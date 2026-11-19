@@ -4502,6 +4502,7 @@ mod tests {
     mod canvas_2d;
     mod canvas_colors;
     mod canvas_readback;
+    mod inline_style_keys;
 
     use super::*;
     use std::io::{Read, Write};

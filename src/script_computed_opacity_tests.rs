@@ -110,6 +110,30 @@ if(style.opacity!=='' || computed.opacity!=='0.4' || style.color!=='blue' ||
 }
 
 #[test]
+fn opacity_inline_style_enumeration_uses_the_same_valid_important_winner() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var root=document.documentElement, style=root.style, computed=getComputedStyle(root);
+var raw='color:red; OPACITY:125% /* winner */ !important;width:6px /* keep */;opacity:bad !important;background-color:blue;opacity:85%';
+root.setAttribute('style',raw);
+var desc=Object.getOwnPropertyDescriptor(style,'1'), names=[];
+for(var key in style)names.push(key);
+if(style.length!==4 || style.item(1)!=='opacity' || style[2]!=='width' ||
+   !desc || desc.value!=='opacity' || desc.writable || !desc.enumerable || !desc.configurable ||
+   Object.hasOwn(style,'opacity') || names.indexOf('opacity')<0 || Object.keys(style).join(',')!=='0,1,2,3')
+    throw 'numeric own indexed winner and inherited property';
+if(style.getPropertyValue('OPACITY')!=='1.25' || style.opacity!=='1.25' ||
+   computed.opacity!=='1' || root.getAttribute('style')!==raw)throw 'specified priority or premature mutation';
+style.opacity='25%';
+if(style.opacity!=='0.25' || computed.opacity!=='0.25' || style[1]!=='opacity' || style[2]!=='width' ||
+   root.getAttribute('style')!=='color:red;opacity:0.25;width:6px /* keep */;background-color:blue;')
+    throw 'replacement moved the winning slot or rewrote a neighbor';
+if(style.removeProperty('OPACITY')!=='0.25' || style.length!==3 || style.item(1)!=='width' ||
+   style.opacity!=='' || computed.opacity!=='0.4')throw 'remove did not update the same slot';
+"#);
+}
+
+#[test]
 fn opacity_inline_url_refusals_preserve_existing_style_and_native_neighbor() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc,&mut forms,&mut page,

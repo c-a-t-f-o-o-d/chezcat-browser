@@ -49,6 +49,8 @@ mod script_document_fragments;
 mod script_timezone;
 #[path = "script_computed_style.rs"]
 mod script_computed_style;
+#[path = "script_inline_style.rs"]
+mod script_inline_style;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -2430,20 +2432,19 @@ impl Bridge<'_> {
             let value = script_transform::specified(style, self.state)?;
             return self.string(&value);
         }
-        if name == "opacity" {
-            let value = match inline_opacity(style, self.state)? {
-                Some(value) => value.serialize()?,
-                None => String::new(),
-            };
-            return self.string(&value);
-        }
-        let value = crate::css::declaration_items(style)
-            .filter_map(|item| item.split_once(':'))
-            .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            .map(|(_, value)| crate::css::declaration_priority(value).0)
-            .last()
-            .unwrap_or("")
-            .to_owned();
+        let Some((_, raw)) = script_inline_style::winner(style, name, self.state)? else {
+            return self.string("");
+        };
+        let clean;
+        let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
+        let specified = crate::css::declaration_priority(raw).0;
+        let value = if name == "opacity" {
+            let parsed = metered_opacity(specified, self.state)?
+                .ok_or("The selected inline opacity is invalid.")?;
+            parsed.serialize()?
+        } else {
+            specified.to_owned()
+        };
         self.string(&value)
     }
 
@@ -2455,6 +2456,9 @@ impl Bridge<'_> {
         priority: &str,
     ) -> Result<(), String> {
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
+        if matches!(name, "color" | "background-color") && !value.is_empty() && !crate::css::inline_color_value(value) {
+            return Ok(());
+        }
         let specified;
         let checked = matches!(name, "transform" | "opacity");
         let value = if checked && !value.is_empty() {
@@ -2487,32 +2491,10 @@ impl Bridge<'_> {
         {
             return Ok(());
         }
-        if name == "opacity" && value.is_empty() && inline_opacity(existing, self.state)?.is_none() {
-            return Ok(());
-        }
-        let mut style = String::new();
-        for item in crate::css::declaration_items(existing).filter(|item| !item.trim().is_empty()) {
-            if item
-                .split_once(':')
-                .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            {
-                continue;
-            }
-            style.push_str(item.trim());
-            style.push(';');
-        }
-        if !value.trim().is_empty() {
-            style.push_str(name);
-            style.push(':');
-            style.push_str(value.trim());
-            if !priority.is_empty() {
-                style.push_str(" !important");
-            }
-            style.push(';');
-        }
-        if style.len() > self.state.limits.host.string_bytes {
-            return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
-        }
+        self.state.work(1 + existing.len().saturating_mul(2))?;
+        self.state.copies(existing.len().saturating_add(name.len()).saturating_add(value.len()).saturating_add(14))?;
+        let limit = self.state.limits.host.string_bytes;
+        let Some(style) = script_inline_style::replace(existing, name, value.trim(), priority, limit, self.state)? else { return Ok(()); };
         self.attribute(node, "style", Some(style))
     }
 }
@@ -2669,6 +2651,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if script_inline_style::handle(object) {return Some(WINDOW);}
         if self.canvas_context_receiver(object) {return Some(WINDOW);}
         if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
         if let Some(owner)=self.event_owner(object) {return Some(owner);}
@@ -2703,6 +2686,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if script_inline_style::handle(object) && (property == "length" || collection_index(property).is_some()) { return true; }
         if self.html_offset_member(object, property) {return true;}
         if self.node_list_iteration_member(object,property) {return false;}
         if self.element_sibling_member(object,property) || self.assigned_slot_lookup(object,property) && self.slottable(object).is_some() {return true;}
@@ -2785,6 +2769,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
         if (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method {
+                "item" => &[(0, false)],
                 "setProperty" if matches!(args.get(1), Some(Value::Null)) => &[(0, true), (2, true)],
                 "setProperty" => &[(0, true), (1, true), (2, true)],
                 "getPropertyValue" | "removeProperty" => &[(0, true)],
@@ -2867,6 +2852,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if script_inline_style::handle(object) && method == "item" { return Some(1); }
         if let Some(operation) = CanvasOperation::parse(method) { return Some(operation.arity()); }
         if object==WINDOW && method=="getComputedStyle" {return Some(1);}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
@@ -2899,6 +2885,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
         if CanvasOperation::parse(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -2969,6 +2956,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if script_inline_style::handle(object) && method == "item" { return 1; }
         if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
         if method == script_node_contains::CONTAINS_METHOD { return 1; }
@@ -3301,6 +3289,10 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if script_inline_style::handle(object) {
+            return self.attr_element_receiver(node_handle((object - STYLE_BASE) as usize))
+                .then(|| script_inline_style::method(property)).flatten();
+        }
         if self.computed_style_receiver(object) {return match property {"getPropertyValue"=>Some("getPropertyValue"),"setProperty"=>Some("setProperty"),"removeProperty"=>Some("removeProperty"),_=>None};}
         if self.node_list_iteration_member(object,property) {return None;}
         // Named form controls use the native field path; other genuine
@@ -3368,6 +3360,9 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {
+            return script_inline_style::handle(receiver) && self.attr_element_receiver(node_handle((receiver - STYLE_BASE) as usize));
+        }
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.event_target_interface(object) && operation.accepts(self, receiver);
         }
@@ -3504,6 +3499,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if script_inline_style::handle(object) {return self.inline_keys(object, false);}
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
@@ -3545,13 +3541,27 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_keys(&mut self,object:u32) -> Result<Vec<String>,String> {
+        if script_inline_style::handle(object) {return self.inline_keys(object, true);}
         if self.element_expando_receiver(object) {
             return Err("Inherited native Element property enumeration is not implemented.".into());
         }
         self.own_keys(object)
     }
 
+    fn enumeration_member(&mut self, object: u32, name: &str) -> Result<bool, String> {
+        if script_inline_style::handle(object) {
+            // Supported inline CSS properties, IDL members and live own indices
+            // are enumerable. Presence validates the receiver and current list.
+            return self.has(object, name);
+        }
+        self.own_data(object, name).map(|slot| slot.is_some())
+    }
+
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if script_inline_style::handle(object) {
+            let node = self.style_node(object)?;
+            return match collection_index(property) { Some(index) => self.inline_index(node, index), None => Ok(None) };
+        }
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(None);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
@@ -3604,6 +3614,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if script_inline_style::handle(object) { return Ok(self.own_data(object, property)?.is_none()); }
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(true);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
@@ -3936,11 +3947,9 @@ impl Host for Bridge<'_> {
                 ));
         }
         if object >= STYLE_BASE {
-            self.style_node(object)?;
-            return Ok(matches!(
-                property,
-                "setProperty" | "getPropertyValue" | "removeProperty"
-            ) || css_name(property).is_ok());
+            let node = self.style_node(object)?;
+            if let Some(index) = collection_index(property) { return Ok(index < self.inline_names(node)?.len()); }
+            return Ok(property == "length" || script_inline_style::method(property).is_some() || css_name(property).is_ok());
         }
         if object == CONSOLE {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
@@ -4241,6 +4250,8 @@ impl Host for Bridge<'_> {
             // An empty direct key is an absent ordinary property, not a CSS
             // declaration name. Validate the handle before reporting absence.
             if property.is_empty() { return Ok(Value::Undefined); }
+            if property == "length" { return Ok(Value::Number(self.inline_names(node)?.len() as f64)); }
+            if let Some(index) = collection_index(property) { return Ok(self.inline_index(node, index)?.unwrap_or(Value::Undefined)); }
             return self.get_style(node, &css_name(property)?);
         }
         if let Some(value) = self.handler(object, property)? {
@@ -4982,6 +4993,10 @@ impl Host for Bridge<'_> {
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
+            if method == "item" {
+                let index = timer_integer(args.first().ok_or("Style item requires an index.")?)? as u32 as usize;
+                return Ok(self.inline_index(node, index)?.unwrap_or_else(|| Value::String(String::new())));
+            }
             if method == "setProperty" && (2..=3).contains(&args.len()) {
                 let name = self.text(&args[0])?;
                 let name = css_declaration_name(&name)?;
@@ -5213,8 +5228,11 @@ fn prefix(text: &str, maximum: usize) -> &str {
     &text[..end]
 }
 fn css_declaration_name(name: &str) -> Result<String, String> {
-    if name.eq_ignore_ascii_case("transform") {return Ok("transform".into());}
-    if name.eq_ignore_ascii_case("opacity") {return Ok("opacity".into());}
+    if crate::css::computed_custom_property_name(name) { return Ok(name.to_owned()); }
+    if name.len() <= 64 {
+        let lower = name.to_ascii_lowercase();
+        if script_inline_style::PROPERTIES.binary_search(&lower.as_str()).is_ok() { return Ok(lower); }
+    }
     css_name(name)
 }
 fn metered_opacity<'a>(value: &'a str, state: &mut State) -> Result<Option<crate::css::SpecifiedOpacity<'a>>, String> {
@@ -5222,21 +5240,6 @@ fn metered_opacity<'a>(value: &'a str, state: &mut State) -> Result<Option<crate
     state.work(work)?;
     state.copies(copies)?;
     Ok(crate::css::specified_opacity(value))
-}
-fn inline_opacity<'a>(style: &'a str, state: &mut State) -> Result<Option<crate::css::SpecifiedOpacity<'a>>, String> {
-    let mut winner = None;
-    let mut important = false;
-    for item in crate::css::declaration_items(style) {
-        let Some((name, raw)) = item.split_once(':') else {continue};
-        if !name.trim().eq_ignore_ascii_case("opacity") {continue;}
-        let (value, priority) = crate::css::declaration_priority(raw);
-        if important && !priority {continue;}
-        if let Some(parsed) = metered_opacity(value, state)? {
-            winner = Some(parsed);
-            important = priority;
-        }
-    }
-    Ok(winner)
 }
 fn css_name(name: &str) -> Result<String, String> {
     if name.len() > 64 {
@@ -5251,71 +5254,7 @@ fn css_name(name: &str) -> Result<String, String> {
             css.push(ch);
         }
     }
-    if !matches!(
-        css.as_str(),
-        "display"
-            | "transform"
-            | "opacity"
-            | "overflow"
-            | "position"
-            | "inset"
-            | "top"
-            | "right"
-            | "bottom"
-            | "left"
-            | "color"
-            | "background"
-            | "background-color"
-            | "background-image"
-            | "background-repeat"
-            | "background-position"
-            | "background-size"
-            | "font"
-            | "font-family"
-            | "font-size"
-            | "font-weight"
-            | "font-style"
-            | "text-decoration"
-            | "text-decoration-line"
-            | "text-align"
-            | "line-height"
-            | "white-space"
-            | "width"
-            | "height"
-            | "min-width"
-            | "max-width"
-            | "min-height"
-            | "max-height"
-            | "margin"
-            | "margin-top"
-            | "margin-right"
-            | "margin-bottom"
-            | "margin-left"
-            | "padding"
-            | "padding-top"
-            | "padding-right"
-            | "padding-bottom"
-            | "padding-left"
-            | "border"
-            | "border-width"
-            | "border-color"
-            | "border-style"
-            | "box-sizing"
-            | "vertical-align"
-            | "flex"
-            | "flex-grow"
-            | "flex-shrink"
-            | "flex-basis"
-            | "flex-direction"
-            | "flex-wrap"
-            | "justify-content"
-            | "align-items"
-            | "align-self"
-            | "gap"
-            | "row-gap"
-            | "column-gap"
-            | "order"
-    ) {
+    if script_inline_style::PROPERTIES.binary_search(&css.as_str()).is_err() {
         return Err(format!(
             "CSS property {name:?} is not supported by the script bridge."
         ));
@@ -5323,6 +5262,9 @@ fn css_name(name: &str) -> Result<String, String> {
     Ok(css)
 }
 fn validate_css_value(name: &str, value: &str, string_limit: usize) -> Result<(), String> {
+    if name.starts_with("--") && !crate::css::inline_custom_value(value) {
+        return Err("The custom property exceeds the supported inline value syntax.".into());
+    }
     if name == "background-image" {
         // Reuse the genuine single-image parser. Shared declaration boundaries
         // preserve semicolons and bangs inside URL payloads. Escaped mutation
@@ -5379,7 +5321,12 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
-        let name = css_declaration_name(name.trim())?;
+        let name = name.trim();
+        let name = if name.eq_ignore_ascii_case("transform") || name.eq_ignore_ascii_case("opacity") {
+            name.to_ascii_lowercase()
+        } else {
+            css_name(name)?
+        };
         // Priority is separate grammar. Keep the ordinary value guard on
         // everything before a genuine trailing priority marker.
         let value = if matches!(name.as_str(), "transform" | "opacity") { crate::css::declaration_priority(value).0 } else { value.trim() };
