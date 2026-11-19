@@ -76,13 +76,17 @@ pub(super) struct PreparedChange {
 
 impl Arena {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
+        for prototype in [self.observer_prototype, self.record_prototype].into_iter().flatten() {
+            add(Edge::Object(prototype));
+        }
         for callback in self.observers.values().map(|observer| &observer.callback) {
             Edge::value(callback, add);
         }
     }
 
     pub(super) fn reachability_cost(&self) -> usize {
-        self.observers.len()
+        self.observers.len() + usize::from(self.observer_prototype.is_some())
+            + usize::from(self.record_prototype.is_some())
     }
 }
 

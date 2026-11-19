@@ -121,6 +121,8 @@ mod image_data_api;
 mod dom_exception;
 #[path = "mutation_observers.rs"]
 mod mutation_observers;
+#[path = "tree_walker.rs"]
+mod tree_walker;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "identifier_names.rs"]
@@ -481,6 +483,8 @@ pub(crate) enum NativePromiseFailure {
 }
 
 pub trait Host {
+    fn tree_walker_document(&self, _document: u32) -> bool { false }
+    fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
     fn mutation_observation_target(&self, _target: u32) -> Option<bool> { None }
     fn character_data_write_generation(&self, _target: u32, _property: &str) -> Option<u64> { None }
     fn empty_mutation_node_list(&mut self) -> Result<u32, String> { Err("MutationRecord nodes are unavailable.".into()) }
@@ -3595,6 +3599,7 @@ enum Builtin {
     ImageData(image_data_api::Op),
     DomException(dom_exception::Op),
     MutationObserver(mutation_observers::Op),
+    TreeWalker(tree_walker::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -3848,6 +3853,7 @@ pub struct Runtime {
     symbol_species: Option<usize>,
     promises: promises::Arena,
     mutations: mutation_observers::Arena,
+    walkers: tree_walker::Arena,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -3998,6 +4004,7 @@ impl Runtime {
             symbol_species: None,
             promises: promises::Arena::default(),
             mutations: mutation_observers::Arena::default(),
+            walkers: tree_walker::Arena::default(),
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -9324,6 +9331,9 @@ impl Runtime {
             Some(Function::Native(Builtin::MutationObserver(operation))) => {
                 return self.mutation_observer_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::TreeWalker(operation))) => {
+                return self.tree_walker_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Promise(operation))) => {
                 return self.promise_builtin(*operation, args, this, host);
             }
@@ -10034,6 +10044,7 @@ impl Runtime {
             | Builtin::ImageData(_)
             | Builtin::DomException(_)
             | Builtin::MutationObserver(_)
+            | Builtin::TreeWalker(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

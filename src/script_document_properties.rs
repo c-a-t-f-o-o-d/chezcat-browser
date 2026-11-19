@@ -8,7 +8,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn document_inherited_property(&self, object:u32, name:&str)->bool {
-        self.document_interface_receiver(object)
+        object==DOCUMENT && name=="createTreeWalker" || self.document_interface_receiver(object)
             && (name=="documentElement" || script_element_properties::ordinary_interface_member(name))
     }
 
@@ -22,7 +22,7 @@ impl Bridge<'_> {
         dom_tree::native_node_member(name)
             // An unavailable native factory keeps its diagnostic dispatch;
             // its presence/callable exposure remains controlled by the gate.
-            || name == "createEvent"
+            || matches!(name, "createEvent" | "createTreeWalker")
             || self.method(DOCUMENT, name).is_some()
             // The fixed startup table also owns legacy prebound methods that
             // Host::method does not expose through dynamic native dispatch.
