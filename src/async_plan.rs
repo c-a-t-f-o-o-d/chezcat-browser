@@ -21,8 +21,8 @@ pub(super) enum Instruction {
     EnterBlock(StmtId),
     LeaveBlock,
     EnterSwitch { statement: StmtId, leave: usize },
-    EnterForOf(StmtId),
-    NextForOf { statement: StmtId, after: usize },
+    EnterForOf { statement: StmtId, after: usize },
+    NextForOf(StmtId),
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
     BranchOnValueFalse(usize),
     Jump(usize),
@@ -423,10 +423,10 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         return Err(Fault::new("Await in this expression or statement position is not implemented.")
             .at(&program.source, template.source_start));
     }
-    // A direct case break can jump to the switch's lexical exit. Other
-    // jumps to split ancestors need explicit unwinding of their subtrees.
+    // Direct case breaks and iterator loop jumps have their own exits.
+    // Other split ancestors still need explicit subtree unwinding.
     for (id, target, direct_switch_break) in jumps {
-        if split.contains(&target) && !direct_switch_break {
+        if split.contains(&target) && !direct_switch_break && lexical_for_of(program, target).is_none() {
             return Err(Fault::new("A jump to a statement split by await is not implemented.")
                 .at(&program.source, program.stmts[id].at));
         }
@@ -443,7 +443,7 @@ enum Emit {
     SwitchBreak(usize),
     FinishSwitch(usize),
     FinishFor { statement: StmtId, start: usize, test: bool, advance: Option<ExprId> },
-    FinishForOf { statement: StmtId, start: usize },
+    FinishForOf(usize),
     FinishTry { handler: usize, catch: Option<StmtId>, finally: Option<StmtId> },
     FinishCatch(usize),
     FinishFinally(usize),
@@ -532,10 +532,12 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                 }
                 continue;
             }
-            Emit::FinishForOf { statement, start } => {
+            Emit::FinishForOf(entry) => {
                 push(&mut code, Instruction::LeaveBlock)?;
-                push(&mut code, Instruction::Jump(start))?;
-                code[start] = Instruction::NextForOf { statement, after: code.len() };
+                push(&mut code, Instruction::Jump(entry + 1))?;
+                let end = code.len();
+                let Instruction::EnterForOf { after, .. } = &mut code[entry] else { unreachable!() };
+                *after = end;
                 continue;
             }
             Emit::FinishTry { handler, catch, finally } => {
@@ -621,10 +623,10 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     push(&mut pending, Emit::Statement(*body))?;
                 }
                 StmtKind::ForOf(_, _, body) => {
-                    push(&mut code, Instruction::EnterForOf(id))?;
-                    let start = code.len();
-                    push(&mut code, Instruction::NextForOf { statement: id, after: 0 })?;
-                    push(&mut pending, Emit::FinishForOf { statement: id, start })?;
+                    let entry = code.len();
+                    push(&mut code, Instruction::EnterForOf { statement: id, after: 0 })?;
+                    push(&mut code, Instruction::NextForOf(id))?;
+                    push(&mut pending, Emit::FinishForOf(entry))?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
                 StmtKind::Switch { cases, body, .. } => {
@@ -777,6 +779,7 @@ mod tests {
             ("async function f(p){for(;test();advance()){await p;}}", 6),
             ("async function f(p){for(;;)return await p;}", 2),
             ("async function f(p){for(let value of p){await value;}}", 7),
+            ("async function f(p){for(let value of p){await value;if(value)continue;break;}}", 9),
             ("async function f(p){switch(0){case 0:case 1:await p;break;default:done();}}", 8),
             ("async function f(p){return yes() && use(await p);}", 3),
             ("async function f(p){return yes() && use(await p).ready;}", 3),
