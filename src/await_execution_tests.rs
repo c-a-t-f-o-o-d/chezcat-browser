@@ -32,6 +32,61 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_suspending_finally_preserves_or_overrides_the_incoming_completion() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, retained, fallback, escaped, rejected, normal;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var replacement={marker:'replacement'};
+function fresh(marker){return function(){return marker;};}
+async function keep(){
+    try{
+        try{return fresh('return');}
+        finally{let local='inner|';await gate;trace+=local;}
+    }finally{trace+='outer|';}
+}
+async function keepThrow(){
+    try{throw fresh('throw');}
+    finally{await gate;trace+='throw|';}
+}
+async function replaceThrow(){
+    try{throw 'stale exception';}
+    finally{await gate;return fresh('override');}
+}
+async function replaceReturn(){
+    try{return 'stale return';}
+    finally{await failed;throw 'unreachable';}
+}
+async function follow(){
+    try{trace+='body|';}
+    finally{await gate;trace+='cleanup|';}
+    trace+='after|';
+    return 7;
+}
+keep().then(value=>retained=value);
+keepThrow().catch(error=>escaped=error);
+replaceThrow().then(value=>fallback=value);
+replaceReturn().catch(error=>rejected=error);
+follow().then(value=>normal=value);
+if(trace!=='body|'||retained||fallback||escaped||rejected||normal)throw 'finally did not suspend';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();reject(replacement);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='body|inner|outer|throw|cleanup|after|'||retained()!=='return'||escaped()!=='throw'||
+    fallback()!=='override'||rejected!==replacement||normal!==7)throw 'lost completion, cleanup or scope';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_logical_not_resumes_the_operand_before_choosing_a_branch() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1224,7 +1279,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "let first=await p,second=1+await p;",
         "while(false){await p;}",
         "try{}catch(reason){await p;}finally{}",
-        "try{}finally{await p;}",
+        "try{}catch{}finally{await p;}",
         "var values=[await p];",
         "var value={entry:await p,another:1};",
         "await (await p);",
