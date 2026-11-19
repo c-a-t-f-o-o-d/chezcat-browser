@@ -2,6 +2,8 @@
 use std::collections::HashMap;
 #[path="css_stylesheet_cache.rs"]
 mod stylesheet_cache;
+#[path="css_rule_candidates.rs"]
+mod rule_candidates;
 pub(crate) use stylesheet_cache::StylesheetCache;
 
 #[path="css_media.rs"]
@@ -1077,11 +1079,17 @@ fn compute_cascade(
         }
         let mut applicable = Vec::new();
         let mut has_transform = false;
-        for (order, rule) in rules.iter().enumerate() {
+        let candidates = if let Some(indexed) = prepared.rule_candidates() {
+            indexed.for_element(&match_context, index, rules.len(), meter.as_deref_mut())?
+        } else { None };
+        let count = candidates.as_ref().map_or(rules.len(), |indices| indices.len());
+        for candidate in 0..count {
             if budget == 0 {
                 complete = false;
                 break;
             }
+            let order = candidates.as_ref().map_or(candidate, |indices| indices[candidate]);
+            let rule = &rules[order];
             let mut rule_budget = budget;
             if let Some(meter) = meter.as_deref_mut() {
                 meter.work(1)?;

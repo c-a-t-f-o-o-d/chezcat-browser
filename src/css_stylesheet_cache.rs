@@ -1,6 +1,7 @@
 //! One immutable generation of fully admitted stylesheet syntax. Node matches,
 //! inline declarations, variables, form state and computed styles remain live.
 use super::*;
+use super::rule_candidates::RuleCandidates;
 use std::borrow::Cow;
 use std::rc::Rc;
 #[cfg(test)]
@@ -18,6 +19,7 @@ struct Prepared {
     scripting: bool,
     environment: Option<MediaEnvironment>,
     rules: Vec<Rule>,
+    candidates: RuleCandidates,
     has_transform: bool,
 }
 
@@ -31,6 +33,10 @@ pub(super) struct ParsedSheets {
 }
 
 impl ParsedSheets {
+    pub(super) fn rule_candidates(&self) -> Option<&RuleCandidates> {
+        self.cache.as_ref().map(|cache| &cache.0.candidates)
+    }
+
     pub fn rules(&self) -> &[Rule] {
         self.cache
             .as_ref()
@@ -202,12 +208,18 @@ pub(super) fn prepare(
         };
         keys.push(SourceKey { owner, bytes });
     }
+    let candidates = if let Some(budget) = meter.as_deref_mut() {
+        RuleCandidates::build(&rules, Some(budget))?
+    } else {
+        RuleCandidates::build(&rules, transform_meter.as_deref_mut())?
+    };
     let cache = StylesheetCache(Rc::new(Prepared {
         sources: keys,
         limits: doc.stylesheet_limits,
         scripting: doc.scripting_enabled,
         environment,
         rules,
+        candidates,
         has_transform,
     }));
     Ok(ParsedSheets {
