@@ -32,6 +32,47 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_member_read_uses_original_receiver_and_evaluates_key_after_resume() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, desired={}, received, caught=0;
+var ready=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var member=Symbol('read'), marker={};
+var receiver={marker,get [member](){
+    if(this.marker!==marker)throw 'getter receiver';
+    trace+='getter|';return desired;
+}};
+function key(){
+    trace+='key|';
+    return {[Symbol.toPrimitive](hint){if(hint!=='string')throw 'key hint';trace+='convert|';return member;}};
+}
+function relay(input){if(input!==4)throw 'awaited argument';trace+='relay|';var value=receiver;receiver=null;return value;}
+async function read(){return relay(await ready)[key()];}
+async function skip(){
+    try { return (await failed)[key()]; }
+    catch(error){if(error!==reason)throw error;caught++;}
+}
+async function throws(){
+    var holder={get value(){throw reason;}};
+    try {return (await Promise.resolve(holder)).value;}
+    catch(error){if(error!==reason)throw error;caught++;}
+}
+read().then(function(value){received=value;});
+skip();
+throws();
+if(trace!==''||received!==undefined||caught)throw 'read before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!==''||caught!==1)throw 'static getter exception';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);reject(reason);if(trace!=='')throw 'synchronous read';'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='relay|key|convert|getter|'||received!==desired||caught!==2||receiver!==null)throw 'member result, order or rejection';'ok';");
+}
+
+#[test]
 fn await_execution_logical_right_operands_keep_short_circuit_values_and_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
