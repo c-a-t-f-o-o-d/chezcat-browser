@@ -218,9 +218,9 @@ fn derived_class_super_early_errors_and_deferred_syntax_precede_program_effects(
     for source in [
         "effects++;class Child extends Base{field=effects++;}",
         "effects++;class Child extends Base{#private(){}}",
-        "effects++;class Child extends Base{[effects++](){}}",
+        "effects++;class Child extends Base{[effects++]=3;}",
         "effects++;class Child extends Base{static{effects++;}}",
-        "effects++;class Child extends Base{async method(){}}",
+        "effects++;class Child extends Base{async *method(){}}",
         "effects++;class Child extends Base{*method(){}}",
     ] { no_effects(source); }
 }
