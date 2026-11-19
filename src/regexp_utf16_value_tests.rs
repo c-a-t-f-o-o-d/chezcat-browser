@@ -132,6 +132,28 @@ if ('😀x'.match(/(?:)/gu).length !== 3 ||
 }
 
 #[test]
+fn unicode_regexp_supplementary_ranges_consume_whole_code_points() {
+    succeeds(r#"
+var re = /([A\u{1f680}-\u{1f683}]+)A$/u;
+var found = re.exec('!🚀A🚂A');
+if (found.index !== 1 || found[1] !== '🚀A🚂' || found[0].length !== 6)
+    throw 'mixed-width repetition or backtracking';
+var sticky = new RegExp('[\\u{1f680}-\\u{1f683}]', 'uy');
+sticky.lastIndex = 1;
+if (sticky.exec('🚀').index !== 0 || sticky.lastIndex !== 2 || sticky.test('x'))
+    throw 'supplementary sticky match';
+if (!/\u{000041}/u.test('A') || !/🚀/u.test('🚀') || /[\u{1f680}-\u{1f683}]/u.test('😀'))
+    throw 'supplementary literals or endpoints';
+for (var invalid of ['\\u{}', '\\u{110000}', '\\u{1z}', '\\u{12']) {
+    var error = null;
+    try { new RegExp(invalid, 'u'); } catch (e) { error = e; }
+    if (!(error instanceof SyntaxError)) throw 'invalid braced escape';
+}
+'ok';
+"#);
+}
+
+#[test]
 fn utf16_regexp_genuine_class_escape_and_flag_errors_remain_syntax_errors() {
     succeeds(r#"
 var errors=0;

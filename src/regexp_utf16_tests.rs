@@ -5,9 +5,13 @@ fn unicode_regexp_subset_preserves_syntax_and_unsupported_boundaries() {
     for pattern in [r"[\d-q]", r"[q-\d]", "[z-a]", r"\q", "]"] {
         assert!(matches!(Regex::compile(pattern, "u", &mut 100_000), Err(Error::Syntax(_))), "{pattern}");
     }
-    for pattern in [".", "[^a]", r"\D", r"\u{1f642}", r"[a-\uE001]", "🙂"] {
+    for pattern in [".", "[^a]", r"\D", r"\u{d800}", r"\ud800"] {
         assert!(matches!(Regex::compile(pattern, "u", &mut 100_000), Err(Error::Unsupported(_))), "{pattern}");
     }
+    let range = Regex::compile(r"[a-\uE001]+", "u", &mut 100_000).unwrap();
+    let input = [0xd800, 0xd800, 0xdc00, 0xd800];
+    let found = range.find(&input, 0, false, &mut 100_000).unwrap().unwrap();
+    assert_eq!((found.start(), found.end()), (0, 1));
 }
 
 #[test]

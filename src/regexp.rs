@@ -84,12 +84,22 @@ impl Flags {
     }
 }
 
-fn surrogate(unit: u16) -> bool {
+fn surrogate(unit: u32) -> bool {
     (0xd800..=0xdfff).contains(&unit)
 }
 
 fn starts_surrogate_pair(input: &[u16], at: usize) -> bool {
     matches!(input.get(at..at.saturating_add(2)), Some([0xd800..=0xdbff, 0xdc00..=0xdfff]))
+}
+
+fn character_at(input: &[u16], at: usize, unicode: bool) -> Option<(u32, usize)> {
+    let first = u32::from(*input.get(at)?);
+    if unicode && starts_surrogate_pair(input, at) {
+        let second = u32::from(input[at + 1]);
+        Some((0x10000 + ((first - 0xd800) << 10) + second - 0xdc00, 2))
+    } else {
+        Some((first, 1))
+    }
 }
 
 pub(super) fn advance_string_index(input: &[u16], at: usize, unicode: bool) -> usize {
@@ -98,7 +108,7 @@ pub(super) fn advance_string_index(input: &[u16], at: usize, unicode: bool) -> u
 
 #[derive(Clone, Debug)]
 enum ClassPart {
-    Range(u16, u16),
+    Range(u32, u32),
     Digit(bool),
     Word(bool),
     Space(bool),
@@ -110,16 +120,16 @@ struct Class {
     parts: Vec<ClassPart>,
 }
 
-fn line(unit: u16) -> bool {
+fn line(unit: u32) -> bool {
     matches!(unit, 10 | 13 | 0x2028 | 0x2029)
 }
-fn word(unit: u16) -> bool {
+fn word(unit: u32) -> bool {
     matches!(unit, 48..=57 | 65..=90 | 95 | 97..=122)
 }
-fn space(unit: u16) -> bool {
+fn space(unit: u32) -> bool {
     matches!(unit, 9..=13 | 32 | 0xa0 | 0x1680 | 0x2000..=0x200a | 0x2028 | 0x2029 | 0x202f | 0x205f | 0x3000 | 0xfeff)
 }
-fn ascii_fold(unit: u16) -> u16 {
+fn ascii_fold(unit: u32) -> u32 {
     if (97..=122).contains(&unit) {
         unit - 32
     } else {
@@ -128,7 +138,7 @@ fn ascii_fold(unit: u16) -> u16 {
 }
 
 impl Class {
-    fn matches(&self, unit: u16, insensitive: bool, budget: &mut usize) -> Result<bool, Error> {
+    fn matches(&self, unit: u32, insensitive: bool, budget: &mut usize) -> Result<bool, Error> {
         spend(budget, self.parts.len().max(1))?;
         let found = self.parts.iter().any(|part| match *part {
             ClassPart::Range(low, high) => {
@@ -149,7 +159,7 @@ impl Class {
 #[derive(Debug)]
 enum Node {
     Empty,
-    Character(u16),
+    Character(u32),
     Class(Class),
     Any,
     Start,
@@ -477,7 +487,10 @@ impl Parser {
             42 | 43 | 63 => Err(Error::Syntax(
                 "Unexpected regular-expression quantifier or delimiter.",
             )),
-            _ => self.character(unit),
+            _ => {
+                let character = self.raw_character();
+                self.character(character)
+            }
         }
     }
     fn capture(&mut self, name: Option<String>) -> Result<usize, Error> {
@@ -598,7 +611,13 @@ impl Parser {
         }
         Ok(name)
     }
-    fn character(&mut self, unit: u16) -> Result<usize, Error> {
+    fn raw_character(&mut self) -> u32 {
+        let (character, width) = character_at(&self.units, self.at - 1, self.unicode).unwrap();
+        self.at += width - 1;
+        character
+    }
+
+    fn character(&mut self, unit: u32) -> Result<usize, Error> {
         if self.unicode && surrogate(unit) {
             return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
         }
@@ -623,6 +642,23 @@ impl Parser {
         }
         Ok(value)
     }
+    fn braced_unicode_escape(&mut self) -> Result<u32, Error> {
+        let start = self.at;
+        let mut value = 0;
+        while let Some(digit) = self.peek().and_then(|unit| char::from_u32(u32::from(unit)))
+            .and_then(|character| character.to_digit(16))
+        {
+            value = value * 16 + digit;
+            if value > 0x10ffff {
+                return Err(Error::Syntax("Unicode regexp escape exceeds U+10FFFF."));
+            }
+            self.at += 1;
+        }
+        if self.at == start || !self.eat(b'}' as u16) {
+            return Err(Error::Syntax("Invalid braced Unicode regexp escape."));
+        }
+        Ok(value)
+    }
     fn escape(&mut self, in_class: bool) -> Result<ClassPart, Error> {
         let unit = self
             .peek()
@@ -641,11 +677,9 @@ impl Parser {
             118 => 11,
             102 => 12,
             98 if in_class => 8,
-            120 => self.hex(2)?,
-            117 if self.unicode && self.peek() == Some(b'{' as u16) => {
-                return Err(Error::Unsupported("Braced Unicode regexp escapes are not implemented."));
-            }
-            117 => self.hex(4)?,
+            120 => u32::from(self.hex(2)?),
+            117 if self.unicode && self.eat(b'{' as u16) => self.braced_unicode_escape()?,
+            117 => u32::from(self.hex(4)?),
             99 => {
                 let next = self
                     .peek()
@@ -654,7 +688,7 @@ impl Parser {
                     return Err(Error::Syntax("Invalid regexp control escape."));
                 }
                 self.at += 1;
-                next % 32
+                u32::from(next % 32)
             }
             48 => {
                 if self.peek().is_some_and(|u| (48..=57).contains(&u)) {
@@ -682,7 +716,7 @@ impl Parser {
             _ if self.unicode && (unit != b'-' as u16 || !in_class)
                 && !b"^$\\.*+?()[]{}|/".iter().any(|&syntax| unit == u16::from(syntax)) =>
                 return Err(Error::Syntax("Invalid Unicode regexp identity escape.")),
-            _ => unit,
+            _ => u32::from(unit),
         };
         if self.unicode && surrogate(literal) {
             return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
@@ -702,6 +736,7 @@ impl Parser {
         if unit == 92 {
             self.escape(true)
         } else {
+            let unit = self.raw_character();
             if self.unicode && surrogate(unit) {
                 return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
             }
@@ -731,9 +766,6 @@ impl Parser {
                         if low > high {
                             return Err(Error::Syntax("Reversed regular-expression range."));
                         }
-                        if self.unicode && low <= 0xdfff && high >= 0xd800 {
-                            return Err(Error::Unsupported("Unicode regexp ranges spanning surrogates are not implemented."));
-                        }
                         parts.push(ClassPart::Range(low, high));
                     }
                     (start, end) => {
@@ -742,7 +774,7 @@ impl Parser {
                         }
                         // Annex B CharacterRangeOrUnion. This parser receives
                         // classic patterns after flag validation.
-                        parts.extend([start, ClassPart::Range(b'-' as u16, b'-' as u16), end]);
+                        parts.extend([start, ClassPart::Range(u32::from(b'-'), u32::from(b'-')), end]);
                     }
                 }
             } else {
@@ -756,12 +788,12 @@ impl Parser {
 
 #[derive(Debug)]
 enum Atom {
-    Character(u16),
+    Character(u32),
     Class(Class),
     Any,
 }
 impl Atom {
-    fn matches(&self, unit: u16, flags: Flags, budget: &mut usize) -> Result<bool, Error> {
+    fn matches(&self, unit: u32, flags: Flags, budget: &mut usize) -> Result<bool, Error> {
         spend(budget, 1)?;
         match self {
             Self::Character(expected) => {
@@ -776,7 +808,7 @@ impl Atom {
 
 #[derive(Debug)]
 enum Instruction {
-    Character(u16),
+    Character(u32),
     Class(Class),
     Any,
     Start,
@@ -810,6 +842,7 @@ struct Compiler<'a> {
     budget: &'a mut usize,
     names: &'a [NamedCapture],
     groups: usize,
+    unicode: bool,
 }
 impl Compiler<'_> {
     fn emit(&mut self, instruction: Instruction) -> Result<usize, Error> {
@@ -950,15 +983,18 @@ impl Compiler<'_> {
                 greedy,
             } => {
                 let atom = match &nodes[*body] {
-                    Node::Character(unit) => Some(Atom::Character(*unit)),
-                    Node::Class(class) => {
+                    Node::Character(unit) if !self.unicode || *unit <= 0xffff => Some(Atom::Character(*unit)),
+                    Node::Class(class) if !self.unicode || !class.inverted && class.parts.iter().all(|part| match *part {
+                        ClassPart::Range(low, high) => high <= 0xffff && (high < 0xd800 || low > 0xdfff),
+                        ClassPart::Digit(inverted) | ClassPart::Word(inverted) | ClassPart::Space(inverted) => !inverted,
+                    }) => {
                         spend(
                             self.budget,
                             class.parts.len() * std::mem::size_of::<ClassPart>(),
                         )?;
                         Some(Atom::Class(class.clone()))
                     }
-                    Node::Any => Some(Atom::Any),
+                    Node::Any if !self.unicode => Some(Atom::Any),
                     _ => None,
                 };
                 if let Some(atom) = atom {
@@ -1149,9 +1185,8 @@ impl Regex {
     }
 
     fn compile_prepared(units: Vec<u16>, flags: Flags, budget: &mut usize) -> Result<Self, Error> {
-        // The admitted Unicode atoms consume only single-unit, non-surrogate
-        // characters. The VM can keep UTF-16 capture offsets while search
-        // visits only code-point boundaries.
+        // The VM retains UTF-16 capture offsets and Unicode search visits
+        // only code-point boundaries.
         let named_mode = has_named_capture(&units);
         let mut parser = Parser {
             units,
@@ -1178,6 +1213,7 @@ impl Regex {
             budget,
             names: &parser.names,
             groups: parser.groups,
+            unicode: flags.unicode,
         };
         compiler.emit(Instruction::Save(0))?;
         compiler.node(&parser.nodes, root, false)?;
@@ -1330,16 +1366,18 @@ impl Regex {
         let mut alternatives = Vec::new();
         loop {
             spend(budget, 1)?;
-            let following = input.get(state.position).copied();
-            let current = if backwards {
-                state
-                    .position
-                    .checked_sub(1)
-                    .and_then(|index| input.get(index))
-                    .copied()
+            let following = input.get(state.position).copied().map(u32::from);
+            let at = if backwards {
+                if self.flags.unicode && state.position >= 2 && starts_surrogate_pair(input, state.position - 2) {
+                    Some(state.position - 2)
+                } else {
+                    state.position.checked_sub(1)
+                }
             } else {
-                following
+                Some(state.position)
             };
+            let decoded = at.and_then(|index| character_at(input, index, self.flags.unicode));
+            let current = decoded.map(|(character, _)| character);
             let next = &self.code[state.pc];
             let succeeded = match next {
                 Instruction::Character(unit) => current.is_some_and(|actual| {
@@ -1358,14 +1396,14 @@ impl Regex {
                     state.position == 0
                         || self.flags.multiline
                             && state.position > 0
-                            && line(input[state.position - 1])
+                            && line(u32::from(input[state.position - 1]))
                 }
                 Instruction::End => {
                     state.position == input.len()
                         || self.flags.multiline && following.is_some_and(line)
                 }
                 Instruction::Boundary(inverted) => {
-                    let before = state.position > 0 && word(input[state.position - 1]);
+                    let before = state.position > 0 && word(u32::from(input[state.position - 1]));
                     let after = following.is_some_and(word);
                     (before != after) != *inverted
                 }
@@ -1402,7 +1440,7 @@ impl Regex {
                                 .all(|(a, b)| {
                                     a == b
                                         || self.flags.insensitive
-                                            && ascii_fold(*a) == ascii_fold(*b)
+                                            && ascii_fold(u32::from(*a)) == ascii_fold(u32::from(*b))
                                 });
                             if matched {
                                 state.position = if backwards { target } else { target + length };
@@ -1449,7 +1487,7 @@ impl Regex {
                         } else {
                             start + matched
                         };
-                        if !atom.matches(input[index], self.flags, budget)? {
+                        if !atom.matches(u32::from(input[index]), self.flags, budget)? {
                             break;
                         }
                         matched += 1;
@@ -1540,10 +1578,12 @@ impl Regex {
                     next,
                     Instruction::Character(_) | Instruction::Class(_) | Instruction::Any
                 ) {
+                    let width = decoded.expect("Successful consuming instruction has a character").1;
+                    spend(budget, width - 1)?;
                     state.position = if backwards {
-                        state.position - 1
+                        state.position - width
                     } else {
-                        state.position + 1
+                        state.position + width
                     };
                 }
                 state.pc += 1;
