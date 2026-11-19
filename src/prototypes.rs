@@ -117,7 +117,7 @@ impl Runtime {
             ) => 0,
             Builtin::StringMethod("split" | "slice" | "substring" | "substr" | "replace" | "replaceAll") => 2,
             Builtin::PrimitiveMethod("toString" | "toFixed", true) => 1,
-            Builtin::PrimitiveMethod(_, _) => 0,
+            Builtin::PrimitiveMethod(_, _) | Builtin::BigIntMethod(false) => 0,
             _ => 1,
         };
         let allocation = self.insert_function_slot(Function::Native(builtin))?;
@@ -1648,6 +1648,7 @@ impl Runtime {
                     Value::Host(handle)=>Some(self.native_instance_prototype(*handle,host)?),
                     Value::String(_) | Value::StringUnits(_) => self.string_prototype.map(Ordinary::Object),
                     Value::Number(_) => self.number_prototype.map(Ordinary::Object),
+                    Value::BigInt(_) => self.big_int_prototype.map(Ordinary::Object),
                     Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
                     Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
                     _ => {
@@ -1689,7 +1690,7 @@ impl Runtime {
             }
             "getOwnPropertyDescriptor" | "defineProperty" => {
                 if method == "getOwnPropertyDescriptor"
-                    && matches!(first, Value::Number(_) | Value::Bool(_) | Value::Symbol(_))
+                    && matches!(first, Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_))
                 {
                     // These temporary wrappers have no own properties. Still
                     // observe key conversion, including its possible exception.
@@ -1790,7 +1791,7 @@ impl Runtime {
             }
             "assign" => {
                 let boxed;
-                let first = if matches!(first, Value::Number(_) | Value::Bool(_) | Value::Symbol(_))
+                let first = if matches!(first, Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_))
                 {
                     boxed = self.box_primitive(first.clone())?;
                     &boxed
@@ -1814,6 +1815,7 @@ impl Runtime {
                         Value::Null
                             | Value::Undefined
                             | Value::Number(_)
+                            | Value::BigInt(_)
                             | Value::Bool(_)
                             | Value::Symbol(_)
                     ) {
@@ -1919,7 +1921,7 @@ impl Runtime {
         // does not inspect their prototypes or invoke conversion callbacks.
         if matches!(
             descriptors,
-            Value::Number(_) | Value::Bool(_) | Value::Symbol(_)
+            Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_)
         ) {
             return Ok(());
         }
@@ -2054,6 +2056,7 @@ impl Runtime {
                 Value::Null => "Null",
                 Value::Bool(_) => "Boolean",
                 Value::Number(_) => "Number",
+                Value::BigInt(_) => "BigInt",
                 Value::String(_) | Value::StringUnits(_) => "String",
                 Value::Symbol(_) => "Symbol",
                 Value::Function(_) => "Function",
@@ -2341,6 +2344,7 @@ impl Runtime {
                 };
                 self.call_member(receiver, method, args, host)
             }
+            Builtin::BigIntMethod(to_string) => self.big_int_method(to_string, this, args, host),
             Builtin::PrimitiveMethod(method, number) => {
                 self.primitive_value_method(method, number, this, args, host)
             }

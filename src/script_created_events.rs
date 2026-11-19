@@ -473,7 +473,7 @@ fn copy_custom_value(value: &Value) -> Result<Value, String> {
         }
         // Object/function/native/symbol values retain their genuine identities;
         // Runtime already pins exported host arguments until document teardown.
-        Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) |
+        Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) | Value::BigInt(_) |
         Value::Symbol(_) | Value::Function(_) | Value::Object(_) | Value::Host(_) => Ok(value.clone()),
     }
 }

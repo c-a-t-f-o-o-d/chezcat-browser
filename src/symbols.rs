@@ -369,6 +369,7 @@ impl Runtime {
                 Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
                 Value::String(_) | Value::StringUnits(_) => self.string_prototype.map(Ordinary::Object),
                 Value::Number(_) => self.number_prototype.map(Ordinary::Object),
+                Value::BigInt(_) => self.big_int_prototype.map(Ordinary::Object),
                 Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
                 _ => None,
             },
@@ -426,6 +427,7 @@ impl Runtime {
             None => match receiver {
                 Value::String(_) | Value::StringUnits(_) => Ordinary::Object(self.string_prototype.unwrap()),
                 Value::Number(_) => Ordinary::Object(self.number_prototype.unwrap()),
+                Value::BigInt(_) => Ordinary::Object(self.big_int_prototype.unwrap()),
                 Value::Bool(_) => Ordinary::Object(self.boolean_prototype.unwrap()),
                 Value::Symbol(_) => Ordinary::Object(self.symbol_prototype.unwrap()),
                 _ => return Err(Fault::new(
