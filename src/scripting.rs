@@ -2663,6 +2663,12 @@ impl Host for Bridge<'_> {
         self.child_list_change_plan(target, method, args)
     }
 
+    fn mutation_attribute_change(&mut self, target: u32, method: &str, args: &[Value])
+        -> Result<Option<crate::javascript::NativeAttributeChange>, String>
+    {
+        self.attribute_observation_plan(target, method, args)
+    }
+
     fn mutation_node_list(&mut self, nodes: &[u32]) -> Result<u32, String> {
         self.snapshot_mutation_node_list(nodes)
     }
@@ -5378,14 +5384,7 @@ impl Host for Bridge<'_> {
             if args.len() < count { return Err("Wrong number of attribute arguments.".into()); }
             let text = self.text(&args[0])?;
             let namespace = self.doc.nodes[node].namespace;
-            // HTML qualified-name lookup folds ASCII case. Proven SVG names
-            // are exact. Keep the existing setAttribute admission path.
-            let qualified = if namespace == crate::html::Namespace::Svg && method != "setAttribute" {
-                text
-            } else {
-                self.state.copies(text.len())?;
-                text.to_ascii_lowercase()
-            };
+            let qualified = self.method_qualified_attribute_name(node, method, text)?;
             let slot = self.raw_attribute_slot(node, &qualified)?;
             // Uncertain foreign parser contexts retain their existing raw
             // mutation policy; only known element namespaces prove absence.

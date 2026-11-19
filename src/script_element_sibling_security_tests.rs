@@ -40,15 +40,22 @@ if(head.nextElementSibling!==body||body.previousElementSibling!==head||get.call(
 }
 
 #[test]
-fn element_siblings_do_not_skip_unsupported_inert_or_foreign_elements_or_promote_characterdata_expandos() {
-    let(mut doc,mut forms,mut page)=fixture("<!doctype html><title>Sibling refusals</title><body><div><span id=a></span><template><span id=inert></span></template><span id=b></span></div><div><span id=before></span><svg id=foreign>foreign text</svg><span id=after></span></div>");
-    run(&mut doc,&mut forms,&mut page,"var a=document.getElementById('a'),b=document.getElementById('b'),before=document.getElementById('before'),after=document.getElementById('after'),foreign=document.getElementById('foreign'),foreignText=foreign.firstChild,text=document.createTextNode('kept');if(a.nextSibling!==b||foreignText.nodeType!==3||text.data!=='kept')throw 'old boundary prefix';");
+fn element_siblings_distinguish_template_hosts_from_unsupported_inert_or_foreign_nodes() {
+    let(mut doc,mut forms,mut page)=fixture("<!doctype html><title>Sibling refusals</title><body><div><span id=a></span><template id=template><span id=inert></span></template><span id=b></span></div><div><span id=blocked></span><object><span id=hidden></span></object><span id=other></span></div><div><span id=before></span><svg id=foreign>foreign text</svg><span id=after></span></div>");
+    run(&mut doc, &mut forms, &mut page, r#"
+var a=document.getElementById('a'),b=document.getElementById('b'),template=document.getElementById('template');
+var blocked=document.getElementById('blocked'),before=document.getElementById('before'),after=document.getElementById('after');
+var foreign=document.getElementById('foreign'),foreignText=foreign.firstChild,text=document.createTextNode('kept');
+if(a.nextSibling!==template||a.nextElementSibling!==template||template.nextElementSibling!==b||
+    template.content.firstChild.id!=='inert'||document.getElementById('inert')!==null||
+    foreignText.nodeType!==3||text.data!=='kept')throw 'template host and real namespace boundaries';
+"#);
     let snapshot=format!("{:?}",doc.nodes);
-    for source in ["a.nextElementSibling;","before.nextElementSibling;","foreign.nextElementSibling;","foreignText.nextElementSibling;","text.arbitrarySiblingState=17;"] {
+    for source in ["blocked.nextElementSibling;","before.nextElementSibling;","foreign.nextElementSibling;","foreignText.nextElementSibling;","text.arbitrarySiblingState=17;"] {
         page.clear_console();let out=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(out.errors,1,"{source}\n{}",page.report());
         assert_eq!(format!("{:?}",doc.nodes),snapshot,"{source}");
-        run(&mut doc,&mut forms,&mut page,"if(a.nextSibling!==b||text.data!=='kept'||document.title!=='Sibling refusals'||document.getElementById('after')!==after)throw 'sibling refusal altered existing boundaries';");
+        run(&mut doc,&mut forms,&mut page,"if(a.nextSibling!==template||template.nextElementSibling!==b||text.data!=='kept'||document.title!=='Sibling refusals'||document.getElementById('after')!==after||document.getElementById('hidden')!==null)throw 'sibling refusal altered existing boundaries';");
     }
     let bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     let text=bridge.doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Text(data) if data=="kept")).unwrap();

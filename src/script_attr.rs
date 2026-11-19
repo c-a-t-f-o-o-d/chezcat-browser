@@ -162,6 +162,62 @@ impl Bridge<'_> {
         Ok(attrs.iter().position(|attr| attr.name.qualified == qualified))
     }
 
+    pub(super) fn method_qualified_attribute_name(&mut self, node: usize, method: &str, name: String)
+        -> Result<String, String>
+    {
+        // Keep the existing qualified-name normalization for each operation.
+        if self.doc.nodes[node].namespace == crate::html::Namespace::Svg && method != "setAttribute" {
+            Ok(name)
+        } else {
+            self.state.copies(name.len())?;
+            Ok(name.to_ascii_lowercase())
+        }
+    }
+
+    pub(super) fn attribute_observation_plan(&mut self, object: u32, method: &str, args: &[Value])
+        -> Result<Option<crate::javascript::NativeAttributeChange>, String>
+    {
+        if !self.attr_element_receiver(object) || self.is_frame_handle(object) { return Ok(None); }
+        let node = self.attr_element_node(object)?;
+        let (slot, local, uri, removal) = match method {
+            "setAttribute" | "removeAttribute" => {
+                let Some(name) = args.first() else { return Ok(None); };
+                let text = self.text(name)?;
+                let qualified = self.method_qualified_attribute_name(node, method, text)?;
+                let slot = self.raw_attribute_slot(node, &qualified)?;
+                (slot, qualified, None, method == "removeAttribute")
+            }
+            "setAttributeNS" | "removeAttributeNS" => {
+                let Some(name) = args.get(1) else { return Ok(None); };
+                let uri = namespace(args)?;
+                let mut local = self.text(name)?;
+                if method == "setAttributeNS" && uri.is_some() {
+                    if let Some((_, name)) = local.split_once(':') {
+                        self.state.copies(name.len())?;
+                        local = name.into();
+                    }
+                }
+                let slot = self.attribute_slot(node, uri, &local)?;
+                (slot, local, uri, method == "removeAttributeNS")
+            }
+            _ => return Ok(None),
+        };
+        if removal && slot.is_none() { return Ok(None); }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
+            return Err("Attribute observation requires a genuine Element.".into());
+        };
+        let prior = slot.and_then(|index| attrs.get(index));
+        let local = prior.map_or(local.as_str(), |attr| attr.name.local());
+        let uri = prior.map_or(uri, |attr| attr.name.namespace_uri());
+        let old = prior.map(|attr| attr.value.as_str());
+        self.state.copies(local.len().saturating_add(uri.map_or(0, str::len)).saturating_add(old.map_or(0, str::len)))?;
+        Ok(Some(crate::javascript::NativeAttributeChange {
+            local_name: local.into(),
+            namespace: uri.map(str::to_owned),
+            old_value: old.map(str::to_owned),
+        }))
+    }
+
     pub(super) fn copy_attribute_name(&mut self, node: usize, slot: usize) -> Result<AttributeName, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("Not an Element.".into()); };
         let name = &attrs.get(slot).ok_or("Attribute slot is unavailable.")?.name;
