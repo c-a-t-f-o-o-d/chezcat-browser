@@ -4067,3 +4067,25 @@ document.title='comment-native-alias-ok';
     assert_eq!(result.errors, 0, "{}", page.report());
     assert_eq!(doc.title, "comment-native-alias-ok");
 }
+
+#[test]
+fn html_fullscreen_feature_detection_uses_ordinary_absent_property_lookup() {
+    let (doc, _, page, result) = page("<!doctype html><html><body><iframe id=early hidden></iframe><div id=app></div></body></html>", &[r#"
+var html=document.documentElement, frame=document.getElementById('early'), app=document.getElementById('app');
+var fullscreen=html.requestFullscreen?'standard':html.webkitRequestFullscreen?'webkit':
+    html.mozRequestFullScreen?'moz':html.msRequestFullscreen?'ms':'absent';
+if(fullscreen!=='absent'||'requestFullscreen' in html||html.requestFullscreen!==undefined||
+   frame.nextElementSibling!==app||frame.contentWindow!==null)
+    throw 'unsupported fullscreen must be absent';
+try{html.requestFullscreen();throw 'unsupported method appeared';}
+catch(e){if(e.name!=='TypeError')throw e;}
+Object.defineProperty(app,'requestFullscreen',{value:function(){return this===app;},configurable:true});
+if(!app.requestFullscreen()||html.requestFullscreen!==undefined)throw 'ordinary author property';
+delete app.requestFullscreen;
+if('requestFullscreen' in app||app.requestFullscreen!==undefined||frame.contentWindow!==null)
+    throw 'ordinary absence and native frame boundary';
+document.title='fullscreen-feature-absent';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "fullscreen-feature-absent");
+}
