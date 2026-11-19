@@ -27,6 +27,49 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_branch_resumes_only_the_selected_sequence() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='';
+function choose(flag){trace+='choose|';return flag;}
+function relay(value){trace+='call:'+value+'|';return value;}
+function* items(value){trace+='in:'+value+'|';yield value;return value*10;}
+function* run(flag){
+    try{
+        var base=relay(yield* items(1));
+        var selected=0;
+        choose(flag) ? (
+            selected=relay(yield* items(2)),
+            trace+='between|',
+            selected=relay(yield* items(3))
+        ) : selected=relay(yield* items(4));
+        return base+selected;
+    }finally{trace+='finally|';}
+}
+var yes=run(true);
+if(yes.next().value!==1||yes.next().value!==2||trace!=='in:1|call:10|choose|in:2|')
+    throw 'selected branch prefix';
+if(yes.next().value!==3||!trace.endsWith('call:20|between|in:3|'))throw 'sequence order';
+var complete=yes.next();
+if(!complete.done||complete.value!==40||!trace.endsWith('call:30|finally|')||trace.includes('in:4|'))
+    throw 'completed wrong branch';
+trace='';
+var no=run(false);
+if(no.next().value!==1||no.next().value!==4||no.next().value!==50||
+    trace!=='in:1|call:10|choose|in:4|call:40|finally|')throw 'alternate or duplicate condition';
+trace='';
+var cancelled=run(true);
+cancelled.next();cancelled.next();
+if(cancelled.return(99).value!==99||!cancelled.next().done||
+    trace!=='in:1|call:10|choose|in:2|finally|')throw 'cancelled sequence ran its suffix';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_declaration_initializes_hoisted_and_lexical_bindings_on_resume() {
     let mut runtime = Runtime::for_test();
     let source = r#"

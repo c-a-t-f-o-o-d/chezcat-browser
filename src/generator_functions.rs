@@ -2,7 +2,7 @@
 //! https://tc39.es/ecma262/#sec-generatorfunction-definitions
 //! https://tc39.es/ecma262/#sec-generator-objects
 use super::function_reachability::Edge;
-use super::async_plan::{GeneratorCallDestination as Destination, Instruction};
+use super::async_plan::{GeneratorCallDestination as Destination, GeneratorCallYield, Instruction, Resume};
 use super::iterator_protocol::{Delegated, Record};
 use super::*;
 
@@ -26,6 +26,7 @@ pub(super) struct Activation {
     callee: usize,
     environment: usize,
     next: usize,
+    condition: Option<bool>,
     delegate: Option<Record>,
     pending_call: Option<Box<PendingCall>>,
     scopes: [Option<usize>; 4],
@@ -240,7 +241,7 @@ impl Runtime {
         let result = prepared.and_then(|environment| {
             let frame = Activation {
                 program: Rc::clone(program), template, callee, environment, next: 0, delegate: None, scopes,
-                pending_call: None,
+                pending_call: None, condition: None,
                 lexical_scopes: Vec::new(), try_scopes: Vec::new(),
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
@@ -440,10 +441,26 @@ impl Runtime {
                 Instruction::Statement(statement) => {
                     self.statement(&frame.program, statement, frame.environment(), &frame.this, host)?
                 }
-                Instruction::Yield(statement) => {
-                    if let Some(progress) = self.yield_generator_statement(frame, statement, host)? {
+                Instruction::Yield { statement, call } => {
+                    if let Some(progress) = self.yield_generator_statement(frame, statement, call, host)? {
                         return Ok(progress);
                     }
+                    continue;
+                }
+                Instruction::Evaluate { statement, expression, action } => {
+                    self.evaluate_generator_expression(frame, statement, expression, action, host)?;
+                    continue;
+                }
+                Instruction::BranchOnValueFalse(target) => {
+                    self.step()?;
+                    if !frame.condition.take().expect("compiled generator branch condition") {
+                        frame.next = target;
+                    }
+                    continue;
+                }
+                Instruction::Jump(target) => {
+                    self.step()?;
+                    frame.next = target;
                     continue;
                 }
                 Instruction::EnterBlock(statement) => {
@@ -484,22 +501,36 @@ impl Runtime {
     }
 
     #[inline(never)]
+    fn evaluate_generator_expression(
+        &mut self, frame: &mut Activation, statement: StmtId, expression: ExprId, action: Resume, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.step()?;
+        let value = self.eval(&frame.program, expression, frame.environment(), &frame.this, host)
+            .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+        match action {
+            Resume::StoreExpressionValue => frame.condition = Some(value.truthy()),
+            Resume::Discard => {}
+            _ => unreachable!("compiled generator expression action"),
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
     fn yield_generator_statement(
-        &mut self, frame: &mut Activation, statement: StmtId, host: &mut dyn Host,
+        &mut self, frame: &mut Activation, statement: StmtId, call: Option<GeneratorCallYield>, host: &mut dyn Host,
     ) -> Result<Option<Progress>, Fault> {
         let marker = self.root_marker();
         let result = (|| {
             self.step()?;
-            let (operand, delegate) = match frame.program.stmts[statement].kind {
-                StmtKind::Yield(operand) => (operand, false),
-                StmtKind::YieldFrom(operand) => (Some(operand), true),
-                StmtKind::Expr(_) | StmtKind::Declare(..) => {
-                    let call = async_plan::generator_call_yield(&frame.program, statement)
-                        .expect("compiled generator call argument");
-                    self.capture_generator_call(frame, &call, host)?;
-                    (call.operand, call.delegate)
+            let (operand, delegate) = if let Some(call) = call {
+                self.capture_generator_call(frame, &call, host)?;
+                (call.operand, call.delegate)
+            } else {
+                match frame.program.stmts[statement].kind {
+                    StmtKind::Yield(operand) => (operand, false),
+                    StmtKind::YieldFrom(operand) => (Some(operand), true),
+                    _ => unreachable!("compiled yield statement"),
                 }
-                _ => unreachable!("compiled yield statement"),
             };
             if delegate {
                 self.begin_generator_delegate(frame, operand.expect("delegating yield operand"), host)
@@ -517,7 +548,7 @@ impl Runtime {
 
     #[inline(never)]
     fn capture_generator_call(
-        &mut self, frame: &mut Activation, site: &async_plan::GeneratorCallYield, host: &mut dyn Host,
+        &mut self, frame: &mut Activation, site: &GeneratorCallYield, host: &mut dyn Host,
     ) -> Result<(), Fault> {
         let destination = match site.destination {
             Destination::Discard => Destination::Discard,
