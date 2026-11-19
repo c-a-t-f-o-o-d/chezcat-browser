@@ -679,15 +679,19 @@ impl Parser {
             {
                 self.at += 1;
                 let end = self.class_atom()?;
-                let (ClassPart::Range(low, _), ClassPart::Range(_, high)) = (start, end) else {
-                    return Err(Error::Unsupported(
-                        "Character-class escapes cannot form ranges in this subset.",
-                    ));
-                };
-                if low > high {
-                    return Err(Error::Syntax("Reversed regular-expression range."));
+                match (start, end) {
+                    (ClassPart::Range(low, _), ClassPart::Range(_, high)) => {
+                        if low > high {
+                            return Err(Error::Syntax("Reversed regular-expression range."));
+                        }
+                        parts.push(ClassPart::Range(low, high));
+                    }
+                    (start, end) => {
+                        // Annex B CharacterRangeOrUnion. This parser receives
+                        // classic patterns after flag validation.
+                        parts.extend([start, ClassPart::Range(b'-' as u16, b'-' as u16), end]);
+                    }
                 }
-                parts.push(ClassPart::Range(low, high));
             } else {
                 parts.push(start);
             }

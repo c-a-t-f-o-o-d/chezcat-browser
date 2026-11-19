@@ -89,6 +89,26 @@ if(count!==1||found.index!==1||found[0].charCodeAt(0)!==55939||live.lastIndex!==
 }
 
 #[test]
+fn legacy_regexp_class_escape_range_uses_both_atoms_and_literal_hyphen() {
+    succeeds(r#"
+var patterns = [/^[\d-\s]$/, new RegExp('^[\\d-\\s]$'),
+                /^[\d-q]$/, new RegExp('^[q-\\d]$')];
+for (var i = 0; i < patterns.length; i++) {
+    var re = patterns[i];
+    if (!re.test('-') || !re.test('5') || re.test('!') ||
+        re.test(' ') !== (i < 2) || re.test('q') !== (i >= 2))
+        throw 'legacy character class ' + i;
+}
+if (/^[^\d-\s]$/.test('-') || !/^[a-c]$/.test('b'))
+    throw 'class controls';
+var error;
+try { new RegExp('[c-a]'); } catch (e) { error = e; }
+if (!(error instanceof SyntaxError)) throw 'descending range';
+'ok';
+"#);
+}
+
+#[test]
 fn utf16_regexp_genuine_class_escape_and_flag_errors_remain_syntax_errors() {
     succeeds(r#"
 var errors=0;
