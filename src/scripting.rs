@@ -4643,7 +4643,12 @@ impl Host for Bridge<'_> {
             // this absence permits the explicitly authorized Promise protocol;
             // form named properties above retain their normal lookup behavior.
             "then" | "" => Ok(Value::Undefined),
-            _ => Err(format!("Element property {property:?} is not supported.")),
+            _ => {
+                let property = prefix(property, 160);
+                let name = prefix(tag(self.doc, node), 80);
+                let namespace = self.doc.nodes[node].namespace.element_uri().unwrap_or("unknown");
+                Err(format!("Element property {property:?} is not supported. Receiver tag={name}, namespace={namespace}, owner=main document."))
+            }
         }
     }
 

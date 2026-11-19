@@ -1,5 +1,9 @@
 //! Bounded, read-only diagnostics. Never invoke page getters or conversions.
-use super::{Exception, Fault, Runtime, StoredValue, Value};
+use super::{Exception, Fault, FaultLocation, Runtime, StoredValue, Value};
+use std::collections::VecDeque;
+use std::fmt::Write;
+
+const MAX_ERROR_ORIGINS: usize = 128;
 
 #[derive(Default)]
 pub(super) struct Data {
@@ -7,6 +11,14 @@ pub(super) struct Data {
     omitted: usize,
     entries: [Entries; 2],
     last_fault: Option<(&'static str, &'static str)>,
+    origins: VecDeque<NativeOrigin>,
+}
+
+struct NativeOrigin {
+    identity: usize,
+    kind: &'static str,
+    message: String,
+    location: Box<FaultLocation>,
 }
 
 #[cfg(test)]
@@ -18,6 +30,23 @@ mod tests {
         fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("No host write".into()) }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("No host call".into()) }
     }
+    #[test]
+    fn native_error_rethrow_reports_original_location_without_reading_page_getters() {
+        let mut runtime = Runtime::for_test();
+        let script = "var saved,hits=0;\n\
+            function fail(){return null.missing;}\n\
+            try{fail();}catch(e){saved=e;Object.defineProperty(e,'message',{get:function(){hits++;return 'altered';}});}\n\
+            try{throw saved;}catch(e){if(e!==saved)throw 'identity changed';}\n\
+            throw saved;";
+        let error = runtime.execute(script, &mut NoHost).unwrap_err();
+        assert!(error.contains("JavaScript error at line 5,"), "{error}");
+        assert!(error.contains("Original native error at line 2,"), "{error}");
+        assert!(error.contains("Cannot access a property of null or undefined."), "{error}");
+        assert!(error.contains("null.missing"), "{error}");
+        runtime.begin_job();
+        assert_eq!(runtime.execute("hits;", &mut NoHost).unwrap().to_number(), 0.0);
+    }
+
     #[test]
     fn stage_observations_classify_typed_faults_without_user_property_reads() {
         let mut runtime = Runtime::for_test();
@@ -59,6 +88,24 @@ fn bounded(text: &str) -> String {
 }
 
 impl Runtime {
+    // Error objects keep their existing public identity and fields. Origin
+    // records are private, fixed-count diagnostics and never call page code.
+    #[inline(never)]
+    pub(super) fn materialize_native_error(
+        &mut self, kind: &'static str, message: String, location: Option<Box<FaultLocation>>,
+    ) -> Result<Value, Fault> {
+        let detail = location.as_ref().map(|_| bounded(&message));
+        let value = self.error_object(kind, Some(message))?;
+        if let (Value::Object(identity), Some(location), Some(message)) = (&value, location, detail) {
+            let origins = &mut self.diagnostics.origins;
+            if origins.len() == MAX_ERROR_ORIGINS { origins.pop_front(); }
+            if origins.try_reserve(1).is_ok() {
+                origins.push_back(NativeOrigin { identity: *identity, kind, message, location });
+            }
+        }
+        Ok(value)
+    }
+
     // Only API entry outcomes are counted here; these are not statement counts.
     // Keep diagnostic scratch out of recursive evaluator/native-call frames.
     #[inline(never)]
@@ -141,13 +188,21 @@ impl Runtime {
 
     #[inline(never)]
     pub(super) fn display_fault(&self, mut fault: Fault) -> String {
+        let mut origin = None;
         if let Some(exception) = &fault.exception {
             if let Exception::Value(value @ Value::Object(id)) = &**exception {
                 if self.objects.get(*id).is_some_and(|object| object.error_name.is_some()) {
                     fault.message = format!("Uncaught exception: {}", self.diagnostic_value(value));
+                    origin = self.diagnostics.origins.iter().rev().find(|origin| origin.identity == *id);
                 }
             }
         }
-        fault.display()
+        let mut text = fault.display();
+        if let Some(origin) = origin {
+            let location = &origin.location;
+            let _ = write!(text, "\nOriginal native error at line {}, column {}: {}: {}\nOriginal source: {}",
+                location.line, location.column, origin.kind, origin.message, location.context);
+        }
+        text
     }
 }

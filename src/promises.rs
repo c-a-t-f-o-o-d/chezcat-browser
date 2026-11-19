@@ -566,7 +566,7 @@ impl Runtime {
         match fault.exception {
             Some(exception) => match *exception {
                 Exception::Value(value) => Ok(value),
-                Exception::Error(name) => self.error_object(name, Some(fault.message)),
+                Exception::Error(name) => self.materialize_native_error(name, fault.message, fault.location),
             },
             None => Err(fault),
         }
