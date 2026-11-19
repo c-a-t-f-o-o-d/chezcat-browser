@@ -14,6 +14,37 @@ fn succeeds(source: &str) {
 }
 
 #[test]
+fn async_class_methods_reuse_promises_and_await_without_becoming_constructors() {
+    let mut runtime = Runtime::for_test();
+    let result = runtime.execute(r#"
+var trace = '';
+class Service {
+    constructor() { this.base = 3; }
+    async run(value) {
+        trace += 'prefix|';
+        var resolved = await Promise.resolve(value);
+        trace += 'resume|';
+        return this.base + resolved;
+    }
+    static async ['load'](value) { return value; }
+    async() { return 'ordinary'; }
+}
+var service = new Service(), promise = service.run(4);
+promise.then(function(value) { if (value !== 7) throw 'async receiver'; trace += 'done|'; });
+Service.load(9).then(function(value) { if (value !== 9) throw 'static result'; trace += 'static|'; });
+var denied = false;
+try { new service.run(1); } catch (e) { denied = e instanceof TypeError; }
+if (trace !== 'prefix|' || !(promise instanceof Promise) || !denied || service.async() !== 'ordinary' ||
+    Object.getOwnPropertyDescriptor(Service.prototype, 'run').enumerable) throw 'async method descriptor';
+'ok';
+"#, &mut NoHost).unwrap();
+    assert_eq!(result.to_text(), "ok");
+    assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+    let result = runtime.execute("if(trace!=='prefix|resume|static|done|')throw trace;'ok';", &mut NoHost).unwrap();
+    assert_eq!(result.to_text(), "ok");
+}
+
+#[test]
 fn computed_class_methods_preserve_symbol_keys_order_and_constructor_identity() {
     succeeds(r#"
 var order = '';
@@ -292,6 +323,7 @@ fn base_class_exact_source_reflection_preserves_class_constructor_methods_and_ac
 fn base_class_invalid_and_unsupported_syntax_is_rejected_before_program_effects() {
     let syntax_errors = [
         "effects++;class C{constructor(){}constructor(){}}",
+        "effects++;class C{async constructor(){}}",
         "effects++;class C{get constructor(){return 1;}}",
         "effects++;class C{set constructor(value){}}",
         "effects++;class C{static prototype(){}}",
@@ -319,7 +351,8 @@ fn base_class_invalid_and_unsupported_syntax_is_rejected_before_program_effects(
         "effects++;class C{value=effects++;}",
         "effects++;class C{static value=effects++;}",
         "effects++;class C{static{effects++;}}",
-        "effects++;class C{async method(){}}",
+        "effects++;class C{async *method(){}}",
+        "effects++;class C{async\nmethod(){}}",
         "effects++;class C{*method(){}}",
         "effects++;@decorator class C{}",
         "effects++;export class C{}",
