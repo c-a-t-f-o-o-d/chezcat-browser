@@ -941,6 +941,81 @@ document.title='verified-template-import';
 }
 
 #[test]
+fn template_inner_html_replaces_inert_children_without_activating_resources() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<html><head></head><body><template id=starter><u>Original</u><template><b>Nested</b></template></template><main id=mount></main></body></html>",
+        &[r##"
+var parsed=document.getElementById('starter');
+if(parsed.innerHTML!=='<u>Original</u><template><b>Nested</b></template>')throw 'serialize retained template topology';
+var template=document.createElement('template'), inner=template.content, list=inner.childNodes, calls=0;
+var source={toString:function(){calls++;return '<div id=item data-key="x&amp;y"><b>First &amp; second</b></div>'; }};
+template.innerHTML=source;
+var previous=inner.firstChild;
+if(calls!==1||template.content!==inner||inner.childNodes!==list||list.length!==1||list[0]!==previous||
+    previous.ownerDocument!==inner.ownerDocument||previous.parentNode!==inner||
+    inner.textContent!=='First & second'||template.innerHTML!=='<div id="item" data-key="x&amp;y"><b>First &amp; second</b></div>'||
+    template.childNodes.length!==0||template.textContent!==''||document.getElementById('item')!==null)
+    throw 'native parsed template topology and normalized serialization';
+var descriptor=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+descriptor.set.call(template,'<a href="#end" id="fresh">Visible</a>');
+var anchor=inner.firstChild;
+if(anchor===previous||previous.parentNode!==null||previous.firstChild.textContent!=='First & second'||
+    descriptor.get.call(template)!=='<a href="#end" id="fresh">Visible</a>'||list[0]!==anchor)
+    throw 'stable content and detached old nodes';
+var copy=document.importNode(inner,true);
+document.getElementById('mount').appendChild(copy);
+if(document.getElementById('fresh').textContent!=='Visible'||anchor.isConnected||anchor.parentNode!==inner)
+    throw 'native import continues from generated content';
+template.innerHTML='<script id="latent">document.title="forbidden";</script><img src="https://unrequested.test/inert.png">';
+if(template.content!==inner||inner.childNodes.length!==2||inner.firstChild.localName!=='script'||
+    inner.lastChild.localName!=='img'||document.getElementById('latent')!==null)throw 'inert resource ownership';
+var savedFirst=inner.firstChild,savedMarkup=template.innerHTML;
+var separate=document.implementation.createHTMLDocument('other'), separateTemplate=separate.createElement('template');
+separateTemplate.innerHTML='<i>owned</i>';
+if(separateTemplate.innerHTML!=='<i>owned</i>'||separateTemplate.content.ownerDocument===inner.ownerDocument||
+    separateTemplate.content.firstChild.textContent!=='owned')throw 'inert factory-created template';
+document.title='verified-template-inner-html';
+"##]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-template-inner-html");
+    assert!(!page.has_host_tasks());
+    let before = page.state.retained;
+    let live_nodes = doc.nodes.len();
+    let refused = page.console_eval(&mut doc, &mut forms, "template.innerHTML='<table><tr><td>unsupported structure';");
+    assert_eq!(refused.errors, 1);
+    assert_eq!(page.state.retained, before);
+    assert_eq!(doc.nodes.len(), live_nodes);
+    let verified = page.console_eval(&mut doc, &mut forms, r#"
+if(template.content!==inner||inner.firstChild!==savedFirst||template.innerHTML!==savedMarkup||
+    document.getElementById('fresh').textContent!=='Visible')throw 'failed parse changed retained content';
+template.innerHTML=null;
+if(template.content!==inner||list.length!==0||template.innerHTML!==''||savedFirst.parentNode!==null||
+    savedFirst.textContent!=='document.title="forbidden";')throw 'null and retained identity';
+"#);
+    assert_eq!(verified.errors, 0, "{}", page.report());
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
+fn template_inner_html_rolls_back_an_unmaterialized_fragment_on_capacity_failure() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<html><head></head><body></body></html>",
+        &["var fresh=document.createElement('template');"]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let retained = page.state.retained;
+    let limit = page.state.limits.host.extra_nodes;
+    page.state.limits.host.extra_nodes = 3;
+    let failure = page.console_eval(&mut doc, &mut forms, "fresh.innerHTML='<b>no partial tree</b>';");
+    assert_eq!(failure.errors, 1);
+    assert!(page.report().contains("Inert DOM identity limit reached during template replacement"));
+    assert_eq!(page.state.retained, retained);
+    page.state.limits.host.extra_nodes = limit;
+    let verified = page.console_eval(&mut doc, &mut forms,
+        "if(fresh.content.firstChild!==null)throw 'partial child';fresh.innerHTML='<b>retry</b>';if(fresh.content.textContent!=='retry')throw 'failed retry';");
+    assert_eq!(verified.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn create_html_document_builds_an_independent_inert_native_tree() {
     let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
 var impl=document.implementation;

@@ -1,6 +1,7 @@
 //! Separate HTML node trees with no Window, renderer, or resource loader.
 //! https://dom.spec.whatwg.org/#dom-domimplementation-createhtmldocument
 use super::*;
+use std::rc::Rc;
 
 pub(super) const MAIN_IMPLEMENTATION: u32 = 0x8600_0000;
 const FIRST_ENTRY: u32 = MAIN_IMPLEMENTATION + 1;
@@ -14,6 +15,7 @@ pub(super) const HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
 #[derive(Default)]
 pub(super) struct Arena {
     entries: Vec<Entry>,
+    generated: Vec<GeneratedNode>,
     template_documents: HashMap<u32, u32>,
     template_contents: HashMap<u32, u32>,
 }
@@ -27,11 +29,22 @@ struct DocumentNodes {
     title: String,
 }
 
+#[derive(Clone, Copy)]
+enum ParsedSource {
+    Loaded(usize),
+    Generated(usize),
+}
+
+struct GeneratedNode {
+    node: Rc<Node>,
+    unsafe_nonce: bool,
+}
+
 enum Kind {
     Document(DocumentNodes),
     TemplateDocument { implementation: u32 },
     Fragment,
-    Parsed { source: usize, copy_template_contents: bool },
+    Parsed { source: ParsedSource, copy_template_contents: bool },
     Doctype,
     Element(String),
     Text(String),
@@ -87,7 +100,7 @@ impl Bridge<'_> {
         Some(match self.state.inert_documents.node(object)?.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => 9,
             Kind::Fragment => 11,
-            Kind::Parsed { source, .. } => match self.doc.nodes.get(source)?.kind {
+            Kind::Parsed { source, .. } => match self.parsed_source(source)?.0.kind {
                 NodeKind::Element { .. } => 1,
                 NodeKind::Text(_) => 3,
                 NodeKind::Comment(_) => 8,
@@ -109,7 +122,7 @@ impl Bridge<'_> {
             Kind::Document(_) | Kind::TemplateDocument { .. } => "Document",
             Kind::Fragment => "DocumentFragment",
             Kind::Parsed { source, .. } => {
-                let node = self.doc.nodes.get(*source)?;
+                let node = self.parsed_source(*source)?.0;
                 match &node.kind {
                     NodeKind::Element { tag, .. } => match node.namespace {
                         crate::html::Namespace::Html => crate::javascript::ordinary_html_interface(tag).unwrap_or("HTMLElement"),
@@ -153,11 +166,11 @@ impl Bridge<'_> {
             Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "localName" | "tagName" | "namespaceURI" | "prefix"),
             Kind::Fragment => false,
-            Kind::Parsed { source, .. } => match self.doc.nodes[source].kind {
-                NodeKind::Element { .. } => matches!(name, "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
-                NodeKind::Text(_) | NodeKind::Comment(_) => matches!(name, "data" | "length"),
-                NodeKind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
-                NodeKind::DocumentFragment => false,
+            Kind::Parsed { source, .. } => match self.parsed_source(source).map(|(node, _)| &node.kind) {
+                Some(NodeKind::Element { .. }) => matches!(name, "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
+                Some(NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }) =>
+                    matches!(name, "data" | "length"),
+                _ => false,
             },
             Kind::Text(_) | Kind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
         }
@@ -165,6 +178,16 @@ impl Bridge<'_> {
 
     pub(super) fn inert_children(&self, object: u32) -> Option<&[u32]> {
         self.state.inert_documents.node(object).map(|node| node.children.as_slice())
+    }
+
+    fn parsed_source(&self, source: ParsedSource) -> Option<(&Node, bool)> {
+        match source {
+            ParsedSource::Loaded(index) => Some((self.doc.nodes.get(index)?, self.doc.nonce_unsafe_nodes.contains(&index))),
+            ParsedSource::Generated(index) => {
+                let source = self.state.inert_documents.generated.get(index)?;
+                Some((source.node.as_ref(), source.unsafe_nonce))
+            }
+        }
     }
 
     fn parsed_template(&self, node: usize) -> bool {
@@ -181,7 +204,7 @@ impl Bridge<'_> {
         let node = self.state.inert_documents.node(object)?;
         match &node.kind {
             Kind::Element(tag) if tag == "template" => Some((node.owner, None)),
-            Kind::Parsed { source, copy_template_contents } if self.parsed_template(*source) => {
+            Kind::Parsed { source: ParsedSource::Loaded(source), copy_template_contents } if self.parsed_template(*source) => {
                 Some((node.owner, copy_template_contents.then_some(*source)))
             }
             _ => None,
@@ -243,7 +266,7 @@ impl Bridge<'_> {
             staged.try_reserve(1).map_err(|_| "Cannot reserve parsed template nodes.")?;
             staged.push(Entry::Node(InertNode {
                 kind: if index == 0 { Kind::Fragment } else {
-                    Kind::Parsed { source: source.unwrap(), copy_template_contents: true }
+                    Kind::Parsed { source: ParsedSource::Loaded(source.unwrap()), copy_template_contents: true }
                 },
                 owner, parent, children: child_handles,
             }));
@@ -262,12 +285,163 @@ impl Bridge<'_> {
         Ok(Value::Host(fragment))
     }
 
+    pub(super) fn template_html(&mut self, object: u32) -> Result<Value, String> {
+        use script_inner_html::{append, escaped, raw_text, write_open_tag};
+
+        let Value::Host(root) = self.template_content(object)? else { unreachable!() };
+        let mut output = String::new();
+        let mut pending = Vec::new();
+        let children = self.inert_children(root).ok_or("Template fragment is unavailable.")?;
+        pending.try_reserve(children.len()).map_err(|_| "Cannot reserve template serialization.")?;
+        pending.extend(children.iter().rev().map(|&child| (child, false, false)));
+        while let Some((handle, end, raw)) = pending.pop() {
+            self.state.work(1)?;
+            let Kind::Parsed { source, .. } = self.state.inert_documents.node(handle)
+                .ok_or("Template serialization node is unavailable.")?.kind else {
+                return Err("Unsupported inert template serialization node.".into());
+            };
+            let generated = match source {
+                ParsedSource::Generated(index) => Some(Rc::clone(&self.state.inert_documents.generated[index].node)),
+                _ => None,
+            };
+            let node = match source {
+                ParsedSource::Loaded(index) => &self.doc.nodes[index],
+                ParsedSource::Generated(_) => generated.as_deref().unwrap(),
+            };
+            match &node.kind {
+                NodeKind::Text(text) => escaped(self.state, &mut output, text, false, raw)?,
+                NodeKind::Comment(data) => {
+                    for piece in ["<!--", data, "-->"] { append(self.state, &mut output, piece)?; }
+                }
+                NodeKind::ProcessingInstruction { target, data } => {
+                    for piece in ["<?", target, " ", data, "?>"] { append(self.state, &mut output, piece)?; }
+                }
+                NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
+                NodeKind::Element { tag, attrs, .. } => {
+                    if node.namespace != crate::html::Namespace::Html {
+                        return Err("Template serialization of foreign elements is unavailable.".into());
+                    }
+                    if end {
+                        for piece in ["</", tag, ">"] { append(self.state, &mut output, piece)?; }
+                        continue;
+                    }
+                    write_open_tag(self.state, &mut output, tag, attrs)?;
+                    if crate::html::is_void(tag) { continue; }
+                    let raw = raw_text(tag, self.doc.scripting_enabled);
+                    let children_owner = if tag == "template" {
+                        let Value::Host(fragment) = self.template_content(handle)? else { unreachable!() };
+                        fragment
+                    } else { handle };
+                    let children = self.inert_children(children_owner).ok_or("Template serialization children are unavailable.")?;
+                    pending.try_reserve(children.len().saturating_add(1)).map_err(|_| "Cannot reserve template serialization.")?;
+                    pending.push((handle, true, false));
+                    pending.extend(children.iter().rev().map(|&child| (child, false, raw)));
+                }
+            }
+        }
+        Ok(Value::String(output))
+    }
+
+    pub(super) fn set_template_html(&mut self, object: u32, markup: &str) -> Result<(), String> {
+        let (document, _) = self.template_source(object).ok_or("Invalid HTML template receiver.")?;
+        if markup.len() > self.state.limits.host.string_bytes {
+            return Err("HTML fragment source exceeds the host string limit.".into());
+        }
+        self.state.work(markup.len())?;
+        self.state.copies(markup.len().saturating_mul(2))?;
+        let parsed = crate::html::parse_fragment(markup, "template", self.doc.scripting_enabled)?;
+
+        let had_fragment = self.state.inert_documents.template_contents.contains_key(&object);
+        let had_template_owner = self.state.inert_documents.template_documents.contains_key(&document);
+        let starting_entries = self.state.inert_documents.entries.len();
+        let starting_bytes = self.state.retained;
+        let Value::Host(fragment) = self.template_content(object)? else { unreachable!() };
+        let result = self.replace_template_children(fragment, parsed);
+        if result.is_err() && !had_fragment {
+            let arena = &mut self.state.inert_documents;
+            arena.entries.truncate(starting_entries);
+            arena.template_contents.remove(&object);
+            if !had_template_owner { arena.template_documents.remove(&document); }
+            self.state.retained = starting_bytes;
+        }
+        result
+    }
+
+    fn replace_template_children(&mut self, fragment: u32, mut parsed: Document) -> Result<(), String> {
+        let arena = &self.state.inert_documents;
+        let owner = arena.node(fragment).ok_or("Template fragment is unavailable.")?.owner;
+        let fragment_index = (fragment - FIRST_ENTRY) as usize;
+        let count = parsed.nodes.len().checked_sub(1).ok_or("Missing checked fragment root.")?;
+        if count > self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len()) {
+            return Err("Inert DOM identity limit reached during template replacement.".into());
+        }
+        let first = FIRST_ENTRY + arena.entries.len() as u32;
+        let generated_base = arena.generated.len();
+        let mut entries = Vec::new();
+        let mut generated = Vec::new();
+        entries.try_reserve_exact(count).map_err(|_| "Cannot reserve template replacement identities.")?;
+        generated.try_reserve_exact(count).map_err(|_| "Cannot reserve parsed template replacement nodes.")?;
+        let mut parents = Vec::new();
+        parents.try_reserve_exact(parsed.nodes.len()).map_err(|_| "Cannot reserve template parent links.")?;
+        parents.resize(parsed.nodes.len(), None);
+        let mut payload = count.saturating_mul(std::mem::size_of::<GeneratedNode>() + std::mem::size_of::<Node>());
+        let children_for = |items: &[usize]| -> Result<Vec<u32>, String> {
+            let mut children = Vec::new();
+            children.try_reserve_exact(items.len()).map_err(|_| "Cannot reserve template child links.")?;
+            children.extend(items.iter().map(|&child| first + child as u32 - 1));
+            Ok(children)
+        };
+        for (local, node) in parsed.nodes.iter().enumerate() {
+            self.state.work(node.children.len().saturating_add(1))?;
+            let parent = Some(if local == 0 { fragment } else { first + local as u32 - 1 });
+            for &child in &node.children { parents[child] = parent; }
+            if local == 0 { continue; }
+            payload = payload.saturating_add(node_bytes(node));
+            if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
+                if node.namespace != crate::html::Namespace::Html || tag == "template" {
+                    return Err("Template fragment parsing of foreign or nested template markup is unavailable.".into());
+                }
+                self.state.work(attrs.len())?;
+                payload = payload.saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
+            }
+        }
+        let root_children = children_for(&parsed.nodes[0].children)?;
+        payload = payload.saturating_add(root_children.capacity().saturating_mul(std::mem::size_of::<u32>()));
+        for (offset, mut node) in parsed.nodes.drain(1..).enumerate() {
+            let local = offset + 1;
+            let children = children_for(&node.children)?;
+            payload = payload.saturating_add(children.capacity().saturating_mul(std::mem::size_of::<u32>()));
+            node.children = Vec::new();
+            entries.push(Entry::Node(InertNode {
+                kind: Kind::Parsed {
+                    source: ParsedSource::Generated(generated_base + offset),
+                    copy_template_contents: false,
+                },
+                owner, parent: parents[local], children,
+            }));
+            generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
+        }
+        self.state.inert_documents.generated.try_reserve(count).map_err(|_| "Cannot reserve inert template source storage.")?;
+        let committed = self.reserve_inert_entries(entries.len(), payload)?;
+        debug_assert_eq!(committed, first);
+        let arena = &mut self.state.inert_documents;
+        let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
+        let old = std::mem::replace(&mut root.children, root_children);
+        for child in old {
+            let Entry::Node(node) = &mut arena.entries[(child - FIRST_ENTRY) as usize] else { unreachable!() };
+            node.parent = None;
+        }
+        arena.generated.extend(generated);
+        arena.entries.extend(entries);
+        Ok(())
+    }
+
     pub(super) fn inert_import_source(&self, object: u32) -> Option<ImportSource<'_>> {
         Some(match &self.state.inert_documents.node(object)?.kind {
-            Kind::Parsed { source, .. } => ImportSource::Parsed {
-                node: self.doc.nodes.get(*source)?,
-                unsafe_nonce: self.doc.nonce_unsafe_nodes.contains(source),
-            },
+            Kind::Parsed { source, .. } => {
+                let (node, unsafe_nonce) = self.parsed_source(*source)?;
+                ImportSource::Parsed { node, unsafe_nonce }
+            }
             Kind::Element(tag) => ImportSource::Element(tag),
             Kind::Text(data) => ImportSource::Text(data),
             Kind::Fragment => ImportSource::Fragment,
@@ -444,7 +618,7 @@ impl Bridge<'_> {
     fn inert_text_value(&self, object: u32) -> Option<&str> {
         match &self.state.inert_documents.node(object)?.kind {
             Kind::Text(value) => Some(value),
-            Kind::Parsed { source, .. } => match &self.doc.nodes.get(*source)?.kind {
+            Kind::Parsed { source, .. } => match &self.parsed_source(*source)?.0.kind {
                 NodeKind::Text(value) => Some(value),
                 _ => None,
             },
@@ -479,15 +653,17 @@ impl Bridge<'_> {
         if property == "childNodes" { return self.create_inert_child_list(object); }
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Parsed { source, .. } = node.kind {
-            let parsed = &self.doc.nodes[source];
+            let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;
             if let Some(data) = parsed.kind.character_data() {
                 match property {
                     "data" | "nodeValue" | "textContent" => {
                         self.state.copies(data.len())?;
+                        let data = self.parsed_source(source).unwrap().0.kind.character_data().unwrap();
                         return Ok(Value::String(data.into()));
                     }
                     "length" => {
                         self.state.work(data.len())?;
+                        let data = self.parsed_source(source).unwrap().0.kind.character_data().unwrap();
                         return Ok(Value::Number(data.encode_utf16().count() as f64));
                     }
                     _ => {}
@@ -497,6 +673,8 @@ impl Bridge<'_> {
                 match property {
                     "localName" | "nodeName" | "tagName" => {
                         self.state.copies(tag.len())?;
+                        let parsed = self.parsed_source(source).unwrap().0;
+                        let NodeKind::Element { tag, .. } = &parsed.kind else { unreachable!() };
                         return Ok(Value::String(if property != "localName" && parsed.namespace == crate::html::Namespace::Html {
                             tag.to_ascii_uppercase()
                         } else { tag.clone() }));
@@ -506,7 +684,8 @@ impl Bridge<'_> {
                     "id" => {
                         let id = id.as_deref().unwrap_or_default();
                         self.state.copies(id.len())?;
-                        return Ok(Value::String(id.into()));
+                        let NodeKind::Element { id, .. } = &self.parsed_source(source).unwrap().0.kind else { unreachable!() };
+                        return Ok(Value::String(id.as_deref().unwrap_or_default().into()));
                     }
                     _ => {}
                 }
@@ -562,7 +741,7 @@ impl Bridge<'_> {
             "nodeName" => match &node.kind {
                 Kind::Document(_) | Kind::TemplateDocument { .. } => string("#document"),
                 Kind::Fragment => string("#document-fragment"),
-                Kind::Parsed { source, .. } => match &self.doc.nodes[*source].kind {
+                Kind::Parsed { source, .. } => match &self.parsed_source(*source).ok_or("Inert parsed node is unavailable.")?.0.kind {
                     NodeKind::Element { tag, .. } => string(tag),
                     NodeKind::Text(_) => string("#text"),
                     NodeKind::Comment(_) => string("#comment"),

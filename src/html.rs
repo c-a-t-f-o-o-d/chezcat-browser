@@ -200,7 +200,7 @@ pub(crate) fn parse_loaded_document(
 /// callers never create a source wrapper that markup could escape. Unsupported
 /// tree-builder recovery and unrepresented comment nodes reject explicitly.
 pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
-    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option") {
+    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
     parse_internal(input, Some(context), scripting, None)

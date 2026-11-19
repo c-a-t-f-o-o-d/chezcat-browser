@@ -3,7 +3,7 @@
 //! until document teardown. Unsupported contexts never commit a parsed prefix.
 use super::*;
 
-fn append(state: &mut State, out: &mut String, text: &str) -> Result<(), String> {
+pub(super) fn append(state: &mut State, out: &mut String, text: &str) -> Result<(), String> {
     if out.len().checked_add(text.len()).is_none_or(|len| len > state.limits.host.string_bytes) { return Err("HTML serialization exceeds the host string limit.".into()); }
     state.copies(text.len())?;
     out.try_reserve(text.len()).map_err(|_| "HTML serialization reservation failed.")?;
@@ -11,7 +11,7 @@ fn append(state: &mut State, out: &mut String, text: &str) -> Result<(), String>
     Ok(())
 }
 
-fn escaped(state: &mut State, out: &mut String, text: &str, attribute: bool, raw: bool) -> Result<(), String> {
+pub(super) fn escaped(state: &mut State, out: &mut String, text: &str, attribute: bool, raw: bool) -> Result<(), String> {
     state.work(text.len())?;
     if raw { return append(state, out, text); }
     for ch in text.chars() {
@@ -22,8 +22,31 @@ fn escaped(state: &mut State, out: &mut String, text: &str, attribute: bool, raw
     Ok(())
 }
 
-fn raw_text(name: &str, scripting: bool) -> bool {
+pub(super) fn raw_text(name: &str, scripting: bool) -> bool {
     matches!(name, "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") || name == "noscript" && scripting
+}
+
+pub(super) fn write_open_tag(state: &mut State, out: &mut String, tag: &str, attrs: &[crate::html::Attribute]) -> Result<(), String> {
+    append(state, out, "<")?;
+    append(state, out, tag)?;
+    state.work(attrs.len())?;
+    for attr in attrs {
+        append(state, out, " ")?;
+        let prefix = match attr.name.namespace_uri() {
+            Some("http://www.w3.org/XML/1998/namespace") => Some("xml:"),
+            Some("http://www.w3.org/2000/xmlns/") if attr.name.local() != "xmlns" => Some("xmlns:"),
+            Some("http://www.w3.org/2000/xmlns/") => Some(""),
+            Some("http://www.w3.org/1999/xlink") => Some("xlink:"),
+            _ => None,
+        };
+        if let Some(prefix) = prefix { append(state, out, prefix)?; append(state, out, attr.name.local())?; }
+        else { append(state, out, &attr.name.qualified)?; }
+        append(state, out, "=\"")?;
+        escaped(state, out, &attr.value, true, false)?;
+        append(state, out, "\"")?;
+    }
+    append(state, out, ">")?;
+    Ok(())
 }
 
 impl Bridge<'_> {
@@ -64,25 +87,7 @@ impl Bridge<'_> {
                 NodeKind::Element { tag, attrs, .. } => {
                     if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
                     if end { append(self.state, &mut out, "</")?; append(self.state, &mut out, tag)?; append(self.state, &mut out, ">")?; continue; }
-                    append(self.state, &mut out, "<")?;
-                    append(self.state, &mut out, tag)?;
-                    self.state.work(attrs.len())?;
-                    for attr in attrs {
-                        append(self.state, &mut out, " ")?;
-                        let prefix = match attr.name.namespace_uri() {
-                            Some("http://www.w3.org/XML/1998/namespace") => Some("xml:"),
-                            Some("http://www.w3.org/2000/xmlns/") if attr.name.local() != "xmlns" => Some("xmlns:"),
-                            Some("http://www.w3.org/2000/xmlns/") => Some(""),
-                            Some("http://www.w3.org/1999/xlink") => Some("xlink:"),
-                            _ => None,
-                        };
-                        if let Some(prefix) = prefix { append(self.state, &mut out, prefix)?; append(self.state, &mut out, attr.name.local())?; }
-                        else { append(self.state, &mut out, &attr.name.qualified)?; }
-                        append(self.state, &mut out, "=\"")?;
-                        escaped(self.state, &mut out, &attr.value, true, false)?;
-                        append(self.state, &mut out, "\"")?;
-                    }
-                    append(self.state, &mut out, ">")?;
+                    write_open_tag(self.state, &mut out, tag, attrs)?;
                     if !crate::html::is_void(tag) {
                         self.state.work(item.children.len())?;
                         stack.push((node, true, false));
