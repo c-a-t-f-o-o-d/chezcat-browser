@@ -32,6 +32,43 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_logical_not_resumes_the_operand_before_choosing_a_branch() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, branch, doubled, catches=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var object={valueOf(){throw 'unexpected coercion';},toString(){throw 'unexpected conversion';}};
+function relay(value){trace+='call|';return value;}
+async function choose(value){
+    try{
+        if(!relay(await value)){trace+='true|';return 'true';}
+        trace+='false|';
+        return 'false';
+    }catch(error){if(error!==reason)throw error;catches++;}
+    finally{trace+='finally|';}
+}
+async function twice(){let item={answer:!!await gate};return item.answer;}
+choose(gate).then(value=>branch=value);
+choose(failed);
+twice().then(value=>doubled=value);
+if(trace!==''||branch!==undefined||doubled!==undefined||catches)throw 'side effect before fulfillment';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(object);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='call|false|finally|finally|'||branch!=='false'||doubled!==true||catches!==1)
+    throw 'logical not order, result or rejection';
+choose(Promise.resolve(0)).then(value=>branch=value);
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(branch!=='true'||!trace.endsWith('call|true|finally|'))throw 'falsey operand';'ok';");
+}
+
+#[test]
 fn await_execution_single_property_literal_keeps_the_converted_key_and_own_definition() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
