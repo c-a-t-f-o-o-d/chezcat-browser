@@ -27,6 +27,56 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_try_catch_resumes_after_handling_a_suspended_throw() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', injected={}, fromBody={}, replacement={}, saved;
+function* work(label,mode){
+    try{
+        try{
+            let inner=5;
+            yield inner;
+            trace+=label+':continued|';
+            if(mode==='body')throw fromBody;
+        }catch(error){
+            trace+=label+':catch|';
+            saved=()=>error;
+            if(mode==='replace')throw replacement;
+        }
+        yield 'after';
+        return 7;
+    }finally{trace+=label+':finally|';}
+}
+var first=work('a','injected');
+if(first.next().value!==5||trace!=='')throw 'initial suspension';
+var handled=first.throw(injected);
+if(handled.done||handled.value!=='after'||trace!=='a:catch|'||saved()!==injected)
+    throw 'catch did not resume the generator';
+if(first.next().value!==7||!first.next().done||trace!=='a:catch|a:finally|')
+    throw 'continuation or duplicate cleanup';
+var second=work('b','body');
+second.next();
+if(second.next().value!=='after'||saved()!==fromBody||
+    !trace.endsWith('b:continued|b:catch|'))throw 'body throw or catch scope';
+var closed=second.return(10);
+if(!closed.done||closed.value!==10||!trace.endsWith('b:finally|'))throw 'post-catch closure';
+var bypass=work('c','injected');
+bypass.next();
+if(bypass.return(11).value!==11||!trace.endsWith('b:finally|c:finally|'))
+    throw 'return entered catch';
+var changed=work('d','replace'), received;
+changed.next();
+try{changed.throw(injected);}catch(error){received=error;}
+if(received!==replacement||!trace.endsWith('d:catch|d:finally|')||!changed.next().done)
+    throw 'catch replacement or cleanup';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_call_argument_retains_callee_and_uses_the_resumed_value() {
     let mut runtime = Runtime::for_capacity_test();
     let source = r#"
