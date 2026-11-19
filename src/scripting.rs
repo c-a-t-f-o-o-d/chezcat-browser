@@ -63,6 +63,8 @@ mod script_hidden_inputs;
 mod script_text_inputs;
 #[path = "script_input_accessors.rs"]
 mod script_input_accessors;
+#[path = "script_content_editable.rs"]
+mod script_content_editable;
 #[path = "script_canvas.rs"]
 mod script_canvas;
 #[path = "script_canvas_context.rs"]
@@ -2551,6 +2553,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         property == "style" && self.element_expando_receiver(object)
+            || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
             || self.assigned_slot_lookup(object, property)
@@ -2729,6 +2732,7 @@ impl Host for Bridge<'_> {
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
+            || self.content_editable_attribute(object, property)
             || self.html_offset_attribute(object, property)
             || script_element_properties::ordinary_interface_member(property)
             && self.frame_concrete_html_interface(object).is_some()
@@ -2759,6 +2763,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
         if matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
@@ -2784,6 +2789,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
             return self.canvas_receiver(object).then_some(name);
         }
@@ -2934,6 +2940,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
             && self.event_target_interface(object) { return Some(object); }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
@@ -3081,6 +3088,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if script_content_editable::accessor(method) {return self.validate_content_editable(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             if !self.html_element_receiver(object) {
                 return Err(("TypeError", "The style accessor requires an HTMLElement.".into()));
@@ -3257,6 +3265,7 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if self.content_editable_attribute(object,property) {return self.validate_content_editable_value(object,value);}
         if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
             return Err(("NotSupportedError", format!("Canvas 2D drawing state {property:?} is not implemented.")));
         }
@@ -3313,6 +3322,10 @@ impl Host for Bridge<'_> {
             }
         }
         Ok(())
+    }
+
+    fn setter_dom_exception(&self,object:u32,property:&str,kind:&str)->bool {
+        kind=="SyntaxError" && self.content_editable_attribute(object,property)
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
@@ -3420,6 +3433,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             return self.event_target_interface(object) && self.html_element_receiver(receiver);
         }
@@ -4190,6 +4204,7 @@ impl Host for Bridge<'_> {
             return Ok(Value::Undefined);
         }
         self.state.work(1)?;
+        if self.content_editable_member(object,property) {return Ok(Value::Undefined);}
         if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
         if self.element_selector_member(object,property) {return Ok(Value::Undefined);}
@@ -4527,6 +4542,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.content_editable_attribute(object,property) {return self.content_editable_set(object,&value);}
         if self.canvas_context_receiver(object) {
             return Err(format!("Setting native Canvas 2D property {property:?} is not implemented."));
         }
@@ -4790,6 +4806,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == script_content_editable::GET {return self.content_editable_get(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             self.state.work(1)?;
             let node = self.node(object)?;

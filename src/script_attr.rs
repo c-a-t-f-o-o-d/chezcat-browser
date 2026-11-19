@@ -375,13 +375,15 @@ impl Bridge<'_> {
             || matches!(key,"name"|"value") && (self.owned_native_checkbox(node) || self.owned_native_radio(node))
             || key == "checked" && self.input_receiver(node_handle(node));
         let button_attribute = matches!(key,"name"|"value"|"type") && (self.native_button(node) || self.fresh_button(node));
+        let content_editable = key == "contenteditable" && self.content_editable_receiver(node_handle(node));
         let canvas_attribute = matches!(key, "width" | "height") && crate::html_canvas::element(self.doc, node);
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
-            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !canvas_attribute && !media_source && !media_controls && !style_metadata {
+            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {

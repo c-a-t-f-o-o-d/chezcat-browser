@@ -114,6 +114,8 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
+                    self.define_node_attribute(prototype, window, "contentEditable",
+                        "\0HTMLElement.get.contentEditable", Some("\0HTMLElement.set.contentEditable"))?;
                     self.define_node_attribute(prototype, window, "style",
                         ELEMENT_STYLE_GET, Some(ELEMENT_STYLE_SET))?;
                     for (key, operation) in [
@@ -857,8 +859,13 @@ impl Runtime {
             self.checked_value(value)?
         };
         self.pin_exported_value(&value);
-        host.validate_set(handle, name, &value)
-            .map_err(|(kind, message)| Fault::exception(kind, message))?;
+        self.validate_native_access(handle,host)?;
+        if let Err((kind,message)) = host.validate_set(handle, name, &value) {
+            if host.setter_dom_exception(handle,name,kind) {
+                return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));
+            }
+            return Err(Fault::exception(kind,message));
+        }
         let ticket=self.prepare_host_microtask(host,handle,name,std::slice::from_ref(&value),true)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
