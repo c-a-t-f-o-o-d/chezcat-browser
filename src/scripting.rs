@@ -2710,6 +2710,11 @@ impl Host for Bridge<'_> {
             || self.comment_receiver(object)
             || self.processing_instruction_receiver(object)
     }
+    fn mutable_native_wrapper_prototype(&self, object: u32) -> bool {
+        self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
+            || self.ordinary_event_owner(object).is_some() && !self.ui_receiver(object)
+                && !self.custom_receiver(object) && !self.mouse_receiver(object)
+    }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
         if self.document_interface_receiver(object) {return false;}

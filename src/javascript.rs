@@ -599,6 +599,7 @@ pub trait Host {
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Actual exposed immediate prototype, distinct from a read-only Object tail.
     fn exposed_native_prototype(&self, _object:u32) -> bool { false }
+    fn mutable_native_wrapper_prototype(&self, _object: u32) -> bool { false }
     /// Whether the ordinary chain can supply inherited enumerable keys.
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
         self.exposed_native_prototype(object)
@@ -8906,7 +8907,7 @@ impl Runtime {
                     .map(Value::Bool);
             }
             if host.native_ancestry_inspection(handle) {
-                let anchor=self.native_instance_anchor(handle,host)?;
+                let anchor=self.native_instance_visible_anchor(handle,host)?;
                 return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));
             }
             self.reject_foreign_window(&Value::Host(handle),host)?;
