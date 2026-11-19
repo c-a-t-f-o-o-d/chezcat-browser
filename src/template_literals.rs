@@ -1,13 +1,17 @@
-//! Original bounded cooked, untagged template literals.
+//! Original bounded template literals.
 //! https://tc39.es/ecma262/#sec-template-literal-lexical-components
 //! https://tc39.es/ecma262/#sec-template-literals-runtime-semantics-evaluation
+//! https://tc39.es/ecma262/#sec-gettemplateobject
 
 #[cfg(test)]
 use super::MAX_STRING_BYTES;
 use super::{
-    primitive_conversion::Hint, ExprId, ExprKind, Fault, Host, Parser, Program, Runtime, TokenKind,
-    Value, MAX_EXPRESSION_FRAMES,
+    primitive_conversion::Hint, Argument, ExprId, ExprKind, Fault, Host, Parser, Program, Runtime,
+    TokenKind, Value, MAX_EXPRESSION_FRAMES,
 };
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug)]
@@ -16,6 +20,18 @@ pub(super) enum Part {
     Head,
     Middle,
     Tail,
+}
+
+struct TaggedChunk {
+    cooked: String,
+    raw: Range<usize>,
+}
+
+pub(super) struct TaggedTemplateSite {
+    chunks: Vec<TaggedChunk>,
+    // Each parsed site has one array per realm. Both arrays contain only
+    // strings and the raw link, and their runtime object IDs are append-only.
+    objects: RefCell<HashMap<Option<usize>, usize>>,
 }
 
 // Cooked text is represented in the runtime's existing UTF-8 string model.
@@ -163,9 +179,82 @@ impl Parser {
         }
         Ok(ExprKind::TemplateLiteral(head, spans))
     }
+
+    pub(super) fn tagged_template_arguments(&mut self) -> Result<Vec<Argument>, Fault> {
+        let start = self.at();
+        // Reserve the leading argument's budget before consuming substitutions.
+        let mut arguments = Vec::new();
+        let site = self.expr(ExprKind::Literal(Value::Undefined), start)?;
+        self.append_argument(&mut arguments, Argument { expression: site, spread: false })?;
+        let mut chunks = Vec::new();
+        loop {
+            let token = self.token();
+            let TokenKind::Template(cooked, part) = &token.kind else {
+                return Err(self.error("Expected the closing template substitution brace."));
+            };
+            let tail = matches!(part, Part::NoSubstitution | Part::Tail);
+            // A token begins at the backtick or substitution's closing brace,
+            // and includes the trailing backtick or opening ${ delimiter.
+            let raw = token.at() + 1..token.end() - if tail { 1 } else { 2 };
+            chunks.try_reserve(1).map_err(|_| Fault::new("Template chunk allocation failed."))?;
+            chunks.push(TaggedChunk { cooked: cooked.clone(), raw });
+            self.current += 1;
+            if tail {
+                break;
+            }
+            if arguments.len() > MAX_EXPRESSION_FRAMES {
+                return Err(self.unsupported("Template substitution limit reached (4096)."));
+            }
+            let expression = self.expression_with_in()?;
+            self.append_argument(&mut arguments, Argument { expression, spread: false })?;
+        }
+        self.program.exprs[site].kind = ExprKind::TemplateObject(Rc::new(TaggedTemplateSite {
+            chunks, objects: RefCell::default(),
+        }));
+        Ok(arguments)
+    }
 }
 
 impl Runtime {
+    pub(super) fn eval_template_object(
+        &mut self, program: &Program, site: &TaggedTemplateSite,
+    ) -> Result<Value, Fault> {
+        let realm = self.active_realm;
+        let mut objects = site.objects.borrow_mut();
+        if let Some(&id) = objects.get(&realm) {
+            return Ok(Value::Object(id));
+        }
+        objects.try_reserve(1).map_err(|_| Fault::new("Template site allocation failed."))?;
+        let cooked = self.new_object(Some(site.chunks.len()))?;
+        let raw = self.new_object(Some(site.chunks.len()))?;
+        for (index, chunk) in site.chunks.iter().enumerate() {
+            let key = index.to_string();
+            let mut text = String::new();
+            self.append_string(&mut text, &chunk.cooked)?;
+            self.set_property(cooked, key.clone(), Value::String(text))?;
+            let source = &program.source[chunk.raw.clone()];
+            self.work(source.len())?;
+            let mut text = String::new();
+            let mut after_cr = false;
+            for part in source.split_inclusive('\r') {
+                let part = if after_cr { part.strip_prefix('\n').unwrap_or(part) } else { part };
+                after_cr = part.ends_with('\r');
+                if let Some(line) = part.strip_suffix('\r') {
+                    self.append_string(&mut text, line)?;
+                    self.append_string(&mut text, "\n")?;
+                } else {
+                    self.append_string(&mut text, part)?;
+                }
+            }
+            self.set_property(raw, key, Value::String(text))?;
+        }
+        self.object_integrity("freeze", &Value::Object(raw))?;
+        self.store_property(cooked, "raw".into(), Value::Object(raw), Some((false, false, false)))?;
+        self.object_integrity("freeze", &Value::Object(cooked))?;
+        objects.insert(realm, cooked);
+        Ok(Value::Object(cooked))
+    }
+
     pub(super) fn eval_template(
         &mut self,
         program: &Rc<Program>,
@@ -328,12 +417,38 @@ if(caught!==11)throw 'syntax exceptions';'ok';
     }
 
     #[test]
-    fn template_tagged_and_lone_surrogate_boundaries_stay_explicit_and_atomic() {
+    fn template_tagged_calls_preserve_site_identity_receiver_and_values() {
+        succeeds(
+            r#"
+var log='', token=Symbol('substitution'), value={toString(){throw 'coercion';}};
+var owner={get tag(){log+='g';return function(site,a,b){
+    if(this!==owner||a!==token||b!==value)throw 'receiver or value';
+    if(site.length!==3||site[0]!=='a\n'||site[1]!=='b'||site[2]!=='c')throw 'cooked';
+    if(site.raw.length!==3||site.raw[0]!=='a\\n'||site.raw[1]!=='b'||site.raw[2]!=='c')throw 'raw';
+    var descriptor=Object.getOwnPropertyDescriptor(site,'raw');
+    if(descriptor.value!==site.raw||descriptor.writable||descriptor.configurable||descriptor.enumerable)throw 'descriptor';
+    if(!Object.isFrozen(site)||!Object.isFrozen(site.raw))throw 'mutable site';
+    log+='t';return site;
+};}};
+function first(){return owner.tag`a\n${(log+='a',token)}b${(log+='b',value)}c`;}
+function second(){return owner.tag`a\n${(log+='a',token)}b${(log+='b',value)}c`;}
+if(first()!==first()||first()===second()||log!=='gabtgabtgabtgabt')throw 'order or site identity';
+function empty(site){return site;}
+if(empty``[0]!==''||empty``.raw[0]!=='')throw 'empty';
+function factory(site){return function Box(){this.value=site[0];};}
+if((new factory`box`).value!=='box')throw 'new target';
+var caught=0;try{eval('owner?.tag`x`');}catch(error){if(error.name==='SyntaxError')caught++;}
+if(caught!==1)throw 'optional chain';'ok';
+"#,
+        );
+        succeeds("function tag(s){return s[0]==='a\\nb'&&s.raw[0]==='a'+String.fromCharCode(92,10,10)+'b';}if(!tag`a\\\r\r\nb`)throw 'CR normalization';'ok';");
+    }
+
+    #[test]
+    fn template_optional_chain_and_lone_surrogate_boundaries_stay_explicit_and_atomic() {
         for text in [
-            "function tag(){};tag`text`;",
-            "function tag(){};tag\n`text`;",
-            "function tag(){return tag;}tag()`x`;",
-            "new tag`x`;",
+            "var owner={};owner?.tag`text`;",
+            r"tag`\uD800`;",
             r"`\uD800`;",
             r"`\uDC00`;",
             r"`\uD800${1}\uDC00`;",

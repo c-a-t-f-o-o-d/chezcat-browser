@@ -1721,6 +1721,7 @@ struct Argument {
 enum ExprKind {
     Literal(Value),
     TemplateLiteral(String, Vec<(ExprId, String)>),
+    TemplateObject(Rc<template_literals::TaggedTemplateSite>),
     RegExp(Rc<regexp::Regex>),
     Name(String),
     This,
@@ -7361,6 +7362,7 @@ impl Runtime {
             ExprKind::TemplateLiteral(head, spans) => {
                 self.eval_template(program, head, spans, env, this, host)
             }
+            ExprKind::TemplateObject(site) => self.eval_template_object(program, site),
             ExprKind::RegExp(expression) => self.regexp_object(expression.clone()),
             ExprKind::Name(name) => match self.lookup(env, name)? {
                 Some(scope) => self.read_binding(scope, name, host),

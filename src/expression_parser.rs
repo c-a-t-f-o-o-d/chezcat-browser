@@ -386,11 +386,12 @@ impl Parser {
             self.append_postfix(&mut owner, Step::Member { key, optional }, context.at)?;
             Phase::Postfix(owner)
         } else if matches!(self.token().kind, TokenKind::Template(_, Part::NoSubstitution | Part::Head)) {
-            return Err(if owner.chain.is_some() {
-                self.error("An optional chain cannot be a tagged template.")
-            } else {
-                self.unsupported("Tagged template literals are not implemented.")
-            });
+            if owner.chain.is_some() {
+                return Err(self.error("An optional chain cannot be a tagged template."));
+            }
+            let args = self.tagged_template_arguments()?;
+            self.append_postfix(&mut owner, Step::Call { args, optional: false }, context.at)?;
+            Phase::Postfix(owner)
         } else {
             let mut value = self.finish_postfix(owner, context.at)?;
             if context.goal.updates && !self.token().newline() && (self.is("++") || self.is("--")) {

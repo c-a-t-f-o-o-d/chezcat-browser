@@ -1477,7 +1477,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn object_integrity(&mut self, method: &str, value: &Value) -> Result<Value, Fault> {
+    pub(super) fn object_integrity(&mut self, method: &str, value: &Value) -> Result<Value, Fault> {
         if matches!(value, Value::Host(_)) {
             return Err(Fault::new(
                 "Native host object integrity cannot be inspected or changed.",
