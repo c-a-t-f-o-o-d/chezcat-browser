@@ -164,7 +164,7 @@ impl Runtime {
 
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
-    fn prepare_script_call(
+    pub(super) fn prepare_script_call(
         &mut self,
         program: &Rc<Program>,
         template: usize,

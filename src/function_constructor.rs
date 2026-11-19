@@ -7,7 +7,7 @@
 #[cfg(test)]
 use super::{MAX_PROGRAMS, MAX_RETAINED_AST, MAX_RETAINED_SOURCE, MAX_STRING_BYTES};
 use super::{
-    ExprKind, Fault, Host, Parser, Program, Runtime, StmtKind, Value,
+    ExprKind, Fault, FunctionKind, Host, Parser, Program, Runtime, StmtKind, Value,
     MAX_CALL_DEPTH,
 };
 use std::rc::Rc;
@@ -18,13 +18,13 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.dynamic_function_constructor(args, false, None, host)
+        self.dynamic_function_constructor(args, FunctionKind::Ordinary, None, host)
     }
 
     pub(super) fn dynamic_function_constructor(
         &mut self,
         args: &[Value],
-        asynchronous: bool,
+        kind: FunctionKind,
         new_target: Option<usize>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
@@ -49,7 +49,7 @@ impl Runtime {
                 Some(value) => self.function_source_argument(value, host)?,
                 None => String::new(),
             };
-            let source = self.function_source_wrapper(&parameters, &body, asynchronous)?;
+            let source = self.function_source_wrapper(&parameters, &body, kind)?;
             // CreateDynamicFunction converts every argument before asking the
             // host to permit string compilation. No fragment is parsed first.
             if !host.allow_eval_for_window(self.browser_global.map(|(handle, _)| handle)).map_err(Fault::new)? {
@@ -67,28 +67,28 @@ impl Runtime {
             // Newlines terminate trailing line comments. Separate parses and
             // exact wrapper shapes prevent either fragment from supplying the
             // other's syntax, closing the wrapper, or adding top-level code.
-            let parameter_source = self.function_source_wrapper(&parameters, "", asynchronous)?;
+            let parameter_source = self.function_source_wrapper(&parameters, "", kind)?;
             let parameter_program = self.parse_function_source(&parameter_source)?;
-            Self::function_source_template(&parameter_program, false, true, asynchronous)?;
+            Self::function_source_template(&parameter_program, false, true, kind)?;
             drop(parameter_program);
             drop(parameter_source);
 
-            let body_source = self.function_source_wrapper("", &body, asynchronous)?;
+            let body_source = self.function_source_wrapper("", &body, kind)?;
             let body_program = self.parse_function_source(&body_source)?;
-            Self::function_source_template(&body_program, true, false, asynchronous)?;
+            Self::function_source_template(&body_program, true, false, kind)?;
             drop(body_program);
             drop(body_source);
 
             // The final parse enforces parameter/body early errors together,
             // including duplicate bindings and strict directives with rest.
             let mut program = self.parse_function_source(&source)?;
-            let template = Self::function_source_template(&program, false, false, asynchronous)?;
+            let template = Self::function_source_template(&program, false, false, kind)?;
             program.templates[template].dynamic_source = true;
             let program = self.retain_parsed_program(Rc::new(program))?;
-            let prototype = if asynchronous {
-                Some(self.dynamic_async_function_prototype(new_target, host)?)
-            } else {
-                None
+            let prototype = match kind {
+                FunctionKind::Ordinary => None,
+                FunctionKind::Async => Some(self.dynamic_async_function_prototype(new_target, host)?),
+                FunctionKind::Generator => Some(self.dynamic_generator_function_prototype(new_target, host)?),
             };
             let function = self.make_function(&program, template, self.global_environment, &Value::Undefined)?;
             let properties = self.ordinary_id(self.ordinary_required(&function)?)?;
@@ -133,10 +133,9 @@ impl Runtime {
         Ok(())
     }
 
-    fn function_source_wrapper(&mut self, parameters: &str, body: &str, asynchronous: bool) -> Result<String, Fault> {
+    fn function_source_wrapper(&mut self, parameters: &str, body: &str, kind: FunctionKind) -> Result<String, Fault> {
         let mut source = String::new();
-        let prefix = if asynchronous { "(async function(" } else { "(function(" };
-        for part in [prefix, parameters, "\n) {\n", body, "\n})"] {
+        for part in ["(", kind.source_prefix(), "(", parameters, "\n) {\n", body, "\n})"] {
             self.function_source_append(&mut source, part)?;
         }
         Ok(source)
@@ -162,7 +161,7 @@ impl Runtime {
         program: &Program,
         empty_parameters: bool,
         empty_body: bool,
-        asynchronous: bool,
+        kind: FunctionKind,
     ) -> Result<usize, Fault> {
         let template = match program.body.as_slice() {
             [statement] => match program.stmts[*statement].kind {
@@ -177,8 +176,8 @@ impl Runtime {
         if let Some(template) = template {
             let function = &program.templates[template];
             if !function.arrow
-                && function.asynchronous == asynchronous
-                && function.constructible == !asynchronous
+                && function.kind == kind
+                && function.constructible == (kind == FunctionKind::Ordinary)
                 && function.name.is_none()
                 && (!empty_parameters || function.params.is_empty() && !function.rest)
                 && (!empty_body || function.body.is_empty())

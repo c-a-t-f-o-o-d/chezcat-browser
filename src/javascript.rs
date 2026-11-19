@@ -138,6 +138,8 @@ mod environment_lifetime_tests;
 mod function_constructor;
 #[path = "async_function_intrinsics.rs"]
 mod async_function_intrinsics;
+#[path = "generator_functions.rs"]
+mod generator_functions;
 #[path = "host_objects.rs"]
 mod host_objects;
 #[path = "event_interface.rs"]
@@ -191,6 +193,9 @@ mod promises;
 #[cfg(test)]
 #[path = "async_function_execution_tests.rs"]
 mod async_function_execution_tests;
+#[cfg(test)]
+#[path = "generator_function_tests.rs"]
+mod generator_function_tests;
 #[path = "async_plan.rs"]
 mod async_plan;
 #[path = "async_execution.rs"]
@@ -1790,12 +1795,33 @@ struct Parameter {
     initial: Option<ExprId>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    Ordinary,
+    Async,
+    Generator,
+}
+
+impl FunctionKind {
+    fn from_async(asynchronous: bool) -> Self {
+        if asynchronous { Self::Async } else { Self::Ordinary }
+    }
+
+    fn source_prefix(self) -> &'static str {
+        match self {
+            Self::Ordinary => "function",
+            Self::Async => "async function",
+            Self::Generator => "function*",
+        }
+    }
+}
+
 struct Template {
     source_start: usize,
     source_end: usize,
     dynamic_source: bool,
     arrow: bool,
-    asynchronous: bool,
+    kind: FunctionKind,
     await_plan: Vec<async_plan::Instruction>,
     constructible: bool,
     class_constructor: bool,
@@ -2015,7 +2041,7 @@ impl Parser {
             self.depth = active_depth;
             self.enter()?;
             self.functions = body.function_depth;
-            self.await_count = self.program.templates[body.template].asynchronous.then_some(0);
+            self.await_count = (self.program.templates[body.template].kind == FunctionKind::Async).then_some(0);
             self.new_target_allowed = body.new_target_allowed;
             self.super_property_allowed = body.super_property_allowed;
             self.super_call_allowed = body.super_call_allowed;
@@ -2350,10 +2376,9 @@ impl Parser {
             let value = self.expr(ExprKind::Class(class), at)?;
             StmtKind::Declare(Declaration::Let, vec![(pattern, Some(value))])
         } else if self.is("function") || self.async_function_ahead() {
-            let asynchronous = self.eat("async");
-            self.need("function")?;
+            let kind = self.function_head()?;
             let name = self.name()?;
-            let function = self.function(None, at, asynchronous)?;
+            let function = self.function_with_super(None, at, kind, false, false)?;
             StmtKind::Function(name, function)
         } else if self.eat("if") {
             self.if_statement(id)?
@@ -2517,11 +2542,20 @@ impl Parser {
         self.is("async") && self.next_is("function") && !self.tokens[self.current + 1].newline()
     }
 
-    fn function(&mut self, name: Option<String>, start: usize, asynchronous: bool) -> Result<usize, Fault> {
-        self.function_with_super(name, start, asynchronous, false, false)
+    fn function_head(&mut self) -> Result<FunctionKind, Fault> {
+        let asynchronous = self.eat("async");
+        self.need("function")?;
+        if self.eat("*") {
+            if asynchronous {
+                return Err(self.unsupported("Async generator functions are not implemented."));
+            }
+            Ok(FunctionKind::Generator)
+        } else {
+            Ok(FunctionKind::from_async(asynchronous))
+        }
     }
 
-    fn function_with_super(&mut self, name: Option<String>, start: usize, asynchronous: bool,
+    fn function_with_super(&mut self, name: Option<String>, start: usize, kind: FunctionKind,
         super_property_allowed: bool, super_call_allowed: bool) -> Result<usize, Fault> {
         self.enter()?;
         let outer_await_count = self.await_count.take();
@@ -2534,9 +2568,9 @@ impl Parser {
             source_end: start,
             dynamic_source: false,
             arrow: false,
-            asynchronous,
+            kind,
             await_plan: Vec::new(),
-            constructible: !asynchronous,
+            constructible: kind == FunctionKind::Ordinary,
             class_constructor: false,
             class_element: false,
             derived_constructor: false,
@@ -2639,7 +2673,7 @@ impl Parser {
                 source_end: at,
                 dynamic_source: false,
                 arrow: true,
-                asynchronous,
+                kind: FunctionKind::from_async(asynchronous),
                 await_plan: Vec::new(),
                 constructible: false,
                 class_constructor: false,
@@ -2689,7 +2723,7 @@ impl Parser {
             source_end: self.tokens[self.current - 1].end(),
             dynamic_source: false,
             arrow: true,
-            asynchronous,
+            kind: FunctionKind::from_async(asynchronous),
             await_plan: Vec::new(),
             constructible: false,
             class_constructor: false,
@@ -2729,10 +2763,9 @@ impl Parser {
     fn primary(&mut self) -> Result<ExprId, Fault> {
         let at = self.at();
         if self.is("function") || self.async_function_ahead() {
-            let asynchronous = self.eat("async");
-            self.need("function")?;
+            let kind = self.function_head()?;
             let name = if self.is("(") { None } else { Some(self.name()?) };
-            let template = self.function(name, at, asynchronous)?;
+            let template = self.function_with_super(name, at, kind, false, false)?;
             return self.expr(ExprKind::Function(template), at);
         }
         if self.is("class") {
@@ -2900,7 +2933,7 @@ impl Parser {
                 {
                     return Err(self.error("A setter parameter cannot be followed by a comma."));
                 }
-                let template = self.function_with_super(None, position, asynchronous, true, false)?;
+                let template = self.function_with_super(None, position, FunctionKind::from_async(asynchronous), true, false)?;
                 let params = &self.program.templates[template].params;
                 let kind = accessor.unwrap_or(Kind::Method);
                 if kind == Kind::Getter && !params.is_empty() {
@@ -3076,7 +3109,7 @@ impl Parser {
                 }
                 let statement = self.statement()?;
                 if !self.strict
-                    && matches!(self.program.stmts[statement].kind, StmtKind::Function(_, id) if !self.program.templates[id].asynchronous)
+                    && matches!(self.program.stmts[statement].kind, StmtKind::Function(_, id) if self.program.templates[id].kind == FunctionKind::Ordinary)
                 {
                     return Err(self.unsupported(
                         "Sloppy switch function declarations (Annex B) are not implemented.",
@@ -3395,6 +3428,8 @@ enum Builtin {
     Math(&'static str),
     Function,
     AsyncFunction,
+    GeneratorFunction,
+    Generator(generator_functions::Op),
     EmptyFunction,
     ObjectStatic(&'static str),
     ObjectMethod(&'static str),
@@ -3488,6 +3523,7 @@ struct Object {
     binary: Option<binary_data::Data>,
     collection: Option<collections::Data>,
     iterator: Option<collections::IteratorData>,
+    generator: Option<generator_functions::State>,
     text: Option<text_encoding::Data>,
     properties: BTreeMap<String, Property>,
     symbol_properties: BTreeMap<usize, Property>,
@@ -3618,6 +3654,7 @@ pub struct Runtime {
     object_prototype: Option<usize>,
     function_prototype: Option<usize>,
     async_function_roots: async_function_intrinsics::Roots,
+    generator_roots: generator_functions::Roots,
     array_prototype: Option<usize>,
     active_array_joins: Vec<usize>,
     regexp_prototype: Option<usize>,
@@ -3765,6 +3802,7 @@ impl Runtime {
             object_prototype: None,
             function_prototype: None,
             async_function_roots: async_function_intrinsics::Roots::default(),
+            generator_roots: generator_functions::Roots::default(),
             array_prototype: None,
             active_array_joins: Vec::new(),
             regexp_prototype: None,
@@ -4832,10 +4870,11 @@ impl Runtime {
         &mut self, program: &Rc<Program>, template: usize, environment: usize, this: &Value,
     ) -> Result<Value, Fault> {
         self.step()?;
-        let async_prototype = if program.templates[template].asynchronous {
-            Some(self.async_function_prototype()?)
-        } else {
-            None
+        let kind = program.templates[template].kind;
+        let function_prototype = match kind {
+            FunctionKind::Ordinary => None,
+            FunctionKind::Async => Some(self.async_function_prototype()?),
+            FunctionKind::Generator => Some(self.generator_function_prototype()?),
         };
         if self.function_arena.occupied == self.limits.capacity.functions {
             return Err(self.function_limit_fault("script"));
@@ -4882,9 +4921,12 @@ impl Runtime {
             program.templates[template].parameter_length(),
             program.templates[template].constructible,
         )?;
-        if let Some(prototype) = async_prototype {
+        if let Some(prototype) = function_prototype {
             let properties = self.function_properties[index];
             self.objects[properties].prototype = Some(Ordinary::Object(prototype));
+        }
+        if kind == FunctionKind::Generator {
+            self.initialize_generator_function(index)?;
         }
         Ok(Value::Function(index))
     }
@@ -5213,6 +5255,7 @@ impl Runtime {
         }
         for object in &self.objects {
             if let Some(data) = &object.promise { data.await_environment_roots(&mut roots); }
+            if let Some(generator) = &object.generator { generator.environment_roots(&mut roots); }
             if let Some(arguments) = &object.arguments {
                 if !arguments.mapped.is_empty() { roots.push(arguments.environment); }
             }
@@ -5682,6 +5725,7 @@ impl Runtime {
             binary: None,
             collection: None,
             iterator: None,
+            generator: None,
             text: None,
             properties: BTreeMap::new(),
             symbol_properties: BTreeMap::new(),
@@ -8030,6 +8074,9 @@ impl Runtime {
             }
             Some(Function::Native(Builtin::Function)) => self.function_constructor(args, host),
             Some(Function::Native(Builtin::AsyncFunction)) => self.async_function_constructor(args, new_target, host),
+            Some(Function::Native(Builtin::GeneratorFunction)) => {
+                self.dynamic_function_constructor(args, FunctionKind::Generator, new_target, host)
+            }
             Some(Function::Host {
                 object,
                 method,
@@ -9041,6 +9088,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Iterator(operation))) => {
                 return self.iterator_builtin(*operation, this, host);
             }
+            Some(Function::Native(Builtin::Generator(operation))) => {
+                return self.generator_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Iterable(operation))) => {
                 return self.iterable_builtin(*operation, args, this, host);
             }
@@ -9244,10 +9294,16 @@ impl Runtime {
         let previous_strict = self.strict;
         self.transient_roots.owned_call_depth += 1;
         self.strict = program.templates[template].strict;
-        let result = if program.templates[template].asynchronous {
-            self.async_function_body(&program, template, index, parent, args, &this, host)
-        } else {
-            self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
+        let result = match program.templates[template].kind {
+            FunctionKind::Ordinary => {
+                self.script_parameters_and_body(&program, template, index, parent, args, &this, host)
+            }
+            FunctionKind::Async => {
+                self.async_function_body(&program, template, index, parent, args, &this, host)
+            }
+            FunctionKind::Generator => {
+                self.start_generator(&program, template, index, parent, args, &this, host)
+            }
         };
         self.call_depth -= 1;
         self.transient_roots.owned_call_depth -= 1;
@@ -9729,6 +9785,7 @@ impl Runtime {
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)
+            | Builtin::Generator(_)
             | Builtin::Iterable(_)
             | Builtin::TextEncoding(_) => Err(Fault::new(
                 "Native data operations need an execution context.",
@@ -9736,6 +9793,7 @@ impl Runtime {
             Builtin::EmptyFunction => Ok(Value::Undefined),
             Builtin::Function => self.function_constructor(args, host),
             Builtin::AsyncFunction => self.async_function_constructor(args, None, host),
+            Builtin::GeneratorFunction => self.dynamic_function_constructor(args, FunctionKind::Generator, None, host),
             Builtin::Proxy | Builtin::ReflectGet | Builtin::ReflectSet
             | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)

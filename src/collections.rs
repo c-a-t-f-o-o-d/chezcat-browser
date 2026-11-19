@@ -145,6 +145,7 @@ pub(super) struct Roots {
     set: Option<usize>,
     weak_map: Option<usize>,
     weak_set: Option<usize>,
+    pub(super) iterator_prototype: Option<usize>,
     array_iterator: Option<usize>,
     map_iterator: Option<usize>,
     set_iterator: Option<usize>,
@@ -157,7 +158,7 @@ pub(super) struct Roots {
 impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
-        for id in [self.map, self.set, self.weak_map, self.weak_set, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
+        for id in [self.map, self.set, self.weak_map, self.weak_set, self.iterator_prototype, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
         for id in [self.array_keys,self.array_values,self.array_entries].into_iter().flatten() { add(Edge::Function(id)); }
     }
 }
@@ -234,6 +235,7 @@ impl Runtime {
         }
         self.initialize_weak_collections()?;
         let iterator_prototype = self.new_object(None)?;
+        self.collection_roots.iterator_prototype = Some(iterator_prototype);
         let identity = self.native_function(
             Builtin::Iterator(super::iterator_protocol::Op::Self_),
             "[Symbol.iterator]",

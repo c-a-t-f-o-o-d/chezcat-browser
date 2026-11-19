@@ -332,7 +332,7 @@ fn async_parser_keeps_source_ranges_and_nested_function_kinds() {
                   const g = async(a, b) => {return a + b;}; const h = async => async;";
     let program = parse(source).unwrap();
     let mut templates = program.templates.iter().map(|template| {
-        (&source[template.source_start..template.source_end], template.asynchronous, template.arrow, template.constructible)
+        (&source[template.source_start..template.source_end], template.kind == FunctionKind::Async, template.arrow, template.constructible)
     }).collect::<Vec<_>>();
     templates.sort_unstable();
     let mut expected = [
@@ -346,7 +346,7 @@ fn async_parser_keeps_source_ranges_and_nested_function_kinds() {
     expected.sort_unstable();
     assert_eq!(templates.as_slice(), &expected);
     assert!(matches!(&program.stmts[program.body[0]].kind, StmtKind::Function(name, id)
-        if name == "outer" && program.templates[*id].asynchronous));
+        if name == "outer" && program.templates[*id].kind == FunctionKind::Async));
 }
 
 #[test]
@@ -356,7 +356,7 @@ fn async_parser_preserves_contextual_calls_line_breaks_and_slash_goals() {
         async /* multiline\n */ function split(){} /next/.test('next');\n\
         let async = obj.async; async(1); obj.async(2); async /* gap */ x => x;\n\
         async\u{2028}x => x;").unwrap();
-    assert_eq!(program.templates.iter().filter(|t| t.asynchronous).count(), 3);
+    assert_eq!(program.templates.iter().filter(|t| t.kind == FunctionKind::Async).count(), 3);
     assert_eq!(program.exprs.iter().filter(|e| matches!(e.kind, ExprKind::RegExp(_))).count(), 2);
     assert!(program.exprs.iter().any(|e| matches!(e.kind, ExprKind::Binary("/", _, _))));
     assert!(program.exprs.iter().any(|e| matches!(&e.kind, ExprKind::Call(id, _)

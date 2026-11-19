@@ -409,7 +409,7 @@ impl Runtime {
     fn plain_array_storage(object: &Object) -> bool {
         object.date.is_none() && object.url.is_none() && object.rect.is_none() && object.dom_exception.is_none() && object.primitive.is_none()
             && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
-            && object.iterator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
+            && object.iterator.is_none() && object.generator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
             && object.proxy.is_none()
     }
 
@@ -535,6 +535,7 @@ impl Runtime {
                     meter.charge(32 + (object.properties.len() + object.symbol_properties.len()) * 4
                         + object.collection.as_ref().map_or(0, collections::Data::reachability_cost)
                         + object.promise.as_ref().map_or(0, promises::Data::reachability_cost)
+                        + object.generator.as_ref().map_or(0, generator_functions::State::reachability_cost)
                         + if object.proxy.is_some() { 2 } else { 0 })?;
                     if let Some(proxy) = object.proxy {
                         add(Edge::Object(proxy.target));
@@ -555,6 +556,7 @@ impl Runtime {
                     if let Some(binary) = &object.binary { binary.reachability_edges(&mut add); }
                     if let Some(collection) = &object.collection { collection.reachability_edges(&mut add); }
                     if let Some(iterator) = &object.iterator { iterator.reachability_edges(&mut add); }
+                    if let Some(generator) = &object.generator { generator.reachability_edges(&mut add); }
                     if let Some(url) = &object.url { url.reachability_edges(&mut add); }
                     if let Some(promise) = &object.promise { promise.reachability_edges(&mut add); }
                 }
