@@ -4132,3 +4132,34 @@ document.title='element-prototype-ok';
     let result = page.console_eval(&mut doc, &mut forms, "if(guard.contentWindow!==null||guard.nextElementSibling!==card)throw 'frame changed';");
     assert_eq!(result.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn base_event_prototype_patch_preserves_trust_dispatch_and_lifetime() {
+    let (mut doc, mut forms, mut page, result) = page("<html><body><p>Original event</p></body></html>", &[r#"
+var exposed, delivered=0, native=Event.prototype;
+var patched=Object.create(native,{alias:{get:function(){return this.type;}}});
+document.addEventListener('DOMContentLoaded',function(event){
+    event.__proto__=patched;
+    var flag=Object.getOwnPropertyDescriptor(event,'isTrusted');
+    if(event.alias!=='DOMContentLoaded'||!event.isTrusted||!flag||flag.configurable||
+       !(event instanceof Event)||Object.getPrototypeOf(event)!==patched||
+       !patched.isPrototypeOf(event)||event.target!==document||event.currentTarget!==document)
+        throw 'trusted event wrapper and dispatch';
+    exposed=event;
+    delivered++;
+});
+window.addEventListener('load',function(){
+    var author=new Event('original');
+    Object.setPrototypeOf(author,patched);
+    if(delivered!==1||author.isTrusted||author.alias!=='original'||Object.getPrototypeOf(author)!==patched)
+        throw 'authored event retains its own trust';
+    document.title='event-prototype-ok';
+});
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "event-prototype-ok");
+    let result = page.console_eval(&mut doc, &mut forms, "Object.getPrototypeOf(exposed);");
+    assert_eq!(result.errors, 1);
+    let result = page.console_eval(&mut doc, &mut forms, "if(delivered!==1)throw 'later event effects';");
+    assert_eq!(result.errors, 0, "{}", page.report());
+}

@@ -160,21 +160,21 @@ impl Runtime {
 
     pub(super) fn native_instance_visible_anchor(&mut self, handle: u32, host: &mut dyn Host) -> Result<Ordinary, Fault> {
         let native = self.native_instance_anchor(handle, host)?;
-        if host.mutable_element_prototype(handle) {
+        if host.mutable_native_wrapper_prototype(handle) {
             self.ensure_native_expando(handle, host, false)?;
             if let Some(&backing) = self.host_objects.get(&handle) {
                 return self.ordinary_prototype(Ordinary::Object(backing))?
-                    .ok_or_else(|| Fault::new("Element prototype backing is unavailable."));
+                    .ok_or_else(|| Fault::new("Native prototype backing is unavailable."));
             }
         }
         Ok(native)
     }
 
-    pub(super) fn set_native_element_prototype(
+    pub(super) fn set_native_wrapper_prototype(
         &mut self, handle: u32, prototype: Option<Ordinary>, host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.validate_native_access(handle, host)?;
-        if !host.mutable_element_prototype(handle) {
+        if !host.mutable_native_wrapper_prototype(handle) {
             return Err(Fault::new("Native host object prototypes cannot be changed."));
         }
         let native = self.native_instance_anchor(handle, host)?;
@@ -196,7 +196,7 @@ impl Runtime {
             }
             current = self.ordinary_prototype(parent)?;
         }
-        Err(Fault::exception("TypeError", "An element prototype must retain its real native interface in the ordinary chain."))
+        Err(Fault::exception("TypeError", "A native wrapper prototype must retain its real interface in the ordinary chain."))
     }
 
     pub(super) fn native_instance_anchor(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {

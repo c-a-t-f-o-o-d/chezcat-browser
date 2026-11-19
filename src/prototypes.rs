@@ -1670,7 +1670,7 @@ impl Runtime {
                 if let Some(object) = Ordinary::from_value(first) {
                     self.set_prototype(object, prototype)?;
                 } else if let Value::Host(handle) = first {
-                    self.set_native_element_prototype(*handle, prototype, host)?;
+                    self.set_native_wrapper_prototype(*handle, prototype, host)?;
                 }
                 self.copy_value(first)
             }
@@ -2024,7 +2024,7 @@ impl Runtime {
             if let Value::Host(handle) = this {
                 self.reject_foreign_window(prototype, host)?;
                 let prototype = self.prototype_argument(prototype)?;
-                self.set_native_element_prototype(handle, prototype, host)?;
+                self.set_native_wrapper_prototype(handle, prototype, host)?;
             } else if let Some(object) = Ordinary::from_value(&this) {
                 self.reject_foreign_window(prototype, host)?;
                 let prototype = self.prototype_argument(prototype)?;
