@@ -1735,6 +1735,38 @@ fn named_map_laziness_quota_rollback_and_unsupported_surfaces_preserve_real_entr
 }
 
 #[test]
+fn node_text_content_descriptor_wraps_existing_native_access() {
+    let (doc, _, page, outcome) = page("<p id=sample>Before</p>", &[r#"
+var p = document.getElementById('sample');
+var original = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+if (!original || !original.enumerable || !original.configurable ||
+    typeof original.get !== 'function' || typeof original.set !== 'function')
+    throw 'missing native Node descriptor';
+Object.defineProperty(Node.prototype, 'textContent', {
+    get: original.get,
+    set: function(value) { original.set.call(this, value + '!'); }
+});
+p.textContent = 'After';
+if (p.textContent !== 'After!' || original.get.call(p) !== 'After!' ||
+    Object.prototype.hasOwnProperty.call(p, 'textContent'))
+    throw 'native descriptor did not follow prototype dispatch';
+var text = document.createTextNode('old');
+text.textContent = 'new';
+if (text.data !== 'new!' || original.get.call(text) !== 'new!')
+    throw 'Text must use the inherited setter';
+original.set.call(document, 'ignored');
+if (original.get.call(document) !== null || p.textContent !== 'After!')
+    throw 'Document textContent must not replace its children';
+var refused = false;
+try { original.get.call({}); } catch (error) { refused = error instanceof TypeError; }
+if (!refused) throw 'invalid native receiver';
+document.title = 'descriptor passed';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "descriptor passed");
+}
+
+#[test]
 fn named_map_unsupported_descriptor_definition_never_claims_or_publishes_mutation() {
     let (mut doc, mut forms, mut page, outcome) = page("<p id=p title=old></p>", &["var p=document.getElementById('p'),map=p.attributes;"]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
