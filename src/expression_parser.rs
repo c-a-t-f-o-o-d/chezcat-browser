@@ -393,7 +393,7 @@ impl Parser {
             });
         } else {
             let mut value = self.finish_postfix(owner, context.at)?;
-            if context.goal.updates && !self.token().newline && (self.is("++") || self.is("--")) {
+            if context.goal.updates && !self.token().newline() && (self.is("++") || self.is("--")) {
                 self.check_update_target(value)?;
                 let increment = self.eat("++");
                 if !increment {

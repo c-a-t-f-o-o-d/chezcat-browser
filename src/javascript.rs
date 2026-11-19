@@ -1003,10 +1003,29 @@ enum TokenKind {
 
 struct Token {
     kind: TokenKind,
-    at: usize,
-    end: usize,
-    newline: bool,
+    start_and_newline: u32,
+    end: u32,
 }
+
+impl Token {
+    const NEWLINE: u32 = 1 << 31;
+    const MAX_SOURCE_BYTES: usize = (Self::NEWLINE - 1) as usize;
+
+    fn new(kind: TokenKind, start: usize, end: usize, newline: bool) -> Self {
+        debug_assert!(start <= end && end <= Self::MAX_SOURCE_BYTES);
+        let start_and_newline = start as u32 | if newline { Self::NEWLINE } else { 0 };
+        Self { kind, start_and_newline, end: end as u32 }
+    }
+
+    fn at(&self) -> usize { (self.start_and_newline & !Self::NEWLINE) as usize }
+    fn end(&self) -> usize { self.end as usize }
+    fn newline(&self) -> bool { self.start_and_newline & Self::NEWLINE != 0 }
+}
+
+// Keep token records and the delimiter index within the previous 128 MiB
+// structural allowance. Source, parsing work and AST limits are independent.
+const _: () = assert!((limits::BROWSER_CAPACITIES.tokens + 1) *
+    (std::mem::size_of::<Token>() + std::mem::size_of::<u32>()) <= 128 * 1024 * 1024);
 
 fn reserved(name: &str) -> bool {
     matches!(
@@ -1387,12 +1406,14 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
 }
 
 fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: limits::Capacities) -> Result<Vec<Token>, Fault> {
-    if source.len() > capacity.source_bytes {
-        return Err(Fault::new(format!("Script source limit reached ({} KiB).", capacity.source_bytes / 1024)));
+    let source_limit = capacity.source_bytes.min(Token::MAX_SOURCE_BYTES);
+    if source.len() > source_limit {
+        return Err(Fault::new(format!("Script source limit reached ({} KiB).", source_limit / 1024)));
     }
     let bytes = source.as_bytes();
     let (mut at, mut newline) = (0, false);
     let mut tokens = Vec::new();
+    let max_records = capacity.tokens.min(source.len()) + 1;
     let mut goal = LexGoal::new();
     // Moving lexical goals into bounded interpolation frames preserves their
     // regexp/division context without copying enclosing delimiter stacks.
@@ -1633,12 +1654,8 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
             }
         }
         goal.accept(&kind, newline);
-        tokens.push(Token {
-            kind,
-            at: start,
-            end: at,
-            newline,
-        });
+        push_token(&mut tokens, Token::new(kind, start, at, newline), max_records)
+            .map_err(|error| error.at(source, start))?;
         newline = false;
     }
     if !templates.is_empty() {
@@ -1646,15 +1663,31 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
             Fault::exception("SyntaxError", "Unterminated template substitution.").at(source, at),
         );
     }
-    tokens.push(Token {
-        kind: TokenKind::End,
-        at,
-        end: at,
-        newline,
-    });
+    push_token(&mut tokens, Token::new(TokenKind::End, at, at, newline), max_records)?;
     Ok(tokens)
 }
 
+fn push_token(tokens: &mut Vec<Token>, token: Token, max_records: usize) -> Result<(), Fault> {
+    if tokens.len() == tokens.capacity() {
+        let next = tokens.capacity().saturating_mul(2).max(8).min(max_records);
+        tokens.try_reserve_exact(next - tokens.len())
+            .map_err(|_| Fault::new("Script token storage reservation failed."))?;
+    }
+    tokens.push(token);
+    Ok(())
+}
+
+#[test]
+fn compact_token_records_preserve_byte_offsets_newlines_and_capacity() {
+    let capacity = limits::Capacities { tokens: 3, ..limits::REGRESSION_CAPACITIES };
+    let mut regexp_work = limits::BROWSER.regexp_work;
+    let tokens = tokenize_with_capacity("'é'\n;1", &mut regexp_work, capacity).unwrap();
+    let spans: Vec<_> = tokens.iter().map(|t| (t.at(), t.end(), t.newline())).collect();
+    assert_eq!(spans, [(0, 4, false), (5, 6, true), (6, 7, false), (7, 7, false)]);
+    assert!(tokens.capacity() <= capacity.tokens + 1);
+    let error = tokenize_with_capacity(";;;;", &mut regexp_work, capacity).err().unwrap();
+    assert!(error.message.contains("Script token limit reached (3)."));
+}
 fn hex_escape(source: &str, at: &mut usize, count: usize) -> Result<u32, Fault> {
     let end = at.saturating_add(count);
     let bytes = source.as_bytes();
@@ -1814,7 +1847,7 @@ struct Parser {
     heap: limits::HeapLimits,
     program: Program,
     tokens: Vec<Token>,
-    delimiter_ends: Vec<usize>,
+    delimiter_ends: Vec<u32>,
     deferred_bodies: Vec<DeferredBody>,
     current: usize,
     depth: usize,
@@ -1866,21 +1899,22 @@ impl Parser {
         // reuse this token-sized map instead of rescanning nested token ranges.
         // Separate delimiter stacks preserve the existing lookahead semantics;
         // parsing, not this index, diagnoses mixed/malformed delimiters.
-        let mut delimiter_ends = vec![usize::MAX; tokens.len()];
+        let mut delimiter_ends = vec![u32::MAX; tokens.len()];
         let mut braces = Vec::new();
         let mut parentheses = Vec::new();
         for (index, token) in tokens.iter().enumerate() {
+            let index = index as u32;
             match token.kind {
                 TokenKind::Punct("(") => parentheses.push(index),
                 TokenKind::Punct(")") => {
                     if let Some(start) = parentheses.pop() {
-                        delimiter_ends[start] = index;
+                        delimiter_ends[start as usize] = index;
                     }
                 }
                 TokenKind::Punct("{") => braces.push(index),
                 TokenKind::Punct("}") => {
                     if let Some(start) = braces.pop() {
-                        delimiter_ends[start] = index;
+                        delimiter_ends[start as usize] = index;
                     }
                 }
                 _ => {}
@@ -1944,10 +1978,11 @@ impl Parser {
         let start = self.current;
         self.need("{")?;
         let end = self.delimiter_ends[start];
-        if end == usize::MAX {
+        if end == u32::MAX {
             return Err(self.error("Unterminated function body."));
         }
-        template.source_end = self.tokens[end].end;
+        let end = end as usize;
+        template.source_end = self.tokens[end].end();
         let id = self.program.templates.len();
         self.program.templates.push(template);
         // Each queued body has a function AST node; the existing source/token/
@@ -2038,7 +2073,7 @@ impl Parser {
         &self.tokens[self.current]
     }
     fn at(&self) -> usize {
-        self.token().at
+        self.token().at()
     }
     fn error(&self, message: impl Into<String>) -> Fault {
         Fault::exception("SyntaxError", message).at(&self.program.source, self.at())
@@ -2113,7 +2148,7 @@ impl Parser {
         if self.eat(";")
             || self.is("}")
             || matches!(self.token().kind, TokenKind::End)
-            || self.token().newline
+            || self.token().newline()
         {
             Ok(())
         } else {
@@ -2253,7 +2288,7 @@ impl Parser {
     }
 
     fn jump_target(&mut self, continued: bool) -> Result<StmtId, Fault> {
-        let name = if !self.token().newline {
+        let name = if !self.token().newline() {
             match &self.token().kind {
                 TokenKind::Word(word) | TokenKind::EscapedWord(word) if !reserved(word) => Some(self.name()?),
                 _ => None,
@@ -2341,7 +2376,7 @@ impl Parser {
         } else if self.eat("switch") {
             self.switch_body(id)?
         } else if self.eat("throw") {
-            if self.token().newline {
+            if self.token().newline() {
                 return Err(self.error("A line ending is not allowed after throw."));
             }
             let value = self.expression()?;
@@ -2353,7 +2388,7 @@ impl Parser {
             if self.functions == 0 {
                 return Err(self.error("return is only valid inside a function."));
             }
-            let value = if self.token().newline
+            let value = if self.token().newline()
                 || self.is(";")
                 || self.is("}")
                 || matches!(self.token().kind, TokenKind::End)
@@ -2478,7 +2513,7 @@ impl Parser {
     }
 
     fn async_function_ahead(&self) -> bool {
-        self.is("async") && self.next_is("function") && !self.tokens[self.current + 1].newline
+        self.is("async") && self.next_is("function") && !self.tokens[self.current + 1].newline()
     }
 
     fn function(&mut self, name: Option<String>, start: usize, asynchronous: bool) -> Result<usize, Fault> {
@@ -2558,7 +2593,7 @@ impl Parser {
         let word = |token: &Token| matches!(&token.kind, TokenKind::Word(name) | TokenKind::EscapedWord(name) if !reserved(name));
         let punct = |token: Option<&Token>, text| matches!(token.map(|t| &t.kind), Some(TokenKind::Punct(value)) if *value == text);
         // In `async => ...`, async itself is the ordinary binding name.
-        if self.is("async") && !self.next_is("=>") && !tokens[at + 1].newline {
+        if self.is("async") && !self.next_is("=>") && !tokens[at + 1].newline() {
             at += 1;
         }
         if word(&tokens[at]) {
@@ -2569,8 +2604,8 @@ impl Parser {
         }
         // Parenthesis matching was indexed once with the tokens. Looking through
         // every nested group here would make the new heap path quadratic.
-        at = self.delimiter_ends[at];
-        at != usize::MAX && punct(tokens.get(at + 1), "=>")
+        let end = self.delimiter_ends[at];
+        end != u32::MAX && punct(tokens.get(end as usize + 1), "=>")
     }
 
     fn arrow(&mut self) -> Result<ExprId, Fault> {
@@ -2593,7 +2628,7 @@ impl Parser {
                 false,
             )
         };
-        if self.token().newline {
+        if self.token().newline() {
             return Err(self.error("A line ending is not allowed before =>."));
         }
         self.need("=>")?;
@@ -2650,7 +2685,7 @@ impl Parser {
         let template = self.program.templates.len();
         self.program.templates.push(Template {
             source_start: at,
-            source_end: self.tokens[self.current - 1].end,
+            source_end: self.tokens[self.current - 1].end(),
             dynamic_source: false,
             arrow: true,
             asynchronous,
