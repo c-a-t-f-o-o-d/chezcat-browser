@@ -917,6 +917,48 @@ if(trace!=='receiver|key:write|operand|key:skip|'||stored||result||caught)throw 
 }
 
 #[test]
+fn await_execution_later_bare_argument_retains_prefix_without_evaluating_suffix_early() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, normal, caught, original={}, replacement={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failed=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+function inner(value){return mark('inner',value);}
+function outer(first,second,third,fourth){
+    'use strict';
+    if(this!==undefined||first()!==original||second!==2||third!==original||fourth!==4)throw 'arguments';
+    return mark('outer',third);
+}
+async function accept(){
+    return outer(mark('first',()=>original),...mark('spread',[2]),inner(await mark('operand',gate)),mark('last',4));
+}
+async function discard(){
+    try{return outer(mark('reject-prefix',original),await failed,mark('skipped',0));}
+    catch(error){caught=error;}
+}
+accept().then(value=>normal=value);
+discard();
+if(trace!=='first|spread|operand|reject-prefix|'||normal||caught)throw 'arguments before suspension';
+outer=function(){throw 'reloaded outer';};
+inner=function(){throw 'reloaded inner';};
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(original);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='first|spread|operand|reject-prefix|inner|last|outer|'||normal!==original||caught!==reason)
+    throw 'arguments after suspension';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_followup_method_chain_preserves_receivers_and_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1830,7 +1872,7 @@ if(prefix!==1||entered!==0)throw 'fatal pending prefix';
 #[test]
 fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code() {
     for body in [
-        "if(false){consume(1,await p);}",
+        "if(false){consume(1,await p,await p);}",
         "if(1+await p){}",
         "return await p+1;",
         "let first=await p,second=1+await p;",

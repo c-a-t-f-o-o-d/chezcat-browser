@@ -1,7 +1,8 @@
 //! Owned await activations for the parser's finite statement plan. A resumed
 //! instruction never evaluates the prefix again. Synchronous subtrees use
 //! the ordinary evaluator and its native access checks.
-use super::async_plan::{followup_receiver, FollowupCalls, Instruction, LiteralAwait, Resume};
+use super::async_plan::{followup_receiver, ArgumentAwait, FollowupCalls, Instruction, LiteralAwait, Resume};
+use super::expression_evaluator::PreparedPlainArguments;
 use super::function_reachability::Edge;
 use super::*;
 
@@ -68,6 +69,7 @@ struct PendingAwait {
     statement: StmtId,
     action: Resume,
     call: Option<PendingCall>,
+    argument_call: Option<Box<PreparedPlainArguments>>,
     method: Option<Box<PendingMethod>>,
     followup_call: Option<FollowupCalls>,
     member_key: Option<ExprId>,
@@ -172,6 +174,7 @@ impl Activation {
             .saturating_add(self.expression_value.as_ref().map_or(0, Value::bytes))
             .saturating_add(comparisons)
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
+            .saturating_add(self.pending_argument_call().map_or(0, PreparedPlainArguments::retained_bytes))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_literal().map_or(0, PendingLiteral::retained_bytes))
             .saturating_add(references)
@@ -209,6 +212,7 @@ impl Activation {
                 + usize::from(self.pending_literal().is_some())
                 + 2 * usize::from(self.pending_assignment().is_some()))
             .saturating_add(self.assignments.len().saturating_mul(2))
+            .saturating_add(self.pending_argument_call().map_or(0, |call| 1 + call.prefix.len()))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -223,6 +227,10 @@ impl Activation {
         }
         if let Some(call) = self.pending_call() {
             Edge::value(&call.function, add);
+        }
+        if let Some(call) = self.pending_argument_call() {
+            Edge::value(&call.function, add);
+            for value in &call.prefix { Edge::value(value, add); }
         }
         if let Some(method) = self.pending_method() {
             Edge::value(&method.receiver, add);
@@ -273,6 +281,10 @@ impl Activation {
 
     fn pending_call(&self) -> Option<&PendingCall> {
         self.pending.as_ref().and_then(|pending| pending.call.as_ref())
+    }
+
+    fn pending_argument_call(&self) -> Option<&PreparedPlainArguments> {
+        self.pending.as_ref().and_then(|pending| pending.argument_call.as_deref())
     }
 
     fn pending_method(&self) -> Option<&PendingMethod> {
@@ -525,7 +537,7 @@ impl Runtime {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
                 let PendingAwait {
-                    statement, action, call, method, followup_call, member_key, chain, literal, negations, assignment,
+                    statement, action, call, argument_call, method, followup_call, member_key, chain, literal, negations, assignment,
                 } = frame
                     .pending
                     .take()
@@ -538,6 +550,15 @@ impl Runtime {
                         let value = if let Some(call) = call {
                             let direct = call.direct_eval.then_some((frame.environment()?, &frame.this));
                             let result = self.invoke_plain_call(call.function, &[value], direct, host)?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(arguments) = argument_call {
+                            let result = self.eval_resumed_plain_argument(
+                                &frame.program, *arguments, value, frame.environment()?, &frame.this, host,
+                            )?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -775,6 +796,7 @@ impl Runtime {
                     operand,
                     callee,
                     method,
+                    argument_call,
                     followup_call,
                     member_key,
                     chain,
@@ -822,6 +844,13 @@ impl Runtime {
                         } else {
                             None
                         };
+                        let argument_call = if let Some(site) = argument_call {
+                            let prepared = self.prepare_await_argument_call(frame, site, retained, host)?;
+                            retained = retained.saturating_add(prepared.retained_bytes());
+                            Some(prepared)
+                        } else {
+                            None
+                        };
                         let call = if let Some(callee) = callee {
                             let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
                             self.push_transient_value(&function)?;
@@ -839,7 +868,7 @@ impl Runtime {
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
                         frame.pending = Some(PendingAwait {
-                            statement, action, call, method, followup_call, member_key, chain, literal, negations, assignment,
+                            statement, action, call, argument_call, method, followup_call, member_key, chain, literal, negations, assignment,
                         });
                         Ok(Progress::Suspend(promise))
                     })();
@@ -894,6 +923,27 @@ impl Runtime {
         let result = self.copy_value(&value)?;
         self.write_reference(reference, value, host)?;
         Ok(result)
+    }
+
+    #[inline(never)]
+    fn prepare_await_argument_call(
+        &mut self, frame: &Activation, site: ArgumentAwait, retained: usize, host: &mut dyn Host,
+    ) -> Result<Box<PreparedPlainArguments>, Fault> {
+        self.step()?;
+        let ExprKind::Call(callee, arguments) = &frame.program.exprs[site.call].kind else {
+            unreachable!("compiled async argument call");
+        };
+        let environment = frame.environment()?;
+        let function = self.eval(&frame.program, *callee, environment, &frame.this, host)?;
+        self.push_transient_value(&function)?;
+        let direct_eval = matches!(&frame.program.exprs[*callee].kind, ExprKind::Name(name) if name == "eval");
+        let prefix = self.eval_await_argument_prefix(
+            &frame.program, &arguments[..site.index], environment, &frame.this, host,
+        )?;
+        let prepared = PreparedPlainArguments { call: site.call, index: site.index, function, direct_eval, prefix };
+        let bytes = prepared.retained_bytes();
+        self.await_storage(retained.saturating_add(bytes), bytes)?;
+        Ok(Box::new(prepared))
     }
 
     #[inline(never)]
@@ -1389,6 +1439,7 @@ mod tests {
                 statement: 0,
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
+                argument_call: None,
                 method: Some(Box::new(PendingMethod {
                     call: 0,
                     receiver: Value::Function(19),

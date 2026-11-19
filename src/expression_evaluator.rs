@@ -126,10 +126,30 @@ enum Target {
 
 enum ResumedExpression {
     Value(Value),
+    PlainArgument(PreparedPlainArguments, Value),
     MemberArgument {
         target: (Value, PropertyKey, Option<Value>),
         first: Value,
     },
+}
+
+pub(super) struct PreparedPlainArguments {
+    pub(super) call: ExprId,
+    pub(super) index: usize,
+    pub(super) function: Value,
+    pub(super) direct_eval: bool,
+    pub(super) prefix: Vec<Value>,
+}
+
+impl PreparedPlainArguments {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.prefix.iter().fold(
+            std::mem::size_of::<Self>()
+                .saturating_add(self.function.bytes())
+                .saturating_add(self.prefix.capacity().saturating_mul(std::mem::size_of::<Value>())),
+            |bytes, value| bytes.saturating_add(value.bytes()),
+        )
+    }
 }
 
 impl Target {
@@ -354,6 +374,13 @@ impl Runtime {
         self.eval_resumed(program, id, ResumedExpression::MemberArgument { target, first }, env, this, host)
     }
 
+    pub(super) fn eval_resumed_plain_argument(
+        &mut self, program: &Rc<Program>, arguments: PreparedPlainArguments, value: Value,
+        env: usize, this: &Value, host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.eval_resumed(program, arguments.call, ResumedExpression::PlainArgument(arguments, value), env, this, host)
+    }
+
     fn eval_resumed(
         &mut self, program: &Rc<Program>, id: ExprId, mut expression: ResumedExpression, env: usize,
         this: &Value, host: &mut dyn Host,
@@ -495,7 +522,7 @@ impl Runtime {
         self.push_evaluation(&mut scratch, program, Request::Value(id), true)?;
         let mut completed = None;
         if let Some(expression) = resumed {
-            Self::start_resumed_expression(program, id, expression, &mut scratch, &mut completed);
+            self.start_resumed_expression(program, id, expression, &mut scratch, &mut completed)?;
         }
         while let Some(mut frame) = scratch.frames.pop() {
             compact(&mut scratch.frames, &mut self.evaluation_frame_slots);
@@ -595,9 +622,9 @@ impl Runtime {
     // Keep resumed-value setup out of ordinary evaluator frames.
     #[inline(never)]
     fn start_resumed_expression<'p>(
-        program: &'p Program, id: ExprId, resumed: &mut ResumedExpression,
+        &mut self, program: &'p Program, id: ExprId, resumed: &mut ResumedExpression,
         scratch: &mut Scratch<'p>, completed: &mut Option<Completion>,
-    ) {
+    ) -> Result<(), Fault> {
         let (state, value) = match std::mem::replace(resumed, ResumedExpression::Value(Value::Undefined)) {
             ResumedExpression::Value(value) => {
                 let state = match &program.exprs[id].kind {
@@ -622,9 +649,24 @@ impl Runtime {
                 };
                 (State::Argument(call), first)
             }
+            ResumedExpression::PlainArgument(prepared, value) => {
+                let ExprKind::Call(_, arguments) = &program.exprs[id].kind else {
+                    unreachable!("a resumed plain argument needs a call");
+                };
+                let slots = self.evaluation_argument_slots.saturating_add(prepared.prefix.capacity());
+                if slots > self.argument_scratch_limit()? {
+                    return Err(Fault::new("Evaluation scratch storage limit reached."));
+                }
+                self.evaluation_argument_slots = slots;
+                scratch.arguments = prepared.prefix;
+                let target = Target::Value { function: prepared.function, direct_eval: prepared.direct_eval };
+                let call = Call { target, arguments, index: prepared.index, start: 0, after: AfterCall::Value };
+                (State::Argument(call), value)
+            }
         };
         scratch.frames[0].state = state;
         *completed = Some(Completion::Value(value));
+        Ok(())
     }
 
     #[inline(never)]
@@ -950,6 +992,41 @@ impl Runtime {
         reserve(&mut scratch.arguments, &mut self.evaluation_argument_slots,
                 limit)?;
         scratch.arguments.push(value);
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn eval_await_argument_prefix(
+        &mut self, program: &Rc<Program>, arguments: &[Argument], env: usize, this: &Value, host: &mut dyn Host,
+    ) -> Result<Vec<Value>, Fault> {
+        let initial_slots = self.evaluation_argument_slots;
+        let mut scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
+        let result = (|| {
+            for argument in arguments {
+                let first = scratch.arguments.len();
+                if !argument.spread { self.check_await_argument_count(first)?; }
+                let value = self.eval(program, argument.expression, env, this, host)?;
+                if argument.spread {
+                    let marker = self.inhibit_transient_collection_for("spread-arguments");
+                    let result = self.append_heap_spread(&mut scratch, 0, value, host);
+                    self.restore_transient_marker(marker);
+                    result?;
+                } else {
+                    self.push_heap_argument(&mut scratch, value)?;
+                }
+                for value in &scratch.arguments[first..] { self.push_transient_value(value)?; }
+            }
+            self.check_await_argument_count(scratch.arguments.len())?;
+            Ok(scratch.arguments)
+        })();
+        self.evaluation_argument_slots = initial_slots;
+        result
+    }
+
+    fn check_await_argument_count(&self, length: usize) -> Result<(), Fault> {
+        if length >= self.limits.capacity.arguments {
+            return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
+        }
         Ok(())
     }
 
