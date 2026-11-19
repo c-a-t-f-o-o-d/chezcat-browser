@@ -32,6 +32,47 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_member_call_retains_receiver_and_getter_result_before_nested_await() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, result=0, caught=0, invalid=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var marker={}, original={base:5,marker,get run(){
+    trace+='getter|';
+    return function(value){if(this.marker!==marker)throw 'receiver';trace+='method|';return this.base+value;};
+}};
+function owner(){trace+='receiver|';return original;}
+function key(){trace+='key|';return {toString(){trace+='convert|';return 'run';}};}
+function replace(){trace+='operand|';Object.defineProperty(original,'run',{value:function(){throw 'getter repeated';}});original=null;return gate;}
+function relay(value){trace+='relay|';return value+1;}
+function never(){throw 'evaluated argument for invalid receiver';}
+async function work(){var result=owner()[key()](relay(await replace()));return result;}
+async function skips(){
+    let object={get run(){trace+='reject-get|';return function(){throw 'invoked on rejection';};}};
+    try {return object.run(await failed);}catch(error){if(error!==reason)throw error;caught++;}
+}
+async function early(){
+    let absent=null;
+    try {return absent.run(await never());}catch(error){if(error.name!=='TypeError')throw error;invalid++;}
+}
+work().then(function(value){result=value;});
+skips();early();
+if(trace!=='receiver|key|convert|getter|operand|reject-get|'||result||caught||invalid!==1)
+    throw 'pre-suspension method resolution';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='receiver|key|convert|getter|operand|reject-get|relay|method|'||result!==10||caught!==1||invalid!==1)throw 'member call order, collection or rejection';'ok';");
+}
+
+#[test]
 fn await_execution_optional_chain_keeps_receivers_and_skips_nullish_suffixes() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

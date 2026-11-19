@@ -16,6 +16,7 @@ struct PendingAwait {
     statement: StmtId,
     action: Resume,
     call: Option<PendingCall>,
+    method: Option<Box<PendingMethod>>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     assignment: Option<Reference>,
@@ -24,6 +25,25 @@ struct PendingAwait {
 struct PendingCall {
     function: Value,
     direct_eval: bool,
+}
+
+struct PendingMethod {
+    receiver: Value,
+    key: PropertyKey,
+    function: Option<Value>,
+}
+
+impl PendingMethod {
+    fn retained_bytes(&self) -> usize {
+        let key_bytes = match &self.key {
+            PropertyKey::String(name) => name.len(),
+            PropertyKey::Symbol(_) => 0,
+        };
+        std::mem::size_of::<Self>()
+            .saturating_add(self.receiver.bytes())
+            .saturating_add(key_bytes)
+            .saturating_add(self.function.as_ref().map_or(0, Value::bytes))
+    }
 }
 
 fn name_reference_bytes(reference: &Reference) -> usize {
@@ -58,6 +78,7 @@ impl Activation {
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
+            .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_assignment().map_or(0, name_reference_bytes))
             .saturating_add(
                 self.environments
@@ -78,6 +99,7 @@ impl Activation {
             .len()
             .saturating_add(self.try_scopes.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
+                + 2 * usize::from(self.pending_method().is_some())
                 + usize::from(self.pending_assignment().is_some()))
     }
 
@@ -87,6 +109,12 @@ impl Activation {
         Edge::value(&self.this, add);
         if let Some(call) = self.pending_call() {
             Edge::value(&call.function, add);
+        }
+        if let Some(method) = self.pending_method() {
+            Edge::value(&method.receiver, add);
+            if let Some(function) = &method.function {
+                Edge::value(function, add);
+            }
         }
         if let Some(reference) = self.pending_assignment() {
             Edge::reference(reference, add);
@@ -118,6 +146,10 @@ impl Activation {
 
     fn pending_call(&self) -> Option<&PendingCall> {
         self.pending.as_ref().and_then(|pending| pending.call.as_ref())
+    }
+
+    fn pending_method(&self) -> Option<&PendingMethod> {
+        self.pending.as_ref().and_then(|pending| pending.method.as_deref())
     }
 
     fn pending_assignment(&self) -> Option<&Reference> {
@@ -327,7 +359,7 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let PendingAwait { statement, action, call, member_key, chain, assignment } = frame
+                let PendingAwait { statement, action, call, method, member_key, chain, assignment } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -339,6 +371,14 @@ impl Runtime {
                         let value = if let Some(call) = call {
                             let direct = call.direct_eval.then_some((frame.environment()?, &frame.this));
                             let result = self.invoke_plain_call(call.function, &[value], direct, host)?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(method) = method {
+                            let PendingMethod { receiver, key, function } = *method;
+                            let result = self.invoke_member_call(receiver, key, function, &[value], host)?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -523,6 +563,7 @@ impl Runtime {
                     statement,
                     operand,
                     callee,
+                    method,
                     member_key,
                     chain,
                     assignment,
@@ -552,13 +593,20 @@ impl Runtime {
                         if chain.is_some() {
                             self.step()?; // Optional-chain reference construction.
                         }
+                        let mut retained = frame.retained_bytes()
+                            .saturating_add(assignment.as_ref().map_or(0, name_reference_bytes));
+                        let method = if let Some(method) = method {
+                            let prepared = self.prepare_await_method(frame, method, retained, host)?;
+                            retained = retained.saturating_add(prepared.retained_bytes());
+                            Some(prepared)
+                        } else {
+                            None
+                        };
                         let call = if let Some(callee) = callee {
                             let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
                             self.push_transient_value(&function)?;
                             self.await_storage(
-                                frame.retained_bytes()
-                                    .saturating_add(assignment.as_ref().map_or(0, name_reference_bytes))
-                                    .saturating_add(function.bytes()),
+                                retained.saturating_add(function.bytes()),
                                 function.bytes(),
                             )?;
                             let direct_eval = matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
@@ -570,7 +618,7 @@ impl Runtime {
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some(PendingAwait { statement, action, call, member_key, chain, assignment });
+                        frame.pending = Some(PendingAwait { statement, action, call, method, member_key, chain, assignment });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -581,6 +629,32 @@ impl Runtime {
         })();
         self.restore_root_marker(marker);
         result
+    }
+
+    #[inline(never)]
+    fn prepare_await_method(
+        &mut self,
+        frame: &Activation,
+        method: ExprId,
+        retained: usize,
+        host: &mut dyn Host,
+    ) -> Result<Box<PendingMethod>, Fault> {
+        let ExprKind::Member(receiver, key) = frame.program.exprs[method].kind else {
+            unreachable!("suspended member call needs a member expression");
+        };
+        let environment = frame.environment()?;
+        let receiver = self.eval(&frame.program, receiver, environment, &frame.this, host)?;
+        self.push_transient_value(&receiver)?;
+        let key = self.eval(&frame.program, key, environment, &frame.this, host)?;
+        self.push_transient_value(&key)?;
+        let (receiver, key, function) = self.resolve_member_call(receiver, key, host)?;
+        if let Some(function) = &function {
+            self.push_transient_value(function)?;
+        }
+        let method = PendingMethod { receiver, key, function };
+        let bytes = method.retained_bytes();
+        self.await_storage(retained.saturating_add(bytes), bytes)?;
+        Ok(Box::new(method))
     }
 
     fn await_resume_action(
@@ -709,6 +783,11 @@ mod tests {
                 statement: 0,
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
+                method: Some(Box::new(PendingMethod {
+                    receiver: Value::Function(19),
+                    key: PropertyKey::String("invoke".into()),
+                    function: Some(Value::Function(20)),
+                })),
                 member_key: None,
                 chain: None,
                 assignment: Some(Reference::Binding(18, "target".into())),
@@ -716,7 +795,7 @@ mod tests {
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13, 17] {
+        for function in [11, 13, 17, 19, 20] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
@@ -737,6 +816,7 @@ mod tests {
             std::mem::size_of::<Activation>()
                 + frame.this.bytes()
                 + "target".len()
+                + std::mem::size_of::<PendingMethod>() + "invoke".len()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
         );
