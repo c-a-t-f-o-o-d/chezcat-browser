@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value};
+use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -114,6 +114,8 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
+                    self.define_node_attribute(prototype, window, "style",
+                        ELEMENT_STYLE_GET, Some(ELEMENT_STYLE_SET))?;
                     for (key, operation) in [
                         ("offsetParent", "\0HTMLElement.get.offsetParent"),
                         ("offsetLeft", "\0HTMLElement.get.offsetLeft"),
@@ -1004,6 +1006,18 @@ mod expando_tests {
         fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String> {Err("No native write".into())}
         fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String> {Err("No native call".into())}
     }
+    #[test]
+    fn element_inline_style_property_ignored_arguments_do_not_become_permanent_host_roots() {
+        let mut runtime = Runtime::for_test();
+        let mut host = Native { enabled: true, reads: 0 };
+        let id = runtime.new_object(None).unwrap();
+        for operation in [ELEMENT_STYLE_GET, ELEMENT_STYLE_SET] {
+            let error = runtime.call_host(42, operation, &[Value::Object(id)], &mut host).unwrap_err();
+            assert!(error.message.contains("No native call"), "{}", error.message);
+            assert!(!runtime.exported_object_roots.contains(&id));
+        }
+    }
+
     #[test]
     fn native_expando_allocation_failure_is_atomic_and_recovery_preserves_native_paths() {
         let mut runtime=Runtime::for_test();runtime.bind_browser_global(77).unwrap();

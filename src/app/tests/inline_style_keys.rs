@@ -31,20 +31,29 @@ fn inline_style_enumeration_app_uses_inherited_css_name_to_paint_on_trusted_inpu
     app.resize(400, 280);
     app.set_javascript_enabled(true);
     app.open(&path);
-    let check_pixels = |app: &App, expected| {
-        let frame = app.draw();
-        for (x, color) in [(16, expected), (64, 0x6080a0)] {
-            let top = (app.content_top() + 16 - app.scroll) as usize;
-            for y in top..top + 24 {
-                let start = y * frame.width + x;
-                assert!(frame.pixels[start..start + 24]
-                    .iter()
-                    .all(|&pixel| pixel == color));
-            }
-        }
-    };
     assert_eq!(app.document.title, "Ready");
     check_pixels(&app, 0x204060);
+    click_apply(&mut app);
+    let script = app.scripting.as_ref().unwrap();
+    assert_eq!(script.error_count(), 0, "{}", script.report());
+    assert_eq!(app.document.title, "Color applied");
+    check_pixels(&app, 0x6080a0);
+}
+
+fn check_pixels(app: &App, expected: u32) {
+    let frame = app.draw();
+    for (x, color) in [(16, expected), (64, 0x6080a0)] {
+        let top = (app.content_top() + 16 - app.scroll) as usize;
+        for y in top..top + 24 {
+            let start = y * frame.width + x;
+            assert!(frame.pixels[start..start + 24]
+                .iter()
+                .all(|&pixel| pixel == color));
+        }
+    }
+}
+
+fn click_apply(app: &mut App) {
     let button = app
         .page
         .controls
@@ -59,8 +68,47 @@ fn inline_style_enumeration_app_uses_inherited_css_name_to_paint_on_trusted_inpu
         PlatformAction::None
     ));
     assert!(matches!(app.pointer_up(x, y), PlatformAction::None));
-    let script = app.scripting.as_ref().unwrap();
-    assert_eq!(script.error_count(), 0, "{}", script.report());
-    assert_eq!(app.document.title, "Color applied");
-    check_pixels(&app, 0x6080a0);
+}
+
+#[test]
+fn element_inline_style_property_paints_through_saved_handle_and_restores_on_trusted_clicks() {
+    let files = Fixture::new();
+    let path = files.write("saved-element-style.html", r#"<!doctype html><html><head><title>Ready</title>
+<style>
+body{margin:0;background:white}
+.tile{position:absolute;top:16px;width:24px;height:24px}
+#sample{left:16px}#reference{left:64px;background:#6080a0}
+button{position:absolute;left:16px;top:64px;width:112px;height:32px}
+</style></head><body><div id=sample class=tile style="background-color:#204060"></div>
+<div id=reference class=tile></div><button id=apply type=button>Change color</button>
+<script>
+var tile=document.getElementById('sample'),native=tile.style,shadow={},stage=0;
+document.getElementById('apply').onclick=function(e){
+    if(!e.isTrusted||e.currentTarget!==this)throw 'trusted activation';
+    if(stage===0){
+        Object.defineProperty(tile,'style',{get:function(){return shadow;},configurable:true});
+        native.backgroundColor='#6080a0';
+        if(tile.style!==shadow||tile.getAttribute('style').indexOf('#6080a0')<0)throw 'real backing declaration';
+        stage++;document.title='Saved style painted';
+    }else{
+        if(!delete tile.style||tile.style!==native)throw 'real native identity after deletion';
+        tile.style.backgroundColor='#204060';
+        document.title='Restored style painted';
+    }
+};
+</script></body></html>"#);
+    let mut app = App::new();
+    app.resize(400, 280);
+    app.set_javascript_enabled(true);
+    app.open(&path);
+    app.wait_for_load();
+    assert_eq!(app.document.title, "Ready");
+    check_pixels(&app, 0x204060);
+    for (title, color) in [("Saved style painted", 0x6080a0), ("Restored style painted", 0x204060)] {
+        click_apply(&mut app);
+        let script = app.scripting.as_ref().unwrap();
+        assert_eq!(script.error_count(), 0, "{}", script.report());
+        assert_eq!(app.document.title, title);
+        check_pixels(&app, color);
+    }
 }

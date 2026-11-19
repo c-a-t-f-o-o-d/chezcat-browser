@@ -114,7 +114,7 @@ impl Runtime {
                 "toString" | "valueOf" | "trim" | "toLowerCase" | "toUpperCase",
             ) => 0,
             Builtin::StringMethod("split" | "slice" | "substring" | "substr" | "replace" | "replaceAll") => 2,
-            Builtin::PrimitiveMethod("toString", true) => 1,
+            Builtin::PrimitiveMethod("toString" | "toFixed", true) => 1,
             Builtin::PrimitiveMethod(_, _) => 0,
             _ => 1,
         };
@@ -457,6 +457,9 @@ impl Runtime {
             self.constructor_prototype(name, Value::Object(prototype))?;
             for method in ["toString", "valueOf"] {
                 self.prototype_method(prototype, method, Builtin::PrimitiveMethod(method, number))?;
+            }
+            if number {
+                self.prototype_method(prototype, "toFixed", Builtin::PrimitiveMethod("toFixed", true))?;
             }
         }
         Ok(())

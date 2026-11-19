@@ -4,6 +4,7 @@ use super::*;
 pub(super) const PROPERTIES: &[&str] = &[
     "align-items",
     "align-self",
+    "animation-timing-function",
     "background",
     "background-color",
     "background-image",
@@ -81,7 +82,9 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
 }
 
 pub(super) fn same_name(raw: &str, expected: &str) -> bool {
-    if expected.starts_with("--") {
+    if expected == "animation-timing-function" {
+        crate::css::easing_trim(raw).eq_ignore_ascii_case(expected)
+    } else if expected.starts_with("--") {
         raw.trim() == expected
     } else {
         raw.trim().eq_ignore_ascii_case(expected)
@@ -90,7 +93,7 @@ pub(super) fn same_name(raw: &str, expected: &str) -> bool {
 
 fn skip_trivia(mut raw: &str) -> Option<&str> {
     loop {
-        raw = raw.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        raw = raw.trim_start_matches([' ', '\t', '\r', '\n', '\u{c}']);
         let Some(after) = raw.strip_prefix("/*") else {
             return Some(raw);
         };
@@ -122,7 +125,7 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
         } else {
             raw
         };
-        let (specified, priority) = crate::css::declaration_priority(value);
+        let (specified, priority) = if name == "animation-timing-function" { crate::css::easing_priority(value) } else { crate::css::declaration_priority(value) };
         if important && !priority {
             continue;
         }
@@ -130,6 +133,12 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             && !crate::css::inline_color_value(specified)
         {
             continue;
+        }
+        if name == "animation-timing-function" {
+            // Validation formats bounded specified numbers even on removal.
+            // Charge this actual candidate here, not an unrelated whole style.
+            state.work(crate::css::easing_source_cost(specified.len()).0)?;
+            if !crate::css::inline_easing_value(specified) { continue; }
         }
         if name == "opacity" && metered_opacity(specified, state)?.is_none() {
             continue;
@@ -202,7 +211,31 @@ pub(super) fn replace(
     Ok(Some(result))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum EasingText { Specified, Cssom }
+
+pub(super) fn normalize_easing(value: &str, state: &mut State, kind: EasingText) -> Result<Option<String>, String> {
+    let (work, copies) = crate::css::easing_source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)?;
+    Ok(match kind {
+        EasingText::Specified => crate::css::specified_easing(value),
+        EasingText::Cssom => crate::css::normalize_easing(value),
+    })
+}
+
+pub(super) fn easing_declaration(style: &str, state: &mut State, kind: EasingText) -> Result<Option<(String, bool)>, String> {
+    state.work(1 + style.len().saturating_mul(4))?;
+    state.copies(style.len())?;
+    let Some((_, raw)) = winner(style, "animation-timing-function", state)? else { return Ok(None); };
+    let clean;
+    let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); clean.as_str() } else { raw };
+    let (value, important) = crate::css::easing_priority(raw);
+    Ok(normalize_easing(value, state, kind)?.map(|value| (value, important)))
+}
+
 impl Bridge<'_> {
+
     pub(super) fn inline_names(&mut self, node: usize) -> Result<Vec<String>, String> {
         let raw = self.doc.attr(node, "style").unwrap_or("");
         if raw.len() > self.state.limits.host.string_bytes {
@@ -285,6 +318,96 @@ mod tests {
         let mut page = Page::for_test();
         assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
         (doc, forms, page)
+    }
+
+    #[test]
+    fn element_inline_style_property_distinguishes_own_accessors_data_and_native_handles() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var root=document.documentElement, detached=document.createElement('div'), neighbor=document.getElementById('tile');
+var proto=HTMLElement.prototype, descriptor=Object.getOwnPropertyDescriptor(proto,'style'), get=descriptor.get;
+if(!descriptor.enumerable||!descriptor.configurable||get.name!=='get style'||get.length!==0||
+   descriptor.set.name!=='set style'||descriptor.set.length!==1||Object.hasOwn(Element.prototype,'style'))
+    throw 'HTML interface descriptor';
+var rootStyle=root.style, kept=detached.style, other=neighbor.style;
+if(detached.ownerDocument!==document||detached.parentNode!==null||rootStyle===kept||kept===other||
+   get.call(detached)!==kept||get.call(root)!==rootStyle||Object.hasOwn(detached,'style')||!('style' in root))
+    throw 'native declaration identity and owner';
+var reads=0,writes=0,memo={};
+function ownGet(){if(this!==root)throw 'wrong getter receiver';reads++;return memo;}
+function ownSet(value){if(this!==root||value!==memo)throw 'wrong setter receiver';writes++;}
+Object.defineProperty(root,'style',{get:ownGet,set:ownSet,enumerable:true,configurable:true});
+var own=Object.getOwnPropertyDescriptor(root,'style');
+if(own.get!==ownGet||own.set!==ownSet||!own.configurable||!own.enumerable||
+   !Object.hasOwn(root,'style')||Object.keys(root).indexOf('style')<0||reads!==0)throw 'inspection invoked getter';
+root.style=memo;
+if(writes!==1||root.style!==memo||reads!==1||get.call(root)!==rootStyle||neighbor.style!==other)
+    throw 'ordinary accessor and saved native getter';
+rootStyle.color='red';
+if(!delete root.style||Object.hasOwn(root,'style')||root.style!==rootStyle||root.style.color!=='red')
+    throw 'delete restores inherited handle and live CSS';
+Object.defineProperty(detached,'style',{value:13,writable:true,configurable:true});
+detached.style=27;
+if(detached.style!==27||Object.getOwnPropertyDescriptor(detached,'style').enumerable||
+   get.call(detached)!==kept||detached.getAttribute('style')!==null)throw 'ordinary data storage';
+if(!delete detached.style||detached.style!==kept||root.style!==rootStyle||neighbor.style!==other)
+    throw 'restored independent declarations';
+var getterRuns=0;
+Object.defineProperty(proto,'style',{get:function(){getterRuns++;return this;},configurable:true});
+if(root.style!==root||detached.style!==detached||getterRuns!==2||get.call(detached)!==kept)
+    throw 'replacement prototype and saved getter';
+delete proto.style;
+if('style' in detached||detached.style!==undefined)throw 'deleted inherited property remained visible';
+Object.defineProperty(proto,'style',descriptor);
+if(detached.style!==kept||get.call(neighbor)!==other)throw 'restored prototype';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn element_inline_style_property_preserves_native_brands_and_protected_names() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let setup = page.console_eval(&mut doc, &mut forms, r#"
+var p=document.getElementById('tile'),native=p.style,keep=p.getAttribute('style');
+var desc=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'style'),calls=0;
+for(var receiver of [document,document.createTextNode('x'),native,Object.create(HTMLElement.prototype)]){
+  var caught=false;try{desc.get.call(receiver);}catch(e){caught=e instanceof TypeError;}
+  if(!caught)throw 'getter requires a genuine HTMLElement';
+  caught=false;try{desc.set.call(receiver,{toString:function(){calls++;return '';}});}catch(e){caught=e instanceof TypeError;}
+  if(!caught||calls!==0)throw 'setter brand must precede conversion';
+}
+"#);
+        assert_eq!(setup.errors, 0, "{}", page.report());
+        for refused in [
+            "p.style='color:blue';",
+            "Object.defineProperty(p,'ownerDocument',{get:function(){return null;}});",
+            "Object.defineProperty(p,'onclick',{value:17});",
+        ] {
+            let outcome = page.console_eval(&mut doc, &mut forms, refused);
+            assert_eq!(outcome.errors, 1, "{refused}: {}", page.report());
+        }
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "if(p.ownerDocument!==document||p.style!==native||Object.hasOwn(p,'style')||p.getAttribute('style')!==keep)throw 'protected native state';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn inline_easing_and_opacity_share_checked_writes_without_replacing_each_other() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let result = page.console_eval(&mut doc, &mut forms, r#"
+var mixed=document.createElement('div');
+mixed.setAttribute('style','OPACITY:.2;ANIMATION-TIMING-FUNCTION:ease; width:24px');
+mixed.style.width='30px';
+if(mixed.style.opacity!=='0.2'||mixed.style.animationTimingFunction!=='ease'||mixed.style.width!=='30px')throw 'raw CSS spelling and neighboring write';
+mixed.style.animationTimingFunction='cubic-bezier(.1234564,0,1,1)';
+var stored=mixed.getAttribute('style');
+if(stored.indexOf('0.1234564')<0||mixed.style.opacity!=='0.2')throw 'precise easing and genuine opacity';
+mixed.style.opacity=null;
+if(mixed.style.opacity!==''||mixed.style.animationTimingFunction!=='cubic-bezier(0.123456, 0, 1, 1)'||mixed.getAttribute('style').indexOf('0.1234564')<0)throw 'opacity legacy null must preserve precise easing';
+mixed.style.opacity=.75;mixed.style.animationTimingFunction=null;
+if(mixed.style.opacity!=='0.75'||mixed.style.animationTimingFunction!==''||mixed.style.width!=='30px'||mixed.style.length!==2)throw 'easing legacy null must preserve opacity and width';
+"#);
+        assert_eq!(result.errors, 0, "{}", page.report());
     }
 
     #[test]
