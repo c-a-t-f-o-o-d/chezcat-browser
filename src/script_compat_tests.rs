@@ -112,6 +112,7 @@ document.title='detached-style-type-ok';
     assert_eq!(doc.nodes.len(), nodes);
     assert_eq!(page.state.dom_commits, commits);
     assert!(doc.nodes[style].children.is_empty());
+    assert!(!page.has_host_tasks());
     let text = page.console_eval(&mut doc, &mut forms, "detachedStyle.textContent='body{display:none}';if(detachedStyle.isConnected||detachedStyle.firstChild.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'detached style text or type';");
     assert_eq!(text.errors, 0, "{}", page.report());
     assert_eq!(doc.nodes.len(), nodes + 1);
