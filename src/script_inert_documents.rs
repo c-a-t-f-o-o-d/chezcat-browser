@@ -49,7 +49,7 @@ enum Kind {
     Document(DocumentNodes),
     TemplateDocument { implementation: u32 },
     Fragment { template: Option<u32> },
-    Parsed { source: ParsedSource, copy_template_contents: bool },
+    Parsed { source: ParsedSource, initial_template: Option<usize> },
     Doctype,
     Element(String),
     Text(String),
@@ -221,9 +221,10 @@ impl Bridge<'_> {
         let node = self.state.inert_documents.node(object)?;
         match &node.kind {
             Kind::Element(tag) if tag == "template" => Some((node.owner, None)),
-            Kind::Parsed { source: ParsedSource::Loaded(source), copy_template_contents } if self.parsed_template(*source) => {
-                Some((node.owner, copy_template_contents.then_some(*source)))
-            }
+            Kind::Parsed { source, initial_template } if self.parsed_source(*source).is_some_and(|(source, _)| {
+                source.namespace == crate::html::Namespace::Html
+                    && matches!(&source.kind, NodeKind::Element { tag, .. } if tag == "template")
+            }) => Some((node.owner, *initial_template)),
             _ => None,
         }
     }
@@ -297,7 +298,7 @@ impl Bridge<'_> {
         self.state.replace_bytes(0, size_of::<(u32, InertNode)>() + size_of::<u32>())?;
         let arena = &mut self.state.inert_documents;
         arena.adopted.insert(child, InertNode {
-            kind: Kind::Parsed { source: ParsedSource::Loaded(index), copy_template_contents: true },
+            kind: Kind::Parsed { source: ParsedSource::Loaded(index), initial_template: None },
             owner, parent: Some(fragment), children: Vec::new(),
         });
         arena.node_mut(fragment).unwrap().children.push(child);
@@ -365,7 +366,11 @@ impl Bridge<'_> {
             staged.try_reserve(1).map_err(|_| "Cannot reserve parsed template nodes.")?;
             staged.push(Entry::Node(InertNode {
                 kind: if index == 0 { Kind::Fragment { template: Some(object) } } else {
-                    Kind::Parsed { source: ParsedSource::Loaded(source.unwrap()), copy_template_contents: true }
+                    let source = source.unwrap();
+                    Kind::Parsed {
+                        source: ParsedSource::Loaded(source),
+                        initial_template: self.parsed_template(source).then_some(source),
+                    }
                 },
                 owner, parent, children: child_handles,
             }));
@@ -514,7 +519,7 @@ impl Bridge<'_> {
             entries.push(Entry::Node(InertNode {
                 kind: Kind::Parsed {
                     source: ParsedSource::Generated(generated_base + offset),
-                    copy_template_contents: false,
+                    initial_template: None,
                 },
                 owner, parent: parents[local], children,
             }));
@@ -555,55 +560,134 @@ impl Bridge<'_> {
     }
 
     pub(super) fn clone_inert_tree(&mut self, object: u32, deep: bool) -> Result<Value, String> {
+        #[derive(Clone, Copy)]
+        struct Step {
+            source: u32,
+            owner: u32,
+            parent: Option<u32>,
+            template: Option<u32>,
+        }
+
         let arena = &self.state.inert_documents;
-        let owner = arena.node(object).ok_or("Inert clone source is unavailable.")?.owner;
         let remaining = self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len());
         if remaining == 0 { return Err("Inert DOM identity limit reached during cloning.".into()); }
         let first = FIRST_ENTRY + arena.entries.len() as u32;
-        let mut pending = vec![(object, None)];
-        let mut staged = Vec::new();
+        let mut generated = None;
         let mut payload = 0usize;
-        while let Some(&(source, parent)) = pending.get(staged.len()) {
-            let node = self.state.inert_documents.node(source)
-                .filter(|node| node.owner == owner).ok_or("Inert clone source ownership changed.")?;
-            let child_count = if deep { node.children.len() } else { 0 };
-            if child_count > remaining - pending.len() {
+        // Main-document templates carry an ordinary element record, but their
+        // content is a distinct host-linked tree. Snapshot the outer element
+        // and retain the original owner's identity in the staged clone.
+        let (owner, outer) = if let Some(node) = arena.node(object) {
+            (node.owner, None)
+        } else {
+            let (owner, initial) = self.template_source(object).ok_or("Inert clone source is unavailable.")?;
+            let index = node_index(object).ok_or("Main template has no native node.")?;
+            let source = &self.doc.nodes[index];
+            let NodeKind::Element { tag, href, attrs, .. } = &source.kind else { unreachable!() };
+            if attrs.iter().any(|attr| attr.name.namespace.is_none()
+                && (attr.name.qualified.starts_with("on") || attr.name.html_is("is"))) {
+                return Err("Template cloning cannot transfer active handlers or customized built-ins.".into());
+            }
+            let bytes = node_bytes(source).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
+            self.state.work(attrs.len().saturating_add(1))?;
+            self.state.copies(bytes)?;
+            payload = bytes.saturating_add(size_of::<GeneratedNode>() + size_of::<Node>());
+            let generated_index = self.state.inert_documents.generated.len();
+            generated = Some(GeneratedNode {
+                node: Rc::new(Node {
+                    kind: script_clone_node::copy_node_kind(&source.kind),
+                    namespace: source.namespace, children: Vec::new(),
+                }),
+                unsafe_nonce: self.doc.nonce_unsafe_nodes.contains(&index),
+            });
+            (owner, Some(Kind::Parsed {
+                source: ParsedSource::Generated(generated_index),
+                initial_template: if deep { initial } else { None },
+            }))
+        };
+        let mut pending = vec![Step { source: object, owner, parent: None, template: None }];
+        let mut staged = Vec::new();
+        let mut template_links = Vec::new();
+        let mut outer = outer;
+        while let Some(step) = pending.get(staged.len()) {
+            let Step { source, owner, parent, template } = *step;
+            let handle = first + staged.len() as u32;
+            let arena = &self.state.inert_documents;
+            let (children, kind) = if let Some(kind) = outer.as_ref() {
+                (&[][..], kind)
+            } else {
+                let source = arena.node(source).filter(|node| node.owner == owner)
+                    .ok_or("Inert clone source ownership changed.")?;
+                (if deep { source.children.as_slice() } else { &[][..] }, &source.kind)
+            };
+            let content = if deep {
+                arena.template_contents.get(&source).map(|&fragment| {
+                    let node = arena.node(fragment).filter(|node| node.parent.is_none()
+                        && matches!(node.kind, Kind::Fragment { template: Some(host) } if host == source))
+                        .ok_or("Missing template content identity during cloning.")?;
+                    Ok::<_, String>((fragment, node.owner))
+                }).transpose()?
+            } else { None };
+            let extra = children.len().saturating_add(usize::from(content.is_some()));
+            if extra > remaining - pending.len() {
                 return Err("Inert DOM identity limit reached during cloning.".into());
             }
-            let string_bytes = match &node.kind {
+            let string_bytes = match kind {
                 Kind::Element(name) | Kind::Text(name) => name.len(),
                 Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
                 _ => 0,
             };
-            self.state.work(child_count.saturating_add(1))?;
+            self.state.work(extra.saturating_add(1))?;
             self.state.copies(string_bytes)?;
-            pending.try_reserve(child_count).map_err(|_| "Cannot reserve inert clone traversal.")?;
+            pending.try_reserve(extra).map_err(|_| "Cannot reserve inert clone traversal.")?;
             staged.try_reserve(1).map_err(|_| "Cannot reserve inert clone nodes.")?;
-            let node = self.state.inert_documents.node(source).ok_or("Inert clone source is unavailable.")?;
-            let handle = first + staged.len() as u32;
             let child_start = first + pending.len() as u32;
-            pending.extend(node.children.iter().take(child_count).map(|&child| (child, Some(handle))));
+            let child_count = if deep && outer.is_none() {
+                let source = self.state.inert_documents.node(source).ok_or("Inert clone source is unavailable.")?;
+                pending.extend(source.children.iter().map(|&source| Step {
+                    source, owner, parent: Some(handle), template: None,
+                }));
+                source.children.len()
+            } else { 0 };
+            if let Some((source, owner)) = content {
+                let new_fragment = first + pending.len() as u32;
+                template_links.try_reserve(1).map_err(|_| "Cannot reserve cloned template identities.")?;
+                template_links.push((handle, new_fragment));
+                pending.push(Step { source, owner, parent: None, template: Some(handle) });
+            }
             let mut children = Vec::new();
             children.try_reserve_exact(child_count).map_err(|_| "Cannot reserve inert clone children.")?;
             children.extend(child_start..child_start + child_count as u32);
-            let kind = match &node.kind {
-                Kind::Fragment { .. } => Kind::Fragment { template: None },
-                Kind::Parsed { source, copy_template_contents } =>
-                    Kind::Parsed { source: *source, copy_template_contents: deep && *copy_template_contents },
-                Kind::Element(name) => Kind::Element(name.clone()),
-                Kind::Text(data) => Kind::Text(data.clone()),
-                Kind::ProcessingInstruction { target, data } =>
-                    Kind::ProcessingInstruction { target: target.clone(), data: data.clone() },
-                Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype =>
-                    return Err("Cloning this inert document node is unavailable.".into()),
+            let kind = if let Some(kind) = outer.take() { kind } else {
+                let node = self.state.inert_documents.node(source).ok_or("Inert clone source is unavailable.")?;
+                match &node.kind {
+                    Kind::Fragment { .. } => Kind::Fragment { template },
+                    Kind::Parsed { source, initial_template } =>
+                        Kind::Parsed { source: *source, initial_template: if deep { *initial_template } else { None } },
+                    Kind::Element(name) => Kind::Element(name.clone()),
+                    Kind::Text(data) => Kind::Text(data.clone()),
+                    Kind::ProcessingInstruction { target, data } =>
+                        Kind::ProcessingInstruction { target: target.clone(), data: data.clone() },
+                    Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype =>
+                        return Err("Cloning this inert document node is unavailable.".into()),
+                }
             };
             payload = payload.saturating_add(string_bytes)
-                .saturating_add(children.capacity().saturating_mul(std::mem::size_of::<u32>()));
+                .saturating_add(children.capacity().saturating_mul(size_of::<u32>()));
             staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
+        }
+        payload = payload.saturating_add(template_links.len().saturating_mul(size_of::<(u32, u32)>()));
+        let arena = &mut self.state.inert_documents;
+        arena.template_contents.try_reserve(template_links.len()).map_err(|_| "Cannot reserve cloned template contents.")?;
+        if generated.is_some() {
+            arena.generated.try_reserve(1).map_err(|_| "Cannot reserve a cloned template source.")?;
         }
         let committed = self.reserve_inert_entries(staged.len(), payload)?;
         debug_assert_eq!(committed, first);
-        self.state.inert_documents.entries.extend(staged);
+        let arena = &mut self.state.inert_documents;
+        if let Some(source) = generated { arena.generated.push(source); }
+        arena.entries.extend(staged);
+        arena.template_contents.extend(template_links);
         Ok(Value::Host(first))
     }
 
