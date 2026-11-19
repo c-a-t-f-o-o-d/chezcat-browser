@@ -447,7 +447,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
         }
         let children_eligible = eligible && if generator {
-            matches!(kind, StmtKind::Block(_) | StmtKind::Try(_, None, Some(_)))
+            matches!(kind, StmtKind::Block(_) | StmtKind::Try(_, _, _))
         } else {
             matches!(kind, StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
                 | StmtKind::For(None, _, _, _) | StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()
@@ -477,7 +477,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             StmtKind::Try(body, catch, finally) => {
                 if let Some(finally) = finally { child(*finally, !generator && children_eligible && catch.is_none())?; }
                 if let Some((_, catch)) = catch {
-                    child(*catch, children_eligible && finally.is_none())?;
+                    child(*catch, !generator && children_eligible && finally.is_none())?;
                 }
                 child(*body, children_eligible)?;
             }
@@ -786,7 +786,7 @@ mod tests {
         for source in [
             "function* g(){if(true){yield 1;}}",
             "function* g(){try{}finally{yield 1;}}",
-            "function* g(){try{yield 1;}catch(error){}}",
+            "function* g(){try{}catch(error){yield 1;}}",
             "function* g(){let value=yield 1;}",
             "function* g(){receiver.call(yield 1);}",
             "function* g(){take(...yield 1);}",

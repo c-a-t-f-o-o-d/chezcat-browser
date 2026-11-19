@@ -40,6 +40,7 @@ pub(super) struct Activation {
 struct TryScope {
     statement: StmtId,
     lexical_depth: usize,
+    after: usize,
 }
 
 struct PendingCall {
@@ -369,30 +370,46 @@ impl Runtime {
         self.strict = frame.program.templates[frame.template].strict;
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;
-        let result = (|| {
+        let incoming = (|| {
             if frame.delegate.is_some() {
-                if let Some(progress) = self.advance_generator_delegate(frame, operation, input, host)? {
-                    return Ok(progress);
-                }
+                return self.advance_generator_delegate(frame, operation, input, host);
             } else if !matches!(operation, Op::Next) {
-                return self.generator_abrupt_value(operation, input).map(Progress::Complete);
+                return self.generator_abrupt_value(operation, input).map(|value| Some(Progress::Complete(value)));
             } else if frame.pending_call.is_some() {
                 let value = self.copy_value(input)?;
                 self.finish_generator_argument(frame, value, host)?;
             }
-            self.drive_generator_body(frame, host)
+            Ok(None)
         })();
-        let result = match result {
-            Ok(Progress::Complete(value)) => self.finish_generator_body(frame, Ok(Control::Return(value)), host),
-            Err(error) => self.finish_generator_body(frame, Err(error), host),
-            suspended => suspended,
-        };
+        let result = self.resume_generator_instructions(frame, incoming, host);
         self.transient_roots.owned_call_depth -= 1;
         self.call_depth -= 1;
         self.invocation = previous_invocation;
         self.native_access_caller = previous_native_caller;
         self.strict = previous_strict;
         result
+    }
+
+    #[inline(never)]
+    fn resume_generator_instructions(
+        &mut self, frame: &mut Activation, incoming: Result<Option<Progress>, Fault>, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let mut progress = match incoming {
+            Ok(Some(progress)) => Ok(progress),
+            Ok(None) => self.drive_generator_body(frame, host),
+            Err(error) => Err(error),
+        };
+        loop {
+            let completion = match progress {
+                Ok(Progress::Complete(value)) => Ok(Control::Return(value)),
+                Err(error) => Err(error),
+                suspended => return suspended,
+            };
+            if let Some(completed) = self.finish_generator_body(frame, completion, host)? {
+                return Ok(completed);
+            }
+            progress = self.drive_generator_body(frame, host);
+        }
     }
 
     fn drive_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
@@ -423,10 +440,10 @@ impl Runtime {
                     self.release_environment(scope);
                     continue;
                 }
-                Instruction::PushTry { statement, .. } => {
+                Instruction::PushTry { statement, after, .. } => {
                     self.step()?;
                     self.reserve_generator_stack(&mut frame.try_scopes)?;
-                    frame.try_scopes.push(TryScope { statement, lexical_depth: frame.lexical_scopes.len() });
+                    frame.try_scopes.push(TryScope { statement, after, lexical_depth: frame.lexical_scopes.len() });
                     continue;
                 }
                 Instruction::FinishTry => {
@@ -551,13 +568,14 @@ impl Runtime {
     ) -> Result<Control, Fault> {
         let scope = frame.try_scopes.pop().expect("compiled generator try exit");
         self.unwind_generator_scopes(frame, scope.lexical_depth);
+        frame.next = scope.after;
         self.finish_try_statement(&frame.program, scope.statement, completion, frame.environment(), &frame.this, host)
     }
 
     #[inline(never)]
     fn finish_generator_body(
         &mut self, frame: &mut Activation, mut completion: Result<Control, Fault>, host: &mut dyn Host,
-    ) -> Result<Progress, Fault> {
+    ) -> Result<Option<Progress>, Fault> {
         if let Some(call) = frame.pending_call.take() {
             self.value_bytes -= call.function.bytes();
         }
@@ -566,8 +584,13 @@ impl Runtime {
         }
         while !frame.try_scopes.is_empty() && !completion.as_ref().is_err_and(|error| error.exception.is_none()) {
             completion = self.finish_generator_try(frame, completion, host);
+            if matches!(completion, Ok(Control::Normal(_))) {
+                // A synchronous catch handled the throw. Continue at the end
+                // of this try without unwinding any enclosing scopes.
+                return Ok(None);
+            }
         }
-        completion.and_then(Self::generator_completion)
+        completion.and_then(Self::generator_completion).map(Some)
     }
 
     #[inline(never)]
