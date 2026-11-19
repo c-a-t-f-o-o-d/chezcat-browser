@@ -338,6 +338,21 @@ impl Runtime {
                         self.statement(&frame.program, statement, environment, &frame.this, host)?;
                     Self::await_control(control)
                 }
+                Instruction::Declare { statement, index } => {
+                    let StmtKind::Declare(kind, declarations) = &frame.program.stmts[statement].kind else {
+                        unreachable!("declarator instruction requires a declaration");
+                    };
+                    let result = (|| {
+                        let mode = self.declaration_mode(*kind, environment)?;
+                        self.evaluate_declarator(
+                            &frame.program, declarations[index], *kind, mode, environment, &frame.this, host,
+                        )?;
+                        Ok(Progress::Continue)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::Evaluate { statement, expression, action } => {
                     let result = (|| {
                         let value = self.eval(&frame.program, expression, environment, &frame.this, host)?;
@@ -482,11 +497,7 @@ impl Runtime {
             Resume::Return => Ok(Progress::Return(value)),
             Resume::Initialize { kind, pattern } => {
                 let environment = frame.environment()?;
-                let mode = if kind == Declaration::Var {
-                    binding_patterns::Mode::Var(self.var_environment(environment)?)
-                } else {
-                    binding_patterns::Mode::Initialize(environment)
-                };
+                let mode = self.declaration_mode(kind, environment)?;
                 self.initialize_pattern(
                     &frame.program,
                     pattern,
