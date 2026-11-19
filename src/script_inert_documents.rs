@@ -198,6 +198,44 @@ impl Bridge<'_> {
         self.state.inert_documents.node(object).map(|node| node.children.as_slice())
     }
 
+    pub(super) fn inert_element_attribute(&mut self, object: u32, argument: &Value) -> Result<Value, String> {
+        let name = self.text(argument)?;
+        let node = self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
+        let source = match node.kind {
+            Kind::Element(_) => return Ok(Value::Null),
+            Kind::Parsed { source, .. } => source,
+            _ => return Err("getAttribute requires an Element.".into()),
+        };
+        let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
+        let NodeKind::Element { attrs, .. } = &node.kind else {
+            return Err("getAttribute requires an Element.".into());
+        };
+        let html = node.namespace == crate::html::Namespace::Html;
+        let count = attrs.len();
+        let work = attrs.iter().map(|attr| attr.name.qualified.len()).sum::<usize>();
+        self.state.work(count)?;
+        self.state.copies(work)?;
+        let name = if html {
+            self.state.copies(name.len())?;
+            name.to_ascii_lowercase()
+        } else {
+            name
+        };
+        let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
+        let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
+        let Some(index) = attrs.iter().position(|attr| attr.name.qualified == name) else {
+            return Ok(Value::Null);
+        };
+        let size = attrs[index].value.len();
+        if size > self.state.limits.host.string_bytes {
+            return Err("Attribute value exceeds the host string bound.".into());
+        }
+        self.state.copies(size)?;
+        let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
+        let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
+        Ok(Value::String(attrs[index].value.clone()))
+    }
+
     pub(super) fn empty_inert_fragment(&self, object: u32) -> Option<Option<u32>> {
         let node = self.state.inert_documents.node(object)?;
         match node.kind {

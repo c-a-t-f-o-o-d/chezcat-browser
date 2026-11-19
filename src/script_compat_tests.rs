@@ -3919,6 +3919,46 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn inert_elements_get_attribute_from_real_markup_without_active_attachment() {
+    let (doc, _, page, result) = page(
+        "<html><body><iframe hidden></iframe><main id=app></main></body></html>",
+        &[r#"
+var markup=document.createElement('template');
+markup.innerHTML='<theme-scope class="from-template" data-raw="&amp;" empty><link href="/private.css"></theme-scope>';
+var donor=markup.content, theme=donor.firstChild, main=document.getElementById('app');
+var get=Element.prototype.getAttribute, owner=donor.ownerDocument;
+var once=0, qualified={toString:function(){once++;return 'CLASS';}};
+if(!(theme instanceof Element)||theme.nodeType!==1||theme.ownerDocument!==owner||
+   owner===document||owner.defaultView!==null||theme.isConnected||theme.parentNode!==donor)
+    throw 'actual inert element';
+if(theme.getAttribute!==get||theme.getAttribute(qualified)!=='from-template'||once!==1||
+   theme.getAttribute('data-raw')!=='&'||theme.getAttribute('empty')!==''||
+   theme.getAttribute('missing')!==null||theme.firstChild.getAttribute('href')!=='/private.css')
+    throw 'retained attribute values';
+var built=owner.createElement('theme-scope'), copied=donor.cloneNode(true).firstChild;
+var adopted=document.createElement('div');
+adopted.setAttribute('class','author');
+donor.appendChild(adopted);
+if(get.call(built,'class')!==null||get.call(copied,'class')!=='from-template'||
+   get.call(adopted,'class')!=='author'||main.getAttribute.call(theme,'class')!=='from-template'||
+   get.call(main,'id')!=='app'||document.querySelector('theme-scope')!==null)
+    throw 'receiver and source ownership';
+var failures=0;
+for(var run of [function(){theme.getAttribute();},function(){get.call(donor,qualified);},
+               function(){get.call({},qualified);},function(){get.call(theme,Symbol('class'));}]){
+    try{run();}catch(e){if(e.name==='TypeError'){failures++;continue;}throw e;}
+}
+if(failures!==4||once!==1||theme.ownerDocument!==owner||theme.parentNode!==donor||
+   donor.lastChild!==adopted||adopted.ownerDocument!==owner||main.childNodes.length!==0)
+    throw 'failed reads changed topology or arguments';
+document.title='inert attributes verified';
+"#],
+    );
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "inert attributes verified");
+}
+
+#[test]
 fn empty_inert_fragment_insertion_preserves_owner_and_checks_destination() {
     let (doc, _, page, result) = page(
         "<html><head><title>Fixture</title></head><body><iframe hidden></iframe><main>Text</main></body></html>",
