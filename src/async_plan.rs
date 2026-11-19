@@ -105,10 +105,10 @@ impl<T> GeneratorCallDestination<T> {
     }
 }
 
-fn generator_declaration_yield(program: &Program, statement: StmtId) -> Option<GeneratorCallYield> {
-    let StmtKind::Declare(kind, declarations) = &program.stmts[statement].kind else { return None };
-    let [(pattern, Some(initial))] = declarations.as_slice() else { return None };
-    generator_call_yield(program, *initial, GeneratorCallDestination::Initialize { kind: *kind, pattern: *pattern })
+fn generator_declarator_yield(
+    program: &Program, kind: Declaration, (pattern, initial): (binding_patterns::Id, Option<ExprId>),
+) -> Option<GeneratorCallYield> {
+    generator_call_yield(program, initial?, GeneratorCallDestination::Initialize { kind, pattern })
 }
 
 fn generator_call_yield(
@@ -493,7 +493,13 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 match kind {
                     StmtKind::Expr(expression) => expression_size(program, *expression, true)?,
                     StmtKind::Yield(_) | StmtKind::YieldFrom(_) => (1, 1),
-                    _ => (1, usize::from(generator_declaration_yield(program, id).is_some())),
+                    StmtKind::Declare(kind, declarations) => {
+                        let sites = declarations.iter()
+                            .filter(|&&declarator| generator_declarator_yield(program, *kind, declarator).is_some())
+                            .count();
+                        (declarations.len(), sites)
+                    }
+                    _ => (1, 0),
                 }
             } else {
                 statement_size(program, id)?
@@ -611,9 +617,10 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
 
 pub(super) fn compile(program: &Program, template: usize, expected_suspensions: usize, ast_limit: usize) -> Result<Vec<Instruction>, Fault> {
     let template = &program.templates[template];
+    let generator = template.kind == FunctionKind::Generator;
     let (split, instructions) = split_statements(program, template, expected_suspensions)?;
     if instructions > ast_limit.saturating_sub(program.node_count()) {
-        let operation = if template.kind == FunctionKind::Generator { "yield" } else { "await" };
+        let operation = if generator { "yield" } else { "await" };
         return Err(Fault::new(format!("AST node limit reached ({ast_limit}) compiling {operation} plan."))
             .at(&program.source, template.source_start));
     }
@@ -720,16 +727,19 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
         };
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
-        } else if let Some(call) = generator_declaration_yield(program, id) {
-            push(&mut code, Instruction::Yield { statement: id, call: Some(call) })?;
         } else if let Some((expression, action)) = statement_expression(program, id) {
-            emit_expression(program, id, expression, action, template.kind == FunctionKind::Generator, &mut code)?;
+            emit_expression(program, id, expression, action, generator, &mut code)?;
         } else {
             match &program.stmts[id].kind {
                 StmtKind::Yield(_) | StmtKind::YieldFrom(_) => push(&mut code, Instruction::Yield { statement: id, call: None })?,
                 StmtKind::Declare(kind, declarations) => {
                     for (index, &(pattern, initial)) in declarations.iter().enumerate() {
-                        if let Some(expression) = initial {
+                        if generator {
+                            if let Some(call) = generator_declarator_yield(program, *kind, (pattern, initial)) {
+                                push(&mut code, Instruction::Yield { statement: id, call: Some(call) })?;
+                                continue;
+                            }
+                        } else if let Some(expression) = initial {
                             if expression_size(program, expression, false)?.1 != 0 {
                                 let action = Resume::Initialize { kind: *kind, pattern };
                                 emit_expression(program, id, expression, action, false, &mut code)?;

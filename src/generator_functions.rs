@@ -441,6 +441,13 @@ impl Runtime {
                 Instruction::Statement(statement) => {
                     self.statement(&frame.program, statement, frame.environment(), &frame.this, host)?
                 }
+                Instruction::Declare { statement, index } => {
+                    self.step()?;
+                    self.evaluate_resumption_declarator(
+                        &frame.program, statement, index, frame.environment(), &frame.this, host,
+                    )?;
+                    continue;
+                }
                 Instruction::Yield { statement, call } => {
                     if let Some(progress) = self.yield_generator_statement(frame, statement, call, host)? {
                         return Ok(progress);

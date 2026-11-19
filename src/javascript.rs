@@ -6825,6 +6825,20 @@ impl Runtime {
         })
     }
 
+    #[inline(never)]
+    fn evaluate_resumption_declarator(
+        &mut self, program: &Rc<Program>, statement: StmtId, index: usize, env: usize, this: &Value, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        let StmtKind::Declare(kind, declarations) = &program.stmts[statement].kind else {
+            unreachable!("declarator instruction requires a declaration");
+        };
+        let result = (|| {
+            let mode = self.declaration_mode(*kind, env)?;
+            self.evaluate_declarator(program, declarations[index], *kind, mode, env, this, host)
+        })();
+        result.map_err(|error: Fault| error.at(&program.source, program.stmts[statement].at))
+    }
+
     fn evaluate_declarator(
         &mut self,
         program: &Rc<Program>,
