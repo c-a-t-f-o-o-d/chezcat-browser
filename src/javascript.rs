@@ -442,6 +442,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("html", "HTMLHtmlElement"),
     ("iframe", "HTMLIFrameElement"),
     ("input", "HTMLInputElement"),
+    ("template", "HTMLTemplateElement"),
     ("ul", "HTMLUListElement"),
 ];
 
@@ -469,6 +470,7 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
+pub(crate) const HTML_TEMPLATE_CONTENT_GET: &str = "\0HTMLTemplateElement.get.content";
 pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
 pub(crate) const CREATE_PROCESSING_INSTRUCTION: &str = "\0Document.createProcessingInstruction";
 pub(crate) const PROCESSING_INSTRUCTION_TARGET_GET: &str = "\0ProcessingInstruction.get.target";

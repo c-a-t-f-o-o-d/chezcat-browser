@@ -14,6 +14,8 @@ pub(super) const HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
 #[derive(Default)]
 pub(super) struct Arena {
     entries: Vec<Entry>,
+    template_documents: HashMap<u32, u32>,
+    template_contents: HashMap<u32, u32>,
 }
 
 struct DocumentNodes {
@@ -27,6 +29,9 @@ struct DocumentNodes {
 
 enum Kind {
     Document(DocumentNodes),
+    TemplateDocument { implementation: u32 },
+    Fragment,
+    Parsed(usize),
     Doctype,
     Element(String),
     Text(String),
@@ -62,7 +67,7 @@ impl Arena {
 impl Bridge<'_> {
     pub(super) fn inert_document(&self, object: u32) -> bool {
         self.state.inert_documents.node(object)
-            .is_some_and(|node| matches!(node.kind, Kind::Document(_)))
+            .is_some_and(|node| matches!(node.kind, Kind::Document(_) | Kind::TemplateDocument { .. }))
     }
 
     pub(super) fn inert_implementation(&self, object: u32) -> bool {
@@ -72,7 +77,15 @@ impl Bridge<'_> {
 
     pub(super) fn inert_node_type(&self, object: u32) -> Option<u32> {
         Some(match self.state.inert_documents.node(object)?.kind {
-            Kind::Document(_) => 9,
+            Kind::Document(_) | Kind::TemplateDocument { .. } => 9,
+            Kind::Fragment => 11,
+            Kind::Parsed(source) => match self.doc.nodes.get(source)?.kind {
+                NodeKind::Element { .. } => 1,
+                NodeKind::Text(_) => 3,
+                NodeKind::Comment(_) => 8,
+                NodeKind::ProcessingInstruction { .. } => 7,
+                NodeKind::DocumentFragment => 11,
+            },
             Kind::Doctype => 10,
             Kind::Element(_) => 1,
             Kind::Text(_) => 3,
@@ -85,7 +98,22 @@ impl Bridge<'_> {
             return Some("DOMImplementation");
         }
         Some(match &self.state.inert_documents.node(object)?.kind {
-            Kind::Document(_) => "Document",
+            Kind::Document(_) | Kind::TemplateDocument { .. } => "Document",
+            Kind::Fragment => "DocumentFragment",
+            Kind::Parsed(source) => {
+                let node = self.doc.nodes.get(*source)?;
+                match &node.kind {
+                    NodeKind::Element { tag, .. } => match node.namespace {
+                        crate::html::Namespace::Html => crate::javascript::ordinary_html_interface(tag).unwrap_or("HTMLElement"),
+                        crate::html::Namespace::Svg => "SVGElement",
+                        _ => "Element",
+                    },
+                    NodeKind::Text(_) => "Text",
+                    NodeKind::Comment(_) => "Comment",
+                    NodeKind::ProcessingInstruction { .. } => "ProcessingInstruction",
+                    NodeKind::DocumentFragment => "DocumentFragment",
+                }
+            }
             Kind::Doctype => "DocumentType",
             Kind::Element(tag) => crate::javascript::ordinary_html_interface(tag).unwrap_or("HTMLElement"),
             Kind::Text(_) => "Text",
@@ -107,17 +135,119 @@ impl Bridge<'_> {
         if self.inert_factory(object, name).is_some() { return true; }
         let Some(node) = self.state.inert_documents.node(object) else { return false; };
         if matches!(name, "ownerDocument" | "parentNode" | "parentElement" | "firstChild" | "lastChild"
-            | "previousSibling" | "nextSibling" | "isConnected" | "nodeValue" | "baseURI")
+            | "previousSibling" | "nextSibling" | "isConnected" | "nodeValue" | "baseURI" | "childNodes")
         {
             return true;
         }
         match node.kind {
-            Kind::Document(_) => matches!(name, "URL" | "documentURI" | "defaultView" | "contentType"
+            Kind::Document(_) | Kind::TemplateDocument { .. } => matches!(name, "URL" | "documentURI" | "defaultView" | "contentType"
                 | "compatMode" | "characterSet" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
             Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "localName" | "tagName" | "namespaceURI" | "prefix"),
+            Kind::Fragment => false,
+            Kind::Parsed(source) => match self.doc.nodes[source].kind {
+                NodeKind::Element { .. } => matches!(name, "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
+                NodeKind::Text(_) | NodeKind::Comment(_) => matches!(name, "data" | "length"),
+                NodeKind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
+                NodeKind::DocumentFragment => false,
+            },
             Kind::Text(_) | Kind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
         }
+    }
+
+    pub(super) fn inert_children(&self, object: u32) -> Option<&[u32]> {
+        self.state.inert_documents.node(object).map(|node| node.children.as_slice())
+    }
+
+    fn parsed_template(&self, node: usize) -> bool {
+        self.doc.nodes.get(node).is_some_and(|entry|
+            entry.namespace == crate::html::Namespace::Html
+                && matches!(&entry.kind, NodeKind::Element { tag, .. } if tag == "template"))
+    }
+
+    fn template_source(&self, object: u32) -> Option<(u32, Option<usize>)> {
+        if let Some(index) = node_index(object) {
+            return (self.dom_accessible(index) && self.parsed_template(index))
+                .then_some((DOCUMENT, Some(index)));
+        }
+        let node = self.state.inert_documents.node(object)?;
+        match &node.kind {
+            Kind::Element(tag) if tag == "template" => Some((node.owner, None)),
+            Kind::Parsed(source) if self.parsed_template(*source) => Some((node.owner, Some(*source))),
+            _ => None,
+        }
+    }
+
+    pub(super) fn template_receiver(&self, object: u32) -> bool {
+        self.template_source(object).is_some()
+    }
+
+    pub(super) fn template_content(&mut self, object: u32) -> Result<Value, String> {
+        let (document, source) = self.template_source(object)
+            .ok_or("Template content requires a genuine HTMLTemplateElement.")?;
+        if let Some(&handle) = self.state.inert_documents.template_contents.get(&object) {
+            self.state.work(1)?;
+            return Ok(Value::Host(handle));
+        }
+        let arena = &self.state.inert_documents;
+        let existing_owner = if matches!(arena.node(document).map(|node| &node.kind), Some(Kind::TemplateDocument { .. })) {
+            Some(document)
+        } else {
+            arena.template_documents.get(&document).copied()
+        };
+        let limit = self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len());
+        let first = FIRST_ENTRY + arena.entries.len() as u32;
+        let owner_overhead = if existing_owner.is_some() { 0 } else { 2 };
+        let owner = existing_owner.unwrap_or(first);
+        let fragment = first + owner_overhead as u32;
+        if limit <= owner_overhead { return Err("Inert DOM identity limit reached during template content read.".into()); }
+
+        // Source nodes stay in the immutable parsed input. The exposed
+        // fragment gets new inert handles and never returns active-tree IDs.
+        let mut pending = vec![(source, None)];
+        let mut staged = Vec::new();
+        let mut payload = 2 * std::mem::size_of::<(u32, u32)>();
+        if existing_owner.is_none() {
+            staged.push(Entry::Node(InertNode {
+                kind: Kind::TemplateDocument { implementation: first + 1 },
+                owner, parent: None, children: Vec::new(),
+            }));
+            staged.push(Entry::Implementation);
+        }
+        let mut index = 0;
+        while let Some(&(source, parent)) = pending.get(index) {
+            let handle = fragment + index as u32;
+            let children = source.filter(|&child| index == 0 || !self.parsed_template(child))
+                .map_or(&[][..], |child| self.doc.nodes[child].children.as_slice());
+            self.state.work(1 + children.len())?;
+            if children.len() > limit - owner_overhead - pending.len() {
+                return Err("Inert DOM identity limit reached during template content read.".into());
+            }
+            pending.try_reserve(children.len()).map_err(|_| "Cannot reserve template traversal.")?;
+            let child_start = fragment + pending.len() as u32;
+            pending.extend(children.iter().map(|&child| (Some(child), Some(handle))));
+            let mut child_handles = Vec::new();
+            child_handles.try_reserve_exact(children.len()).map_err(|_| "Cannot reserve template children.")?;
+            child_handles.extend(child_start..child_start + children.len() as u32);
+            payload = payload.saturating_add(child_handles.capacity().saturating_mul(std::mem::size_of::<u32>()));
+            staged.try_reserve(1).map_err(|_| "Cannot reserve parsed template nodes.")?;
+            staged.push(Entry::Node(InertNode {
+                kind: if index == 0 { Kind::Fragment } else { Kind::Parsed(source.unwrap()) },
+                owner, parent, children: child_handles,
+            }));
+            index += 1;
+        }
+        self.state.inert_documents.template_contents.try_reserve(1).map_err(|_| "Cannot reserve template content identity.")?;
+        if existing_owner.is_none() {
+            self.state.inert_documents.template_documents.try_reserve(1).map_err(|_| "Cannot reserve template document identity.")?;
+        }
+        let committed = self.reserve_inert_entries(staged.len(), payload)?;
+        debug_assert_eq!(committed, first);
+        let arena = &mut self.state.inert_documents;
+        arena.entries.extend(staged);
+        if existing_owner.is_none() { arena.template_documents.insert(document, owner); }
+        arena.template_contents.insert(object, fragment);
+        Ok(Value::Host(fragment))
     }
 
     fn reserve_inert_entries(&mut self, count: usize, payload: usize) -> Result<u32, String> {
@@ -226,18 +356,32 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
+    fn inert_text_value(&self, object: u32) -> Option<&str> {
+        match &self.state.inert_documents.node(object)?.kind {
+            Kind::Text(value) => Some(value),
+            Kind::Parsed(source) => match &self.doc.nodes.get(*source)?.kind {
+                NodeKind::Text(value) => Some(value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     fn inert_text_content(&mut self, object: u32) -> Result<Value, String> {
         let mut pending = vec![object];
         let mut text = String::new();
         while let Some(id) = pending.pop() {
             self.state.work(1)?;
             let node = self.state.inert_documents.node(id).ok_or("Unknown inert Node.")?;
-            if let Kind::Text(value) = &node.kind {
+            if let Some(value) = self.inert_text_value(id) {
                 let bytes = value.len();
+                if text.len().saturating_add(bytes) > self.state.limits.host.string_bytes {
+                    return Err("Inert DOM textContent exceeds the host string limit.".into());
+                }
                 self.state.copies(bytes)?;
-                let Kind::Text(value) = &self.state.inert_documents.node(id).unwrap().kind else { unreachable!() };
-                text.push_str(value);
+                text.push_str(self.inert_text_value(id).unwrap());
             } else {
+                pending.try_reserve(node.children.len()).map_err(|_| "Cannot reserve inert text traversal.")?;
                 pending.extend(node.children.iter().rev().copied());
             }
         }
@@ -247,7 +391,42 @@ impl Bridge<'_> {
     pub(super) fn inert_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
         if self.inert_implementation(object) { return Ok(Value::Undefined); }
+        if property == "childNodes" { return self.create_inert_child_list(object); }
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
+        if let Kind::Parsed(source) = node.kind {
+            let parsed = &self.doc.nodes[source];
+            if let Some(data) = parsed.kind.character_data() {
+                match property {
+                    "data" | "nodeValue" | "textContent" => {
+                        self.state.copies(data.len())?;
+                        return Ok(Value::String(data.into()));
+                    }
+                    "length" => {
+                        self.state.work(data.len())?;
+                        return Ok(Value::Number(data.encode_utf16().count() as f64));
+                    }
+                    _ => {}
+                }
+            }
+            if let NodeKind::Element { tag, id, .. } = &parsed.kind {
+                match property {
+                    "localName" | "nodeName" | "tagName" => {
+                        self.state.copies(tag.len())?;
+                        return Ok(Value::String(if property != "localName" && parsed.namespace == crate::html::Namespace::Html {
+                            tag.to_ascii_uppercase()
+                        } else { tag.clone() }));
+                    }
+                    "namespaceURI" => return Ok(parsed.namespace.element_uri()
+                        .map_or(Value::Null, |ns| Value::String(ns.into()))),
+                    "id" => {
+                        let id = id.as_deref().unwrap_or_default();
+                        self.state.copies(id.len())?;
+                        return Ok(Value::String(id.into()));
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Kind::ProcessingInstruction { target, data } = &node.kind {
             match property {
                 "target" | "nodeName" | "data" | "nodeValue" | "textContent" => {
@@ -269,6 +448,11 @@ impl Bridge<'_> {
         let host = |id: Option<u32>| id.map_or(Value::Null, Value::Host);
         let string = |value: &str| Value::String(value.into());
         let document = match &node.kind { Kind::Document(nodes) => Some(nodes), _ => None };
+        let template_implementation = match node.kind {
+            Kind::TemplateDocument { implementation } => Some(implementation),
+            _ => None,
+        };
+        let html_document = document.is_some() || template_implementation.is_some();
         Ok(match property {
             "nodeType" => Value::Number(f64::from(self.inert_node_type(object).unwrap())),
             "ownerDocument" => host((node.owner != object).then_some(node.owner)),
@@ -291,13 +475,21 @@ impl Bridge<'_> {
                 Value::Bool(id == node.owner)
             }
             "nodeName" => match &node.kind {
-                Kind::Document(_) => string("#document"),
+                Kind::Document(_) | Kind::TemplateDocument { .. } => string("#document"),
+                Kind::Fragment => string("#document-fragment"),
+                Kind::Parsed(source) => match &self.doc.nodes[*source].kind {
+                    NodeKind::Element { tag, .. } => string(tag),
+                    NodeKind::Text(_) => string("#text"),
+                    NodeKind::Comment(_) => string("#comment"),
+                    NodeKind::ProcessingInstruction { target, .. } => string(target),
+                    NodeKind::DocumentFragment => string("#document-fragment"),
+                },
                 Kind::Doctype => string("html"),
                 Kind::Element(name) => Value::String(name.to_ascii_uppercase()),
                 Kind::Text(_) => string("#text"),
                 Kind::ProcessingInstruction { .. } => unreachable!("processing instruction name was handled above"),
             },
-            "textContent" if matches!(node.kind, Kind::Element(_) | Kind::Text(_)) => return self.inert_text_content(object),
+            "textContent" if matches!(node.kind, Kind::Fragment | Kind::Parsed(_) | Kind::Element(_) | Kind::Text(_)) => return self.inert_text_content(object),
             "data" | "nodeValue" if matches!(node.kind, Kind::Text(_)) => return self.inert_text_content(object),
             "textContent" | "nodeValue" => Value::Null,
             "length" if matches!(node.kind, Kind::Text(_)) => {
@@ -311,17 +503,18 @@ impl Bridge<'_> {
             "head" => host(document.map(|doc| doc.head)),
             "body" => host(document.map(|doc| doc.body)),
             "doctype" => host(document.map(|doc| doc.doctype)),
-            "implementation" => host(document.map(|doc| doc.implementation)),
+            "implementation" => host(document.map(|doc| doc.implementation).or(template_implementation)),
+            "title" if template_implementation.is_some() => string(""),
             "title" if document.is_some() => {
                 self.state.copies(document.unwrap().title.len())?;
                 let Kind::Document(document) = &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
                 string(&document.title)
             }
-            "URL" | "documentURI" if document.is_some() => string("about:blank"),
-            "contentType" if document.is_some() => string("text/html"),
-            "compatMode" if document.is_some() => string("CSS1Compat"),
-            "characterSet" if document.is_some() => string("UTF-8"),
-            "defaultView" if document.is_some() => Value::Null,
+            "URL" | "documentURI" if html_document => string("about:blank"),
+            "contentType" if html_document => string("text/html"),
+            "compatMode" if html_document => string("CSS1Compat"),
+            "characterSet" if html_document => string("UTF-8"),
+            "defaultView" if html_document => Value::Null,
             "name" if matches!(node.kind, Kind::Doctype) => string("html"),
             "publicId" | "systemId" if matches!(node.kind, Kind::Doctype) => string(""),
             "localName" if matches!(node.kind, Kind::Element(_)) => {

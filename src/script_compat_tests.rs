@@ -756,6 +756,75 @@ fn unsupported_element_lookup_reports_native_receiver_provenance() {
 }
 
 #[test]
+fn html_template_content_preserves_inert_identity_tree_and_ownership() {
+    let mut doc = crate::html::parse(concat!(
+        "<html><head></head><body>",
+        "<template id=outer><strong id=hidden>Hidden</strong><template id=nested><em>Deep</em></template></template>",
+        "<template id=second>More</template><p id=visible>Visible</p></body></html>"
+    ));
+    doc.scripting_enabled = true;
+    let mut page = Page::for_test();
+    let mut forms = Forms::new(&doc);
+    let result = page.start(&mut doc, &mut forms, &[Script { node: 0, label: "Original HTML template fixture".into(), source: r#"
+var T = HTMLTemplateElement, P = T.prototype, getter = Object.getOwnPropertyDescriptor(P,'content').get;
+var outer = document.getElementById('outer'), second = document.getElementById('second');
+var f = getter.call(outer), owner = f.ownerDocument, child = f.firstChild, nested = f.lastChild;
+if (outer !== document.querySelector('template') || !(outer instanceof T) ||
+    Object.getPrototypeOf(outer) !== P || Object.getPrototypeOf(P) !== HTMLElement.prototype ||
+    outer.content !== f || Object.hasOwn(outer,'content')) throw 'HTMLTemplateElement interface';
+if (!(f instanceof DocumentFragment) || f.nodeType !== 11 || f.nodeName !== '#document-fragment' ||
+    f.parentNode !== null || f.isConnected || owner === document || !(owner instanceof Document) ||
+    owner.defaultView !== null || owner.documentElement !== null || owner.ownerDocument !== null ||
+    second.content.ownerDocument !== owner) throw 'separate shared inert owner';
+if (outer.firstChild !== null || outer.lastChild !== null || outer.childNodes.length !== 0 ||
+    outer.textContent !== '' || document.getElementById('hidden') !== null ||
+    document.querySelector('#nested') !== null || document.getElementById('visible').textContent !== 'Visible')
+    throw 'ordinary DOM excludes template-only children';
+if (!(f.childNodes instanceof NodeList) || f.childNodes !== f.childNodes || f.childNodes.length !== 2 ||
+    f.childNodes.item(0) !== child || f.childNodes[1] !== nested || child.parentNode !== f ||
+    child.nextSibling !== nested || nested.previousSibling !== child || child.id !== 'hidden' ||
+    child.ownerDocument !== owner || child.firstChild.nodeType !== 3 || child.textContent !== 'Hidden' ||
+    f.textContent !== 'Hidden') throw 'genuine ordered fragment content';
+if (!(nested instanceof T) || nested.firstChild !== null || nested.childNodes.length !== 0 ||
+    nested.content.ownerDocument !== owner || nested.content.firstChild.localName !== 'em' ||
+    nested.content.textContent !== 'Deep') throw 'nested template content boundary';
+var fresh = document.createElement('template'), pending = document.createElement('template');
+var separate = document.implementation.createHTMLDocument('separate');
+var foreignCreated = separate.createElement('template');
+if (!(fresh instanceof T) || fresh.content === f || fresh.content.childNodes.length !== 0 ||
+    fresh.content.ownerDocument !== owner || !(foreignCreated instanceof T) ||
+    foreignCreated.content.ownerDocument === owner || foreignCreated.content.ownerDocument === separate ||
+    foreignCreated.content.ownerDocument.defaultView !== null) throw 'actual document-specific owner';
+var rejected = 0;
+try { new T(); } catch (e) { if (e instanceof TypeError) rejected++; else throw e; }
+try { getter.call(document.body); } catch (e) { if (e instanceof TypeError) rejected++; else throw e; }
+if (rejected !== 2) throw 'receiver and constructor checks';
+document.title = 'verified-native-template-content';
+"#.into() }]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-native-template-content");
+    assert!(!page.has_host_tasks());
+    let commits = page.state.dom_commits;
+    let refused = page.console_eval(&mut doc, &mut forms, "document.body.appendChild(f);");
+    assert_eq!(refused.errors, 1);
+    assert_eq!(page.state.dom_commits, commits);
+    let verified = page.console_eval(&mut doc, &mut forms,
+        "if (f.firstChild !== child || child.parentNode !== f || child.isConnected || document.getElementById('hidden') !== null) throw 'inert ownership changed';");
+    assert_eq!(verified.errors, 0, "{}", page.report());
+    let limit = page.state.limits.host.extra_nodes;
+    let retained = page.state.retained;
+    page.state.limits.host.extra_nodes = 0;
+    let refused = page.console_eval(&mut doc, &mut forms, "pending.content;");
+    assert_eq!(refused.errors, 1);
+    assert!(page.report().contains("Inert DOM identity limit reached"));
+    assert_eq!(page.state.retained, retained);
+    page.state.limits.host.extra_nodes = limit;
+    let verified = page.console_eval(&mut doc, &mut forms,
+        "if (pending.content.ownerDocument !== owner || pending.content === f || outer.content !== f) throw 'atomic retry';");
+    assert_eq!(verified.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn create_html_document_builds_an_independent_inert_native_tree() {
     let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
 var impl=document.implementation;
@@ -3094,7 +3163,9 @@ if(root.removeChild(box)!==box||box.isConnected||text.isConnected||box.parentNod
 root.insertBefore(box,null);if(!box.isConnected||root.lastChild!==box||root.querySelector('#new')!==box)throw 'reinsert';
 box.removeChild(text);if(text.parentNode!==null||text.data!=='new'||text.isConnected)throw 'text removal';
 text.nodeValue=null;if(text.data!==''||box.textContent!=='Z')throw 'text null';
-if(document.getElementById('hidden')!==null||document.querySelectorAll('template,p').length!==0)throw 'inert lookup';
+var templates=document.querySelectorAll('template,p');
+if(document.getElementById('hidden')!==null||templates.length!==1||templates[0].localName!=='template'||
+   templates[0].content.firstChild.id!=='hidden')throw 'inert lookup and template host identity';
 document.title='DOM tree passed';
 "#],
     );

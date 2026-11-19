@@ -32,6 +32,7 @@ pub(super) struct DomState {
     pub(super) pending_focus: Option<usize>,
     pub(super) collections: Vec<dom_collections::TagCollection>,
     pub(super) child_lists: HashMap<usize, u32>,
+    pub(super) inert_child_lists: HashMap<u32, u32>,
     pub(super) fragment_scripts: HashSet<usize>,
     force_async: HashSet<usize>,
 }
@@ -41,10 +42,9 @@ pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
         || name == "noscript" && scripting
 }
 
-// Script and HTML iframe elements have an identity in the embedding document
-// even when their contents are excluded from ordinary element queries.
+// Keep the host element visible to queries while excluding its inert children.
 pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) -> bool {
-    name == "script" || name == "iframe" && namespace == crate::html::Namespace::Html
+    name == "script" || matches!(name, "iframe" | "template") && namespace == crate::html::Namespace::Html
 }
 
 fn common_node_property(name: &str) -> bool {

@@ -4,7 +4,7 @@
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET,
-    PROCESSING_INSTRUCTION_TARGET_GET};
+    HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -324,6 +324,9 @@ impl Runtime {
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
             )?;
+            if name == "HTMLTemplateElement" {
+                self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
+            }
             if name == "HTMLInputElement" {
                 for (key, getter, setter) in [
                     ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),

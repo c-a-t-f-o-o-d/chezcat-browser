@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, PROCESSING_INSTRUCTION_TARGET_GET,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
@@ -2594,6 +2594,7 @@ impl Bridge<'_> {
             || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "textContent" && self.text_content_receiver(object)
             || property == "target" && self.processing_instruction_receiver(object)
+            || property == "content" && self.template_receiver(object)
             || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
@@ -2825,6 +2826,7 @@ impl Host for Bridge<'_> {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
             || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "textContent" && self.text_content_receiver(object)
+            || property == "content" && self.template_receiver(object)
             || self.content_editable_attribute(object, property)
             || self.html_offset_attribute(object, property)
             || script_element_properties::ordinary_interface_member(property)
@@ -3056,7 +3058,7 @@ impl Host for Bridge<'_> {
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if self.event_target_interface(object)
             && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION
-                | PROCESSING_INSTRUCTION_TARGET_GET | "ProcessingInstruction"
+                | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
                 | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
             return Some(object);
@@ -3593,6 +3595,7 @@ impl Host for Bridge<'_> {
             if method == PROCESSING_INSTRUCTION_TARGET_GET {
                 return self.processing_instruction_receiver(receiver);
             }
+            if method == HTML_TEMPLATE_CONTENT_GET { return self.template_receiver(receiver); }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
@@ -4997,6 +5000,7 @@ impl Host for Bridge<'_> {
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
         if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
+        if method == HTML_TEMPLATE_CONTENT_GET { return self.template_content(object); }
         if method == CREATE_PROCESSING_INSTRUCTION {
             return self.create_processing_instruction(object, args);
         }
