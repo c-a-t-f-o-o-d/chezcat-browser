@@ -32,6 +32,44 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_logical_right_operands_keep_short_circuit_values_and_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, token={}, result=0, same=false;
+var gate=new Promise(function(resolve){release=resolve;});
+function mark(value,label){trace+=label+'|';return value;}
+function never(){throw 'skipped operand ran';}
+function invoke(value){trace+='call:'+value+'|';return value;}
+async function run(){
+    try {
+        mark(false,'skip-and') && absent(await never()),
+        mark(true,'take-and') && invoke(await gate);
+        let object=mark(token,'skip-or') || absent(await never()),
+            zero=mark(0,'skip-nullish') ?? absent(await never()),
+            value=mark(0,'take-or') || invoke(await Promise.resolve(2));
+        if(object!==token||zero!==0)throw 'left value';
+        return mark(null,'take-nullish') ?? await Promise.resolve(value+1);
+    } finally { trace+='finally|'; }
+}
+async function preserved(){return token || invoke(await never());}
+run().then(function(value){result=value;});
+preserved().then(function(value){same=value===token;});
+if(trace!=='skip-and|take-and|'||result||same)throw 'synchronous prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(!same||result||trace!=='skip-and|take-and|')throw 'short-circuit branch suspended';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);if(result)throw 'synchronous resolution';'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(result!==3||trace!=='skip-and|take-and|call:4|skip-or|skip-nullish|take-or|call:2|take-nullish|finally|')
+    throw 'logical evaluation order or value';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_declarators_initialize_in_order_and_leave_later_bindings_in_tdz() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

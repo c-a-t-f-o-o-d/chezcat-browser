@@ -7585,10 +7585,7 @@ impl Runtime {
         match &program.exprs[id].kind {
             ExprKind::Binary(op, left, right) => {
                 let left = self.eval(program, *left, env, this, host)?;
-                if (*op == "&&" && !left.truthy())
-                    || (*op == "||" && left.truthy())
-                    || (*op == "??" && !matches!(left, Value::Null | Value::Undefined))
-                {
+                if logical_short_circuits(op, &left) {
                     return Ok(left);
                 }
                 let right = self.eval(program, *right, env, this, host)?;
@@ -9864,6 +9861,15 @@ fn bounded_index(value: f64, length: usize) -> usize {
         0
     } else {
         (value.trunc() as usize).min(length)
+    }
+}
+
+fn logical_short_circuits(operator: &str, left: &Value) -> bool {
+    match operator {
+        "&&" => !left.truthy(),
+        "||" => left.truthy(),
+        "??" => !matches!(left, Value::Null | Value::Undefined),
+        _ => false,
     }
 }
 
