@@ -84,7 +84,10 @@ fn select_fragment_nonconventional_recovery_resources_and_existing_bounds_still_
     }
     assert!(parse_fragment(&format!("<select>{}</select>", "<option>x".repeat(MAX_NODES)), "div", true).is_err());
     assert!(parse_fragment(&format!("{}<select><option>x", "<div>".repeat(MAX_DEPTH - 2)), "div", true).is_err());
-    for context in ["table", "tr", "template", "svg"] {
+    let template = parse_fragment("<select><option>x</option></select>", "template", true).unwrap();
+    assert_eq!(template.nodes[0].children.len(), 1);
+    assert_eq!(node_tag(&template, template.nodes[0].children[0]), "select");
+    for context in ["table", "tr", "svg"] {
         assert!(parse_fragment("<select><option>x</option></select>", context, true).is_err());
     }
 }
