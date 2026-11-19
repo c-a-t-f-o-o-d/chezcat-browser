@@ -79,5 +79,6 @@ fn inline_easing_app_trusted_reflection_keeps_pixels_and_edited_native_state() {
     assert_eq!((control.value.text(), control.value.cursor, control.value.anchor, control.value.offset, control.dirty_value, control.owner), kept);
     assert_eq!(app.forms.text_default_value(neighbor).unwrap(), "seed");
     assert_eq!(app.document.attr(neighbor, "value"), Some("seed"));
-    assert_eq!(app.location.path.as_ref(), Some(&path));
+    let current = app.location.path.as_ref().expect("local fixture is still open");
+    assert_eq!(current.canonicalize().unwrap(), path.canonicalize().unwrap());
 }
