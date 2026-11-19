@@ -210,14 +210,6 @@ impl<'a> CssBudget<'a> {
         self.work(bytes.max(1).div_ceil(64).saturating_mul(512))?;
         self.copies(bytes.saturating_mul(64))
     }
-    pub(super) fn document(
-        &mut self,
-        doc: &Document,
-        external: &HashMap<usize, String>,
-    ) -> Result<(), String> {
-        self.document_structure(doc)?;
-        self.document_sources(doc, external)
-    }
     pub(super) fn document_structure(&mut self, doc: &Document) -> Result<(), String> {
         self.work(doc.nodes.len().saturating_mul(12))?;
         self.copies(doc.nodes.len().saturating_mul(
@@ -240,27 +232,6 @@ impl<'a> CssBudget<'a> {
                     )?;
                 }
             }
-        }
-        Ok(())
-    }
-    pub(super) fn document_sources(&mut self, doc: &Document, external: &HashMap<usize, String>) -> Result<(), String> {
-        for node in &doc.nodes {
-            if let NodeKind::Element { tag, .. } = &node.kind {
-                if tag == "style" {
-                    for &child in &node.children {
-                        if let Some(crate::html::Node {
-                            kind: NodeKind::Text(text),
-                            ..
-                        }) = doc.nodes.get(child)
-                        {
-                            self.source(text.len())?;
-                        }
-                    }
-                }
-            }
-        }
-        for source in external.values() {
-            self.source(source.len())?;
         }
         Ok(())
     }

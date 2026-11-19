@@ -863,8 +863,7 @@ fn compute_cascade(
     retain_sheets: bool,
 ) -> Result<CascadeOutput, String> {
     if let Some(meter) = meter.as_deref_mut() {
-        if previous_sheets.is_some() {meter.document_structure(doc)?;}
-        else {meter.document(doc, external)?;}
+        meter.document_structure(doc)?;
     }
     let mut parents = vec![None; doc.nodes.len()];
     let mut previous_elements = vec![None; doc.nodes.len()];
