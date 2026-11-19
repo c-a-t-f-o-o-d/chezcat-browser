@@ -4,7 +4,7 @@
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
-    NODE_CHILD_NODES_GET, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET,
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
     HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
@@ -144,7 +144,9 @@ impl Runtime {
                             self.store_property(object,key.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;
                         }
                     }
-                    self.define_readonly_node_getter(prototype, window, "childNodes", NODE_CHILD_NODES_GET)?;
+                    for (property, operation) in NODE_TRAVERSAL_GETTERS {
+                        self.define_readonly_node_getter(prototype, window, property, operation)?;
+                    }
                     self.define_node_attribute(prototype, window, "textContent",
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }

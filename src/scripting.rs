@@ -16,7 +16,7 @@ use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
     HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
-    NODE_CHILD_NODES_GET, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -2592,8 +2592,14 @@ impl Bridge<'_> {
     }
 }
 
+fn node_traversal_property(operation: &str) -> Option<&'static str> {
+    operation.strip_prefix("\0Node.get.")?;
+    NODE_TRAVERSAL_GETTERS.iter()
+        .find_map(|&(property, getter)| (operation == getter).then_some(property))
+}
+
 impl Bridge<'_> {
-    fn child_nodes_receiver(&self, object: u32) -> bool {
+    fn node_traversal_receiver(&self, object: u32) -> bool {
         object == DOCUMENT || node_index(object).is_some_and(|node| self.dom_accessible(node))
             || self.inert_children(object).is_some()
     }
@@ -2603,7 +2609,8 @@ impl Bridge<'_> {
         property == "style" && self.element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
-            || property == "childNodes" && self.child_nodes_receiver(object)
+            || NODE_TRAVERSAL_GETTERS.iter().any(|&(name, _)| property == name)
+                && self.node_traversal_receiver(object)
             || property == "target" && self.processing_instruction_receiver(object)
             || property == "content" && self.template_receiver(object)
             || self.content_editable_member(object, property)
@@ -3120,7 +3127,11 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
-        if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName"|NODE_CHILD_NODES_GET|NODE_TEXT_CONTENT_GET|NODE_TEXT_CONTENT_SET) {return Some(object);}
+        if self.event_target_interface(object) && (node_traversal_property(method).is_some()
+            || matches!(method, "\0Node.get.nodeType" | "\0Node.get.nodeName" | NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET))
+        {
+            return Some(object);
+        }
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
@@ -3696,8 +3707,8 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
         }
-        if self.event_target_interface(object) && method == NODE_CHILD_NODES_GET {
-            return self.child_nodes_receiver(receiver);
+        if self.event_target_interface(object) && node_traversal_property(method).is_some() {
+            return self.node_traversal_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
             return self.text_content_receiver(receiver);
@@ -5069,8 +5080,8 @@ impl Host for Bridge<'_> {
         if method == ELEMENT_INNER_HTML_GET {
             return self.get(object, "innerHTML");
         }
-        if method == NODE_CHILD_NODES_GET {
-            return self.get(object, "childNodes");
+        if let Some(property) = node_traversal_property(method) {
+            return self.get(object, property);
         }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
