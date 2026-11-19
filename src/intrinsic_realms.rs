@@ -639,13 +639,15 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
     #[test]
     fn realm_bootstrap_reuses_agent_symbols_and_preserves_parent_jobs() {
         let mut runtime = Runtime::for_capacity_test();
-        let ids = (runtime.symbol_dispose, runtime.symbol_to_primitive, runtime.symbol_iterator, runtime.symbol_species);
+        let ids = (runtime.symbol_dispose, runtime.symbol_to_primitive, runtime.symbol_iterator,
+            runtime.symbol_async_iterator, runtime.symbol_species);
         let symbols = runtime.symbols.len();
         let promise_roots = (runtime.promises.prototype, runtime.promises.constructor);
         runtime.execute("var realmJob=0;Promise.resolve().then(function(){realmJob=42;});", &mut NoHost).unwrap();
         assert!(runtime.has_microtasks());
         runtime.allocate_intrinsic_realm().unwrap();
-        assert_eq!((runtime.symbol_dispose, runtime.symbol_to_primitive, runtime.symbol_iterator, runtime.symbol_species), ids);
+        assert_eq!((runtime.symbol_dispose, runtime.symbol_to_primitive, runtime.symbol_iterator,
+            runtime.symbol_async_iterator, runtime.symbol_species), ids);
         assert_eq!(runtime.symbols.len(), symbols);
         assert_eq!((runtime.promises.prototype, runtime.promises.constructor), promise_roots);
         assert!(runtime.has_microtasks());

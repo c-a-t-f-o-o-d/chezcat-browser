@@ -369,6 +369,12 @@ mod tests {
             r#"
 var k=Symbol.iterator,d=Object.getOwnPropertyDescriptor(Symbol,'iterator');
 if(typeof k!=='symbol'||k.description!=='Symbol.iterator'||d.writable||d.enumerable||d.configurable)throw 'key descriptor';
+var asyncKey=Symbol.asyncIterator,asyncDescriptor=Object.getOwnPropertyDescriptor(Symbol,'asyncIterator');
+if(typeof asyncKey!=='symbol'||asyncKey===k||asyncKey.description!=='Symbol.asyncIterator'||
+   asyncDescriptor.value!==asyncKey||asyncDescriptor.writable||asyncDescriptor.enumerable||asyncDescriptor.configurable||
+   Symbol.keyFor(asyncKey)!==undefined)throw 'async iterator key descriptor';
+var asyncSource={[asyncKey]:function(){return this;}};
+if(asyncSource[asyncKey]()!==asyncSource||asyncSource[k]!==undefined)throw 'separate iterator protocols';
 if(Array.prototype[k]!==Array.prototype.values||Map.prototype[k]!==Map.prototype.entries||Set.prototype[k]!==Set.prototype.values||Set.prototype.keys!==Set.prototype.values)throw 'native aliases';
 if(Uint8Array.prototype[k]!==Uint8Array.prototype.values||Array.prototype[k].name!=='values'||Array.prototype[k].length!==0)throw 'array metadata';
 var it=[2].values(),proto=Object.getPrototypeOf(Object.getPrototypeOf(it));
