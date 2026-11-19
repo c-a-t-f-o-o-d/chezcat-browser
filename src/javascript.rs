@@ -426,10 +426,22 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
 /// Exact ordinary interfaces for supported HTML nodes, including elements
 /// whose immediate interface is HTMLElement itself.
 pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
-    if tag == "main" {
+    if tag == "main" || valid_custom_element_name(tag) {
         return Some("HTMLElement");
     }
     ORDINARY_HTML_SUBCLASSES.iter().find(|(local, _)| *local == tag).map(|&(_, name)| name)
+}
+
+/// HTML's valid custom element name uses the DOM local-name rule for a name
+/// starting with an ASCII letter. The HTML parser and factories independently
+/// bound which names can enter a document.
+/// https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name
+pub(crate) fn valid_custom_element_name(name: &str) -> bool {
+    name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && name.contains('-')
+        && !name.bytes().any(|b| matches!(b, b'A'..=b'Z' | 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ' | b'/' | b'>'))
+        && !matches!(name, "annotation-xml" | "color-profile" | "font-face" | "font-face-src"
+            | "font-face-uri" | "font-face-format" | "font-face-name" | "missing-glyph")
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
