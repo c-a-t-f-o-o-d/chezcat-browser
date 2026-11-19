@@ -32,6 +32,40 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_nested_logical_values_choose_only_the_required_operands() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', releaseYes, releaseZero, token={}, yesResult, zeroResult, skipResult, mixedResult, kept;
+var yes=new Promise(function(resolve){releaseYes=resolve;});
+var zero=new Promise(function(resolve){releaseZero=resolve;});
+function mark(label,value){trace+=label+'|';return value;}
+function receive(pair){return mark('received:'+pair[0],pair[1]);}
+async function choose(flag,gate,label){
+    return mark('check:'+label,flag) && receive(await gate) &&
+        mark('later:'+label,true) && mark('last:'+label,token);
+}
+async function mixed(){
+    return ((await Promise.resolve(null)) ?? ((await Promise.resolve(false)) && mark('wrong',token)))
+        || 'fallback';
+}
+async function preserve(){return (await Promise.resolve(0)) ?? mark('wrong nullish',token);}
+choose(false,yes,'skip').then(value=>skipResult=value);
+choose(true,yes,'yes').then(value=>yesResult=value);
+choose(true,zero,'zero').then(value=>zeroResult=value);
+mixed().then(value=>mixedResult=value);
+preserve().then(value=>kept=value);
+if(trace!=='check:skip|check:yes|check:zero|')throw 'logical prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(skipResult!==false||mixedResult!=='fallback'||kept!==0||yesResult!==undefined||zeroResult!==undefined)throw 'skipped or mixed branch';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "releaseZero(['zero',0]);releaseYes(['yes',true]);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='check:skip|check:yes|check:zero|received:zero|received:yes|later:yes|last:yes|'||zeroResult!==0||yesResult!==token)throw 'logical result or suffix order';'ok';");
+}
+
+#[test]
 fn await_execution_member_call_retains_receiver_and_getter_result_before_nested_await() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"

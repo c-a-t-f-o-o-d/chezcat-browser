@@ -8,6 +8,7 @@ pub(super) enum Resume {
     Return,
     Initialize { kind: Declaration, pattern: binding_patterns::Id },
     BranchFalse(usize),
+    StoreLogicalInput,
 }
 
 #[derive(Clone, Copy)]
@@ -21,7 +22,7 @@ pub(super) enum Instruction {
     Jump(usize),
     PushTry { statement: StmtId, after: usize },
     FinishTry,
-    GuardAwait { statement: StmtId, left: ExprId, operator: &'static str, action: Resume },
+    Logical { statement: StmtId, operator: &'static str, target: usize, action: Resume },
     Await {
         statement: StmtId,
         operand: ExprId,
@@ -56,19 +57,12 @@ struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
     method: Option<ExprId>,
-    guard: Option<(ExprId, &'static str)>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     assignment: Option<ExprId>,
 }
 
 fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> {
-    let (expression, guard) = match program.exprs[expression].kind {
-        ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right) => {
-            (right, Some((left, operator)))
-        }
-        _ => (expression, None),
-    };
     let (expression, assignment) = match program.exprs[expression].kind {
         ExprKind::Assign("=", left, right) if matches!(program.exprs[left].kind, ExprKind::Name(_)) => {
             (right, Some(left))
@@ -98,34 +92,57 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         _ => (expression, None),
     };
     let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some(AwaitSite { operand, callee, method, guard, member_key, chain, assignment })
+    Some(AwaitSite { operand, callee, method, member_key, chain, assignment })
 }
 
-fn visit_sequence(
+enum ExpressionPart {
+    Value(ExprId, Resume),
+    LogicalTest(&'static str, Resume),
+    LogicalEnd,
+}
+
+fn visit_expression(
     program: &Program,
-    mut expression: ExprId,
-    mut visit: impl FnMut(ExprId, bool) -> Result<(), Fault>,
+    expression: ExprId,
+    action: Resume,
+    mut visit: impl FnMut(ExpressionPart) -> Result<(), Fault>,
 ) -> Result<(), Fault> {
     let mut pending = Vec::new();
+    let mut part = ExpressionPart::Value(expression, action);
     loop {
-        if let ExprKind::Sequence(left, right) = program.exprs[expression].kind {
-            push(&mut pending, right)?;
-            expression = left;
-        } else {
-            visit(expression, pending.is_empty())?;
-            let Some(next) = pending.pop() else { return Ok(()) };
-            expression = next;
+        if let ExpressionPart::Value(expression, action) = part {
+            match program.exprs[expression].kind {
+                ExprKind::Sequence(left, right) => {
+                    push(&mut pending, ExpressionPart::Value(right, action))?;
+                    part = ExpressionPart::Value(left, Resume::Discard);
+                    continue;
+                }
+                ExprKind::Binary(operator @ ("&&" | "||" | "??"), left, right) => {
+                    push(&mut pending, ExpressionPart::LogicalEnd)?;
+                    push(&mut pending, ExpressionPart::Value(right, action))?;
+                    push(&mut pending, ExpressionPart::LogicalTest(operator, action))?;
+                    part = ExpressionPart::Value(left, Resume::StoreLogicalInput);
+                    continue;
+                }
+                _ => {}
+            }
         }
+        visit(part)?;
+        let Some(next) = pending.pop() else { return Ok(()) };
+        part = next;
     }
 }
 
 fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usize), Fault> {
     let (mut instructions, mut sites) = (0, 0);
-    visit_sequence(program, expression, |expression, _| {
-        instructions += 1;
-        if let Some(site) = await_expression(program, expression) {
-            instructions += usize::from(site.guard.is_some());
-            sites += 1;
+    visit_expression(program, expression, Resume::Discard, |part| {
+        match part {
+            ExpressionPart::Value(expression, _) => {
+                instructions += 1;
+                sites += usize::from(await_expression(program, expression).is_some());
+            }
+            ExpressionPart::LogicalTest(_, _) => instructions += 1,
+            ExpressionPart::LogicalEnd => {}
         }
         Ok(())
     })?;
@@ -153,18 +170,29 @@ fn emit_expression(
     program: &Program, id: StmtId, expression: ExprId, action: Resume,
     code: &mut Vec<Instruction>,
 ) -> Result<(), Fault> {
-    visit_sequence(program, expression, |expression, last| {
-        let action = if last { action } else { Resume::Discard };
-        let instruction = if let Some(AwaitSite { operand, callee, method, guard, member_key, chain, assignment }) =
-            await_expression(program, expression)
-        {
-            if let Some((left, operator)) = guard {
-                // A successful short circuit skips this site's next instruction.
-                push(code, Instruction::GuardAwait { statement: id, left, operator, action })?;
+    let mut logical_tests = Vec::new();
+    visit_expression(program, expression, action, |part| {
+        let instruction = match part {
+            ExpressionPart::Value(expression, action) => {
+                if let Some(AwaitSite { operand, callee, method, member_key, chain, assignment }) =
+                    await_expression(program, expression)
+                {
+                    Instruction::Await { statement: id, operand, callee, method, member_key, chain, assignment, action }
+                } else {
+                    Instruction::Evaluate { statement: id, expression, action }
+                }
             }
-            Instruction::Await { statement: id, operand, callee, method, member_key, chain, assignment, action }
-        } else {
-            Instruction::Evaluate { statement: id, expression, action }
+            ExpressionPart::LogicalTest(operator, action) => {
+                push(&mut logical_tests, code.len())?;
+                Instruction::Logical { statement: id, operator, target: 0, action }
+            }
+            ExpressionPart::LogicalEnd => {
+                let test = logical_tests.pop().expect("logical expression must have a test");
+                let end = code.len();
+                let Instruction::Logical { target, .. } = &mut code[test] else { unreachable!() };
+                *target = end;
+                return Ok(());
+            }
         };
         push(code, instruction)
     })
@@ -290,7 +318,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
         match instruction {
             Instruction::BranchFalse { target, .. }
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
-            | Instruction::GuardAwait { action: Resume::BranchFalse(target), .. }
+            | Instruction::Logical { action: Resume::BranchFalse(target), .. }
             | Instruction::Evaluate { action: Resume::BranchFalse(target), .. } => {
                 *target = destination;
             }
@@ -310,8 +338,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
     code.try_reserve_exact(instructions).map_err(|_| storage_error())?;
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() { push(&mut pending, Emit::Statement(id))?; }
-    // Container statements emit bounded control instructions. A split comma
-    // expression emits one instruction per leaf, within the same AST limit.
+    // Container statements emit bounded control instructions. Split expressions
+    // emit one instruction per leaf and logical test, within the same AST limit.
     while let Some(task) = pending.pop() {
         let id = match task {
             Emit::Statement(id) => id,
@@ -433,7 +461,7 @@ mod tests {
             "return (await p)?.method(await p);",
             "return use(...await p);",
             "return (use(), 1 + await p);",
-            "return (await p) && use(await p);",
+            "return (1+await p) && use(await p);",
             "if(1+await p){}",
             "return await p + 1;",
             "let a=await p,b=1+await p;",
@@ -472,9 +500,10 @@ mod tests {
             ("async function f(p){if(p){await p;}}", 4),
             ("async function f(p){return (before(), await p, after());}", 3),
             ("async function f(p){let a,b=await p,c=4;}", 3),
-            ("async function f(p){return yes() && use(await p);}", 2),
-            ("async function f(p){return yes() && use(await p).ready;}", 2),
-            ("async function f(p){if(yes() && use(await p).ready){noop();}}", 3),
+            ("async function f(p){return yes() && use(await p);}", 3),
+            ("async function f(p){return yes() && use(await p).ready;}", 3),
+            ("async function f(p){if(yes() && use(await p).ready){noop();}}", 4),
+            ("async function f(p){return yes() && use(await p) && after();}", 5),
             ("async function f(p){let value; value=use(await p);}", 2),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),
         ] {
