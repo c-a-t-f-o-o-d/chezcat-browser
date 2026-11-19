@@ -654,10 +654,14 @@ impl Runtime {
                 (State::Argument(call), value)
             }
             ResumedExpression::PlainArgument(prepared, value) => {
-                let (_, arguments, _) = super::async_plan::plain_call_parts(program, id)
+                let (_, arguments, kind) = super::async_plan::plain_call_parts(program, id)
                     .expect("a resumed plain argument needs a call");
                 self.install_resumed_argument_prefix(scratch, prepared.prefix)?;
-                let target = Target::Value { function: prepared.function, direct_eval: prepared.direct_eval };
+                let target = if matches!(kind, super::async_plan::PlainCallKind::Construct) {
+                    Target::Construct(prepared.function)
+                } else {
+                    Target::Value { function: prepared.function, direct_eval: prepared.direct_eval }
+                };
                 let call = Call { target, arguments, index: prepared.index, start: 0, after: AfterCall::Value };
                 (State::Argument(call), value)
             }

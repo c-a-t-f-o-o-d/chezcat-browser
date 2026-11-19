@@ -293,6 +293,52 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_constructor_keeps_new_target_and_argument_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, made, caught, invalid=false, token={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failure=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('relay',value);}
+class Base{
+    constructor(first,value,last){
+        if(new.target!==Original||first!==1||last!==3)throw 'new target or arguments';
+        this.value=value;trace+='construct|';
+    }
+}
+class Original extends Base{}
+var constructor=Original;
+var owner={get target(){return mark('get',constructor);}};
+async function make(input){
+    try{return new owner.target(mark('prefix',1),relay(await input),mark('suffix',3));}
+    catch(error){caught=error;}
+}
+async function bad(){
+    const target=()=>{};
+    try{return new target(await Promise.resolve(0),mark('invalid-suffix',0));}
+    catch(error){if(error.name!=='TypeError')throw error;invalid=true;}
+}
+make(gate).then(value=>made=value);
+make(failure);
+bad();
+constructor=function(){throw 'constructor read twice';};
+if(trace!=='get|prefix|get|prefix|'||made||caught||invalid)throw 'constructor prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='get|prefix|get|prefix|invalid-suffix|'||!invalid)throw 'constructibility order';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='get|prefix|get|prefix|invalid-suffix|relay|suffix|construct|'||
+   !(made instanceof Original)||made.value!==token||caught!==reason)throw 'constructor continuation';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_optional_bare_call_skips_only_nullish_callees() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

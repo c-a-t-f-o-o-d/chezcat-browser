@@ -1051,11 +1051,11 @@ impl Runtime {
         &mut self, frame: &mut Activation, site: ArgumentAwait, retained: Option<usize>, host: &mut dyn Host,
     ) -> Result<Option<Box<PreparedPlainArguments>>, Fault> {
         self.step()?;
-        let (callee, _, optional) = async_plan::plain_call_parts(&frame.program, site.call)
+        let (callee, _, kind) = async_plan::plain_call_parts(&frame.program, site.call)
             .expect("compiled async argument call");
         let environment = frame.environment()?;
         let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
-        if optional {
+        if matches!(kind, async_plan::PlainCallKind::Optional) {
             self.step()?;
             if matches!(function, Value::Null | Value::Undefined) {
                 return Ok(None);
@@ -1070,7 +1070,8 @@ impl Runtime {
         };
         let (_, arguments, _) = async_plan::plain_call_parts(&frame.program, site.call)
             .expect("compiled async argument call");
-        let direct_eval = !optional && matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
+        let direct_eval = matches!(kind, async_plan::PlainCallKind::Ordinary)
+            && matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
         let prefix = self.eval_await_argument_prefix(
             &frame.program, &arguments[..site.index], environment, &frame.this, host,
         )?;
