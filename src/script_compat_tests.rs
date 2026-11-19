@@ -3926,6 +3926,7 @@ template.innerHTML='<fixture-atlas>\n<svg id="vector" xmlns="http://www.w3.org/2
 var donor=template.content, owner=donor.ownerDocument, atlas=donor.firstChild, svg=atlas.lastChild;
 var defs=svg.firstChild, shape=defs.firstChild, path=shape.firstChild;
 var before=svg.childNodes, held=donor.childNodes, leading=atlas.firstChild;
+var marker={};svg.originalMarker=marker;
 if(path.isConnected||path.ownerDocument!==owner||document.getElementById('vector')!==null)
     throw 'inert SVG identities';
 if(panel.appendChild(donor)!==donor||panel.firstChild!==atlas||atlas.lastChild!==svg||
@@ -3934,7 +3935,7 @@ if(panel.appendChild(donor)!==donor||panel.firstChild!==atlas||atlas.lastChild!=
     throw 'transferred tree identity';
 if(!(svg instanceof SVGElement)||svg instanceof HTMLElement||svg.namespaceURI!=='http://www.w3.org/2000/svg'||
    path.namespaceURI!==svg.namespaceURI||path.ownerDocument!==document||leading.ownerDocument!==document||
-   !path.isConnected||path.parentNode!==shape||path.getAttribute('d')!=='M2 3 L4 7'||
+   !path.isConnected||path.parentNode!==shape||path.getAttribute('d')!=='M2 3 L4 7'||svg.originalMarker!==marker||
    svg.childNodes!==before||before[0]!==defs||held!==donor.childNodes||held.length!==0||
    donor.ownerDocument!==owner||template.content!==donor)
     throw 'namespace, ownership or child lists';

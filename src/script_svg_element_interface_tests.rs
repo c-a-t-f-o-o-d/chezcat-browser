@@ -174,21 +174,16 @@ if(!(svg instanceof S)||!(svg instanceof Element)||html instanceof S||spoof inst
 }
 
 #[test]
-fn svg_element_interface_does_not_expose_concrete_prototypes_or_native_expandos() {
+fn svg_element_ordinary_properties_keep_native_prototype_boundaries() {
     let (mut doc, mut forms, mut page) = fixture();
     let nodes = format!("{:?}", doc.nodes);
     let preserved = editor(&forms, id(&doc, "neighbor"));
     let handles = ["svg", "group", "shape"].map(|name| node_handle(id(&doc, name)));
-    for handle in handles {
-        assert_eq!(
-            page.runtime.native_overlay_state_for_test(handle),
-            (None, None)
-        );
-    }
     // The first read of either Object static method legitimately materializes
     // one native callable and its metadata object. Do that on the ordinary
     // interface prototype before measuring the refused native operations.
     run(&mut doc, &mut forms, &mut page, "if(Object.getPrototypeOf(P)!==Element.prototype||Object.setPrototypeOf(P,Element.prototype)!==P)throw 'ordinary prototype controls';");
+    let overlays = handles.map(|handle| page.runtime.native_overlay_state_for_test(handle));
     for (source, expected) in [
         (
             "Object.getPrototypeOf(svg);",
@@ -198,7 +193,6 @@ fn svg_element_interface_does_not_expose_concrete_prototypes_or_native_expandos(
             "Object.setPrototypeOf(svg,P);",
             "Native host object prototypes cannot be changed",
         ),
-        ("svg.unimplementedSvgMember=17;", "unimplementedSvgMember"),
     ] {
         let allocations = page.runtime.window_allocation_state_for_test();
         page.clear_console();
@@ -214,10 +208,10 @@ fn svg_element_interface_does_not_expose_concrete_prototypes_or_native_expandos(
             allocations,
             "{source}"
         );
-        for handle in handles {
+        for (handle, original) in handles.into_iter().zip(overlays) {
             assert_eq!(
                 page.runtime.native_overlay_state_for_test(handle),
-                (None, None),
+                original,
                 "{source}"
             );
         }
@@ -231,6 +225,29 @@ fn svg_element_interface_does_not_expose_concrete_prototypes_or_native_expandos(
             "if(!(svg instanceof S)||html instanceof S)throw 'native refusal changed ancestry';",
         );
     }
+    run(&mut doc, &mut forms, &mut page, r#"
+var missing='ordinaryFixtureKey', token={}, reads=0, key=Symbol('svg fixture');
+if(svg[missing]!==undefined||missing in svg||Object.hasOwn(svg,missing))
+    throw 'missing ordinary property';
+Object.defineProperty(P,missing,{configurable:true,get:function(){
+    if(this!==svg&&this!==shape)throw 'actual SVG receiver';
+    reads++;
+    return token;
+}});
+if(svg[missing]!==token||shape[missing]!==token||reads!==2||Object.hasOwn(svg,missing))
+    throw 'ordinary inherited property';
+Object.defineProperty(svg,missing,{value:17,writable:true,configurable:true});
+svg[key]=shape;
+if(svg[missing]!==17||shape[missing]!==token||svg[key]!==shape||
+   Object.getOwnPropertyDescriptor(svg,missing).value!==17||!Object.hasOwn(svg,key))
+    throw 'real own property';
+delete svg[missing];delete P[missing];delete svg[key];
+if(svg[missing]!==undefined||svg[key]!==undefined||missing in svg||
+   svg.namespaceURI!=='http://www.w3.org/2000/svg'||svg.ownerDocument!==document)
+    throw 'deletion or native identity';
+"#);
+    assert_eq!(format!("{:?}", doc.nodes), nodes);
+    assert_eq!(editor(&forms, id(&doc, "neighbor")), preserved);
 }
 
 #[test]
