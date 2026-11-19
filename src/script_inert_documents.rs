@@ -38,6 +38,14 @@ enum Kind {
     ProcessingInstruction { target: String, data: String },
 }
 
+pub(super) enum ImportSource<'a> {
+    Parsed { node: &'a Node, unsafe_nonce: bool },
+    Element(&'a str),
+    Text(&'a str),
+    Fragment,
+    ProcessingInstruction { target: &'a str, data: &'a str },
+}
+
 struct InertNode {
     kind: Kind,
     owner: u32,
@@ -252,6 +260,20 @@ impl Bridge<'_> {
         if existing_owner.is_none() { arena.template_documents.insert(document, owner); }
         arena.template_contents.insert(object, fragment);
         Ok(Value::Host(fragment))
+    }
+
+    pub(super) fn inert_import_source(&self, object: u32) -> Option<ImportSource<'_>> {
+        Some(match &self.state.inert_documents.node(object)?.kind {
+            Kind::Parsed { source, .. } => ImportSource::Parsed {
+                node: self.doc.nodes.get(*source)?,
+                unsafe_nonce: self.doc.nonce_unsafe_nodes.contains(source),
+            },
+            Kind::Element(tag) => ImportSource::Element(tag),
+            Kind::Text(data) => ImportSource::Text(data),
+            Kind::Fragment => ImportSource::Fragment,
+            Kind::ProcessingInstruction { target, data } => ImportSource::ProcessingInstruction { target, data },
+            Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype => return None,
+        })
     }
 
     pub(super) fn inert_clone_receiver(&self, object: u32) -> bool {

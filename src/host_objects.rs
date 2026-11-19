@@ -3,7 +3,8 @@
 
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET,
     HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
@@ -223,6 +224,7 @@ impl Runtime {
                     for (name, operation, length) in [
                         ("createCDATASection", CREATE_CDATA_SECTION, 1),
                         ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),
+                        ("importNode", DOCUMENT_IMPORT_NODE, 1),
                     ] {
                         let method = self.allocate_host_function_with_length(window, operation, length)
                             .map_err(Fault::new)?;

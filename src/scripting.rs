@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
+    HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
@@ -3078,7 +3079,7 @@ impl Host for Bridge<'_> {
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if self.event_target_interface(object)
-            && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION
+            && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE
                 | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
                 | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
@@ -3141,7 +3142,7 @@ impl Host for Bridge<'_> {
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
-        if method == script_node_contains::CONTAINS_METHOD { return &[0]; }
+        if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
         else if method=="initUIEvent" && self.ui_receiver(object) {&[3]}
         else {&[]}
@@ -3162,6 +3163,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method == DOCUMENT_IMPORT_NODE { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
         if self.inert_factory(object, method).is_some() {
@@ -3287,6 +3289,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method=="Document" {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
+        if method == DOCUMENT_IMPORT_NODE { return self.validate_import_source(args); }
         if method == CREATE_CDATA_SECTION {
             return Err(("NotSupportedError", "HTML documents cannot create CDATA sections.".into()));
         }
@@ -3617,6 +3620,7 @@ impl Host for Bridge<'_> {
                 return self.processing_instruction_receiver(receiver);
             }
             if method == HTML_TEMPLATE_CONTENT_GET { return self.template_receiver(receiver); }
+            if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
@@ -3948,6 +3952,7 @@ impl Host for Bridge<'_> {
         if method == crate::javascript::canvas_readback::METHOD {
             return Some((4, &["colorSpace", "pixelFormat"]));
         }
+        if method == DOCUMENT_IMPORT_NODE { return Some((1, &["customElementRegistry", "selfOnly"])); }
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
@@ -3974,6 +3979,9 @@ impl Host for Bridge<'_> {
             || method=="MouseEvent"&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method == DOCUMENT_IMPORT_NODE && member == "customElementRegistry" && !matches!(value, Value::Undefined) {
+            return Err(("TypeError", "importNode requires a genuine custom element registry.".into()));
+        }
         if method == crate::javascript::canvas_readback::METHOD {
             return crate::javascript::canvas_readback::validate_setting(member, value);
         }
@@ -4003,6 +4011,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, fields);
         }
+        if method == DOCUMENT_IMPORT_NODE { return self.import_node(args, fields); }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}

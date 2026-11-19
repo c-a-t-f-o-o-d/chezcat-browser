@@ -95,3 +95,61 @@ document.getElementById('build').onclick=function(event){
     assert_eq!(app.forms.controls.len(),2,"Only the original text field and button are native controls");
     assert_eq!(app.raw,raw);assert_eq!(app.location,location);assert_eq!((app.history_index,app.history.len()),history);clean(&app);
 }
+
+#[test]
+fn document_fragment_imported_template_renders_real_pixels_and_link_hits() {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    struct Fixture(PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+    }
+    let fixture = Fixture(std::env::temp_dir().join(format!(
+        "chezcat-template-import-{}-{}.html", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+    )));
+    std::fs::write(&fixture.0, r#"<!doctype html><html><head><title>Template pending</title><style>
+html,body{margin:0;padding:0;background:#ffffff}
+#copy{position:absolute;left:40px;top:30px;width:160px;height:30px}
+#mount{position:absolute;left:40px;top:100px;width:240px;height:80px;background:#ffffff}
+#copy-link{display:block;position:absolute;left:20px;top:12px;width:100px;height:28px;background:#236144;color:white}
+</style></head><body><template id=seed><a id=copy-link href=#destination>Imported link</a></template>
+<button id=copy type=button>Import template</button><div id=mount></div><div id=destination></div>
+<script>
+var input=document.getElementById('seed').content, source=input.firstChild, mount=document.getElementById('mount');
+document.getElementById('copy').onclick=function(event){
+    if(!event.isTrusted)throw 'actual pointer activation';
+    var fragment=document.importNode(input,true), imported=fragment.firstChild;
+    if(imported===source||source.ownerDocument===document||imported.ownerDocument!==document||imported.isConnected)
+        throw 'real import ownership';
+    mount.appendChild(fragment);
+    if(mount.firstChild!==imported||!imported.isConnected||source.isConnected||input.firstChild!==source)
+        throw 'real insertion kept source inert';
+    document.title='Template imported';
+};
+</script></body></html>"#).unwrap();
+    let mut app = App::new();
+    app.resize(640, 480);
+    app.set_javascript_enabled(true);
+    app.open(&fixture.0);
+    clean(&app);
+    let original = id(&app, "copy-link");
+    let location = app.location.clone();
+    assert!(app.page.border_rects[original].is_none());
+    assert_eq!(app.page.link_node_at(120, 125), None);
+    let before = app.draw();
+    let sample = (app.content_top() + 134 - app.scroll) as usize * before.width + 153;
+    assert_eq!(before.pixels[sample], 0xffffff);
+    click(&mut app, "copy");
+    assert_eq!(app.document.title, "Template imported");
+    let imported = app.document.nodes[id(&app, "mount")].children[0];
+    assert_ne!(imported, original);
+    let rect = app.page.border_rects[imported].unwrap();
+    assert_eq!((rect.x, rect.y, rect.width, rect.height), (60, 112, 100, 28));
+    assert_eq!(app.page.link_node_at(120, 125), Some(imported));
+    assert_eq!(app.page.link_at(120, 125), Some("#destination"));
+    assert_eq!(app.page.link_node_at(160, 125), None);
+    let after = app.draw();
+    assert_eq!(after.pixels[sample], 0x236144);
+    assert!(app.page.border_rects[original].is_none());
+    assert_eq!(app.location, location);
+    clean(&app);
+}
