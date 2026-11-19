@@ -2212,9 +2212,15 @@ impl Bridge<'_> {
     }
 
     fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
-        if !text_container(tag(self.doc, node)) {
+        let name = tag(self.doc, node);
+        let detached_style = name == "style"
+            && self.doc.nodes[node].namespace == crate::html::Namespace::Html
+            && self.state.dom.created.contains(&node)
+            && self.state.detached_nodes.contains(&node)
+            && self.state.dom.connected.get(node) == Some(&false);
+        if !text_container(name) && !detached_style {
             return Err(
-                "textContent replacement is limited to plain text containers and buttons.".into(),
+                "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
         }
         // Complete validation before touching any node. Control models and
@@ -5934,6 +5940,54 @@ document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('rel
             1
         );
         assert_ne!(doc.title, "denied");
+    }
+
+    #[test]
+    fn detached_style_text_content_replaces_real_text_without_activating_a_sheet() {
+        let (mut doc, mut forms, mut page, startup) = setup(
+            "<title>Original</title><form><input id=neighbor value=seed></form>",
+            &[],
+        );
+        assert_eq!(startup.errors, 0);
+        page.set_geometry(crate::script_geometry::Geometry::new(
+            640, 360, 1.0, &HashMap::new(), HashMap::new(), &crate::fonts::Book::empty(),
+        ));
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var styleNode=document.createElement('style'), nodes=styleNode.childNodes;
+var neighbor=document.getElementById('neighbor');
+neighbor.value='edited';
+var css='#neighbor { opacity: 0 } /* <script>plain text</script> */';
+styleNode.textContent=css;
+var oldText=styleNode.firstChild;
+if(nodes.length!==1 || nodes[0]!==oldText || oldText.nodeType!==3 ||
+   oldText.parentNode!==styleNode || oldText.ownerDocument!==document ||
+   styleNode.textContent!==css || oldText.data!==css ||
+   styleNode.isConnected || oldText.isConnected ||
+   getComputedStyle(neighbor).opacity!=='1')throw 'first text or detached stylesheet';
+styleNode.textContent='second';
+if(nodes!==styleNode.childNodes || nodes.length!==1 || oldText.parentNode!==null ||
+   oldText.data!==css || nodes[0]===oldText || nodes[0].data!=='second')throw 'replacement';
+var second=nodes[0];
+styleNode.textContent=null;
+if(styleNode.textContent!=='' || nodes.length!==0 || second.parentNode!==null ||
+   second.data!=='second' || neighbor.value!=='edited' || neighbor.defaultValue!=='seed')
+    throw 'removal or neighboring input';
+document.title='Detached text verified';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Detached text verified");
+        assert!(page.take_dynamic_stylesheets().is_empty());
+        assert!(page.take_dynamic_scripts().is_empty());
+        let saved = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='retained';var held=styleNode.firstChild;");
+        assert_eq!(saved.errors, 0, "{}", page.report());
+        page.state.node_limit = doc.nodes.len();
+        let before = (doc.nodes.len(), page.state.dom_commits);
+        let failed = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='too many nodes';");
+        assert_eq!(failed.errors, 1);
+        assert!(page.report().contains("DOM appended-node limit reached"));
+        assert_eq!((doc.nodes.len(), page.state.dom_commits), before);
+        let check = page.console_eval(&mut doc, &mut forms, "if(styleNode.firstChild!==held || held.data!=='retained' || held.parentNode!==styleNode)throw 'partial replacement';");
+        assert_eq!(check.errors, 0, "{}", page.report());
     }
 
     #[test]
