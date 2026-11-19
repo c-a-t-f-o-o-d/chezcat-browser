@@ -239,6 +239,30 @@ fn stylesheet_cache_revalidates_external_bytes_order_media_and_admission_limits(
 }
 
 #[test]
+fn stylesheet_cache_withholding_and_readmitting_the_same_inline_source_changes_the_cascade() {
+    let mut doc = crate::html::parse(
+        "<style>#box{opacity:.25}</style><style id=dynamic>#box{opacity:.75}</style><div id=box></div>",
+    );
+    let sheet = id(&doc, "dynamic");
+    let node = id(&doc, "box");
+    let external = HashMap::new();
+    let initial = cached(&doc, &external, None);
+    assert_eq!(opacity(&initial, node), 0.75);
+    let initial_cache = initial.stylesheet_cache.unwrap();
+
+    doc.withheld_inline_styles.insert(sheet);
+    let denied = cached(&doc, &external, Some(&initial_cache));
+    assert_eq!(opacity(&denied, node), 0.25);
+    let denied_cache = denied.stylesheet_cache.unwrap();
+    assert!(!initial_cache.shares_rules(&denied_cache));
+
+    doc.withheld_inline_styles.remove(&sheet);
+    let restored = cached(&doc, &external, Some(&denied_cache));
+    assert_eq!(opacity(&restored, node), 0.75);
+    assert!(!denied_cache.shares_rules(restored.stylesheet_cache.as_ref().unwrap()));
+}
+
+#[test]
 fn stylesheet_cache_connected_inert_and_scripting_source_scope_remains_live() {
     let mut doc=crate::html::parse("<style id=live>#box{opacity:.25}</style><template id=hidden><style id=inside>#box{opacity:.75}</style></template><noscript><style>#box{opacity:.9}</style></noscript><div id=box></div>");
     doc.scripting_enabled = true;

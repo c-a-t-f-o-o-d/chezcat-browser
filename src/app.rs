@@ -4546,6 +4546,7 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod autonomous_element_identity;
     mod inline_easing;
     mod attribute_substrings;
     mod canvas_2d;

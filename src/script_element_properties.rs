@@ -143,7 +143,7 @@ impl Bridge<'_> {
                         | "link"
                         | "meta"
                         | "title"
-                )
+                ) || crate::javascript::valid_custom_element_name(name)
             })
     }
 

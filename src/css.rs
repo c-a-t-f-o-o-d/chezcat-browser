@@ -114,6 +114,7 @@ fn stylesheet_sources_with<'a>(doc:&'a Document,external:&'a HashMap<usize,Strin
         if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len())?;}
         stack.extend(entry.children.iter().rev().copied().filter(|&child|child!=0));
         if !matches!(tag,"style"|"link") {continue;}
+        if tag == "style" && doc.withheld_inline_styles.contains(&node) {continue;}
         if let Some(meter)=meter.as_deref_mut() {
             if let NodeKind::Element{attrs,..}=&entry.kind {
                 meter.work(attrs.len().saturating_mul(2))?;

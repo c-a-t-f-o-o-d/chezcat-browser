@@ -2045,6 +2045,15 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        // HTML style sheet media is a live reference to the element's media
+        // attribute. Type and nonce are checked when updating the style block
+        // on connection; changing either attribute alone does not update it.
+        let sheet_media = self.created_html_style(node) && name.html_is("media");
+        if sheet_media {
+            script_stylesheets::validate_inline_sheet_media(value.as_deref())?;
+        }
+        let repaint_sheet = sheet_media && self.state.dom.connected[node]
+            && self.doc.attr(node, "media") != value.as_deref();
         let input = self.prepare_input_attribute(node, &name, value.as_deref())?;
         let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
@@ -2137,7 +2146,7 @@ impl Bridge<'_> {
             self.state.canvas_contexts.commit_resize(node, canvas_resize);
             self.state.dom_committed();
         }
-        if self.state.tree.active.get(node).copied().unwrap_or(false) {
+        if repaint_sheet || self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
         if media_change{self.commit_media_source_change(node)?;}
@@ -2212,9 +2221,13 @@ impl Bridge<'_> {
     }
 
     fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
-        if !text_container(tag(self.doc, node)) {
+        let name = tag(self.doc, node);
+        let detached_style = self.created_html_style(node)
+            && self.state.detached_nodes.contains(&node)
+            && self.state.dom.connected.get(node) == Some(&false);
+        if !text_container(name) && !detached_style {
             return Err(
-                "textContent replacement is limited to plain text containers and buttons.".into(),
+                "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
         }
         // Complete validation before touching any node. Control models and
@@ -2734,7 +2747,7 @@ impl Host for Bridge<'_> {
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
-        if property=="type"&&self.style_type_receiver(object){return true;}
+        if self.style_text_attribute(object, property) { return true; }
         if self.media_element_receiver(object)&&property=="src"{return true;}
         property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
             || self.class_list_receiver(object) && property == "value"
@@ -4520,7 +4533,11 @@ impl Host for Bridge<'_> {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
             return self.set_media_time(node_index(object).unwrap(),seconds);
         }
-        if property=="type"&&self.style_type_receiver(object){let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"type",Some(text));}
+        if self.style_text_attribute(object, property) {
+            let node = self.node(object)?;
+            let text = self.text(&value)?;
+            return self.attribute(node, property, Some(text));
+        }
         if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
         if script_class_list::element(object).is_some() {
@@ -5934,6 +5951,54 @@ document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('rel
             1
         );
         assert_ne!(doc.title, "denied");
+    }
+
+    #[test]
+    fn detached_style_text_content_replaces_real_text_without_activating_a_sheet() {
+        let (mut doc, mut forms, mut page, startup) = setup(
+            "<title>Original</title><form><input id=neighbor value=seed></form>",
+            &[],
+        );
+        assert_eq!(startup.errors, 0);
+        page.set_geometry(crate::script_geometry::Geometry::new(
+            640, 360, 1.0, &HashMap::new(), HashMap::new(), &crate::fonts::Book::empty(),
+        ));
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var styleNode=document.createElement('style'), nodes=styleNode.childNodes;
+var neighbor=document.getElementById('neighbor');
+neighbor.value='edited';
+var css='#neighbor { opacity: 0 } /* <script>plain text</script> */';
+styleNode.textContent=css;
+var oldText=styleNode.firstChild;
+if(nodes.length!==1 || nodes[0]!==oldText || oldText.nodeType!==3 ||
+   oldText.parentNode!==styleNode || oldText.ownerDocument!==document ||
+   styleNode.textContent!==css || oldText.data!==css ||
+   styleNode.isConnected || oldText.isConnected ||
+   getComputedStyle(neighbor).opacity!=='1')throw 'first text or detached stylesheet';
+styleNode.textContent='second';
+if(nodes!==styleNode.childNodes || nodes.length!==1 || oldText.parentNode!==null ||
+   oldText.data!==css || nodes[0]===oldText || nodes[0].data!=='second')throw 'replacement';
+var second=nodes[0];
+styleNode.textContent=null;
+if(styleNode.textContent!=='' || nodes.length!==0 || second.parentNode!==null ||
+   second.data!=='second' || neighbor.value!=='edited' || neighbor.defaultValue!=='seed')
+    throw 'removal or neighboring input';
+document.title='Detached text verified';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Detached text verified");
+        assert!(page.take_dynamic_stylesheets().is_empty());
+        assert!(page.take_dynamic_scripts().is_empty());
+        let saved = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='retained';var held=styleNode.firstChild;");
+        assert_eq!(saved.errors, 0, "{}", page.report());
+        page.state.node_limit = doc.nodes.len();
+        let before = (doc.nodes.len(), page.state.dom_commits);
+        let failed = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='too many nodes';");
+        assert_eq!(failed.errors, 1);
+        assert!(page.report().contains("DOM appended-node limit reached"));
+        assert_eq!((doc.nodes.len(), page.state.dom_commits), before);
+        let check = page.console_eval(&mut doc, &mut forms, "if(styleNode.firstChild!==held || held.data!=='retained' || held.parentNode!==styleNode)throw 'partial replacement';");
+        assert_eq!(check.errors, 0, "{}", page.report());
     }
 
     #[test]
