@@ -60,6 +60,28 @@ impl Runtime {
         result.map_err(Fault::display)
     }
 
+    pub(crate) fn define_dom_parser_interface(&mut self, window: u32, parse: &'static str) -> Result<(), String> {
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            let allocation = self.allocate_host_function_with_length(window, "DOMParser", 0).map_err(Fault::new)?;
+            if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+                *constructible = true;
+            }
+            let constructor = Value::Function(allocation.id);
+            let prototype = self.new_object(None)?;
+            self.store_property(self.function_properties[allocation.id], "prototype".into(), Value::Object(prototype), Some((false,false,false)))?;
+            self.store_property(prototype, "constructor".into(), constructor.clone(), Some((false,true,true)))?;
+            self.define_canvas_operation(prototype, window, "parseFromString", parse, 2)?;
+            self.store_symbol_property(prototype, self.symbol_to_string_tag.unwrap(), Value::String("DOMParser".into()), Some((false,false,true)))?;
+            self.native_constructor_prototypes.insert((window, "DOMParser"), prototype);
+            self.put_binding(self.global_environment, "DOMParser".into(), Some(constructor), super::Declaration::Var, false)?;
+            self.global_attributes.insert("DOMParser".into(), (false,true,true));
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
     #[cfg(test)]
     pub(crate) fn native_overlay_state_for_test(&self, handle:u32)->(Option<usize>,Option<u32>) {
         (self.host_objects.get(&handle).copied(),self.native_expando_owners.get(&handle).copied())

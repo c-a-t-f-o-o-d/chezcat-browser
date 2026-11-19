@@ -3,6 +3,9 @@
 use super::*;
 use std::rc::Rc;
 
+#[path = "script_dom_parser.rs"]
+pub(super) mod parser;
+
 pub(super) const MAIN_IMPLEMENTATION: u32 = 0x8600_0000;
 const FIRST_ENTRY: u32 = MAIN_IMPLEMENTATION + 1;
 const MAX_ENTRIES: usize = 65_536;
@@ -22,7 +25,8 @@ pub(super) struct Arena {
 
 struct DocumentNodes {
     implementation: u32,
-    doctype: u32,
+    doctype: Option<u32>,
+    url: String,
     html: u32,
     head: u32,
     body: u32,
@@ -68,6 +72,7 @@ struct InertNode {
 
 enum Entry {
     Implementation,
+    Parser,
     Node(InertNode),
 }
 
@@ -80,7 +85,7 @@ impl Arena {
     fn node(&self, handle: u32) -> Option<&InertNode> {
         match self.entry(handle)? {
             Entry::Node(node) => Some(node),
-            Entry::Implementation => None,
+            Entry::Implementation | Entry::Parser => None,
         }
     }
 }
@@ -89,6 +94,10 @@ impl Bridge<'_> {
     pub(super) fn inert_document(&self, object: u32) -> bool {
         self.state.inert_documents.node(object)
             .is_some_and(|node| matches!(node.kind, Kind::Document(_) | Kind::TemplateDocument { .. }))
+    }
+
+    pub(super) fn inert_parser(&self, object: u32) -> bool {
+        matches!(self.state.inert_documents.entry(object), Some(Entry::Parser))
     }
 
     pub(super) fn inert_implementation(&self, object: u32) -> bool {
@@ -118,6 +127,7 @@ impl Bridge<'_> {
         if self.inert_implementation(object) {
             return Some("DOMImplementation");
         }
+        if self.inert_parser(object) { return Some("DOMParser"); }
         Some(match &self.state.inert_documents.node(object)?.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => "Document",
             Kind::Fragment => "DocumentFragment",
@@ -553,7 +563,7 @@ impl Bridge<'_> {
         });
         self.state.inert_documents.entries.extend([
             node(Kind::Document(DocumentNodes {
-                implementation, doctype, html, head, body, title: normalized,
+                implementation, doctype: Some(doctype), url: "about:blank".into(), html, head, body, title: normalized,
             }), None, vec![doctype, html]),
             Entry::Implementation,
             node(Kind::Doctype, Some(document), Vec::new()),
@@ -647,7 +657,7 @@ impl Bridge<'_> {
 
     pub(super) fn inert_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         self.state.work(1)?;
-        if self.inert_implementation(object) { return Ok(Value::Undefined); }
+        if self.inert_implementation(object) || self.inert_parser(object) { return Ok(Value::Undefined); }
         if property == "childNodes" { return self.create_inert_child_list(object); }
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Parsed { source, .. } = node.kind {
@@ -730,7 +740,13 @@ impl Bridge<'_> {
                     parent.children.get(sibling).copied()
                 }))
             }
-            "baseURI" => string("about:blank"),
+            "baseURI" => {
+                let owner = self.state.inert_documents.node(node.owner);
+                match owner.map(|owner| &owner.kind) {
+                    Some(Kind::Document(document)) => string(&document.url),
+                    _ => string("about:blank"),
+                }
+            }
             "isConnected" => {
                 let mut id = object;
                 while let Some(parent) = self.state.inert_documents.node(id).and_then(|node| node.parent) { id = parent; }
@@ -764,7 +780,7 @@ impl Bridge<'_> {
             "documentElement" => host(document.map(|doc| doc.html)),
             "head" => host(document.map(|doc| doc.head)),
             "body" => host(document.map(|doc| doc.body)),
-            "doctype" => host(document.map(|doc| doc.doctype)),
+            "doctype" => host(document.and_then(|doc| doc.doctype)),
             "implementation" => host(document.map(|doc| doc.implementation).or(template_implementation)),
             "title" if template_implementation.is_some() => string(""),
             "title" if document.is_some() => {
@@ -772,9 +788,11 @@ impl Bridge<'_> {
                 let Kind::Document(document) = &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
                 string(&document.title)
             }
-            "URL" | "documentURI" if html_document => string("about:blank"),
+            "URL" | "documentURI" if html_document => string(document.map_or("about:blank", |doc| &doc.url)),
             "contentType" if html_document => string("text/html"),
-            "compatMode" if html_document => string("CSS1Compat"),
+            "compatMode" if html_document => string(if document.is_some_and(|doc| doc.doctype.is_none()) {
+                "BackCompat"
+            } else { "CSS1Compat" }),
             "characterSet" if html_document => string("UTF-8"),
             "defaultView" if html_document => Value::Null,
             "name" if matches!(node.kind, Kind::Doctype) => string("html"),
