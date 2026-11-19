@@ -30,7 +30,8 @@ pub(super) enum Instruction {
     FinishTry,
     FinishFinally,
     Logical { statement: StmtId, operator: &'static str, target: usize, action: Resume },
-    StrictComparison { statement: StmtId, operator: &'static str, right: ExprId, action: Resume },
+    CaptureComparison(StmtId),
+    StrictComparison { statement: StmtId, operator: &'static str, action: Resume },
     ReadAccess { statement: StmtId, expression: ExprId, action: Resume },
     Await {
         statement: StmtId,
@@ -162,7 +163,8 @@ fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Optio
 
 enum ExpressionPart {
     Value(ExprId, Resume),
-    StrictComparison(&'static str, ExprId, Resume),
+    CaptureComparison,
+    StrictComparison(&'static str, Resume),
     ReadAccess(ExprId, Resume),
     LogicalTest(&'static str, Resume),
     LogicalEnd,
@@ -202,7 +204,9 @@ fn visit_expression(
                     continue;
                 }
                 ExprKind::Binary(operator @ ("===" | "!=="), left, right) => {
-                    push(&mut pending, ExpressionPart::StrictComparison(operator, right, action))?;
+                    push(&mut pending, ExpressionPart::StrictComparison(operator, action))?;
+                    push(&mut pending, ExpressionPart::Value(right, Resume::StoreExpressionValue))?;
+                    push(&mut pending, ExpressionPart::CaptureComparison)?;
                     part = ExpressionPart::Value(left, Resume::StoreExpressionValue);
                     continue;
                 }
@@ -250,7 +254,7 @@ fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usiz
                 instructions += 1;
                 sites += usize::from(await_expression(program, expression).is_some());
             }
-            ExpressionPart::StrictComparison(..) | ExpressionPart::ReadAccess(..)
+            ExpressionPart::CaptureComparison | ExpressionPart::StrictComparison(..) | ExpressionPart::ReadAccess(..)
             | ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
             | ExpressionPart::ConditionalElse | ExpressionPart::CaptureAssignment(_)
             | ExpressionPart::WriteAssignment(_) => instructions += 1,
@@ -302,8 +306,9 @@ fn emit_expression(
                 push(&mut branches, code.len())?;
                 Instruction::Logical { statement: id, operator, target: 0, action }
             }
-            ExpressionPart::StrictComparison(operator, right, action) => {
-                Instruction::StrictComparison { statement: id, operator, right, action }
+            ExpressionPart::CaptureComparison => Instruction::CaptureComparison(id),
+            ExpressionPart::StrictComparison(operator, action) => {
+                Instruction::StrictComparison { statement: id, operator, action }
             }
             ExpressionPart::ReadAccess(expression, action) => {
                 Instruction::ReadAccess { statement: id, expression, action }
@@ -751,7 +756,7 @@ mod tests {
             "if(1+await p){}",
             "if(!(1+await p)){}",
             "return await p + 1;",
-            "return use()!==await p;",
+            "return use()!=await p;",
             "return {[await p]:await p};",
             "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
@@ -804,7 +809,8 @@ mod tests {
             ("async function f(p){let a,b=await p,c=4;}", 3),
             ("async function f(p){return {entry:use(await p)};}", 1),
             ("async function f(p){if(!use(await p)){done();}}", 2),
-            ("async function f(p){if(use(await p)!==flag){done();}}", 3),
+            ("async function f(p){if(use(await p)!==flag){done();}}", 5),
+            ("async function f(p){return use(await p)===(original!==use(await p));}", 7),
             ("async function f(p){return ((use(await p)??base)?.item??fallback).done;}", 7),
             ("async function f(p){try{}finally{await p;}}", 7),
             ("async function f(p){for(;test();advance()){await p;}}", 6),
