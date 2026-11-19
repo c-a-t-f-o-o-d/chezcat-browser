@@ -32,6 +32,32 @@ pub(super) struct DynamicState {
 }
 
 impl Page {
+    pub(super) fn run_classic_script(
+        &mut self, doc: &mut Document, forms: &mut Forms, script: &Script,
+        dynamic_node: Option<usize>,
+    ) {
+        self.state.executed += 1;
+        let previous;
+        let result = {
+            let mut bridge = Bridge { doc, forms, state: &mut self.state };
+            let node = script.node;
+            let is_script_element = dynamic_node.is_none_or(|requested| requested == node)
+                && bridge.dom_accessible(node)
+                && matches!(bridge.doc.nodes[node].namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg)
+                && tag(bridge.doc, node) == "script";
+            previous = std::mem::replace(&mut bridge.state.current_script, is_script_element.then_some(node));
+            self.runtime.execute(&script.source, &mut bridge)
+        };
+        if let Err(error) = result {
+            let kind = if dynamic_node.is_some() { "dynamic script" } else { "script" };
+            self.state.error(&format!("{} ({kind} node {})", script.label, script.node), &error);
+        }
+        // The classic-script checkpoint is part of execution. Restore the
+        // prior slot before later script jobs and resource/lifecycle events.
+        self.microtask_checkpoint(doc, forms);
+        self.state.current_script = previous;
+    }
+
     pub fn set_resource_base(&mut self, base: &crate::navigation::Location) {
         self.state.dynamic.base = Some(base.clone());
     }
@@ -77,21 +103,7 @@ impl Page {
                     "error"
                 } else {
                     self.state.dynamic.source_bytes += script.source.len();
-                    self.state.executed += 1;
-                    if let Err(error) = self.runtime.execute(
-                        &script.source,
-                        &mut Bridge {
-                            doc,
-                            forms,
-                            state: &mut self.state,
-                        },
-                    ) {
-                        self.state.error(
-                            &format!("{} (dynamic script node {})", script.label, script.node),
-                            &error,
-                        );
-                    }
-                    self.microtask_checkpoint(doc, forms);
+                    self.run_classic_script(doc, forms, &script, Some(request.node));
                     "load"
                 }
             }

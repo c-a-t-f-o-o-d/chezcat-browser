@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_IMPORT_NODE,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
@@ -490,6 +490,7 @@ struct State {
     executed: usize,
     enabled: bool,
     ready: &'static str,
+    current_script: Option<usize>,
     // readyState becomes complete BEFORE the load callbacks/checkpoints.
     document_complete: bool,
     last_activation: Option<Instant>,
@@ -568,6 +569,7 @@ impl State {
             executed: 0,
             enabled: false,
             ready: "loading",
+            current_script: None,
             background_pending: false,
             background_tracking: false,
             document_complete: false,
@@ -1460,23 +1462,9 @@ impl Page {
             if let Some(geometry) = &mut self.state.geometry {
                 geometry.set_execution_deadline(deadline);
             }
-            self.state.executed += 1;
-            if let Err(error) = self.runtime.execute(
-                &source.source,
-                &mut Bridge {
-                    doc,
-                    forms,
-                    state: &mut self.state,
-                },
-            ) {
-                self.state.error(
-                    &format!("{} (script node {})", source.label, source.node),
-                    &error,
-                );
-            }
             // Reactions run before the next classic script and consume this
             // script's allowance, including the aggregate startup budget.
-            self.microtask_checkpoint(doc, forms);
+            self.run_classic_script(doc, forms, source, None);
             let (steps, copies, regexp) = self.runtime.job_usage();
             startup_steps = startup_steps.saturating_add(steps);
             startup_copy = startup_copy
@@ -3131,7 +3119,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -3680,7 +3668,11 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.event_target_interface(object) && operation.accepts(self, receiver);
         }
-        if method=="\0Document.get.documentElement" && self.event_target_interface(object) {return self.document_interface_receiver(receiver);}
+        if matches!(method, "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET)
+            && self.event_target_interface(object)
+        {
+            return self.document_interface_receiver(receiver);
+        }
         if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {
             return self.canvas_receiver(receiver);
         }
@@ -5153,6 +5145,14 @@ impl Host for Bridge<'_> {
         if method=="\0Document.get.documentElement" {
             if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
+        }
+        if method == DOCUMENT_CURRENT_SCRIPT_GET {
+            self.state.work(1)?;
+            return Ok(if object == DOCUMENT {
+                self.state.current_script.map_or(Value::Null, |node| Value::Host(node_handle(node)))
+            } else {
+                Value::Null
+            });
         }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if method == script_clone_node::CLONE_METHOD { return self.clone_node(object, args.first().is_some_and(Value::truthy)); }
