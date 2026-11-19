@@ -32,6 +32,38 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_name_assignment_writes_after_fulfillment_and_skips_rejection() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, result=0, caught=0, retained=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function relay(value){trace+='relay|';return value+1;}
+async function work(){
+    let target=1;
+    target=relay(await gate);
+    try { target=await failed; }catch(error){if(error!==reason)throw error;caught++;}
+    try { const locked=2;locked=relay(await Promise.resolve(8)); }
+    catch(error){if(error.name!=='TypeError')throw error;caught++;}
+    retained=target;
+    return target=await Promise.resolve(target+3);
+}
+work().then(function(value){result=value;});
+if(trace!==''||result||caught||retained)throw 'write before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);if(trace!=='')throw 'synchronous write';'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='relay|'||result||caught||retained)throw 'first assignment';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='relay|relay|'||result!==8||caught!==2||retained!==5)throw 'assignment result or error order';'ok';");
+}
+
+#[test]
 fn await_execution_if_selects_one_branch_after_the_condition_finishes() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

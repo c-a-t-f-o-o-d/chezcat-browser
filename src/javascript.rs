@@ -11722,6 +11722,31 @@ caught;
     }
 
     #[test]
+    fn await_execution_name_assignment_keeps_the_reference_across_direct_eval() {
+        let (mut runtime, mut host) = test_runtime();
+        host.eval_permission = Some(true);
+        runtime.execute(r#"
+var captured='outer';
+var ordinary='outer';
+function syncUpdate(){
+    var assigned=ordinary=eval("var ordinary='local'; 'updated';");
+    test.record(ordinary);
+    test.record(assigned);
+}
+syncUpdate();test.record(ordinary);
+async function update(){
+    var assigned=captured=eval(await Promise.resolve("var captured='local'; 'updated';"));
+    test.record(captured);
+    return assigned;
+}
+update().then(function(value){test.record(value);test.record(captured);});
+"#, &mut host).unwrap();
+        assert_eq!(host.records, ["local", "updated", "updated"]);
+        assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+        assert_eq!(host.records, ["local", "updated", "updated", "local", "updated", "updated"]);
+    }
+
+    #[test]
     fn await_execution_direct_eval_keeps_the_resumed_scope_and_csp_check() {
         for allowed in [false, true] {
             let (mut runtime, mut host) = test_runtime();
