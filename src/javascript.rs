@@ -12196,17 +12196,13 @@ caught;
     }
 
     #[test]
-    fn switch_and_json_mixed_nesting_stop_on_a_one_mib_stack() {
+    fn switch_and_json_stringify_nesting_stop_on_a_one_mib_stack() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
             for source in [
                 format!("{};{}", "switch(1){case 1:".repeat(1000), "}".repeat(1000)),
-                "function f(n){if(n===0)return JSON.parse(payload);return f(n-1);}f(10);".into(),
                 "var a=[],b=a;for(var i=0;i<1000;i++){var c=[];b.push(c);b=c;}function f(n){if(n===0)return JSON.stringify(a);return f(n-1);}f(10);".into(),
-                "var n=0;var code='if(n++<10)eval(code);else JSON.parse(payload);';eval(code);".into(),
             ] {
                 let (mut runtime, mut host) = test_runtime();
-                host.eval_permission = Some(true);
-                runtime.define_global("payload", Value::String(format!("{}0{}", "[".repeat(1000), "]".repeat(1000)))).unwrap();
                 let error = runtime.execute(&source, &mut host).unwrap_err();
                 assert!(error.contains("limit"), "{error}");
                 assert_eq!(runtime.eval_depth, 0);
@@ -12215,6 +12211,38 @@ caught;
                 assert_eq!(runtime.execute("JSON.stringify(JSON.parse('[1,true]'));", &mut host).unwrap().to_text(), "[1,true]");
             }
         }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn json_parse_uses_heap_frames_on_a_one_mib_stack() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let (mut runtime, mut host) = test_runtime();
+            let payload = format!("{}17{}", "[{\"child\":".repeat(384), "}]".repeat(384));
+            runtime.define_global("payload", Value::String(payload)).unwrap();
+            host.eval_permission = Some(true);
+            let result = runtime.execute(
+                "var cursor=eval('JSON.parse(payload)');for(var i=0;i<384;i++)cursor=cursor[0].child;cursor;",
+                &mut host,
+            ).unwrap();
+            assert_eq!(result.to_text(), "17");
+            assert_eq!(runtime.eval_depth, 0);
+            assert_eq!(runtime.call_depth, 0);
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn json_parse_frame_budget_failure_rolls_back_objects_and_properties() {
+        let (mut runtime, _) = test_runtime();
+        let budget = runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values = 0;
+        let checkpoint = (runtime.objects.len(), runtime.properties, runtime.value_bytes);
+        let error = runtime
+            .json_parse(&[Value::String("[1]".into())])
+            .unwrap_err();
+        assert!(error.display().contains("JSON parse scratch limit reached (0 bytes)"));
+        assert_eq!((runtime.objects.len(), runtime.properties, runtime.value_bytes), checkpoint);
+        runtime.limits.heap.retained_values = budget;
+        assert!(runtime.json_parse(&[Value::String("[1]".into())]).is_ok());
     }
 
     #[test]
