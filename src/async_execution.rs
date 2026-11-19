@@ -22,6 +22,7 @@ struct PendingAwait {
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     literal: Option<Box<PendingLiteral>>,
+    negations: usize,
     assignment: Option<Reference>,
 }
 
@@ -420,7 +421,7 @@ impl Runtime {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
                 let PendingAwait {
-                    statement, action, call, method, followup_call, member_key, chain, literal, assignment,
+                    statement, action, call, method, followup_call, member_key, chain, literal, negations, assignment,
                 } = frame
                     .pending
                     .take()
@@ -477,6 +478,12 @@ impl Runtime {
                             result
                         } else {
                             value
+                        };
+                        let value = if negations == 0 {
+                            value
+                        } else {
+                            // After the first ToBoolean, pairs of negations cancel.
+                            Value::Bool(value.truthy() == (negations % 2 == 0))
                         };
                         let value = if let Some(literal) = literal {
                             let PendingLiteral { object, key } = *literal;
@@ -659,6 +666,7 @@ impl Runtime {
                     member_key,
                     chain,
                     literal_key,
+                    negations,
                     assignment,
                     action,
                 } => {
@@ -677,6 +685,9 @@ impl Runtime {
                         } else {
                             None
                         };
+                        for _ in 0..negations {
+                            self.step()?;
+                        }
                         if member_key.is_some() {
                             self.step()?; // Ordinary member reference construction.
                         }
@@ -710,7 +721,7 @@ impl Runtime {
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
                         frame.pending = Some(PendingAwait {
-                            statement, action, call, method, followup_call, member_key, chain, literal, assignment,
+                            statement, action, call, method, followup_call, member_key, chain, literal, negations, assignment,
                         });
                         Ok(Progress::Suspend(promise))
                     })();
@@ -996,6 +1007,7 @@ mod tests {
                     object: 27,
                     key: PropertyKey::String("entry".into()),
                 })),
+                negations: 0,
                 assignment: Some(Reference::Binding(18, "target".into())),
             }),
         };

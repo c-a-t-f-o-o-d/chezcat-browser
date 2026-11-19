@@ -35,6 +35,7 @@ pub(super) enum Instruction {
         member_key: Option<ExprId>,
         chain: Option<ExprId>,
         literal_key: Option<ExprId>,
+        negations: usize,
         assignment: Option<ExprId>,
         action: Resume,
     },
@@ -66,6 +67,7 @@ struct AwaitSite {
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
     literal_key: Option<ExprId>,
+    negations: usize,
     assignment: Option<ExprId>,
 }
 
@@ -76,7 +78,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
-    let (expression, literal_key) = match &program.exprs[expression].kind {
+    let (mut expression, literal_key) = match &program.exprs[expression].kind {
         ExprKind::Object(properties) => {
             let [object_literals::Member::Property { key, value, kind: object_literals::Kind::Data }] =
                 properties.as_slice()
@@ -87,6 +89,11 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
+    let mut negations = 0;
+    while let ExprKind::Unary("!", operand) = program.exprs[expression].kind {
+        negations += 1;
+        expression = operand;
+    }
     let (expression, chain) = match program.exprs[expression].kind {
         ExprKind::OptionalChain(base, _) => (base, Some(expression)),
         _ => (expression, None),
@@ -109,7 +116,9 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         } else {
             (await_operand(program, expression)?, None)
         };
-    Some(AwaitSite { operand, callee, method, followup_call, member_key, chain, literal_key, assignment })
+    Some(AwaitSite {
+        operand, callee, method, followup_call, member_key, chain, literal_key, negations, assignment,
+    })
 }
 
 fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Option<ExprId>, Option<ExprId>)> {
@@ -242,12 +251,12 @@ fn emit_expression(
         let instruction = match part {
             ExpressionPart::Value(expression, action) => {
                 if let Some(AwaitSite {
-                    operand, callee, method, followup_call, member_key, chain, literal_key, assignment,
+                    operand, callee, method, followup_call, member_key, chain, literal_key, negations, assignment,
                 }) = await_expression(program, expression)
                 {
                     Instruction::Await {
                         statement: id, operand, callee, method, followup_call, member_key,
-                        chain, literal_key, assignment, action,
+                        chain, literal_key, negations, assignment, action,
                     }
                 } else {
                     Instruction::Evaluate { statement: id, expression, action }
@@ -576,6 +585,7 @@ mod tests {
             "return (1+await p) && use(await p);",
             "return true ? await p : use(1+await p);",
             "if(1+await p){}",
+            "if(!(1+await p)){}",
             "return await p + 1;",
             "return {[await p]:await p};",
             "let a=await p,b=1+await p;",
@@ -615,6 +625,7 @@ mod tests {
             ("async function f(p){return (before(), await p, after());}", 3),
             ("async function f(p){let a,b=await p,c=4;}", 3),
             ("async function f(p){return {entry:use(await p)};}", 1),
+            ("async function f(p){if(!use(await p)){done();}}", 2),
             ("async function f(p){return yes() && use(await p);}", 3),
             ("async function f(p){return yes() && use(await p).ready;}", 3),
             ("async function f(p){if(yes() && use(await p).ready){noop();}}", 4),
