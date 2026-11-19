@@ -105,6 +105,41 @@ fn stylesheet_cache_same_job_inline_mutations_reuse_syntax_with_live_values_and_
 }
 
 #[test]
+fn selector_candidates_leave_budget_for_opacity_after_unrelated_rules() {
+    use std::fmt::Write;
+
+    let markup = format!(
+        "<link id=sheet rel=stylesheet>{}<p id=probe class=marked></p><section id=group class=panel-37><p id=member class=item-37></p></section>",
+        "<p class=unrelated></p>".repeat(180),
+    );
+    let doc = crate::html::parse(&markup);
+    let mut css = String::new();
+    for number in 0..600 {
+        writeln!(css, ".panel-{number} > .item-{number} {{ opacity: .1 }}").unwrap();
+    }
+    css.push_str("* { opacity: .25 } .marked, section { opacity: .5 } #probe { opacity: .75 }");
+    let external = HashMap::from([(id(&doc, "sheet"), css)]);
+    let probe = id(&doc, "probe");
+    let member = id(&doc, "member");
+    let original = cached(&doc, &external, None);
+    assert_eq!(opacity(&original, probe), 0.75);
+    let mut work = 250_000;
+    let mut copies = 32_000_000;
+    let updated = compute_with_environment_and_properties_budgeted_cached(
+        &doc,
+        &external,
+        None,
+        None,
+        &mut CssBudget::new(&mut work, &mut copies),
+        original.stylesheet_cache.as_ref(),
+    ).unwrap();
+    assert_eq!(opacity(&updated, probe), 0.75);
+    assert_eq!(opacity(&updated, member), 0.1);
+    assert_eq!(opacity(&updated, id(&doc, "group")), 0.5);
+    assert!(work > 0);
+}
+
+#[test]
 fn stylesheet_cache_comparison_has_exact_precharged_work_and_no_copy_or_refill() {
     let doc = crate::html::parse("<link id=sheet rel=stylesheet><div id=box></div>");
     let sheet = id(&doc, "sheet");
