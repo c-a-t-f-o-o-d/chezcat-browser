@@ -6718,44 +6718,49 @@ impl Runtime {
     ) -> Result<Control, Fault> {
         match &program.stmts[id].kind {
             StmtKind::Declare(kind, declarations) => {
-                let target = if *kind == Declaration::Var {
-                    self.var_environment(env)?
-                } else {
-                    env
-                };
-                for (pattern, initial) in declarations {
-                    self.step()?;
-                    if let Some(expression) = initial {
-                        let value = self.eval(program, *expression, env, this, host)?;
-                        if let Some(name) = program.pattern_name(*pattern) {
-                            self.infer_class_name(program, *expression, name, &value)?;
-                        }
-                        let scope_candidate = if matches!(&program.patterns[*pattern].kind, binding_patterns::Kind::Name(_)) {
-                            self.fresh_anonymous_scope_closure(program, *expression, &value)
-                        } else { None };
-                        let mode = if *kind == Declaration::Var {
-                            binding_patterns::Mode::Var(target)
-                        } else {
-                            binding_patterns::Mode::Initialize(target)
-                        };
-                        self.initialize_pattern(program, *pattern, value, mode, env, this, host)?;
-                        if let Some(id) = scope_candidate { self.scope_assigned_closures.insert(id); }
-                    } else if *kind == Declaration::Let {
-                        self.initialize_pattern(
-                            program,
-                            *pattern,
-                            Value::Undefined,
-                            binding_patterns::Mode::Initialize(target),
-                            env,
-                            this,
-                            host,
-                        )?;
-                    }
+                let mode = self.declaration_mode(*kind, env)?;
+                for &declarator in declarations {
+                    self.evaluate_declarator(program, declarator, *kind, mode, env, this, host)?;
                 }
                 Ok(Control::Normal(None))
             }
             _ => unreachable!(),
         }
+    }
+
+    fn declaration_mode(&mut self, kind: Declaration, env: usize) -> Result<binding_patterns::Mode, Fault> {
+        Ok(if kind == Declaration::Var {
+            binding_patterns::Mode::Var(self.var_environment(env)?)
+        } else {
+            binding_patterns::Mode::Initialize(env)
+        })
+    }
+
+    fn evaluate_declarator(
+        &mut self,
+        program: &Rc<Program>,
+        (pattern, initial): (binding_patterns::Id, Option<ExprId>),
+        kind: Declaration,
+        mode: binding_patterns::Mode,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.step()?;
+        if let Some(expression) = initial {
+            let value = self.eval(program, expression, env, this, host)?;
+            if let Some(name) = program.pattern_name(pattern) {
+                self.infer_class_name(program, expression, name, &value)?;
+            }
+            let scope_candidate = if matches!(&program.patterns[pattern].kind, binding_patterns::Kind::Name(_)) {
+                self.fresh_anonymous_scope_closure(program, expression, &value)
+            } else { None };
+            self.initialize_pattern(program, pattern, value, mode, env, this, host)?;
+            if let Some(id) = scope_candidate { self.scope_assigned_closures.insert(id); }
+        } else if kind == Declaration::Let {
+            self.initialize_pattern(program, pattern, Value::Undefined, mode, env, this, host)?;
+        }
+        Ok(())
     }
 
     fn switch_statement(

@@ -11,6 +11,7 @@ pub(super) enum Resume {
 #[derive(Clone, Copy)]
 pub(super) enum Instruction {
     Statement(StmtId),
+    Declare { statement: StmtId, index: usize },
     Evaluate { statement: StmtId, expression: ExprId, action: Resume },
     EnterBlock(StmtId),
     LeaveBlock,
@@ -35,10 +36,6 @@ fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume
     Some(match &program.stmts[id].kind {
         StmtKind::Expr(expression) => (*expression, Resume::Discard),
         StmtKind::Return(Some(expression)) => (*expression, Resume::Return),
-        StmtKind::Declare(kind, declarations) => {
-            let [(pattern, Some(expression))] = declarations.as_slice() else { return None };
-            (*expression, Resume::Initialize { kind: *kind, pattern: *pattern })
-        }
         _ => return None,
     })
 }
@@ -71,6 +68,48 @@ fn visit_sequence(
             expression = next;
         }
     }
+}
+
+fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usize), Fault> {
+    let (mut instructions, mut sites) = (0, 0);
+    visit_sequence(program, expression, |expression, _| {
+        instructions += 1;
+        sites += usize::from(await_expression(program, expression).is_some());
+        Ok(())
+    })?;
+    Ok((instructions, sites))
+}
+
+fn statement_size(program: &Program, id: StmtId) -> Result<(usize, usize), Fault> {
+    if let StmtKind::Declare(_, declarations) = &program.stmts[id].kind {
+        let (mut instructions, mut sites) = (0, 0);
+        for &(_, initial) in declarations {
+            let (length, awaits) = initial.map(|expression| expression_size(program, expression))
+                .transpose()?.unwrap_or((1, 0));
+            instructions += if awaits == 0 { 1 } else { length };
+            sites += awaits;
+        }
+        Ok((instructions, sites))
+    } else if let Some((expression, _)) = statement_expression(program, id) {
+        expression_size(program, expression)
+    } else {
+        Ok((1, 0))
+    }
+}
+
+fn emit_expression(
+    program: &Program, id: StmtId, expression: ExprId, action: Resume,
+    code: &mut Vec<Instruction>,
+) -> Result<(), Fault> {
+    visit_sequence(program, expression, |expression, last| {
+        let action = if last { action } else { Resume::Discard };
+        let instruction = if let Some((operand, callee)) = await_expression(program, expression) {
+            Instruction::Await { statement: id, operand, callee, action }
+        } else {
+            Instruction::Evaluate { statement: id, expression, action }
+        };
+        push(code, instruction)
+    })
 }
 
 enum Visit {
@@ -113,17 +152,11 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             Visit::Statement { id, eligible } => (id, eligible),
         };
         let kind = &program.stmts[id].kind;
-        let expression = if eligible { statement_expression(program, id) } else { None };
-        if let Some((expression, _)) = expression {
-            let before = sites;
-            let mut expressions = 0;
-            visit_sequence(program, expression, |expression, _| {
-                expressions += 1;
-                sites += usize::from(await_expression(program, expression).is_some());
-                Ok(())
-            })?;
-            if sites > before {
-                instructions += expressions - 1;
+        if eligible {
+            let (length, awaits) = statement_size(program, id)?;
+            if awaits != 0 {
+                instructions += length - 1;
+                sites += awaits;
                 split.try_reserve(1).map_err(|_| storage_error())?;
                 split.insert(id);
                 continue;
@@ -233,17 +266,21 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
         } else if let Some((expression, action)) = statement_expression(program, id) {
-            visit_sequence(program, expression, |expression, last| {
-                let action = if last { action } else { Resume::Discard };
-                let instruction = if let Some((operand, callee)) = await_expression(program, expression) {
-                    Instruction::Await { statement: id, operand, callee, action }
-                } else {
-                    Instruction::Evaluate { statement: id, expression, action }
-                };
-                push(&mut code, instruction)
-            })?;
+            emit_expression(program, id, expression, action, &mut code)?;
         } else {
             match &program.stmts[id].kind {
+                StmtKind::Declare(kind, declarations) => {
+                    for (index, &(pattern, initial)) in declarations.iter().enumerate() {
+                        if let Some(expression) = initial {
+                            if expression_size(program, expression)?.1 != 0 {
+                                let action = Resume::Initialize { kind: *kind, pattern };
+                                emit_expression(program, id, expression, action, &mut code)?;
+                                continue;
+                            }
+                        }
+                        push(&mut code, Instruction::Declare { statement: id, index })?;
+                    }
+                }
                 StmtKind::Block(body) => {
                     push(&mut code, Instruction::EnterBlock(id))?;
                     push(&mut pending, Emit::LeaveBlock)?;
@@ -307,7 +344,7 @@ mod tests {
             "return (use(), 1 + await p);",
             "if(await p){}",
             "return await p + 1;",
-            "let a=await p,b=1;",
+            "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
             "while(false){await p;}",
             "try{}catch(e){await p;}",
@@ -342,6 +379,7 @@ mod tests {
         for (source, instructions) in [
             ("async function f(p){if(p){await p;}}", 4),
             ("async function f(p){return (before(), await p, after());}", 3),
+            ("async function f(p){let a,b=await p,c=4;}", 3),
         ] {
             let mut runtime = Runtime::for_test();
             let program = runtime.register_program(source, false).unwrap();

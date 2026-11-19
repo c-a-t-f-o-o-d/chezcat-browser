@@ -32,6 +32,51 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_declarators_initialize_in_order_and_leave_later_bindings_in_tdz() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', openFirst, openSecond, reject, reason={}, result=0, caught=0;
+var first=new Promise(function(resolve){openFirst=resolve;});
+var second=new Promise(function(resolve){openSecond=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var retained, neverInitialized;
+function receive(value){trace+='received|';return value+1;}
+async function work(){
+    var hoisted, seed=(trace+='seed|',1), start=await first, after=start+seed;
+    const middle=receive(await second), Klass=class{}, end=(trace+='end|',middle+after);
+    let empty, final=empty===undefined&&hoisted===undefined&&Klass.name==='Klass'?end:0;
+    return final;
+}
+async function stop(){
+    try {
+        let done=(retained=()=>done,neverInitialized=()=>later,3),
+            broken=await failed, later=(trace+='late|',4);
+    } catch(error) { if(error!==reason)throw error; caught++; }
+}
+work().then(function(value){result=value;});
+stop();
+if(trace!=='seed|'||retained()!==3||result||caught)throw 'prefix declaration';
+var tdz=false;try{neverInitialized();}catch(error){tdz=error.name==='ReferenceError';}
+if(!tdz)throw 'early initialization';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "openFirst(2);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='seed|'||retained()!==3||caught!==1||result)throw 'between declarations';
+var tdz=false;try{neverInitialized();}catch(error){tdz=error.name==='ReferenceError';}
+if(!tdz)throw 'rejected declaration initialized a later binding';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "openSecond(5);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='seed|received|end|'||result!==9)throw 'declaration order or result';'ok';");
+}
+
+#[test]
 fn await_execution_sequence_keeps_prefix_suffix_and_final_value_in_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -520,7 +565,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "if(false){consume(1,await p);}",
         "if(await p){}",
         "return await p+1;",
-        "let first=await p,second=1;",
+        "let first=await p,second=1+await p;",
         "while(false){await p;}",
         "try{}catch(reason){await p;}",
         "try{}finally{await p;}",
