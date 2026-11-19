@@ -138,6 +138,7 @@ impl ComputedProperties {
 pub(crate) struct CascadeOutput {
     pub styles: Vec<Style>,
     pub computed_properties: ComputedProperties,
+    pub stylesheet_cache: Option<StylesheetCache>,
 }
 
 /// Borrow the current script job counters, including on an unsuccessful read.
@@ -214,6 +215,10 @@ impl<'a> CssBudget<'a> {
         doc: &Document,
         external: &HashMap<usize, String>,
     ) -> Result<(), String> {
+        self.document_structure(doc)?;
+        self.document_sources(doc, external)
+    }
+    pub(super) fn document_structure(&mut self, doc: &Document) -> Result<(), String> {
         self.work(doc.nodes.len().saturating_mul(12))?;
         self.copies(doc.nodes.len().saturating_mul(
             std::mem::size_of::<Style>()
@@ -223,7 +228,7 @@ impl<'a> CssBudget<'a> {
         ))?;
         for node in &doc.nodes {
             self.work(node.children.len())?;
-            if let NodeKind::Element { tag, attrs, .. } = &node.kind {
+            if let NodeKind::Element { attrs, .. } = &node.kind {
                 self.work(attrs.len())?;
                 for attr in attrs {
                     self.work(
@@ -234,6 +239,13 @@ impl<'a> CssBudget<'a> {
                             .div_ceil(64),
                     )?;
                 }
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn document_sources(&mut self, doc: &Document, external: &HashMap<usize, String>) -> Result<(), String> {
+        for node in &doc.nodes {
+            if let NodeKind::Element { tag, .. } = &node.kind {
                 if tag == "style" {
                     for &child in &node.children {
                         if let Some(crate::html::Node {
