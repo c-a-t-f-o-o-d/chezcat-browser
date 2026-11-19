@@ -156,15 +156,6 @@ pub(super) struct LiteralAwait {
     pub(super) member: usize,
 }
 
-impl LiteralAwait {
-    pub(super) fn members(self, program: &Program) -> &[object_literals::Member] {
-        let ExprKind::Object(properties) = &program.exprs[self.expression].kind else {
-            unreachable!("compiled async object literal");
-        };
-        properties
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct FollowupCalls {
     pub(super) outer: ExprId,
@@ -196,18 +187,24 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
-    let mut site = if let ExprKind::Object(properties) = &program.exprs[expression].kind {
-        properties.iter().enumerate().find_map(|(member, property)| {
+    let literal_site = |member, value| {
+        let mut site = await_value(program, value)?;
+        site.literal = Some(LiteralAwait { expression, member });
+        Some(site)
+    };
+    let mut site = match &program.exprs[expression].kind {
+        ExprKind::Object(properties) => properties.iter().enumerate().find_map(|(member, property)| {
             let object_literals::Member::Property { value, kind: object_literals::Kind::Data, .. } = property else {
                 return None;
             };
-            let mut site = await_value(program, *value)?;
-            site.literal = Some(LiteralAwait { expression, member });
-            Some(site)
-        })?
-    } else {
-        await_value(program, expression)?
-    };
+            literal_site(member, *value)
+        }),
+        ExprKind::Array(elements) => elements.iter().enumerate().find_map(|(member, element)| {
+            let Some(Argument { expression, spread: false }) = element else { return None; };
+            literal_site(member, *expression)
+        }),
+        _ => await_value(program, expression),
+    }?;
     site.assignment = assignment;
     Some(site)
 }
