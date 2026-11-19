@@ -159,6 +159,17 @@ impl Runtime {
         if method == "valueOf" {
             return Ok(receiver);
         }
+        if number && method == "toFixed" {
+            let digits = self.binary_integer(args.first(), 0.0, host)?;
+            if !(0.0..=100.0).contains(&digits) {
+                return Err(Fault::exception(
+                    "RangeError",
+                    "Number fraction digits must be from 0 to 100.",
+                ));
+            }
+            let Value::Number(value) = receiver else { unreachable!() };
+            return self.number_to_fixed(value, digits as usize);
+        }
         // Boolean.toString ignores arguments. Number validates the radix before
         // formatting even NaN/infinity/zero, preserving observable coercion order.
         if number {

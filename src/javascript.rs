@@ -47,6 +47,11 @@ mod function_allocation;
 mod function_arena;
 #[path = "number_radix.rs"]
 mod number_radix;
+#[path = "number_to_fixed.rs"]
+mod number_to_fixed;
+#[cfg(test)]
+#[path = "number_to_fixed_tests.rs"]
+mod number_to_fixed_tests;
 #[path = "program_allocation.rs"]
 mod program_allocation;
 #[path = "function_reachability.rs"]
