@@ -2283,6 +2283,9 @@ fn build_snapshot(app: &App) -> Snapshot {
                         text.push('>');
                     }
                     html::NodeKind::Comment(value) => { text = format!("<!--{}-->", truncate(value, 240)); }
+                    html::NodeKind::ProcessingInstruction { target, data } => {
+                        text = format!("<?{} {}?>", truncate(target, 128), truncate(data, 240));
+                    }
                     html::NodeKind::Text(value) => {
                         let value = value
                             .split_whitespace()
@@ -2306,7 +2309,7 @@ fn build_snapshot(app: &App) -> Snapshot {
                         depth: depth.saturating_sub(1),
                         children: !item.children.is_empty(),
                         number: 0,
-                        color: if matches!(item.kind, html::NodeKind::Text(_) | html::NodeKind::Comment(_)) {
+                        color: if item.kind.character_data().is_some() {
                             ui::MUTED
                         } else {
                             ui::INK
@@ -2459,6 +2462,11 @@ fn selected_details(app: &App) -> Vec<String> {
     match &node.kind {
         html::NodeKind::DocumentFragment => {
             lines.push("DocumentFragment: no element attributes or layout box.".into());
+            return lines;
+        }
+        html::NodeKind::ProcessingInstruction { target, data } => {
+            lines.push(format!("Processing instruction {}:", truncate(target, 128)));
+            lines.extend(data.lines().take(128).map(|line| truncate(line, 4096)));
             return lines;
         }
         html::NodeKind::Comment(data) => {

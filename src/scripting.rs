@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, PROCESSING_INSTRUCTION_TARGET_GET,
+    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[path = "script_promises.rs"]
@@ -2592,6 +2593,7 @@ impl Bridge<'_> {
         property == "style" && self.element_expando_receiver(object)
             || property == "innerHTML" && self.attr_element_receiver(object)
             || property == "textContent" && self.text_content_receiver(object)
+            || property == "target" && self.processing_instruction_receiver(object)
             || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
@@ -2621,12 +2623,13 @@ impl Host for Bridge<'_> {
             NodeKind::Element { .. } => 1,
             NodeKind::Text(_) => 3,
             NodeKind::Comment(_) => 8,
+            NodeKind::ProcessingInstruction { .. } => 7,
             NodeKind::DocumentFragment => 11,
         })
     }
     fn mutation_observation_target(&self, target: u32) -> Option<bool> {
         self.text_content_receiver(target).then(|| node_index(target).is_some_and(|node|
-            self.dom_accessible(node) && matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Comment(_))))
+            self.dom_accessible(node) && self.doc.nodes[node].kind.character_data().is_some()))
     }
 
     fn character_data_write_generation(&self, target: u32, property: &str) -> Option<u64> {
@@ -2656,6 +2659,7 @@ impl Host for Bridge<'_> {
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
             || self.comment_receiver(object)
+            || self.processing_instruction_receiver(object)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
@@ -2704,6 +2708,7 @@ impl Host for Bridge<'_> {
             } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"Comment")}
+            else if matches!(self.doc.nodes[node].kind, NodeKind::ProcessingInstruction { .. }) {(WINDOW,"ProcessingInstruction")}
             else {(WINDOW,"Node")})
         } else if object==DOCUMENT {Some((WINDOW,"Document"))}
         else if self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
@@ -2903,6 +2908,14 @@ impl Host for Bridge<'_> {
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
         if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
+        if method == CREATE_PROCESSING_INSTRUCTION { return &[(0, true), (1, true)]; }
+        if object == WINDOW && method == "ProcessingInstruction" {
+            return if matches!(args.get(1), None | Some(Value::Undefined)) {
+                &[(0, true)]
+            } else {
+                &[(0, true), (1, true)]
+            };
+        }
         if self.inert_implementation(object) && method == script_inert_documents::CREATE {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
@@ -3039,8 +3052,9 @@ impl Host for Bridge<'_> {
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if self.event_target_interface(object)
-            && matches!(method, CREATE_CDATA_SECTION | script_inert_documents::GET
-                | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
+            && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION
+                | PROCESSING_INSTRUCTION_TARGET_GET | "ProcessingInstruction"
+                | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
             return Some(object);
         }
@@ -3122,7 +3136,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if method == CREATE_CDATA_SECTION { return 1; }
+        if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
+        if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { 2 } else { 1 };
         }
@@ -3248,6 +3263,14 @@ impl Host for Bridge<'_> {
         }
         if method == CREATE_CDATA_SECTION {
             return Err(("NotSupportedError", "HTML documents cannot create CDATA sections.".into()));
+        }
+        if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
+            let valid_target = matches!(args.first(), Some(Value::String(target))
+                if script_attribute_names::valid_xml_name(target));
+            let invalid_data = matches!(args.get(1), Some(Value::String(data)) if data.contains("?>"));
+            return if valid_target && !invalid_data { Ok(()) } else {
+                Err(("InvalidCharacterError", "ProcessingInstruction requires a valid XML name and data without ?>.".into()))
+            };
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
@@ -3412,8 +3435,7 @@ impl Host for Bridge<'_> {
                         property,
                         "textContent" | "id" | "className" | "title" | "value" | "selectedIndex"
                     ) || self.doc.nodes.get(node).is_some_and(|node| {
-                        matches!(node.kind, NodeKind::Text(_) | NodeKind::Comment(_))
-                            && matches!(property, "data" | "nodeValue")
+                        node.kind.character_data().is_some() && matches!(property, "data" | "nodeValue")
                     }) || property == "text"
                         && tag(self.doc, node) == "script"
                         && self.state.dom.created.contains(&node)
@@ -3562,8 +3584,11 @@ impl Host for Bridge<'_> {
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
         if self.event_target_interface(object) {
-            if matches!(method, CREATE_CDATA_SECTION | script_inert_documents::GET) {
+            if matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | script_inert_documents::GET) {
                 return receiver == DOCUMENT || self.inert_document(receiver);
+            }
+            if method == PROCESSING_INSTRUCTION_TARGET_GET {
+                return self.processing_instruction_receiver(receiver);
             }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
@@ -4968,6 +4993,13 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
+        if method == CREATE_PROCESSING_INSTRUCTION {
+            return self.create_processing_instruction(object, args);
+        }
+        if object == WINDOW && method == "ProcessingInstruction" {
+            return self.create_processing_instruction(DOCUMENT, args);
+        }
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
@@ -5478,6 +5510,7 @@ fn node_bytes(node: &Node) -> usize {
     match &node.kind {
         NodeKind::DocumentFragment => 0,
         NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
+        NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::len)
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()

@@ -107,7 +107,7 @@ impl Bridge<'_> {
                     if !self.frame_element_sibling_receiver(result) {return Err("Blank sibling identity is outside supported handles.".into());}
                     return Ok(Value::Host(result));
                 },
-                NodeKind::Text(_)|NodeKind::Comment(_)=>{},
+                NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
                 NodeKind::DocumentFragment=>return Err("Invalid blank sibling container.".into()),
             }
         }

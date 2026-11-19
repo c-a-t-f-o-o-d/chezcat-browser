@@ -179,7 +179,7 @@ impl Engine<'_> {
             if self.grid_skips(child)
                 || matches!(
                     self.doc.nodes[child].kind,
-                    NodeKind::Comment(_) | NodeKind::DocumentFragment
+                    NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment
                 )
                 || matches!(self.doc.nodes[child].kind, NodeKind::Element { .. })
                     && matches!(
@@ -546,7 +546,7 @@ impl Engine<'_> {
                                 .chars()
                                 .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}'));
                         }
-                        NodeKind::Comment(_) => {
+                        NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {
                             if !self.grid_work(1) {
                                 group.complete = false;
                                 break;

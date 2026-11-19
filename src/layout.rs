@@ -2018,7 +2018,7 @@ impl Engine<'_> {
             return;
         };
         match &node.kind {
-            NodeKind::Comment(_) | NodeKind::DocumentFragment => {},
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment => {},
             NodeKind::Text(text) => self.text(text, &style, link),
             NodeKind::Element { tag, id, .. } => {
                 if style.display == Display::None
@@ -2788,7 +2788,7 @@ impl Engine<'_> {
             if self.grid_budget.measuring { self.grid_budget.measurement_complete = false; }
             return Intrinsic::default();
         }
-        if matches!(self.doc.nodes[node].kind, NodeKind::Comment(_) | NodeKind::DocumentFragment) { return Intrinsic::default(); }
+        if matches!(self.doc.nodes[node].kind, NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment) { return Intrinsic::default(); }
         if let Some(value) = self.intrinsics[node] {
             return value;
         }
@@ -2802,7 +2802,7 @@ impl Engine<'_> {
             return Intrinsic::default();
         }
         let mut value = match &self.doc.nodes[node].kind {
-            NodeKind::Comment(_) | NodeKind::DocumentFragment => Intrinsic::default(),
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment => Intrinsic::default(),
             NodeKind::Text(text) if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) => {
                 self.collapsed_text_intrinsic(text, &style)
             }
@@ -3260,7 +3260,7 @@ impl Engine<'_> {
             lines: Vec::new(),
         };
         for &child in &self.doc.nodes[node].children {
-            if matches!(self.doc.nodes[child].kind, NodeKind::Comment(_)) { continue; }
+            if self.doc.nodes[child].kind.is_nonrendered_character_data() { continue; }
             if group.items.len() == MAX_FLEX_ITEMS {
                 break;
             }

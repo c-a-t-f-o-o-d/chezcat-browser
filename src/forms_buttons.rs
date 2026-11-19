@@ -63,7 +63,7 @@ fn button_shape(doc: &Document, node: usize) -> Result<(), String> {
 /// Plain caption leaves only. A BUTTON itself is not an admissible descendant.
 pub(crate) fn button_caption_node(doc: &Document, node: usize) -> bool {
     doc.nodes.get(node).is_some_and(|entry| match &entry.kind {
-        NodeKind::Text(_) | NodeKind::Comment(_) => entry.namespace == crate::html::Namespace::None && entry.children.is_empty(),
+        NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => entry.namespace == crate::html::Namespace::None && entry.children.is_empty(),
         NodeKind::Element { tag, .. } => entry.namespace == crate::html::Namespace::Html && matches!(tag.as_str(),
             "span" | "b" | "i" | "em" | "strong" | "small" | "s" | "u" | "mark" | "sub" | "sup"
             | "code" | "kbd" | "samp" | "var" | "abbr" | "cite" | "q" | "time" | "br" | "wbr"),

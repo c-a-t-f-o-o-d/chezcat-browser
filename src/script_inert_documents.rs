@@ -30,6 +30,7 @@ enum Kind {
     Doctype,
     Element(String),
     Text(String),
+    ProcessingInstruction { target: String, data: String },
 }
 
 struct InertNode {
@@ -75,6 +76,7 @@ impl Bridge<'_> {
             Kind::Doctype => 10,
             Kind::Element(_) => 1,
             Kind::Text(_) => 3,
+            Kind::ProcessingInstruction { .. } => 7,
         })
     }
 
@@ -87,6 +89,7 @@ impl Bridge<'_> {
             Kind::Doctype => "DocumentType",
             Kind::Element(tag) => crate::javascript::ordinary_html_interface(tag).unwrap_or("HTMLElement"),
             Kind::Text(_) => "Text",
+            Kind::ProcessingInstruction { .. } => "ProcessingInstruction",
         })
     }
 
@@ -113,7 +116,7 @@ impl Bridge<'_> {
                 | "compatMode" | "characterSet" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
             Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "localName" | "tagName" | "namespaceURI" | "prefix"),
-            Kind::Text(_) => matches!(name, "data" | "length"),
+            Kind::Text(_) | Kind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
         }
     }
 
@@ -203,7 +206,19 @@ impl Bridge<'_> {
             }
             Kind::Element(if namespace_aware { name } else { name.to_ascii_lowercase() })
         };
-        let bytes = match &kind { Kind::Element(name) | Kind::Text(name) => name.capacity(), _ => 0 };
+        self.append_inert_leaf(owner, kind)
+    }
+
+    pub(super) fn create_inert_processing_instruction(&mut self, owner: u32, target: String, data: String) -> Result<Value, String> {
+        self.append_inert_leaf(owner, Kind::ProcessingInstruction { target, data })
+    }
+
+    fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
+        let bytes = match &kind {
+            Kind::Element(name) | Kind::Text(name) => name.capacity(),
+            Kind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
+            _ => 0,
+        };
         let handle = self.reserve_inert_entries(1, bytes)?;
         self.state.inert_documents.entries.push(Entry::Node(InertNode {
             kind, owner, parent: None, children: Vec::new(),
@@ -233,6 +248,24 @@ impl Bridge<'_> {
         self.state.work(1)?;
         if self.inert_implementation(object) { return Ok(Value::Undefined); }
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
+        if let Kind::ProcessingInstruction { target, data } = &node.kind {
+            match property {
+                "target" | "nodeName" | "data" | "nodeValue" | "textContent" => {
+                    let read_target = matches!(property, "target" | "nodeName");
+                    self.state.copies(if read_target { target.len() } else { data.len() })?;
+                    let Kind::ProcessingInstruction { target, data } =
+                        &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
+                    return Ok(Value::String(if read_target { target.clone() } else { data.clone() }));
+                }
+                "length" => {
+                    self.state.work(data.len())?;
+                    let Kind::ProcessingInstruction { data, .. } =
+                        &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
+                    return Ok(Value::Number(data.encode_utf16().count() as f64));
+                }
+                _ => {}
+            }
+        }
         let host = |id: Option<u32>| id.map_or(Value::Null, Value::Host);
         let string = |value: &str| Value::String(value.into());
         let document = match &node.kind { Kind::Document(nodes) => Some(nodes), _ => None };
@@ -262,6 +295,7 @@ impl Bridge<'_> {
                 Kind::Doctype => string("html"),
                 Kind::Element(name) => Value::String(name.to_ascii_uppercase()),
                 Kind::Text(_) => string("#text"),
+                Kind::ProcessingInstruction { .. } => unreachable!("processing instruction name was handled above"),
             },
             "textContent" if matches!(node.kind, Kind::Element(_) | Kind::Text(_)) => return self.inert_text_content(object),
             "data" | "nodeValue" if matches!(node.kind, Kind::Text(_)) => return self.inert_text_content(object),

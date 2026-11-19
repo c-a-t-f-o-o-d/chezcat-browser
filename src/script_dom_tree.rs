@@ -200,6 +200,34 @@ impl Bridge<'_> {
             && matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)))
     }
 
+    pub(super) fn processing_instruction_receiver(&self, object: u32) -> bool {
+        self.inert_node_type(object) == Some(7)
+            || node_index(object).is_some_and(|node| self.dom_accessible(node)
+                && matches!(self.doc.nodes[node].kind, NodeKind::ProcessingInstruction { .. }))
+    }
+
+    pub(super) fn processing_instruction_target(&mut self, object: u32) -> Result<Value, String> {
+        if self.inert_node_type(object) == Some(7) { return self.inert_get(object, "target"); }
+        let node = self.dom_node(object)?;
+        let NodeKind::ProcessingInstruction { target, .. } = &self.doc.nodes[node].kind else {
+            return Err("ProcessingInstruction target requires a genuine node.".into());
+        };
+        self.state.copies(target.len())?;
+        Ok(Value::String(target.clone()))
+    }
+
+    pub(super) fn create_processing_instruction(&mut self, owner: u32, args: &[Value]) -> Result<Value, String> {
+        let target = self.text(args.first().ok_or("ProcessingInstruction requires a target.")?)?;
+        let data = match args.get(1) {
+            None | Some(Value::Undefined) => String::new(),
+            Some(data) => self.text(data)?,
+        };
+        if self.inert_document(owner) {
+            return self.create_inert_processing_instruction(owner, target, data);
+        }
+        self.create_dom_node(NodeKind::ProcessingInstruction { target, data })
+    }
+
     pub(super) fn node_identity_receiver(&self,object:u32)->bool {
         !self.is_frame_handle(object) && (self.namespace_receiver(object) || self.inert_node_type(object).is_some())
     }
@@ -606,7 +634,7 @@ impl Bridge<'_> {
         if common_node_property(property) || self.dom_method(object, property).is_some() {
             return Ok(Some(true));
         }
-        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Comment(_)) {
+        if self.doc.nodes[node].kind.character_data().is_some() {
             return Ok(Some(matches!(
                 property,
                 "data" | "nodeValue" | "textContent" | "length"
@@ -705,11 +733,19 @@ impl Bridge<'_> {
         }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
         let comment = matches!(self.doc.nodes[node].kind, NodeKind::Comment(_));
+        let target = match &self.doc.nodes[node].kind {
+            NodeKind::ProcessingInstruction { target, .. } => Some(target.as_str()),
+            _ => None,
+        };
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
-                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else { 1.0 }),
+                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else if target.is_some() { 7.0 } else { 1.0 }),
                 "nodeName" => {
+                    if let Some(target) = target {
+                        self.state.copies(target.len())?;
+                        return Ok(Some(Value::String(target.into())));
+                    }
                     let name = if self.fragment_receiver(object) { "#document-fragment".into() } else if text {
                         "#text".into()
                     } else if comment {
@@ -772,14 +808,14 @@ impl Bridge<'_> {
                 }
             }));
         }
-        if let NodeKind::Text(value) | NodeKind::Comment(value) = &self.doc.nodes[node].kind {
+        if let Some(value) = self.doc.nodes[node].kind.character_data() {
             return Ok(Some(match property {
                 "data" | "nodeValue" | "textContent" => {
                     if value.len() > self.state.limits.host.string_bytes {
                         return Err("DOM result exceeds 32 KiB.".into());
                     }
                     self.state.copies(value.len())?;
-                    Value::String(value.clone())
+                    Value::String(value.into())
                 }
                 "length" => {
                     self.state.copies(value.len())?;
@@ -827,6 +863,7 @@ impl Bridge<'_> {
         let bytes = match &kind {
             NodeKind::Element { tag, .. } => tag.len(),
             NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
+            NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
             NodeKind::DocumentFragment => 0,
         };
         let node = self.doc.nodes.len();
@@ -1337,12 +1374,12 @@ impl Bridge<'_> {
         if let Some(attribute)=self.html_text_reflection(node,property) {
             let value=self.text(value)?;self.attribute(node,attribute,Some(value))?;return Ok(true);
         }
-        if let NodeKind::Text(old) | NodeKind::Comment(old) = &self.doc.nodes[node].kind {
+        if let Some(old) = self.doc.nodes[node].kind.character_data() {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);
             }
             let old_len = old.len();
-            let comment = matches!(self.doc.nodes[node].kind,NodeKind::Comment(_));
+            let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
                 String::new()
@@ -1350,9 +1387,14 @@ impl Bridge<'_> {
                 self.text(value)?
             };
             self.state.replace_bytes(old_len, text.len())?;
-            self.doc.nodes[node].kind = if comment {NodeKind::Comment(text)} else {NodeKind::Text(text)};
+            match &mut self.doc.nodes[node].kind {
+                NodeKind::Text(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
+                    *data = text;
+                }
+                _ => unreachable!("character data was checked above"),
+            }
             self.state.dom_committed();
-            if self.state.dom.connected[node] && !comment {
+            if self.state.dom.connected[node] && renders_text {
                 self.state.layout_changed();
                 if let Some(parent) =
                     self.state.tree.parents[node].filter(|&parent| self.dom_script(parent))

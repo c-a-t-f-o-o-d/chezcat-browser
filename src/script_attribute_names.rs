@@ -1,5 +1,22 @@
 //! DOM attribute name validation. Namespace strings confer no network authority.
 //! https://dom.spec.whatwg.org/#validate-and-extract
+// XML 1.0 Name, used by Document processing instructions.
+pub(super) fn valid_xml_name(name: &str) -> bool {
+    fn start(ch: char) -> bool {
+        matches!(ch,
+            ':' | 'A'..='Z' | '_' | 'a'..='z' | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}'
+            | '\u{F8}'..='\u{2FF}' | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}'
+            | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}'
+            | '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{EFFFF}')
+    }
+
+    let mut chars = name.chars();
+    chars.next().is_some_and(start)
+        && chars.all(|ch| start(ch) || matches!(ch,
+            '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'))
+}
+
 pub(super) fn valid_attribute_name(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '=' | '>'))
 }
