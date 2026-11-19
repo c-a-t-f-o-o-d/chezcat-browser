@@ -84,6 +84,44 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
 }
 
 #[test]
+fn unimplemented_element_tree_members_follow_author_descriptors() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var element = document.createElement('div'), calls = 0, saved;
+if ('attachShadow' in element || element.attachShadow !== undefined ||
+    'shadowRoot' in element || element.shadowRoot !== undefined ||
+    'getHTML' in element || element.getHTML !== undefined)
+    throw 'an absent operation or field was exposed';
+Element.prototype.attachShadow = function(options) {
+    if (this !== element || options.mode !== 'open') throw 'incorrect receiver or argument';
+    saved = {host: this};
+    return saved;
+};
+Object.defineProperty(Element.prototype, 'shadowRoot', {
+    get: function() { if (this !== element) throw 'incorrect getter receiver'; return saved; },
+    configurable: true
+});
+Object.defineProperty(HTMLElement.prototype, 'getHTML', {
+    get: function() { calls++; return this.tagName; },
+    configurable: true
+});
+if (!('attachShadow' in element) || !('shadowRoot' in element) || !('getHTML' in element) ||
+    Object.hasOwn(element, 'attachShadow') || Object.hasOwn(element, 'shadowRoot') || calls !== 0)
+    throw 'author descriptors lost their inheritance or presence semantics';
+if (element.attachShadow({mode:'open'}).host !== element || element.shadowRoot !== saved ||
+    element.getHTML !== 'DIV' || calls !== 1) throw 'author descriptors did not run';
+Object.defineProperty(element, 'getHTML', {value: 'own', configurable: true});
+if (element.getHTML !== 'own' || !delete element.getHTML || element.getHTML !== 'DIV')
+    throw 'own descriptor did not shadow and reveal the getter';
+delete Element.prototype.attachShadow;
+delete Element.prototype.shadowRoot;
+delete HTMLElement.prototype.getHTML;
+if (element.attachShadow !== undefined || 'shadowRoot' in element || 'getHTML' in element)
+    throw 'deleted authorship left a native member';
+"#);
+}
+
+#[test]
 fn autonomous_element_identity_uses_the_html_and_dom_name_rules() {
     use crate::javascript::valid_custom_element_name;
     for name in ["a-", "data-panel", "x-α", "note-🙂", "x-@", "x-=", "x-:", "x-\u{b}"] {

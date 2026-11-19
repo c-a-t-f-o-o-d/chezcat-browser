@@ -1,5 +1,6 @@
 //! Ordinary element properties and reserved native interface names.
 //! Custom keys use VM descriptors; native interfaces keep host routing.
+//! Absent shadow-tree and markup APIs leave room for author descriptors.
 //! https://dom.spec.whatwg.org/#interface-element
 //! https://html.spec.whatwg.org/multipage/dom.html#htmlelement
 use super::*;
@@ -9,7 +10,7 @@ nodeType nodeName baseURI isConnected ownerDocument parentNode parentElement chi
 hasChildNodes normalize cloneNode isEqualNode isSameNode compareDocumentPosition contains lookupPrefix lookupNamespaceURI isDefaultNamespace insertBefore appendChild replaceChild removeChild
 addEventListener removeEventListener dispatchEvent namespaceURI prefix localName tagName id className classList slot assignedSlot attributes hasAttributes getAttributeNames
 getAttribute getAttributeNS setAttribute setAttributeNS removeAttribute removeAttributeNS toggleAttribute hasAttribute hasAttributeNS getAttributeNode getAttributeNodeNS setAttributeNode setAttributeNodeNS removeAttributeNode
-attachShadow shadowRoot attachInternals getHTML setHTML setHTMLUnsafe innerHTML outerHTML matches webkitMatchesSelector closest getElementsByTagName getElementsByTagNameNS getElementsByClassName querySelector querySelectorAll
+innerHTML outerHTML matches webkitMatchesSelector closest getElementsByTagName getElementsByTagNameNS getElementsByClassName querySelector querySelectorAll
 children firstElementChild lastElementChild childElementCount previousElementSibling nextElementSibling before after replaceWith remove prepend append replaceChildren insertAdjacentHTML insertAdjacentText insertAdjacentElement
 getBoundingClientRect getClientRects getBoxQuads getAnimations animate checkVisibility scrollTop scrollLeft scrollWidth scrollHeight clientTop clientLeft clientWidth clientHeight scroll scrollTo scrollBy scrollIntoView
 offsetParent offsetTop offsetLeft offsetWidth offsetHeight setPointerCapture releasePointerCapture hasPointerCapture requestFullscreen requestPointerLock
