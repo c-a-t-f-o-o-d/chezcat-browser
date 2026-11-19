@@ -3727,6 +3727,8 @@ struct Object {
     length: Option<usize>,
     length_writable: bool,
     extensible: bool,
+    immutable_prototype: bool,
+    window_named_properties: bool,
     next_order: usize,
     error_name: Option<&'static str>,
     regexp: Option<Rc<regexp::Regex>>,
@@ -5951,6 +5953,8 @@ impl Runtime {
             length,
             length_writable: true,
             extensible: true,
+            immutable_prototype: false,
+            window_named_properties: false,
             next_order: 0,
             error_name: None,
             regexp: None,
@@ -6201,6 +6205,11 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.step()?;
         self.property_name(&name)?;
+        if self.object(id)?.window_named_properties {
+            return if self.strict || attributes.is_some() {
+                Err(Fault::exception("TypeError", "Cannot define an own property on WindowProperties."))
+            } else { Ok(()) };
+        }
         if self.string_object_index(id, &name).is_some() {
             return if self.strict || attributes.is_some() {
                 Err(Fault::exception(
@@ -8589,7 +8598,7 @@ impl Runtime {
                 if let Some(backing) = self.symbol_backing(&object, host)? {
                     let id = self.ordinary_id(backing)?;
                     self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
-                    if self.objects[id]
+                    if self.objects[id].window_named_properties || self.objects[id]
                         .symbol_properties
                         .get(&key)
                         .is_some_and(|property| !property.configurable)
@@ -8625,7 +8634,7 @@ impl Runtime {
                 self.property_name(&name)?;
                 self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
                 let object = self.object(id)?;
-                if self
+                if object.window_named_properties || self
                     .typed_numeric_key(id, &name)?
                     .is_some_and(|index| self.typed_index_valid(id, index))
                     || self.string_object_index(id, &name).is_some()
@@ -8776,11 +8785,11 @@ impl Runtime {
                     .inherits_from(Ordinary::Object(properties), prototype, host)
                     .map(Value::Bool);
             }
-            self.reject_foreign_window(&Value::Host(handle),host)?;
             if host.native_ancestry_inspection(handle) {
                 let anchor=self.native_instance_anchor(handle,host)?;
                 return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));
             }
+            self.reject_foreign_window(&Value::Host(handle),host)?;
             if let Some(ancestry) = host.instance_ancestry(handle) {
                 let caller = self.browser_global.map(|(window,_)|window);
                 if caller != Some(ancestry.window) {

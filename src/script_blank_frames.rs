@@ -617,6 +617,55 @@ document.title='node-interface-owners-ok';
         let out=page.console_eval(&mut doc,&mut forms,"if(effects!==1)throw 'foreign getter/conversion';");assert_eq!(out.errors,0,"{}",page.report());
     }
     #[test]
+    fn native_window_interface_preserves_global_identity_realm_and_access_guards() {
+        let source = format!("{CREATE}{}", r#"
+var Main = Window, Child = w.Window, P = Main.prototype, CP = Child.prototype;
+var N = Object.getPrototypeOf(P), CN = Object.getPrototypeOf(CP), tag = Symbol.toStringTag;
+if (typeof Main !== 'function' || Main.name !== 'Window' || Main.length !== 0 ||
+    Object.getPrototypeOf(Main) !== EventTarget || Object.getPrototypeOf(Child) !== w.EventTarget ||
+    Main === Child || P === CP || N === CN || N[tag] !== 'WindowProperties' ||
+    Object.getPrototypeOf(N) !== EventTarget.prototype || Object.getPrototypeOf(CN) !== w.EventTarget.prototype)
+    throw 'real independent interface ancestry';
+if (window.constructor !== Main || Object.getPrototypeOf(window) !== P || Object.getPrototypeOf(w) !== CP ||
+    !(window instanceof Main) || !(window instanceof EventTarget) || !(w instanceof Child) ||
+    w instanceof Main || window instanceof Child || !CP.isPrototypeOf(w)) throw 'native Window identities';
+if (window[tag] !== 'Window' || w.Function('return window[Symbol.toStringTag];')() !== 'Window' ||
+    window.document !== document ||
+    window.self !== window || window.globalThis !== window) throw 'global host identity';
+var rejected = 0;
+try { new Main(); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+try { Main(); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+try { Object.setPrototypeOf(P, Object.prototype); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+try { Object.setPrototypeOf(N, Object.prototype); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+try { Object.defineProperty(N,'item',{value:1}); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+try { Object.preventExtensions(N); } catch(e) { if(e instanceof TypeError) rejected++; else throw e; }
+if (rejected !== 6 || !Object.isExtensible(N) || delete N[tag] || delete N.absent) throw 'protected interfaces';
+var marker = {}, reads=0;
+Object.defineProperty(P,'localProbe',{configurable:true,get:function(){reads++;return this===window?marker:null;}});
+if (window.localProbe !== marker || Object.hasOwn(window,'localProbe') || reads !== 1) throw 'ordinary guarded prototype lookup';
+delete P.localProbe;
+window.Window = 17;
+if (Object.getPrototypeOf(window) !== P || !(window instanceof Main) || window.constructor !== Main) throw 'saved identity';
+window.Window = Main;
+document.title = 'verified-window-interface';
+"#);
+        let (mut doc, mut forms, mut page, out) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(out.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "verified-window-interface");
+        page.set_location(&crate::navigation::Location {
+            url: Some(crate::url::parse("https://other.test/").unwrap().0),
+            path: None, root: None, fragment: String::new(),
+        });
+        let allocations = page.runtime.window_allocation_state_for_test();
+        for operation in ["Object.getPrototypeOf(w);", "w.Window;", "w instanceof Child;", "CP.isPrototypeOf(w);"] {
+            let out = page.console_eval(&mut doc, &mut forms, operation);
+            assert_eq!(out.errors, 1, "{operation}: {}", page.report());
+            assert!(page.report().contains("same-origin"), "{operation}: {}", page.report());
+            assert_eq!(page.runtime.window_allocation_state_for_test(), allocations);
+        }
+    }
+
+    #[test]
     fn standalone_event_target_realms_and_saved_foreign_capabilities_are_guarded() {
         let source=format!("{CREATE}{}",r#"
 var ChildTarget=w.EventTarget,RootTarget=EventTarget,child=new ChildTarget(),root=new EventTarget(),bound=ChildTarget.bind(null),rootBound=RootTarget.bind(null),effects=0;

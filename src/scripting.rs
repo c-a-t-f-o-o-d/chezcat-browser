@@ -2652,7 +2652,7 @@ impl Host for Bridge<'_> {
         object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
-        self.inert_interface(object).is_some() || self.document_interface_receiver(object)
+        self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
@@ -2674,6 +2674,9 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if self.event_target_interface(object) {
+            return Some(crate::javascript::NativeAncestry { window: object, constructor: Some((object, "Window")) });
+        }
         if let Some(interface) = self.inert_interface(object) {
             return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, interface)) });
         }
@@ -3301,7 +3304,7 @@ impl Host for Bridge<'_> {
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object)
-            && (matches!(method,"Node"|"Element"|"HTMLElement"|"SVGElement"|"CharacterData"|"CDATASection"|"HTMLMediaElement"|"HTMLVideoElement")
+            && (matches!(method,"Window"|"Node"|"Element"|"HTMLElement"|"SVGElement"|"CharacterData"|"CDATASection"|"HTMLMediaElement"|"HTMLVideoElement")
                 || crate::javascript::ORDINARY_HTML_SUBCLASSES.iter().any(|&(_, name)| name == method))
         {
             return Err(("TypeError","Illegal constructor for this native interface.".into()));
