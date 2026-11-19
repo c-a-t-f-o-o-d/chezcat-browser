@@ -300,6 +300,7 @@ struct Event {
 struct Tree {
     active: Vec<bool>,
     parents: Vec<Option<usize>>,
+    sibling_slots: Vec<usize>,
     order: Vec<usize>,
     ids: HashMap<String, usize>,
     body: Option<usize>,

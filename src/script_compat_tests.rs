@@ -700,6 +700,34 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn wide_tree_walker_keeps_sibling_reads_within_one_job_and_tracks_reordering() {
+    let mut doc = crate::html::parse(&format!("<div id=root>{}</div>", "<wbr>".repeat(4096)));
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::with_limits(crate::javascript::limits::Limits {
+        host_work: 200_000,
+        startup_host_work: 200_000,
+        ..crate::javascript::limits::CAPACITY_REGRESSION
+    });
+    let script = Script { node: 0, label: "wide sibling fixture".into(), source: r#"
+var root=document.getElementById('root'), first=root.firstChild, second=first.nextSibling;
+var walker=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT), count=0;
+while(walker.nextNode())count++;
+if(count!==4096||walker.currentNode!==root.lastChild)throw 'wide traversal';
+var last=walker.currentNode;
+root.insertBefore(last,first);
+if(last.previousSibling!==null||last.nextSibling!==first||first.previousSibling!==last||
+    first.nextSibling!==second||walker.nextNode()!==first)throw 'sibling positions after reorder';
+root.removeChild(last);
+if(last.nextSibling!==null||first.previousSibling!==null||first.nextSibling!==second)throw 'detachment';
+document.title='wide-dom-sibling-ok';
+"#.into() };
+    let outcome = page.start(&mut doc, &mut forms, &[script]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "wide-dom-sibling-ok");
+}
+
+#[test]
 fn tree_walker_masks_preserve_live_cursor_and_native_tree_boundaries() {
     let (doc, _, page, outcome) = page(
         "<div id=root><p id=one>A<b id=nested>B</b></p><p id=two>C</p></div>",
