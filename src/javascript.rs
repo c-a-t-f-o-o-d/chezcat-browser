@@ -3647,6 +3647,16 @@ enum Reference {
     SuperProperty { base: Option<Ordinary>, receiver: Value, name: Box<str> },
 }
 
+impl Reference {
+    fn assignment_bytes(&self) -> usize {
+        match self {
+            Self::Binding(_, name) | Self::Global(name) | Self::Missing(name) => name.len(),
+            Self::ComputedProperty(receiver, key) => receiver.bytes().saturating_add(key.bytes()),
+            _ => unreachable!("suspended assignment needs an identifier or ordinary property"),
+        }
+    }
+}
+
 enum LoopIterator {
     Keys(Value, std::vec::IntoIter<String>),
     Values(iterator_protocol::Record),

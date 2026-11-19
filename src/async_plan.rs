@@ -81,15 +81,30 @@ pub(super) fn lexical_for_of(program: &Program, id: StmtId) -> Option<(Declarati
     Some((*kind, declarations[0].0, source))
 }
 
-pub(super) fn generator_call_yield(program: &Program, statement: StmtId) -> Option<(ExprId, Option<ExprId>, bool)> {
-    let StmtKind::Expr(call) = program.stmts[statement].kind else { return None };
+pub(super) struct GeneratorCallYield {
+    pub(super) callee: ExprId,
+    pub(super) operand: Option<ExprId>,
+    pub(super) delegate: bool,
+    pub(super) target: Option<ExprId>,
+}
+
+pub(super) fn generator_call_yield(program: &Program, statement: StmtId) -> Option<GeneratorCallYield> {
+    let StmtKind::Expr(expression) = program.stmts[statement].kind else { return None };
+    let (call, target) = match program.exprs[expression].kind {
+        ExprKind::Assign("=", target, right)
+            if matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..)) =>
+        {
+            (right, Some(target))
+        }
+        _ => (expression, None),
+    };
     let ExprKind::Call(callee, arguments) = &program.exprs[call].kind else { return None };
     if !matches!(program.exprs[*callee].kind, ExprKind::Name(_)) {
         return None;
     }
     let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
     let ExprKind::Yield { operand, delegate } = program.exprs[*expression].kind else { return None };
-    Some((*callee, operand, delegate))
+    Some(GeneratorCallYield { callee: *callee, operand, delegate, target })
 }
 
 struct AwaitSite {

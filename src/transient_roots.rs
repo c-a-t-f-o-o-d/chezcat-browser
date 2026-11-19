@@ -1,7 +1,7 @@
 //! ID-only registrations for suspended interpreter state and audited call entries.
 #[cfg(test)]
 use super::MAX_ARGUMENTS;
-use super::{Control, Exception, Fault, Runtime, Value, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
+use super::{Control, Exception, Fault, Reference, Runtime, Value, MAX_CALL_DEPTH, MAX_EVAL_DEPTH,
     MAX_EVALUATION_ARGUMENT_SLOTS, MAX_EVALUATION_FRAME_SLOTS};
 use super::function_reachability::Edge;
 
@@ -123,6 +123,16 @@ impl Runtime {
     pub(super) fn push_transient_value(&mut self, value: &Value) -> Result<(), Fault> {
         match value { Value::Object(id) => self.push_transient_root(Edge::Object(*id)),
             Value::Function(id) => self.push_transient_root(Edge::Function(*id)), _ => Ok(()) }
+    }
+
+    pub(super) fn push_transient_reference(&mut self, reference: &Reference) -> Result<(), Fault> {
+        let mut rooted = Ok(());
+        Edge::reference(reference, &mut |edge| {
+            if rooted.is_ok() {
+                rooted = self.push_transient_root(edge);
+            }
+        });
+        rooted
     }
 
     pub(super) fn push_completion_roots(&mut self, completion: &Result<Control, Fault>) -> Result<(), Fault> {
