@@ -86,6 +86,7 @@ impl Runtime {
             Builtin::ImageData(super::image_data_api::Op::Constructor) => 2,
             Builtin::ImageData(_) => 0,
             Builtin::DomException(operation) => operation.arity(),
+            Builtin::MutationObserver(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::Proxy | Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
             Builtin::JsonStringify | Builtin::ReflectSet => 3,

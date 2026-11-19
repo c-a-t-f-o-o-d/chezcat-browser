@@ -486,6 +486,8 @@ impl Runtime {
         }
         meter.charge(self.promises.reachability_cost())?;
         self.promises.reachability_edges(&mut |edge| graph.add(edge));
+        meter.charge(self.mutations.reachability_cost())?;
+        self.mutations.reachability_edges(&mut |edge| graph.add(edge));
         self.reachability_intrinsic_edges(&mut |edge| graph.add(edge));
         loop {
             self.trace_strong_edges(&mut graph, meter)?;

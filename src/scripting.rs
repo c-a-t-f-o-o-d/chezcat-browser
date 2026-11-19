@@ -970,6 +970,7 @@ impl Page {
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
+        runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
         runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
         Self { runtime, state }
     }
@@ -2598,6 +2599,26 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn mutation_observation_target(&self, target: u32) -> Option<bool> {
+        self.text_content_receiver(target).then(|| node_index(target).is_some_and(|node|
+            self.dom_accessible(node) && matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Comment(_))))
+    }
+
+    fn character_data_write_generation(&self, target: u32, property: &str) -> Option<u64> {
+        if matches!(property, "data" | "nodeValue" | "textContent") && self.mutation_observation_target(target) == Some(true) {
+            self.state.dom_commits
+        } else {
+            None
+        }
+    }
+
+    fn empty_mutation_node_list(&mut self) -> Result<u32, String> {
+        self.empty_snapshot_node_list()
+    }
+
+    fn mutation_callback_error(&mut self, message: &str) {
+        self.state.error("MutationObserver callback", message);
+    }
     fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))

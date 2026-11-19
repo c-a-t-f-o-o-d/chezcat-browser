@@ -40,6 +40,13 @@ impl Bridge<'_> {
         Ok(handle)
     }
 
+    pub(super) fn empty_snapshot_node_list(&mut self) -> Result<u32, String> {
+        self.state.work(1)?;
+        let handle = self.reserve_node_list("identity")?;
+        self.state.node_lists.push(NodeList::Snapshot(Vec::new()));
+        Ok(handle)
+    }
+
     pub(super) fn create_child_list(&mut self, object: u32) -> Result<Value, String> {
         let root = if object == DOCUMENT { 0 } else { self.dom_node(object)? };
         // The parser retains template input in an inert AST subtree, not a

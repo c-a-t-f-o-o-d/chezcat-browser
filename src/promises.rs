@@ -167,11 +167,12 @@ enum Job {
     /// A native stable-state procedure owns no ECMAScript references. It runs
     /// in the host document, sharing FIFO order and all normal job allowances.
     Host(u64),
+    MutationObservers,
 }
 
 impl Job {
     fn allocation_kind(&self) -> usize {
-        match self { Self::Callback(_) | Self::Host(_) => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
+        match self { Self::Callback(_) | Self::Host(_) | Self::MutationObservers => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
     }
 
     fn retained_bytes(&self) -> usize {
@@ -187,7 +188,7 @@ impl Job {
                         + capability.reject.bytes()
                         + value.bytes()
                 }
-                Self::Callback(_) | Self::Host(_) => 0,
+                Self::Callback(_) | Self::Host(_) | Self::MutationObservers => 0,
             }
     }
 }
@@ -293,7 +294,7 @@ impl Arena {
         for group in &self.groups { group.capability.reachability_edges(add); add(Edge::Object(group.values)); }
         for (_, job) in &self.jobs {
             match job {
-                Job::Host(_)=>{},
+                Job::Host(_) | Job::MutationObservers => {},
                 Job::Callback(id) => add(Edge::Function(*id)),
                 Job::Await { frame, value, .. } => {
                     frame.reachability_edges(add);
@@ -665,11 +666,24 @@ impl Runtime {
             _ => None,
         };
         let realm = match &job {
-            Job::Host(_) => None,
+            Job::Host(_) | Job::MutationObservers => None,
             Job::Await { frame, .. } => frame.realm(),
             _ => callback.map_or(self.active_realm, |id| self.function_realms[id]),
         };
         self.promises.jobs.push_back((realm, job));
+        Ok(())
+    }
+
+    pub(super) fn enqueue_mutation_observers(&mut self) -> Result<(), Fault> {
+        self.promise_enqueue(Job::MutationObservers)
+    }
+
+    pub(super) fn remove_mutation_observer_reservation(&mut self) -> Result<(), Fault> {
+        if !self.promises.jobs.back().is_some_and(|(_, job)| matches!(job, Job::MutationObservers)) {
+            return Err(Fault::new("MutationObserver microtask reservation lost its queue position."));
+        }
+        let (_, job) = self.promises.jobs.pop_back().unwrap();
+        self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
         Ok(())
     }
     pub(super) fn prepare_host_microtask(&mut self,host:&mut dyn Host,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,Fault>{
@@ -1371,7 +1385,7 @@ impl Runtime {
         let result = (|| {
             use super::function_reachability::Edge;
             match &job {
-                Job::Host(_)=>{},
+                Job::Host(_) | Job::MutationObservers => {},
                 Job::Callback(function) => self.push_transient_root(Edge::Function(*function))?,
                 Job::Await { frame, value, .. } => {
                     let mut registered = Ok(());
@@ -1407,6 +1421,7 @@ impl Runtime {
         self.step()?;
         match job {
             Job::Host(ticket)=>{host.run_native_microtask(ticket).map_err(Fault::new)?;}
+            Job::MutationObservers => self.notify_mutation_observers(host)?,
             Job::Await { frame, value, reject } => self.resume_await_body(frame, value, reject, host)?,
             Job::Callback(function) => {
                 self.call_value(Value::Function(function), &[], Value::Undefined, host)?;
@@ -1541,6 +1556,7 @@ impl Runtime {
             }
         }
         self.promises.reactions = 0;
+        self.cancel_mutation_observers();
     }
 
     /// Read-only snapshot; handled rejections here are not reported as errors.
