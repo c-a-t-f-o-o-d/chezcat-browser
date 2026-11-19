@@ -293,6 +293,46 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_classic_loop_initializer_keeps_per_iteration_bindings() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, initRead, done, captures=[], varResult, constResult;
+var gate=new Promise(resolve=>release=resolve);
+function mark(label,value){trace+=label+'|';return value;}
+async function run(){
+    let i='outer';
+    for(let i=(initRead=()=>i,mark('init',0)), limit=2;
+        mark('test:'+i,i<limit);i=mark('update:'+i,i+1)){
+        captures.push(()=>i);
+        try{
+            await gate;
+            if(i===0)continue;
+            mark('body:'+i,0);
+        }finally{mark('finally:'+i,0);}
+    }
+    return i;
+}
+async function variable(){for(var j=0;j<1;j++){await gate;}return j;}
+async function constant(){for(const on=true;on;){await gate;break;}return typeof on;}
+run().then(value=>done=value);
+variable().then(value=>varResult=value);
+constant().then(value=>constResult=value);
+if(trace!=='init|test:0|'||initRead()!==0||captures[0]()!==0||done)throw 'loop initializer prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='init|test:0|finally:0|update:0|test:1|body:1|finally:1|update:1|test:2|'||
+   initRead()!==0||captures[0]()!==0||captures[1]()!==1||done!=='outer'||varResult!==1||constResult!=='undefined')
+    throw 'fresh bindings, continue, or loop head scope';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_classic_loop_jumps_preserve_target_update_and_cleanup() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
