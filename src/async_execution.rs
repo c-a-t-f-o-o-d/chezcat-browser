@@ -1,12 +1,12 @@
 //! Owned await activations for the parser's finite statement plan. A resumed
-//! instruction never evaluates the prefix again. Synchronous subtrees and catch
-//! bodies use the ordinary evaluator, including its native/DOM access checks.
+//! instruction never evaluates the prefix again. Synchronous subtrees, catch
+//! and finally bodies use the ordinary evaluator and its native access checks.
 use super::async_plan::{Instruction, Resume};
 use super::function_reachability::Edge;
 use super::*;
 
 #[derive(Clone, Copy)]
-struct Catch {
+struct TryScope {
     statement: StmtId,
     after: usize,
     environments: usize,
@@ -35,7 +35,7 @@ pub(super) struct Activation {
     strict: bool,
     next: usize,
     environments: Vec<usize>,
-    catches: Vec<Catch>,
+    try_scopes: Vec<TryScope>,
     pending: Option<PendingAwait>,
 }
 
@@ -54,9 +54,9 @@ impl Activation {
                     .saturating_mul(std::mem::size_of::<usize>()),
             )
             .saturating_add(
-                self.catches
+                self.try_scopes
                     .capacity()
-                    .saturating_mul(std::mem::size_of::<Catch>()),
+                    .saturating_mul(std::mem::size_of::<TryScope>()),
             )
     }
 
@@ -65,7 +65,7 @@ impl Activation {
         // charge. Program storage is already charged and retained by callee.
         self.environments
             .len()
-            .saturating_add(self.catches.len())
+            .saturating_add(self.try_scopes.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some()))
     }
 
@@ -143,7 +143,7 @@ impl Runtime {
             strict: self.strict,
             next: 0,
             environments,
-            catches: Vec::new(),
+            try_scopes: Vec::new(),
             pending: None,
         });
         self.drive_await_body(frame, None, host)
@@ -239,7 +239,10 @@ impl Runtime {
         loop {
             let result = self.await_instruction(&mut frame, resumed.take(), host);
             let result = match result {
-                Err(error) => self.await_catch(&mut frame, error, host),
+                Ok(Progress::Return(value)) => {
+                    self.unwind_await_try_scopes(&mut frame, Ok(Control::Return(value)), host)
+                }
+                Err(error) => self.unwind_await_try_scopes(&mut frame, Err(error), host),
                 other => other,
             };
             match result {
@@ -387,34 +390,39 @@ impl Runtime {
                     frame.next = target;
                     Ok(Progress::Continue)
                 }
-                Instruction::PushCatch { statement, after } => {
-                    if frame.catches.len() >= MAX_EVAL_DEPTH {
-                        return Err(Fault::new("Async catch nesting limit reached (128)."));
+                Instruction::PushTry { statement, after } => {
+                    if frame.try_scopes.len() >= MAX_EVAL_DEPTH {
+                        return Err(Fault::new("Async try nesting limit reached (128)."));
                     }
-                    if frame.catches.len() == frame.catches.capacity() {
+                    if frame.try_scopes.len() == frame.try_scopes.capacity() {
                         self.await_storage(
                             frame
                                 .retained_bytes()
-                                .saturating_add(std::mem::size_of::<Catch>()),
-                            (frame.catches.len() + 1).saturating_mul(std::mem::size_of::<Catch>()),
+                                .saturating_add(std::mem::size_of::<TryScope>()),
+                            (frame.try_scopes.len() + 1)
+                                .saturating_mul(std::mem::size_of::<TryScope>()),
                         )?;
-                        frame.catches.try_reserve_exact(1).map_err(|_| {
-                            Fault::new("Unable to allocate bounded async catch stack.")
+                        frame.try_scopes.try_reserve_exact(1).map_err(|_| {
+                            Fault::new("Unable to allocate bounded async try stack.")
                         })?;
                     }
-                    frame.catches.push(Catch {
+                    frame.try_scopes.push(TryScope {
                         statement,
                         after,
                         environments: frame.environments.len(),
                     });
                     Ok(Progress::Continue)
                 }
-                Instruction::PopCatch => {
-                    frame
-                        .catches
+                Instruction::FinishTry => {
+                    let scope = frame
+                        .try_scopes
                         .pop()
-                        .ok_or_else(|| Fault::new("Invalid async catch exit."))?;
-                    Ok(Progress::Continue)
+                        .ok_or_else(|| Fault::new("Invalid async try exit."))?;
+                    let completion = self.finish_try_statement(
+                        &frame.program, scope.statement, Ok(Control::Normal(None)),
+                        environment, &frame.this, host,
+                    )?;
+                    Self::await_control(completion)
                 }
                 Instruction::Await {
                     statement,
@@ -515,51 +523,32 @@ impl Runtime {
         }
     }
 
-    fn await_catch(
+    fn unwind_await_try_scopes(
         &mut self,
         frame: &mut Activation,
-        mut error: Fault,
+        mut completion: Result<Control, Fault>,
         host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
-        loop {
-            if error.exception.is_none() {
-                return Err(error);
-            }
-            let Some(handler) = frame.catches.pop() else {
-                return Err(error);
+        while !completion.as_ref().is_err_and(|error| error.exception.is_none()) {
+            let Some(scope) = frame.try_scopes.pop() else {
+                break;
             };
-            self.unwind_await_environments(frame, handler.environments);
+            self.unwind_await_environments(frame, scope.environments);
             let marker = self.publish_await_activation(frame)?;
-            let result = (|| {
-                if let Some(Exception::Value(value)) = error.exception.as_deref() {
-                    self.push_transient_value(value)?;
-                }
-                let StmtKind::Try(_, Some((binding, body)), None) =
-                    frame.program.stmts[handler.statement].kind
-                else {
-                    return Err(Fault::new("Invalid async catch instruction."));
-                };
-                let control = self.catch_statement(
-                    &frame.program,
-                    binding,
-                    body,
-                    &mut error,
-                    frame.environment()?,
-                    &frame.this,
-                    host,
-                )?;
-                Self::await_control(control)
+            completion = (|| {
+                self.push_completion_roots(&completion)?;
+                self.finish_try_statement(
+                    &frame.program, scope.statement, completion,
+                    frame.environment()?, &frame.this, host,
+                )
             })();
             self.restore_root_marker(marker);
-            match result {
-                Ok(Progress::Continue) => {
-                    frame.next = handler.after;
-                    return Ok(Progress::Continue);
-                }
-                Err(next) => error = next,
-                other => return other,
+            if matches!(completion, Ok(Control::Normal(_))) {
+                frame.next = scope.after;
+                break;
             }
         }
+        completion.and_then(Self::await_control)
     }
 }
 
@@ -586,7 +575,7 @@ mod tests {
             strict: true,
             next: 1,
             environments: vec![15, 16],
-            catches: vec![Catch {
+            try_scopes: vec![TryScope {
                 statement: 0,
                 after: 2,
                 environments: 1,
@@ -620,7 +609,7 @@ mod tests {
             std::mem::size_of::<Activation>()
                 + frame.this.bytes()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
-                + frame.catches.capacity() * std::mem::size_of::<Catch>()
+                + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
         );
     }
 }

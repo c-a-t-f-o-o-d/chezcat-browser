@@ -32,6 +32,65 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_try_finally_keeps_completion_order_identity_and_roots() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, reason={}, replacement={};
+var ready=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var recorded=0, rejected=0, replaced=0, recovered=0;
+function plus(value){trace+='call|';return value+3;}
+async function keep(){
+    try {
+        let result=plus(await ready);
+        return function(){return result;};
+    } finally {
+        trace+='kept|';
+        var trash={};for(var i=0;i<900;i++)trash.callback=function(){return i;};
+    }
+}
+async function preserve(){
+    try { try { await failed; } finally { trace+='inner|'; } }
+    finally { trace+='outer|'; }
+}
+async function handle(){
+    try { await failed; }
+    catch(e){if(e!==reason)throw e;trace+='catch|';}
+    finally { trace+='handled|'; }
+    return 8;
+}
+async function replaceRejection(){
+    try { return await failed; } finally { return replacement; }
+}
+async function replaceReturn(){
+    try { return await ready; } finally { throw replacement; }
+}
+async function normal(){
+    try { await ready;trace+='body|'; } finally { trace+='normal|'; }
+    trace+='after|';
+}
+keep().then(function(fn){recorded=fn();});
+preserve().catch(function(error){if(error!==reason)throw error;rejected++;});
+handle().then(function(value){recovered=value;});
+replaceRejection().then(function(value){if(value!==replacement)throw 'return replacement';replaced++;});
+replaceReturn().catch(function(error){if(error!==replacement)throw error;replaced++;});
+normal();
+if(trace!==''||recorded||rejected||replaced||recovered)throw 'finally started before settlement';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);reject(reason);if(trace!=='')throw 'finally ran synchronously';'ok';");
+    checkpoint(&mut runtime);
+    assert!(runtime.function_arena.retired > 0);
+    succeeds(&mut runtime, r#"
+if(trace!=='call|kept|body|normal|after|inner|outer|catch|handled|'||recorded!==7||rejected!==1||replaced!==2||recovered!==8)
+    throw 'completion order, replacement or retention';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_call_argument_keeps_the_resolved_function_through_collection() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"
@@ -383,8 +442,8 @@ fn await_execution_resumed_fatal_budget_keeps_shared_allowance_and_cancels_tail(
 var release,prefix=0,entered=0,caught=0,finalized=0,observed=0,tail=0;
 var gate=new Promise(function(resolve){release=resolve;});
 async function work(){
-    prefix++;await gate;entered++;
-    try{while(true){}}catch(error){caught++;}finally{finalized++;}
+    prefix++;
+    try{await gate;entered++;while(true){}}catch(error){caught++;}finally{finalized++;}
 }
 var pending=work();pending.catch(function(){observed++;});
 if(prefix!==1||entered!==0)throw 'fatal pending prefix';
@@ -429,7 +488,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "let first=await p,second=1;",
         "while(false){await p;}",
         "try{}catch(reason){await p;}",
-        "try{await p;}finally{}",
+        "try{}finally{await p;}",
         "var values=[await p];",
         "var value={entry:await p};",
         "await (await p);",
