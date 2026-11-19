@@ -1775,6 +1775,7 @@ enum StmtKind {
         body: Vec<StmtId>,
     },
     Return(Option<ExprId>),
+    Yield(Option<ExprId>),
     Throw(ExprId),
     Try(
         StmtId,
@@ -2053,7 +2054,8 @@ impl Parser {
             if self.expression_frames != 0 || self.if_branches != 0 {
                 return Err(self.unsupported("Undrained parser continuations before deferred body."));
             }
-            let (statements, strict, own_strict) = self.function_body()?;
+            let kind = self.program.templates[body.template].kind;
+            let (statements, strict, own_strict) = self.function_body(kind)?;
             if self.current != body.end + 1 {
                 return Err(self.error("Function body exceeded its token range."));
             }
@@ -2212,7 +2214,7 @@ impl Parser {
         *active = false;
         false
     }
-    fn function_body(&mut self) -> Result<(Vec<StmtId>, bool, bool), Fault> {
+    fn function_body(&mut self, kind: FunctionKind) -> Result<(Vec<StmtId>, bool, bool), Fault> {
         self.need("{")?;
         let previous = self.strict;
         let mut body = Vec::new();
@@ -2222,13 +2224,37 @@ impl Parser {
             if matches!(self.token().kind, TokenKind::End) {
                 return Err(self.error("Unterminated function body."));
             }
-            let statement = self.statement()?;
+            let statement = if kind == FunctionKind::Generator && self.is("yield") {
+                self.generator_yield_statement()?
+            } else {
+                self.statement()?
+            };
             own_strict |= self.directive(statement, &mut directives);
             body.push(statement);
         }
         let strict = self.strict;
         self.strict = previous;
         Ok((body, strict, own_strict))
+    }
+
+    fn generator_yield_statement(&mut self) -> Result<StmtId, Fault> {
+        self.enter()?;
+        let at = self.at();
+        self.need("yield")?;
+        let value = if self.token().newline() || self.is(";") || self.is("}")
+            || matches!(self.token().kind, TokenKind::End)
+        {
+            None
+        } else {
+            if self.is("*") {
+                return Err(self.unsupported("Delegated yield is not implemented."));
+            }
+            Some(self.assignment_with_in()?)
+        };
+        self.semi()?;
+        let statement = self.stmt(StmtKind::Yield(value), at)?;
+        self.depth -= 1;
+        Ok(statement)
     }
     fn strict_binding(&self, name: &str, strict: bool) -> Result<(), Fault> {
         if strict && matches!(name, "eval" | "arguments") {
@@ -6689,6 +6715,7 @@ impl Runtime {
                 Some(expr) => self.eval(program, *expr, env, this, host)?,
                 None => Value::Undefined,
             })),
+            StmtKind::Yield(_) => unreachable!("yield statements require an owned generator frame"),
             StmtKind::Break(target) => Ok(Control::Break(*target, None)),
             StmtKind::Continue(target) => Ok(Control::Continue(*target, None)),
         }
