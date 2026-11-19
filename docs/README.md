@@ -19,7 +19,7 @@
 | 🧪 **[Compatibility](COMPATIBILITY.md)** | Actual pinned application outcomes, separated by stage |
 | 🏗️ **[Architecture](ARCHITECTURE.md)** | Ownership, processes, resources and rendering boundaries |
 | 🔨 **[Build guide](BUILDING.md)** | Prerequisites, acceptance, local builds and verification |
-| 📦 **[Development and releases](RELEASING.md)** | Current integration gates and owner-requested delivery |
+| 📦 **[Development and releases](RELEASING.md)** | Focused development checks and owner-requested release verification |
 | 📐 **[Feature contracts](FEATURE_CONTRACTS.md)** | Navigable index into the complete preserved acceptance requirements |
 
 ## Policies and provenance
@@ -48,6 +48,5 @@ The verified downloadable baseline is
 from tagged source `f2e1823266a7c08c89bce7293572d801da62053c`. Download and runtime
 checks are recorded alongside earlier releases in the [release history](RELEASING.md#published-baseline).
 
-Named releases remain owner-request-only. Local/hosted checks and agent-owned
-failure diagnosis remain unchanged. This documentation refresh grants no new
-runtime, network, publication, or signing permissions.
+Named releases require an explicit owner request. The development agent owns
+failure diagnosis for ordinary PRs and releases.

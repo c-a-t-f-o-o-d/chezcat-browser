@@ -67,7 +67,7 @@ Windows runtime bundle.
 | :--- | :--- | :--- |
 | **Ordinary edits** | Focused affected tests and relevant security negatives | Proves the changed behavior, not a complete integration pass |
 | **Native suite** | `python tools/capture_tests.py --toolchain 1.99.1` | Normal Windows test results for the actual source/configuration |
-| **Integration** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
+| **Owner-requested release verification** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
 | **Physical devices / public sites** | Separate explicitly scoped checks | Not inferred from routine offline verification |
 | **Named release** | [Release procedure](RELEASING.md) | Only for an explicit owner-requested publication |
 
