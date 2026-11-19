@@ -513,7 +513,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
         }
         let children_eligible = eligible && if generator {
-            matches!(kind, StmtKind::Block(_) | StmtKind::Try(_, _, _))
+            matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _))
         } else {
             matches!(kind, StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
                 | StmtKind::For(None, _, _, _) | StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()
@@ -521,7 +521,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         if children_eligible {
             let before = sites;
             let mut condition_extra = 0;
-            if let StmtKind::If(condition, _, _) = kind {
+            if let (false, StmtKind::If(condition, _, _)) = (generator, kind) {
                 let (length, awaits) = expression_size(program, *condition, false)?;
                 if awaits != 0 {
                     sites += awaits;
@@ -756,7 +756,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 }
                 StmtKind::If(condition, yes, no) => {
                     let start = code.len();
-                    if expression_size(program, *condition, false)?.1 == 0 {
+                    if generator || expression_size(program, *condition, false)?.1 == 0 {
                         push(&mut code, Instruction::BranchFalse { statement: id, condition: *condition, target: 0 })?;
                     } else {
                         emit_expression(program, id, *condition, Resume::BranchFalse(0), false, &mut code)?;
@@ -854,7 +854,7 @@ mod tests {
             Instruction::Yield { .. }, Instruction::LeaveBlock, Instruction::FinishTry,
         ]));
         for source in [
-            "function* g(){if(true){yield 1;}}",
+            "function* g(){if(take(yield 1)){yield 2;}}",
             "function* g(){try{}finally{yield 1;}}",
             "function* g(){try{}catch(error){yield 1;}}",
             "function* g(){let value=yield 1;}",
