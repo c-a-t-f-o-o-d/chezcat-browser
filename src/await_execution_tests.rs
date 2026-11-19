@@ -32,6 +32,50 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_assignment_of_branch_values_keeps_references_and_completion() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', releaseYes, releaseNo, releaseWrite, yesResult, noResult, token={}, reason={}, stored=0;
+var yes=new Promise(function(resolve){releaseYes=resolve;});
+var no=new Promise(function(resolve){releaseNo=resolve;});
+var write=new Promise(function(resolve){releaseWrite=resolve;});
+function mark(label,value){trace+=label+'|';return value;}
+function chooseYes(value){return mark('yes-value',value);}
+function chooseNo(value){return mark('no-value',value);}
+function never(){throw 'unselected expression';}
+function key(label){return mark('key:'+label,{toString(){return mark('convert:'+label,'value');}});}
+var outer={set value(value){stored=mark('outer-write',value);}};
+var inner={set value(value){mark('inner-write',value);}};
+async function choose(flag,source,label){
+    let selected;
+    if(selected=mark('test:'+label,flag) ? chooseYes(await source) : chooseNo(await source))
+        mark('truthy:'+label,selected);
+    else mark('falsy:'+label,selected);
+    return selected;
+}
+async function assign(){
+    try { outer[key('skipped')]=(true ? await Promise.reject(reason) : never()); }
+    catch(error) {
+        if(error!==reason)throw error;
+        mark('caught',error);
+        outer[key('outer')]=(false ? never() : (inner[key('inner')]=(false ? never() : await write)));
+    }
+}
+choose(true,yes,'a').then(value=>yesResult=value);
+choose(false,no,'b').then(value=>noResult=value);
+assign();
+if(trace!=='test:a|test:b|key:skipped|'||stored)throw 'assignment prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='test:a|test:b|key:skipped|caught|key:outer|key:inner|'||stored)throw 'exception or captured targets';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "releaseYes(0);releaseNo(token);releaseWrite(5);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='test:a|test:b|key:skipped|caught|key:outer|key:inner|yes-value|falsy:a|no-value|truthy:b|convert:inner|inner-write|convert:outer|outer-write|'||yesResult!==0||noResult!==token||stored!==5)throw 'assignment value, target order or branch';'ok';");
+}
+
+#[test]
 fn await_execution_catch_body_retains_bindings_and_unwinds_through_outer_finally() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"

@@ -8,7 +8,7 @@ pub(super) enum Resume {
     Return,
     Initialize { kind: Declaration, pattern: binding_patterns::Id },
     BranchFalse(usize),
-    StoreBranchInput,
+    StoreExpressionValue,
 }
 
 #[derive(Clone, Copy)]
@@ -16,6 +16,8 @@ pub(super) enum Instruction {
     Statement(StmtId),
     Declare { statement: StmtId, index: usize },
     Evaluate { statement: StmtId, expression: ExprId, action: Resume },
+    CaptureAssignment { statement: StmtId, target: ExprId },
+    WriteAssignment { statement: StmtId, action: Resume },
     EnterBlock(StmtId),
     LeaveBlock,
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
@@ -111,6 +113,8 @@ enum ExpressionPart {
     ConditionalTest,
     ConditionalElse,
     ConditionalEnd,
+    CaptureAssignment(ExprId),
+    WriteAssignment(Resume),
 }
 
 fn visit_expression(
@@ -133,7 +137,7 @@ fn visit_expression(
                     push(&mut pending, ExpressionPart::LogicalEnd)?;
                     push(&mut pending, ExpressionPart::Value(right, action))?;
                     push(&mut pending, ExpressionPart::LogicalTest(operator, action))?;
-                    part = ExpressionPart::Value(left, Resume::StoreBranchInput);
+                    part = ExpressionPart::Value(left, Resume::StoreExpressionValue);
                     continue;
                 }
                 ExprKind::Conditional(test, yes, no) => {
@@ -142,7 +146,20 @@ fn visit_expression(
                     push(&mut pending, ExpressionPart::ConditionalElse)?;
                     push(&mut pending, ExpressionPart::Value(yes, action))?;
                     push(&mut pending, ExpressionPart::ConditionalTest)?;
-                    part = ExpressionPart::Value(test, Resume::StoreBranchInput);
+                    part = ExpressionPart::Value(test, Resume::StoreExpressionValue);
+                    continue;
+                }
+                ExprKind::Assign("=", target, right)
+                    if matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..))
+                        && matches!(program.exprs[right].kind,
+                            ExprKind::Conditional(..) | ExprKind::Sequence(..)
+                            | ExprKind::Binary("&&" | "||" | "??", _, _)) =>
+                {
+                    // These right-hand shapes combine expression results; direct
+                    // literal naming and other ordinary assignments stay in eval.
+                    push(&mut pending, ExpressionPart::WriteAssignment(action))?;
+                    push(&mut pending, ExpressionPart::Value(right, Resume::StoreExpressionValue))?;
+                    part = ExpressionPart::CaptureAssignment(target);
                     continue;
                 }
                 _ => {}
@@ -163,7 +180,8 @@ fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usiz
                 sites += usize::from(await_expression(program, expression).is_some());
             }
             ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
-            | ExpressionPart::ConditionalElse => instructions += 1,
+            | ExpressionPart::ConditionalElse | ExpressionPart::CaptureAssignment(_)
+            | ExpressionPart::WriteAssignment(_) => instructions += 1,
             ExpressionPart::LogicalEnd | ExpressionPart::ConditionalEnd => {}
         }
         Ok(())
@@ -236,6 +254,8 @@ fn emit_expression(
                 code[jump] = Instruction::Jump(code.len());
                 return Ok(());
             }
+            ExpressionPart::CaptureAssignment(target) => Instruction::CaptureAssignment { statement: id, target },
+            ExpressionPart::WriteAssignment(action) => Instruction::WriteAssignment { statement: id, action },
         };
         push(code, instruction)
     })
@@ -367,6 +387,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
             Instruction::BranchFalse { target, .. }
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
             | Instruction::Logical { action: Resume::BranchFalse(target), .. }
+            | Instruction::WriteAssignment { action: Resume::BranchFalse(target), .. }
             | Instruction::Evaluate { action: Resume::BranchFalse(target), .. } => {
                 *target = destination;
             }
@@ -517,7 +538,7 @@ mod tests {
             "return receiver.method(1 + await p);",
             "receiver[await p] = await p;",
             "value += await p;",
-            "value = flag && await p;",
+            "value = flag && (1+await p);",
             "return (await p)[await p];",
             "return (await p)?.[await p];",
             "return (await p)?.method(await p);",
@@ -572,6 +593,7 @@ mod tests {
             ("async function f(p){return choose() ? await p : other();}", 5),
             ("async function f(p){return choose() ? one() : make(await p)(1);}", 5),
             ("async function f(p){try{throw 1;}catch(e){await p;}}", 7),
+            ("async function f(p){value=flag ? left(await p) : right(await p);}", 7),
             ("async function f(p){let value; value=use(await p);}", 2),
             ("async function f(p){receiver.field=use(await p);}", 1),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),
