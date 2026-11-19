@@ -2607,7 +2607,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        property == "style" && self.element_expando_receiver(object)
+        property == "style" && self.html_element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
             || NODE_TRAVERSAL_GETTERS.iter().any(|&(name, _)| property == name)
@@ -2697,7 +2697,9 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
-        if self.inert_adopted_node(object) && self.inert_interface(object).is_some_and(|interface| interface.starts_with("HTML")) {
+        if self.inert_adopted_node(object) && self.inert_interface(object)
+            .is_some_and(|interface| interface.starts_with("HTML") || interface == "SVGElement")
+        {
             return Some(WINDOW);
         }
         self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
@@ -2859,7 +2861,7 @@ impl Host for Bridge<'_> {
         else if self.event_receiver(object)&&property=="composedPath" {true}
         else if self.node_event_method(object,property) {true}
         else if self.location_instance_owner(object).is_some() {property=="prototype"}
-        else if property=="animate" && self.element_expando_receiver(object) {true}
+        else if property=="animate" && self.html_element_expando_receiver(object) {true}
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
@@ -4446,7 +4448,7 @@ impl Host for Bridge<'_> {
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
             && matches!(property,"prototype"|"setCapture"|"releaseCapture")
-            || property=="animate" && self.element_expando_receiver(object) {
+            || property=="animate" && self.html_element_expando_receiver(object) {
             // Instance prototype/legacy capture and unimplemented animation
             // reads are absent. No capture/animation operation is advertised.
             return Ok(false);
@@ -4741,7 +4743,7 @@ impl Host for Bridge<'_> {
         let node = self.node(object)?;
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)!="form"
             && matches!(property,"prototype"|"setCapture"|"releaseCapture")
-            || property=="animate" && self.element_expando_receiver(object) {
+            || property=="animate" && self.html_element_expando_receiver(object) {
             return Ok(Value::Undefined);
         }
         if let Some(value) = self.image_get(node, property)? {

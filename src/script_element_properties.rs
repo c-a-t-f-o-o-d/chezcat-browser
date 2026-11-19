@@ -76,6 +76,12 @@ impl Bridge<'_> {
     }
 
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
+        self.html_element_expando_receiver(object)
+            || self.attr_element_receiver(object) && node_index(object).is_some_and(|node|
+                self.doc.nodes[node].namespace == crate::html::Namespace::Svg)
+    }
+
+    pub(super) fn html_element_expando_receiver(&self, object: u32) -> bool {
         // Form named properties have their own lookup semantics. An iframe
         // element belongs to this document independently of its child context.
         self.class_list_element_receiver(object) && !self.form_receiver(object)
