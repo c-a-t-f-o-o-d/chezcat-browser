@@ -2,7 +2,7 @@
 //! All other member calls retain their owned receiver/callee snapshots.
 
 use super::{Argument, Builtin, ExprId, ExprKind, Fault, Function, Host, Program,
-    Runtime, Value, WorkKind, MAX_EVALUATION_FRAMES};
+    Runtime, Value, WorkKind};
 #[cfg(test)]
 use super::MAX_CALL_DEPTH;
 use std::rc::Rc;
@@ -32,7 +32,7 @@ impl Runtime {
         let ExprKind::Name(name) = &program.exprs[base].kind else { return None };
         let ExprKind::Literal(Value::String(method)) = &program.exprs[key].kind else { return None };
         if method != "charCodeAt" || arguments.len() != 1 || arguments[0].spread
-            || self.evaluation_frames >= MAX_EVALUATION_FRAMES { return None; }
+            || self.check_pending_evaluation().is_err() { return None; }
         let argument = arguments[0].expression;
         let ExprKind::Name(index_name) = &program.exprs[argument].kind else { return None };
         let scope = self.character_local_scope(env, name)?;
