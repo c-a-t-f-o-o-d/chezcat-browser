@@ -293,6 +293,55 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_nested_calls_hold_prefixes_across_computed_waits() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', firstRelease, secondRelease, fail, result, caught, token={}, reason={};
+var first=new Promise(resolve=>firstRelease=resolve);
+var second=new Promise(resolve=>secondRelease=resolve);
+var rejected=new Promise((resolve,reject)=>fail=reject);
+var original={}, receiver=original;
+function holder(){trace+='receiver|';return receiver;}
+function mark(label,value){trace+=label+'|';return value;}
+function normalize(value){return mark('normalize',value);}
+function combine(prefix,value){if(prefix()!==token||value!==token)throw 'lost arguments';return mark('combine',value);}
+function adopt(value){if(value!==token)throw 'wrong operand';return mark('adopt',second);}
+function deliver(value){return mark('deliver',value);}
+async function work(gate){
+    try{return holder().value=deliver(await adopt(combine(mark('prefix',()=>token),normalize(await gate))));}
+    catch(error){caught=error;return await Promise.resolve('handled');}
+}
+work(first).then(value=>result=value);
+work(rejected);
+if(trace!=='receiver|prefix|receiver|prefix|'||result||caught||Object.hasOwn(original,'value'))
+    throw 'premature call or assignment';
+receiver={};
+deliver=function(){throw 'reloaded outer call';};
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "fail(reason);firstRelease(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='receiver|prefix|receiver|prefix|normalize|combine|adopt|'||caught!==reason||
+    result||Object.hasOwn(original,'value'))throw 'inner wait or rejection';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "secondRelease(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='receiver|prefix|receiver|prefix|normalize|combine|adopt|deliver|'||
+    result!==token||original.value!==token||Object.hasOwn(receiver,'value'))throw 'outer wait or assignment';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_computed_operand_can_suspend_before_the_outer_wait() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
