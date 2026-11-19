@@ -601,13 +601,14 @@ impl Runtime {
                     error.at(&frame.program.source, frame.program.stmts[statement].at)
                 });
             }
-            let code = &frame.program.templates[frame.template].await_plan;
+            let code = &frame.program.templates[frame.template].resumption_plan;
             let Some(instruction) = code.get(frame.next).copied() else {
                 return Ok(Progress::Abrupt(Control::Return(Value::Undefined)));
             };
             frame.next += 1;
             let environment = frame.environment()?;
             match instruction {
+                Instruction::Yield(_) => unreachable!("yield instruction in async function"),
                 Instruction::Statement(statement) => {
                     let control =
                         self.statement(&frame.program, statement, environment, &frame.this, host)?;

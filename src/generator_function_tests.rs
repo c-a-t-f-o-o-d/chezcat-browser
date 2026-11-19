@@ -27,6 +27,60 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_try_finally_keeps_scopes_and_unwinds_on_injected_completion() {
+    let mut runtime = Runtime::for_capacity_test();
+    let source = r#"
+var trace='', marker={}, saw;
+function* scoped(label,source){
+    try{
+        let visible=label;
+        try{
+            let inside=40;
+            yield inside;
+            yield* source;
+            trace+=visible+':body'+inside+'|';
+        }finally{trace+=visible+':inner|';}
+    }finally{trace+=label+':outer|';}
+    trace+=label+':after|';
+    return 'done';
+}
+function iterable(){
+    var used=false;
+    var iterator={
+        next(){if(used)return {done:true};used=true;return {done:false,value:9};},
+        return(value){trace+='delegate:close|';return {done:true,value};}
+    };
+    return {[Symbol.iterator](){return iterator;}};
+}
+var exhausted=scoped('a',iterable());
+if(exhausted.next().value!==40)throw 'first suspension';
+var trash={};for(var index=0;index<900;index++)trash.fn=function(){return index;};trash=null;
+if(exhausted.next().value!==9||trace!=='')throw 'unexpected cleanup';
+if(exhausted.next().value!=='done'||trace!=='a:body40|a:inner|a:outer|a:after|')
+    throw 'normal finally order or state';
+var closed=scoped('b',iterable());
+closed.next();closed.next();
+var returned=closed.return(marker);
+if(!returned.done||returned.value!==marker||!trace.endsWith('delegate:close|b:inner|b:outer|')||
+    !closed.next().done)throw 'return, delegate close or cleanup order';
+var throwing=scoped('c',iterable());
+throwing.next();
+try{throwing.throw(marker);}catch(error){saw=error;}
+if(saw!==marker||!trace.endsWith('c:inner|c:outer|')||!throwing.next().done)
+    throw 'throw unwinding or repeated body';
+function* replace(){try{yield 2;}finally{return 7;}}
+var replacement=replace();
+replacement.next();
+if(replacement.throw(marker).value!==7)throw 'finally did not replace exception';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert!(runtime.function_arena.retired > 0);
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_delegation_forwards_results_and_completions() {
     let mut runtime = Runtime::for_test();
     let source = r#"

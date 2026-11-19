@@ -1,4 +1,4 @@
-//! Owned resumption points for a bounded set of async statement forms.
+//! Owned resumption points for bounded async and generator statement forms.
 use super::*;
 use std::ops::Range;
 
@@ -14,6 +14,7 @@ pub(super) enum Resume {
 #[derive(Clone, Copy)]
 pub(super) enum Instruction {
     Statement(StmtId),
+    Yield(StmtId),
     Declare { statement: StmtId, index: usize },
     Evaluate { statement: StmtId, expression: ExprId, action: Resume },
     CaptureAssignment { statement: StmtId, target: ExprId },
@@ -51,7 +52,7 @@ pub(super) enum Instruction {
 }
 
 fn storage_error() -> Fault {
-    Fault::new("Unable to allocate bounded async statement plan.")
+    Fault::new("Unable to allocate bounded resumption plan.")
 }
 
 fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Fault> {
@@ -381,6 +382,7 @@ enum Visit {
 // roots. The parser's independent expression count catches *all* embedded
 // awaits, including unsupported conditions, pattern defaults and unselected branches.
 fn split_statements(program: &Program, template: &Template, expected: usize) -> Result<(HashSet<StmtId>, usize), Fault> {
+    let generator = template.kind == FunctionKind::Generator;
     let mut pending = Vec::new();
     for &id in template.body.iter().rev() {
         push(&mut pending, Visit::Statement { id, eligible: true, switch_parent: None })?;
@@ -419,18 +421,25 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         };
         let kind = &program.stmts[id].kind;
         if eligible {
-            let (length, awaits) = statement_size(program, id)?;
-            if awaits != 0 {
+            let (length, suspensions) = if generator {
+                (1, usize::from(matches!(kind, StmtKind::Yield(_) | StmtKind::YieldFrom(_))))
+            } else {
+                statement_size(program, id)?
+            };
+            if suspensions != 0 {
                 instructions += length - 1;
-                sites += awaits;
+                sites += suspensions;
                 split.try_reserve(1).map_err(|_| storage_error())?;
                 split.insert(id);
                 continue;
             }
         }
-        let children_eligible = eligible && (matches!(kind,
-            StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
-            | StmtKind::For(None, _, _, _) | StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some());
+        let children_eligible = eligible && if generator {
+            matches!(kind, StmtKind::Block(_) | StmtKind::Try(_, None, Some(_)))
+        } else {
+            matches!(kind, StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
+                | StmtKind::For(None, _, _, _) | StmtKind::Switch { .. }) || lexical_for_of(program, id).is_some()
+        };
         if children_eligible {
             let before = sites;
             let mut condition_extra = 0;
@@ -454,7 +463,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 child(*yes, children_eligible)?;
             }
             StmtKind::Try(body, catch, finally) => {
-                if let Some(finally) = finally { child(*finally, children_eligible && catch.is_none())?; }
+                if let Some(finally) = finally { child(*finally, !generator && children_eligible && catch.is_none())?; }
                 if let Some((_, catch)) = catch {
                     child(*catch, children_eligible && finally.is_none())?;
                 }
@@ -477,14 +486,18 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         }
     }
     if sites != expected {
-        return Err(Fault::new("Await in this expression or statement position is not implemented.")
+        let message = if generator { "Yield in this statement position is not implemented." }
+            else { "Await in this expression or statement position is not implemented." };
+        return Err(Fault::new(message)
             .at(&program.source, template.source_start));
     }
     // Direct case breaks and iterator loop jumps have their own exits.
     // Other split ancestors still need explicit subtree unwinding.
     for (id, target, direct_switch_break) in jumps {
         if split.contains(&target) && !direct_switch_break && lexical_for_of(program, target).is_none() {
-            return Err(Fault::new("A jump to a statement split by await is not implemented.")
+            let message = if generator { "A jump to a statement split by yield is not implemented." }
+                else { "A jump to a statement split by await is not implemented." };
+            return Err(Fault::new(message)
                 .at(&program.source, program.stmts[id].at));
         }
     }
@@ -524,11 +537,12 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
     }
 }
 
-pub(super) fn compile(program: &Program, template: usize, expected_await_count: usize, ast_limit: usize) -> Result<Vec<Instruction>, Fault> {
+pub(super) fn compile(program: &Program, template: usize, expected_suspensions: usize, ast_limit: usize) -> Result<Vec<Instruction>, Fault> {
     let template = &program.templates[template];
-    let (split, instructions) = split_statements(program, template, expected_await_count)?;
+    let (split, instructions) = split_statements(program, template, expected_suspensions)?;
     if instructions > ast_limit.saturating_sub(program.node_count()) {
-        return Err(Fault::new(format!("AST node limit reached ({ast_limit}) compiling await plan."))
+        let operation = if template.kind == FunctionKind::Generator { "yield" } else { "await" };
+        return Err(Fault::new(format!("AST node limit reached ({ast_limit}) compiling {operation} plan."))
             .at(&program.source, template.source_start));
     }
     let mut code = Vec::new();
@@ -638,6 +652,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
             emit_expression(program, id, expression, action, &mut code)?;
         } else {
             match &program.stmts[id].kind {
+                StmtKind::Yield(_) | StmtKind::YieldFrom(_) => push(&mut code, Instruction::Yield(id))?,
                 StmtKind::Declare(kind, declarations) => {
                     for (index, &(pattern, initial)) in declarations.iter().enumerate() {
                         if let Some(expression) = initial {
@@ -746,11 +761,33 @@ mod tests {
     }
 
     #[test]
+    fn generator_resumption_plan_bounds_and_validates_the_admitted_suspensions() {
+        let source = "function* g(){try{yield 1;}finally{cleanup();}}";
+        let program = parse(source).unwrap();
+        assert_eq!(program.resumption_plan_nodes, 5);
+        assert!(matches!(program.templates[0].resumption_plan.as_slice(), [
+            Instruction::PushTry { .. }, Instruction::EnterBlock(_),
+            Instruction::Yield(_), Instruction::LeaveBlock, Instruction::FinishTry,
+        ]));
+        for source in [
+            "function* g(){if(true){yield 1;}}",
+            "function* g(){try{}finally{yield 1;}}",
+            "function* g(){try{yield 1;}catch(error){}}",
+        ] {
+            let error = parse(source).err().expect("unsupported yield placement was accepted");
+            assert!(error.message.contains("Yield in this statement position"), "{}", error.display());
+        }
+        let source = "function* g(){escape:{yield 1;break escape;}}";
+        let error = parse(source).err().expect("jump to a split scope was accepted");
+        assert!(error.message.contains("split by yield"), "{}", error.display());
+    }
+
+    #[test]
     fn async_plan_jumps_scope_exits_and_catches_point_to_owned_instructions() {
         let program = parse("async function go(flag,p){before();\
             if(flag){let x=await p;use(x);}else{await p;}\
             try{return await p;}catch(e){return handle(e);}}").unwrap();
-        let code = &program.templates[0].await_plan;
+        let code = &program.templates[0].resumption_plan;
         use Instruction::*;
         assert!(matches!(code.as_slice(), [
             Statement(_), BranchFalse { target: 7, .. },
@@ -822,7 +859,7 @@ mod tests {
             try{await p;}catch(e){for(;;){break;}}\
         }").unwrap();
         for template in &program.templates {
-            let code = &template.await_plan;
+            let code = &template.resumption_plan;
             assert_eq!(code.iter().filter(|op| matches!(op, Instruction::Await { .. })).count(), 1);
         }
         assert_eq!(program.templates.len(), 2);
@@ -864,7 +901,7 @@ mod tests {
             let mut runtime = Runtime::for_test();
             let program = runtime.register_program(source, false).unwrap();
             let required = program.node_count();
-            assert_eq!(program.await_plan_nodes, instructions);
+            assert_eq!(program.resumption_plan_nodes, instructions);
             assert_eq!(runtime.retained_ast, required);
             let parse_at = |ast_nodes| {
                 let capacity = limits::Capacities { ast_nodes, ..limits::REGRESSION_CAPACITIES };

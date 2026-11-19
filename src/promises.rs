@@ -458,7 +458,7 @@ impl Runtime {
         let marker = self.transient_marker();
         let result = (|| {
             self.push_transient_root(super::function_reachability::Edge::Object(promise))?;
-            if program.templates[template].await_plan.is_empty() {
+            if program.templates[template].resumption_plan.is_empty() {
                 let completion = self.script_parameters_and_body(program, template, callee, parent, args, this, host);
                 self.finish_async_result(promise, completion, host)?;
             } else {
