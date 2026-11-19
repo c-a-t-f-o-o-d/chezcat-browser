@@ -15,6 +15,7 @@ pub(super) enum Resume {
 pub(super) enum Instruction {
     Statement(StmtId),
     Yield { statement: StmtId, call: Option<GeneratorCallYield> },
+    YieldReturn { statement: StmtId, operand: Option<ExprId>, delegate: bool },
     Declare { statement: StmtId, index: usize },
     Evaluate { statement: StmtId, expression: ExprId, action: Resume },
     CaptureAssignment { statement: StmtId, target: ExprId },
@@ -515,7 +516,8 @@ fn expression_size(
             ExpressionPart::Value(expression, action) => {
                 instructions += 1;
                 sites += usize::from(if generator {
-                    generator_expression_yield(program, expression, action).is_some()
+                    matches!((action, &program.exprs[expression].kind), (Resume::Return, ExprKind::Yield { .. }))
+                        || generator_expression_yield(program, expression, action).is_some()
                 } else {
                     await_expression(program, expression).is_some()
                 });
@@ -580,7 +582,9 @@ fn emit_expression(
             }
             ExpressionPart::InvokePlainCall(action) => Instruction::InvokePlainCall { statement: id, action },
             ExpressionPart::Value(expression, action) if generator => {
-                if let Some(call) = generator_expression_yield(program, expression, action) {
+                if let (Resume::Return, ExprKind::Yield { operand, delegate }) = (action, &program.exprs[expression].kind) {
+                    Instruction::YieldReturn { statement: id, operand: *operand, delegate: *delegate }
+                } else if let Some(call) = generator_expression_yield(program, expression, action) {
                     Instruction::Yield { statement: id, call: Some(call) }
                 } else {
                     Instruction::Evaluate { statement: id, expression, action }

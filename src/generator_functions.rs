@@ -27,6 +27,7 @@ pub(super) struct Activation {
     environment: usize,
     next: usize,
     expression_operand: Option<LogicalOperand>,
+    return_after_yield: bool,
     delegate: Option<Record>,
     pending_call: Option<Box<PendingCall>>,
     scopes: [Option<usize>; 4],
@@ -268,7 +269,7 @@ impl Runtime {
         let result = prepared.and_then(|environment| {
             let frame = Activation {
                 program: Rc::clone(program), template, callee, environment, next: 0, delegate: None, scopes,
-                pending_call: None, expression_operand: None,
+                pending_call: None, expression_operand: None, return_after_yield: false,
                 lexical_scopes: Vec::new(), exit_scopes: Vec::new(),
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
@@ -423,6 +424,8 @@ impl Runtime {
                 return runtime.advance_generator_delegate(frame, operation, input, host);
             } else if !matches!(operation, Op::Next) {
                 return runtime.generator_abrupt_value(operation, input).map(|value| Some(Progress::Complete(value)));
+            } else if frame.return_after_yield {
+                return runtime.copy_value(input).map(|value| Some(Progress::Complete(value)));
             } else if frame.pending_call.is_some() {
                 let value = runtime.copy_value(input)?;
                 runtime.finish_generator_argument(frame, value, host)?;
@@ -505,6 +508,12 @@ impl Runtime {
             }
             Instruction::Yield { statement, call } => {
                 return self.yield_generator_statement(frame, statement, call, host);
+            }
+            Instruction::YieldReturn { statement, operand, delegate } => {
+                self.step()?;
+                frame.return_after_yield = true;
+                return self.yield_generator_operand(frame, operand, delegate, host)
+                    .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at));
             }
             Instruction::Evaluate { statement, expression, action } => {
                 self.evaluate_generator_expression(frame, statement, expression, action, host)?
@@ -621,18 +630,23 @@ impl Runtime {
                     _ => unreachable!("compiled yield statement"),
                 }
             };
-            if delegate {
-                self.begin_generator_delegate(frame, operand.expect("delegating yield operand"), host)
-            } else {
-                let value = match operand {
-                    Some(expr) => self.eval(&frame.program, expr, frame.environment(), &frame.this, host)?,
-                    None => Value::Undefined,
-                };
-                Ok(Some(Progress::Yield(value)))
-            }
+            self.yield_generator_operand(frame, operand, delegate, host)
         })();
         self.restore_root_marker(marker);
         result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+    }
+
+    fn yield_generator_operand(
+        &mut self, frame: &mut Activation, operand: Option<ExprId>, delegate: bool, host: &mut dyn Host,
+    ) -> Result<Option<Progress>, Fault> {
+        if delegate {
+            return self.begin_generator_delegate(frame, operand.expect("delegating yield operand"), host);
+        }
+        let value = match operand {
+            Some(expr) => self.eval(&frame.program, expr, frame.environment(), &frame.this, host)?,
+            None => Value::Undefined,
+        };
+        Ok(Some(Progress::Yield(value)))
     }
 
     #[inline(never)]
@@ -817,6 +831,7 @@ impl Runtime {
     fn finish_generator_body(
         &mut self, frame: &mut Activation, mut completion: Result<Control, Fault>, host: &mut dyn Host,
     ) -> Result<Option<Progress>, Fault> {
+        frame.return_after_yield = false;
         if let Some(call) = frame.pending_call.take() {
             self.value_bytes -= call.retained_bytes();
         }
@@ -875,6 +890,7 @@ impl Runtime {
         self.value_bytes -= record.retained_bytes();
         frame.delegate = None;
         match result {
+            Delegated::Done(value) if frame.return_after_yield => Ok(Some(Progress::Complete(value))),
             Delegated::Done(value) => {
                 self.finish_generator_argument(frame, value, host)?;
                 Ok(None)
