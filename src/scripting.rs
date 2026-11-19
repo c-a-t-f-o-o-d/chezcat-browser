@@ -4333,7 +4333,7 @@ impl Host for Bridge<'_> {
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
             if let Some(index) = collection_index(property) { return Ok(index < self.inline_names(node)?.len()); }
-            return Ok(property == "length" || script_inline_style::method(property).is_some() || css_name(property).is_ok());
+            return Ok(property == "length" || script_inline_style::method(property).is_some() || supported_css_name(property).is_some());
         }
         if object == CONSOLE {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
@@ -4638,12 +4638,11 @@ impl Host for Bridge<'_> {
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
-            // An empty direct key is an absent ordinary property, not a CSS
-            // declaration name. Validate the handle before reporting absence.
-            if property.is_empty() { return Ok(Value::Undefined); }
             if property == "length" { return Ok(Value::Number(self.inline_names(node)?.len() as f64)); }
             if let Some(index) = collection_index(property) { return Ok(self.inline_index(node, index)?.unwrap_or(Value::Undefined)); }
-            return self.get_style(node, &css_name(property)?);
+            // Feature detection reads the actual names exposed by this declaration.
+            let Some(name) = supported_css_name(property) else { return Ok(Value::Undefined); };
+            return self.get_style(node, &name);
         }
         if let Some(value) = self.handler(object, property)? {
             return Ok(value);
@@ -5702,6 +5701,10 @@ fn css_name(name: &str) -> Result<String, String> {
     if name.len() > 64 {
         return Err("CSS property name exceeds 64 bytes.".into());
     }
+    supported_css_name(name).ok_or_else(|| format!("CSS property {name:?} is not supported by the script bridge."))
+}
+fn supported_css_name(name: &str) -> Option<String> {
+    if name.len() > 64 { return None; }
     let mut css = String::new();
     for ch in name.chars() {
         if ch.is_ascii_uppercase() {
@@ -5711,12 +5714,7 @@ fn css_name(name: &str) -> Result<String, String> {
             css.push(ch);
         }
     }
-    if script_inline_style::PROPERTIES.binary_search(&css.as_str()).is_err() {
-        return Err(format!(
-            "CSS property {name:?} is not supported by the script bridge."
-        ));
-    }
-    Ok(css)
+    script_inline_style::PROPERTIES.binary_search(&css.as_str()).is_ok().then_some(css)
 }
 fn validate_css_value(name: &str, value: &str, string_limit: usize) -> Result<(), String> {
     if name.starts_with("--") && !crate::css::inline_custom_value(value) {

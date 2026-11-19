@@ -321,6 +321,29 @@ mod tests {
     }
 
     #[test]
+    fn inline_style_feature_detection_reports_unsupported_names_as_absent() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var tile=document.getElementById('tile'), native=tile.style, original=tile.getAttribute('style');
+if(typeof native.touchAction!=='undefined'||'touchAction' in native||
+   native['touch-action']!==undefined||native.originalUnusedName!==undefined||
+   native['']!==undefined||native[100]!==undefined)
+    throw 'unsupported names must be absent';
+if(typeof native.position!=='string'||native.position!==''||
+   !('position' in native)||native.color!=='red'||native.backgroundColor!=='#204060'||
+   native.getPropertyValue('--Tone')!=='13px'||native.length===0)
+    throw 'supported declaration behavior';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let rejected = page.console_eval(&mut doc, &mut forms, "native.touchAction='none';");
+        assert_eq!(rejected.errors, 1);
+        assert!(page.report().contains("CSS property \"touchAction\" is not supported"));
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "if(tile.getAttribute('style')!==original||typeof native.touchAction!=='undefined')throw 'unsupported write changed declaration';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn element_inline_style_property_distinguishes_own_accessors_data_and_native_handles() {
         let (mut doc, mut forms, mut page) = fixture();
         let outcome = page.console_eval(&mut doc, &mut forms, r#"
