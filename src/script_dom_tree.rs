@@ -543,8 +543,8 @@ impl Bridge<'_> {
             && matches!(method, "appendChild" | "insertBefore" | "removeChild")
         {
             if let (true, Some(Value::Host(handle))) = (method != "removeChild", args.first()) {
-                if let Some(template) = self.empty_inert_fragment(*handle) {
-                    return self.validate_empty_fragment_insertion(object, template, method, args);
+                if let Some(template) = self.checked_inert_fragment(*handle) {
+                    return self.validate_inert_fragment_insertion(object, template, method, args);
                 }
             }
             if !matches!(args.first(), Some(Value::Host(handle)) if node_index(*handle).is_some()) {
@@ -574,7 +574,7 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn validate_empty_fragment_insertion(
+    fn validate_inert_fragment_insertion(
         &self,
         object: u32,
         template: Option<u32>,
@@ -1213,12 +1213,14 @@ impl Bridge<'_> {
             return Err("A DOM node is required.".into());
         };
         if method != "removeChild" {
-            if let Some(template) = self.empty_inert_fragment(*handle) {
-                self.validate_empty_fragment_insertion(node_handle(parent), template, method, args)
+            if let Some(template) = self.checked_inert_fragment(*handle) {
+                self.validate_inert_fragment_insertion(node_handle(parent), template, method, args)
                     .map_err(|(name, error)| format!("{name}: {error}"))?;
-                // DOM pre-insertion only moves a fragment's children. An empty
-                // fragment retains its document, including template ownership.
-                return Ok(Value::Host(*handle));
+                let reference = match (method, args.get(1)) {
+                    ("insertBefore", Some(Value::Host(reference))) => node_index(*reference),
+                    _ => None,
+                };
+                return self.splice_checked_inert_fragment(parent, *handle, reference);
             }
         }
         let child = self.dom_node(*handle)?;
