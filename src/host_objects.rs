@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
+use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
@@ -474,14 +474,15 @@ impl Runtime {
         )
     }
 
-    /// A class may inherit a genuine nonallocating interface even though
-    /// constructing an unregistered instance must throw. The capability is
-    /// immutable function metadata, not an author-writable name or prototype.
+    /// Supported class bases have constructor-specific newTarget handling.
+    /// Nonallocating interfaces inherit normally but cannot create unregistered
+    /// instances. Admission uses immutable function metadata.
     /// Keep native qualification off ordinary recursive Script call frames.
     #[inline(never)]
     pub(super) fn supported_class_base(&self, function:usize, host:&dyn Host)->Result<bool,Fault> {
         match self.functions.get(function) {
-            Some(Function::Script { .. }) => Ok(true),
+            Some(Function::Script { .. }
+                | Function::Native(Builtin::Collection(collections::Op::Constructor(_)))) => Ok(true),
             Some(Function::Host {
                 object, constructible:true, illegal_interface_constructor:true, ..
             }) => {

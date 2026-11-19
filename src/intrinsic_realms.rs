@@ -559,6 +559,33 @@ if(!caught||realmSecret!==91||Object.getPrototypeOf([])!==Array.prototype)throw 
     }
 
     #[test]
+    fn collection_subclass_keeps_the_derived_prototype_across_intrinsic_realms() {
+        let mut runtime = Runtime::for_capacity_test();
+        expose_test_realm(&mut runtime);
+        let result = runtime.execute(r#"
+var ForeignMap = ChildFunction('return Map;')();
+class Local extends ForeignMap {
+    set(key,value) {
+        if(Object.getPrototypeOf(this)!==Local.prototype || this.size!==0)
+            throw 'receiver during foreign construction';
+        return super.set(key,value+1);
+    }
+}
+var local=new Local([['a',2]]);
+if(ForeignMap===Map || !(local instanceof ForeignMap) || !(local instanceof Local) ||
+   Object.getPrototypeOf(Local.prototype)!==ForeignMap.prototype ||
+   local.get('a')!==3 || Map.prototype.get.call(local,'a')!==3)throw 'foreign base';
+var ForeignSet=ChildFunction('return class extends Set {};')();
+var foreign=new ForeignSet([4]);
+if(Object.getPrototypeOf(foreign)!==ForeignSet.prototype || !Set.prototype.has.call(foreign,4))
+    throw 'foreign leaf';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+        assert_eq!((runtime.active_realm, runtime.global_environment), (None, 0));
+    }
+
+    #[test]
     fn weak_map_keys_and_borrowed_methods_cross_intrinsic_realms() {
         let mut runtime = Runtime::for_capacity_test();
         expose_test_realm(&mut runtime);
