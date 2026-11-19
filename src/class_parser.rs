@@ -153,17 +153,14 @@ impl Parser {
             syntax.source_end = end;
             constructor
         } else {
-            let constructor = self.program.templates.len();
-            self.program.templates.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class constructor storage."))?;
-            self.program.templates.push(Template {
+            self.record_template(Template {
                 source_start: start, source_end: end, dynamic_source: false,
                 arrow: false, kind: FunctionKind::Ordinary, resumption_plan: Vec::new(),
                 constructible: true, class_constructor: true, class_element: true,
                 derived_constructor: heritage.is_some(), default_constructor: true, strict: true,
                 name: None, params: Vec::new(), rest: false,
                 trailing_parameter_comma: false, body: Vec::new(),
-            });
-            constructor
+            })?
         };
         let index = self.program.classes.len();
         self.program.classes.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class syntax storage."))?;

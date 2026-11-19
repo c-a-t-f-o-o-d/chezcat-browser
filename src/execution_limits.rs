@@ -38,6 +38,8 @@ pub const REGRESSION_HEAP: HeapLimits = HeapLimits {
 pub struct Capacities {
     #[cfg(test)]
     pub(crate) test_expression_frames: Option<usize>,
+    #[cfg(test)]
+    pub(crate) test_function_syntax_depth: Option<usize>,
     pub functions: usize,
     pub programs: usize,
     pub environments: usize,
@@ -59,6 +61,7 @@ pub struct Capacities {
 #[cfg(test)]
 pub const REGRESSION_CAPACITIES: Capacities = Capacities {
     test_expression_frames: Some(super::MAX_EXPRESSION_FRAMES),
+    test_function_syntax_depth: Some(super::MAX_PARSE_DEPTH),
     functions: 1024, programs: 128, environments: 4096, bindings: 4096,
     arguments: 256, source_bytes: 512 * 1024, string_bytes: 128 * 1024,
     tokens: 131_072, ast_nodes: 131_072, retained_source: 2 * 1024 * 1024,
@@ -72,6 +75,8 @@ const BROWSER_TOKEN_RECORD_BYTES: usize = 256 * 1024 * 1024;
 pub const BROWSER_CAPACITIES: Capacities = Capacities {
     #[cfg(test)]
     test_expression_frames: None,
+    #[cfg(test)]
+    test_function_syntax_depth: None,
     functions: 65_536, programs: 4096, environments: 65_536, bindings: 1_048_576,
     arguments: 65_536, source_bytes: 32 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
     tokens: BROWSER_TOKEN_RECORD_BYTES / std::mem::size_of::<super::Token>() - 1,

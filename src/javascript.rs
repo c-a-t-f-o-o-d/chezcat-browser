@@ -2200,20 +2200,45 @@ impl Parser {
         Ok(parser.program)
     }
 
-    fn defer_body(&mut self, mut template: Template) -> Result<usize, Fault> {
-        if self.functions >= MAX_PARSE_DEPTH {
-            return Err(self.unsupported("Function syntax nesting limit reached (64)."));
+    fn check_function_syntax_depth(&self) -> Result<(), Fault> {
+        #[cfg(test)]
+        if let Some(limit) = self.capacity.test_function_syntax_depth {
+            if self.functions >= limit {
+                return Err(self.unsupported(format!("Function syntax nesting limit reached ({limit}).")));
+            }
         }
+        Ok(())
+    }
+
+    fn record_template(&mut self, template: Template) -> Result<usize, Fault> {
+        let id = self.program.templates.len();
+        if id == self.program.templates.capacity() {
+            let additional = self.ast_arena_growth(&self.program.templates)?;
+            self.program.templates.try_reserve_exact(additional)
+                .map_err(|_| compilation_storage_limit(self.capacity))?;
+            self.check_compilation_progress()?;
+        }
+        self.program.templates.push(template);
+        Ok(id)
+    }
+
+    fn defer_body(&mut self, mut template: Template) -> Result<usize, Fault> {
+        self.check_function_syntax_depth()?;
         let start = self.current;
         self.need("{")?;
         let Some(end) = self.tokens[start].delimiter_end() else {
             return Err(self.error("Unterminated function body."));
         };
         template.source_end = self.tokens[end].end();
-        let id = self.program.templates.len();
-        self.program.templates.push(template);
-        // Each queued body has a function AST node; the existing source/token/
-        // AST limits therefore bound the queue as well as the retained program.
+        let id = self.record_template(template)?;
+        // These descriptors survive until their bodies are parsed, so charge
+        // the queue's reservation alongside source, tokens and the AST.
+        if self.deferred_bodies.len() == self.deferred_bodies.capacity() {
+            let additional = self.ast_arena_growth(&self.deferred_bodies)?;
+            self.deferred_bodies.try_reserve_exact(additional)
+                .map_err(|_| compilation_storage_limit(self.capacity))?;
+            self.check_compilation_progress()?;
+        }
         self.deferred_bodies.push(DeferredBody {
             template: id,
             start,
@@ -2236,8 +2261,8 @@ impl Parser {
             self.current = body.start;
             // The outer expression's parser stack has unwound, but eval's live
             // evaluator stack has not. Keep its original allowance and charge
-            // one function-body frame. Lexical function nesting is bounded
-            // separately, even though those bodies no longer recurse in Rust.
+            // one native function-body frame. The queued lexical depth is
+            // independent of that native entry.
             self.depth = active_depth;
             self.enter()?;
             self.functions = body.function_depth;
@@ -2952,9 +2977,7 @@ impl Parser {
             self.depth -= 1;
             return self.expr(ExprKind::Function(template), at);
         }
-        if self.functions >= MAX_PARSE_DEPTH {
-            return Err(self.unsupported("Function syntax nesting limit reached (64)."));
-        }
+        self.check_function_syntax_depth()?;
         let loops = std::mem::take(&mut self.loops);
         let breakables = std::mem::take(&mut self.breakables);
         let labels = std::mem::take(&mut self.labels);
@@ -2979,8 +3002,7 @@ impl Parser {
         self.yield_count = outer_yield_count;
         self.functions -= 1;
         self.depth -= 1;
-        let template = self.program.templates.len();
-        self.program.templates.push(Template {
+        let template = self.record_template(Template {
             source_start: at,
             source_end: self.tokens[self.current - 1].end(),
             dynamic_source: false,
@@ -2998,7 +3020,7 @@ impl Parser {
             rest,
             trailing_parameter_comma,
             body,
-        });
+        })?;
         self.attach_resumption_plan(template, count)?;
         self.expr(ExprKind::Function(template), at)
     }
@@ -11065,6 +11087,27 @@ strictFailure;
             assert!(host.records.is_empty());
             assert!(runtime.programs.is_empty());
         }
+    }
+
+    #[test]
+    fn browser_deferred_bodies_compile_deep_lexical_nesting_on_one_mib_stack() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let headers = "function deeper(){".repeat(2_048);
+            let ends = "}".repeat(2_048);
+            let source = format!("function outer(){{{headers}return 1;{ends}return 17;}}outer();");
+            let mut runtime = Runtime::new();
+            let mut host = TestHost::default();
+            assert_eq!(runtime.execute(&source, &mut host).unwrap().to_text(), "17");
+            assert_eq!(runtime.programs.last().unwrap().templates.len(), 2_049);
+
+            let mut runtime = Runtime::new();
+            runtime.define_global("test", Value::Host(1)).unwrap();
+            let malformed = format!("test.record('before');{headers}let missing=;{ends}");
+            let error = runtime.execute(&malformed, &mut host).unwrap_err();
+            assert!(error.contains("Expected an expression"), "{error}");
+            assert!(host.records.is_empty());
+            assert!(runtime.programs.is_empty());
+        }).unwrap().join().unwrap();
     }
 
     #[test]
