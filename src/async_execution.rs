@@ -804,6 +804,20 @@ impl Runtime {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
                 }
+                Instruction::AwaitComputed { statement, action } => {
+                    let result = (|| {
+                        let value = frame.take_expression_value()?;
+                        self.push_transient_value(&value)?;
+                        let promise = self.promise_for_await(value, host)?;
+                        frame.pending = Some(PendingAwait {
+                            statement, action, call: None, argument_call: None, method: None,
+                            followup_call: None, member_key: None, chain: None, literal: None,
+                            negations: 0, assignment: None,
+                        });
+                        Ok(Progress::Suspend(promise))
+                    })();
+                    result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
                 Instruction::Await {
                     statement,
                     operand,

@@ -37,6 +37,7 @@ pub(super) enum Instruction {
     CaptureComparison(StmtId),
     Comparison { statement: StmtId, operator: &'static str, action: Resume },
     ReadAccess { statement: StmtId, expression: ExprId, action: Resume },
+    AwaitComputed { statement: StmtId, action: Resume },
     Await {
         statement: StmtId,
         operand: ExprId,
@@ -301,6 +302,7 @@ fn bare_argument_operand(program: &Program, argument: ExprId) -> Option<(ExprId,
 
 enum ExpressionPart {
     Value(ExprId, Resume),
+    AwaitComputed(Resume),
     CaptureComparison,
     Comparison(&'static str, Resume),
     ReadAccess(ExprId, Resume),
@@ -336,6 +338,13 @@ fn visit_expression(
     loop {
         if let ExpressionPart::Value(expression, action) = part {
             match program.exprs[expression].kind {
+                ExprKind::Unary("await", operand)
+                    if !generator && await_expression(program, operand).is_some() =>
+                {
+                    push(&mut pending, ExpressionPart::AwaitComputed(action))?;
+                    part = ExpressionPart::Value(operand, Resume::StoreExpressionValue);
+                    continue;
+                }
                 ExprKind::Sequence(left, right) => {
                     push(&mut pending, ExpressionPart::Value(right, action))?;
                     part = ExpressionPart::Value(left, Resume::Discard);
@@ -409,6 +418,10 @@ fn expression_size(
     let (mut instructions, mut sites) = (0, 0);
     visit_expression(program, expression, action, generator, |part| {
         match part {
+            ExpressionPart::AwaitComputed(_) => {
+                instructions += 1;
+                sites += 1;
+            }
             ExpressionPart::Value(expression, action) => {
                 instructions += 1;
                 sites += usize::from(if generator {
@@ -460,6 +473,7 @@ fn emit_expression(
     let mut branches = Vec::new();
     visit_expression(program, expression, action, generator, |part| {
         let instruction = match part {
+            ExpressionPart::AwaitComputed(action) => Instruction::AwaitComputed { statement: id, action },
             ExpressionPart::Value(expression, action) if generator => {
                 if let Some(call) = generator_expression_yield(program, expression, action) {
                     Instruction::Yield { statement: id, call: Some(call) }
@@ -672,6 +686,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
         match instruction {
             Instruction::BranchFalse { target, .. }
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
+            | Instruction::AwaitComputed { action: Resume::BranchFalse(target), .. }
             | Instruction::Logical { action: Resume::BranchFalse(target), .. }
             | Instruction::FinishLogicalNot { action: Resume::BranchFalse(target), .. }
             | Instruction::Comparison { action: Resume::BranchFalse(target), .. }
@@ -969,7 +984,7 @@ mod tests {
             "switch(0){case await p:await p;}",
             "try{}catch(e){await p;}finally{}",
             "try{}catch{}finally{await p;}",
-            "await (await p);",
+            "await (1 + await p);",
         ] {
             let source = format!("async function go(p){{{body}}}");
             let error = parse(&source).err().expect("unsupported await was accepted");
