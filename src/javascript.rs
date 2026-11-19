@@ -427,6 +427,9 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
     ORDINARY_HTML_SUBCLASSES.iter().find(|(local, _)| *local == tag).map(|&(_, name)| name)
 }
 
+pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
+
 /// One callback from a host-owned synchronous event propagation plan. The host
 /// never receives interpreter access; the runtime keeps the current job/realm.
 pub struct EventCallback {pub callback:Value,pub target:u32,pub event:u32}
@@ -8523,6 +8526,9 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        // Neither the style getter nor the unavailable cssText replacement
+        // consumes script values. Keep ignored arguments out of host exports.
+        let args = if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) { &[] } else { args };
         if let Some(property)=host.native_setter_property(object,method) {
             // Web IDL attribute setters receive undefined when no argument is
             // supplied. Brand/origin validation preceded any value conversion.

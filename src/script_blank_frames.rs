@@ -856,6 +856,36 @@ document.title='named-map-owner-ok';
     }
 
     #[test]
+    fn element_inline_style_property_checks_saved_accessor_and_shadow_owner_realms() {
+        let source = format!("{CREATE}{}", r#"
+var root=document.documentElement,native=root.style,expected={},reads=0;
+var get=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'style').get;
+var childGet=w.Object.getOwnPropertyDescriptor(w.HTMLElement.prototype,'style').get;
+if(get===childGet||Object.getPrototypeOf(childGet)!==w.Function.prototype||
+   childGet.call(root)!==native)throw 'independent accessor and main receiver';
+Object.defineProperty(root,'style',{get:function(){reads++;return expected;},configurable:true});
+var read=w.Function('node','return node.style;');
+if(read(root)!==expected||reads!==1||childGet.call(root)!==native)throw 'shadow and original across realms';
+var childRoot=w.document.documentElement,caught=false;
+try{get.call(childRoot);}catch(e){caught=e.name==='NotSupportedError';}
+if(!caught||reads!==1)throw 'child node cannot alias the main native declaration';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        page.set_location(&crate::navigation::Location {
+            url: Some(crate::url::parse("https://other.test/").unwrap().0),
+            path: None, fragment: String::new(), root: None,
+        });
+        for denied in ["read(root);", "childGet.call(root);", "get.call(childRoot);"] {
+            let outcome = page.console_eval(&mut doc, &mut forms, denied);
+            assert_eq!(outcome.errors, 1, "{denied}: {}", page.report());
+        }
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "if(reads!==1||!delete root.style||root.style!==native)throw 'denied calls changed the main declaration';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn native_element_expandos_validate_owner_across_child_callee_realms() {
         let source=format!("{CREATE}{}",r#"
 var p=document.createElement('div');p.customProbe=11;
