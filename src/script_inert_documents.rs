@@ -155,9 +155,7 @@ impl Bridge<'_> {
     pub(super) fn inert_owns_property(&self, object: u32, name: &str) -> bool {
         if self.inert_factory(object, name).is_some() { return true; }
         let Some(node) = self.state.inert_documents.node(object) else { return false; };
-        if matches!(name, "ownerDocument" | "parentNode" | "parentElement" | "firstChild" | "lastChild"
-            | "previousSibling" | "nextSibling" | "isConnected" | "nodeValue" | "baseURI")
-        {
+        if matches!(name, "ownerDocument" | "isConnected" | "nodeValue" | "baseURI") {
             return true;
         }
         match node.kind {

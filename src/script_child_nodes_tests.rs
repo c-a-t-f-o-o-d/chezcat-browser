@@ -23,6 +23,41 @@ fn evaluate(page: &mut Page, doc: &mut Document, forms: &mut Forms, source: &str
 }
 
 #[test]
+fn node_relationship_descriptors_preserve_checked_tree_links() {
+    let (_, _, page) = fixture("<div id=host>lead<b id=child></b>tail</div>", r#"
+var host = document.getElementById('host'), child = document.getElementById('child');
+var getters = {};
+for (var name of ['firstChild','lastChild','previousSibling','nextSibling','parentNode','parentElement']) {
+    var d = Object.getOwnPropertyDescriptor(Node.prototype, name);
+    if (!d || typeof d.get !== 'function' || !d.enumerable || !d.configurable ||
+        d.set !== undefined || Object.hasOwn(host, name) || !(name in host)) throw 'descriptor ' + name;
+    getters[name] = d.get;
+}
+var lead = getters.firstChild.call(host), tail = getters.lastChild.call(host);
+if (lead.data !== 'lead' || tail.data !== 'tail' || getters.nextSibling.call(lead) !== child ||
+    getters.previousSibling.call(tail) !== child || getters.parentNode.call(child) !== host ||
+    getters.parentElement.call(child) !== host || getters.parentNode.call(document) !== null ||
+    getters.firstChild.call(document) !== document.documentElement) throw 'genuine tree links';
+var template = document.createElement('template');
+template.innerHTML = '<i></i><b></b>';
+var fragment = template.content, inertFirst = getters.firstChild.call(fragment);
+if (inertFirst !== fragment.childNodes[0] || getters.nextSibling.call(inertFirst) !== fragment.childNodes[1] ||
+    getters.parentNode.call(inertFirst) !== fragment || getters.parentElement.call(inertFirst) !== null)
+    throw 'inert tree links';
+Object.defineProperty(host, 'firstChild', {get: function() { return child; }, configurable: true});
+if (host.firstChild !== child || getters.firstChild.call(host) !== lead) throw 'own shadow';
+host.removeChild(child);
+if (getters.nextSibling.call(lead) !== tail || getters.previousSibling.call(tail) !== lead ||
+    getters.parentNode.call(child) !== null || !delete host.firstChild || host.firstChild !== lead)
+    throw 'live tree links after removal';
+var rejected = false;
+try { getters.firstChild.call({}); } catch (error) { rejected = error instanceof TypeError; }
+if (!rejected) throw 'getter brand';
+"#);
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn child_nodes_native_descriptor_and_element_shadow_keep_live_list() {
     let (_, _, page) = fixture("<div id=host><b id=child></b></div>", r#"
 var node = document.getElementById('host'), child = document.getElementById('child');
