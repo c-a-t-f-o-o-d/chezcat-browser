@@ -3127,6 +3127,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
+        if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && (node_traversal_property(method).is_some()
             || matches!(method, "\0Node.get.nodeType" | "\0Node.get.nodeName" | NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET))
         {
@@ -3688,7 +3689,8 @@ impl Host for Bridge<'_> {
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
-        if matches!(method,"appendChild"|"insertBefore"|"replaceChild"|"removeChild") {
+        if dom_tree::node_mutation_method(method) {
+            if self.event_target_interface(object) { return self.node_mutation_receiver(receiver); }
             let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
             if parent(object) {return parent(receiver);}

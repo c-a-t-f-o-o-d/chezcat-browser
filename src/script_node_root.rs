@@ -19,9 +19,14 @@ impl Bridge<'_> {
             // VM guards property access from its current realm, and the call
             // rechecks the incumbent before accessing either document.
             "contains" => self.root_node_receiver(object) || self.frame_contains_node(object).is_some(),
+            _ if dom_tree::node_mutation_method(name) => self.node_mutation_receiver(object),
             _ => return false,
         };
         member && !self.form_named_control(object, name)
+    }
+
+    pub(super) fn node_mutation_receiver(&self, object: u32) -> bool {
+        node_index(object).is_some_and(|node| self.dom_accessible(node))
     }
 
     pub(super) fn root_node_receiver(&self, object: u32) -> bool {
