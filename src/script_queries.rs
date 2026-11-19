@@ -8,6 +8,7 @@ pub(super) enum NodeList {
     Name(String),
     // A live SameObject list over this real node's immediate children.
     Children(usize),
+    InertChildren(u32),
 }
 
 pub(super) fn node_list_index(handle: u32) -> Option<usize> {
@@ -49,19 +50,34 @@ impl Bridge<'_> {
 
     pub(super) fn create_child_list(&mut self, object: u32) -> Result<Value, String> {
         let root = if object == DOCUMENT { 0 } else { self.dom_node(object)? };
-        // The parser retains template input in an inert AST subtree, not a
-        // DocumentFragment-backed template contents tree. Do not mislabel it.
-        if tag(self.doc, root) == "template" {
-            return Err("Template childNodes requires the unimplemented template contents tree.".into());
-        }
         self.check_iframe_child_topology(root)?;
         self.state.work(1)?;
         if let Some(&handle) = self.state.dom.child_lists.get(&root) { return Ok(Value::Host(handle)); }
         let handle = self.reserve_node_list("identity")?;
         self.state.dom.child_lists.try_reserve(1).map_err(|_| "DOM childNodes identity reservation failed.")?;
         self.state.replace_bytes(0, std::mem::size_of::<usize>() + std::mem::size_of::<u32>())?;
-        self.state.node_lists.push(NodeList::Children(root));
+        let list = if self.template_receiver(object) {
+            // Parsed template members are exposed only through content.
+            NodeList::Snapshot(Vec::new())
+        } else {
+            NodeList::Children(root)
+        };
+        self.state.node_lists.push(list);
         self.state.dom.child_lists.insert(root, handle);
+        Ok(Value::Host(handle))
+    }
+
+    pub(super) fn create_inert_child_list(&mut self, object: u32) -> Result<Value, String> {
+        if self.inert_children(object).is_none() { return Err("Invalid inert childNodes owner.".into()); }
+        self.state.work(1)?;
+        if let Some(&handle) = self.state.dom.inert_child_lists.get(&object) {
+            return Ok(Value::Host(handle));
+        }
+        let handle = self.reserve_node_list("identity")?;
+        self.state.dom.inert_child_lists.try_reserve(1).map_err(|_| "Inert childNodes identity reservation failed.")?;
+        self.state.replace_bytes(0, std::mem::size_of::<(u32, u32)>())?;
+        self.state.node_lists.push(NodeList::InertChildren(object));
+        self.state.dom.inert_child_lists.insert(object, handle);
         Ok(Value::Host(handle))
     }
 
@@ -113,6 +129,14 @@ impl Bridge<'_> {
             if property == "length" { return Ok(Value::Number(children.len() as f64)); }
             return Ok(collection_index(property).and_then(|index| children.get(index))
                 .map_or(Value::Undefined, |&node| Value::Host(node_handle(node))));
+        }
+        if let NodeList::InertChildren(object) = list {
+            let object = *object;
+            self.state.work(1)?;
+            let children = self.inert_children(object).ok_or("Invalid inert childNodes owner.")?;
+            return if property == "length" { Ok(Value::Number(children.len() as f64)) }
+                else { Ok(collection_index(property).and_then(|index| children.get(index)).copied()
+                    .map_or(Value::Undefined, Value::Host)) };
         }
         if matches!(list,NodeList::Name(_)) {
             if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }

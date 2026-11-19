@@ -194,7 +194,7 @@ if(loadedTextRuns!==1||rawList!==record.childNodes||rawList.length!==2||raw.node
 }
 
 #[test]
-fn child_nodes_template_ast_contents_are_not_exposed_as_a_fake_dom_fragment() {
+fn child_nodes_template_host_and_inert_fragment_keep_separate_identities() {
     let (mut doc,mut forms,mut page)=fixture("<html><head></head><body><div id=owner><template id=inert><span id=not-live>Inert AST input</span></template><b id=sibling>Real sibling</b></div></body></html>",r#"
 var owner=document.getElementById('owner'),parentList=owner.childNodes,inertTemplate=parentList[0],sibling=document.getElementById('sibling'),detachedTemplate=document.createElement('template');
 if(parentList!==owner.childNodes||parentList.length!==2||parentList[1]!==sibling||document.getElementById('not-live')!==null)throw 'parent owns actual template identity without query activation';
@@ -206,15 +206,20 @@ if(parentList!==owner.childNodes||parentList.length!==2||parentList[1]!==sibling
     assert!(matches!(value,Value::Host(actual) if actual==node_handle(template)));
     assert!(!doc.nodes[template].children.is_empty(),"The fixture genuinely retains an inert parser AST subtree");
     let nodes=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;
-    let lists=page.state.node_lists.len();let identities=page.state.dom.child_lists.len();let retained=page.state.retained;
-    for source in ["inertTemplate.childNodes;","detachedTemplate.childNodes;"] {
-        let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());
-        assert_eq!(page.state.dom_commits,commits);assert_eq!(format!("{:?}",doc.nodes),nodes);
-        assert_eq!(page.state.node_lists.len(),lists);assert_eq!(page.state.dom.child_lists.len(),identities);
-        assert_eq!(page.state.retained,retained);assert!(page.take_dynamic_scripts().is_empty());assert!(!page.has_host_tasks());
-        evaluate(&mut page,&mut doc,&mut forms,"if(parentList!==owner.childNodes||parentList.length!==2||parentList[0]!==inertTemplate||parentList[1]!==sibling||document.getElementById('not-live')!==null)throw 'template refusal changed parent identities or inert policy';");
-    }
-    assert!(!page.state.dom.child_lists.contains_key(&template));
+    evaluate(&mut page, &mut doc, &mut forms, r#"
+var hostList = inertTemplate.childNodes, detachedList = detachedTemplate.childNodes, fragmentList = inertTemplate.content.childNodes;
+if (parentList !== owner.childNodes || parentList.length !== 2 || parentList[0] !== inertTemplate ||
+    parentList[1] !== sibling || hostList !== inertTemplate.childNodes || hostList.length !== 0 ||
+    detachedList !== detachedTemplate.childNodes || detachedList.length !== 0 ||
+    fragmentList !== inertTemplate.content.childNodes || fragmentList.length !== 1 ||
+    fragmentList[0] !== inertTemplate.content.firstChild || fragmentList[0].isConnected ||
+    document.getElementById('not-live') !== null) throw 'separate template topology and inertness';
+"#);
+    assert_eq!(page.state.dom_commits, commits);
+    assert_eq!(format!("{:?}", doc.nodes), nodes);
+    assert!(page.state.dom.child_lists.contains_key(&template));
+    assert!(page.take_dynamic_scripts().is_empty());
+    assert!(!page.has_host_tasks());
 }
 
 #[test]
