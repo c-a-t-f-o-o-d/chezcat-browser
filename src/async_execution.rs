@@ -10,7 +10,23 @@ enum ExitScope {
     Try(TryScope),
     ForOf(Box<ForOfScope>),
     Switch { statement: StmtId, after: usize, environments: usize },
-    ClassicFor { statement: StmtId, advance: usize, after: usize, environments: usize },
+    ClassicFor(ClassicForScope),
+}
+
+struct ClassicForScope {
+    statement: StmtId,
+    advance: usize,
+    after: usize,
+    environments: usize,
+    iteration_depth: usize,
+    bindings: Vec<String>,
+}
+
+impl ClassicForScope {
+    fn binding_bytes(bindings: &Vec<String>) -> usize {
+        bindings.iter().fold(bindings.capacity().saturating_mul(std::mem::size_of::<String>()),
+            |bytes, name| bytes.saturating_add(name.capacity()))
+    }
 }
 
 struct ForOfScope {
@@ -205,6 +221,10 @@ impl Activation {
             .saturating_add(self.active_iterators().fold(0usize, |bytes, scope| {
                 bytes.saturating_add(std::mem::size_of::<ForOfScope>())
                     .saturating_add(scope.record.retained_bytes())
+            }))
+            .saturating_add(self.exit_scopes.iter().fold(0usize, |bytes, scope| match scope {
+                ExitScope::ClassicFor(scope) => bytes.saturating_add(ClassicForScope::binding_bytes(&scope.bindings)),
+                _ => bytes,
             }))
     }
 
@@ -739,17 +759,18 @@ impl Runtime {
                     Ok(Progress::Continue)
                 }
                 Instruction::EnterFor { statement, advance, after } => {
-                    self.reserve_await_exit_scope(frame)?;
-                    frame.exit_scopes.push(ExitScope::ClassicFor {
-                        statement, advance, after, environments: frame.environments.len(),
-                    });
+                    self.enter_await_classic_for(frame, statement, advance, after, host)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
+                Instruction::RefreshForBindings => {
+                    self.refresh_await_for_bindings(frame)?;
                     Ok(Progress::Continue)
                 }
                 Instruction::LeaveFor => {
-                    let Some(ExitScope::ClassicFor { environments, .. }) = frame.exit_scopes.pop() else {
+                    let Some(ExitScope::ClassicFor(scope)) = frame.exit_scopes.pop() else {
                         return Err(Fault::new("Invalid async for exit."));
                     };
-                    self.unwind_await_environments(frame, environments);
+                    self.unwind_await_environments(frame, scope.environments);
                     Ok(Progress::Continue)
                 }
                 Instruction::EnterForOf { statement, after } => {
@@ -1261,6 +1282,50 @@ impl Runtime {
     }
 
     #[inline(never)]
+    fn enter_await_classic_for(
+        &mut self, frame: &mut Activation, statement: StmtId, advance: usize, after: usize, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let StmtKind::For(initial, _, _, _) = frame.program.stmts[statement].kind else {
+            unreachable!("compiled async classic loop");
+        };
+        self.reserve_await_exit_scope(frame)?;
+        let environments = frame.environments.len();
+        frame.exit_scopes.push(ExitScope::ClassicFor(ClassicForScope {
+            statement, advance, after, environments,
+            iteration_depth: environments + usize::from(initial.is_some()),
+            bindings: Vec::new(),
+        }));
+        if let Some(initial) = initial {
+            self.reserve_await_environment(frame)?;
+            let environment = self.new_environment(frame.environment()?, false)?;
+            frame.environments.push(environment);
+            self.push_transient_root(Edge::Environment(environment))?;
+            let bindings = self.initialize_classic_for(&frame.program, initial, environment, &frame.this, host)?;
+            let bytes = ClassicForScope::binding_bytes(&bindings);
+            self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+            let Some(ExitScope::ClassicFor(scope)) = frame.exit_scopes.last_mut() else {
+                unreachable!("compiled async classic loop scope");
+            };
+            scope.bindings = bindings;
+            self.refresh_await_for_bindings(frame)?;
+        }
+        Ok(Progress::Continue)
+    }
+
+    fn refresh_await_for_bindings(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        let Some(ExitScope::ClassicFor(scope)) = frame.exit_scopes.last() else {
+            return Err(Fault::new("Invalid async for iteration."));
+        };
+        if !scope.bindings.is_empty() {
+            let slot = scope.environments;
+            let old = frame.environments[slot];
+            let parent = frame.environments[slot - 1];
+            frame.environments[slot] = self.iteration_environment(old, parent, &scope.bindings)?;
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
     fn enter_await_for_of(
         &mut self, frame: &mut Activation, statement: StmtId, after: usize, environment: usize, host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
@@ -1438,20 +1503,19 @@ impl Runtime {
                     }
                     continue;
                 }
-                ExitScope::ClassicFor { statement, advance, after, environments } => {
-                    self.unwind_await_environments(frame, environments);
-                    match completion {
-                        Ok(Control::Break(target, _)) if target == statement => {
-                            frame.next = after;
-                            return Ok(Progress::Continue);
-                        }
-                        Ok(Control::Continue(target, _)) if target == statement => {
-                            frame.next = advance;
-                            frame.exit_scopes.push(ExitScope::ClassicFor { statement, advance, after, environments });
-                            return Ok(Progress::Continue);
-                        }
-                        _ => continue,
+                ExitScope::ClassicFor(scope) => {
+                    if matches!(completion, Ok(Control::Continue(target, _)) if target == scope.statement) {
+                        self.unwind_await_environments(frame, scope.iteration_depth);
+                        frame.next = scope.advance;
+                        frame.exit_scopes.push(ExitScope::ClassicFor(scope));
+                        return Ok(Progress::Continue);
                     }
+                    self.unwind_await_environments(frame, scope.environments);
+                    if matches!(completion, Ok(Control::Break(target, _)) if target == scope.statement) {
+                        frame.next = scope.after;
+                        return Ok(Progress::Continue);
+                    }
+                    continue;
                 }
                 ExitScope::ForOf(mut iterator) => {
                     self.unwind_await_environments(frame, iterator.environments);

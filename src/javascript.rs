@@ -7017,26 +7017,11 @@ impl Runtime {
             StmtKind::For(initial, condition, advance, body) => {
                 let mut loop_env = self.new_environment(env, false)?;
                 let result = (|| {
-                    let mut per_iteration = Vec::new();
-                    if let Some(initial) = initial {
-                        if let StmtKind::Declare(
-                            kind @ (Declaration::Let | Declaration::Const),
-                            declarations,
-                        ) = &program.stmts[*initial].kind
-                        {
-                            for (pattern, _) in declarations {
-                                for name in
-                                    program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))?
-                                {
-                                    self.put_binding(loop_env, name.clone(), None, *kind, false)?;
-                                    if *kind == Declaration::Let {
-                                        per_iteration.push(name);
-                                    }
-                                }
-                            }
-                        }
-                        self.statement(program, *initial, loop_env, this, host)?;
-                    }
+                    let per_iteration = if let Some(initial) = initial {
+                        self.initialize_classic_for(program, *initial, loop_env, this, host)?
+                    } else {
+                        Vec::new()
+                    };
                     // A for-let initializer and each loop body have distinct lexical
                     // environments, so closures retain the value for that iteration.
                     if !per_iteration.is_empty() {
@@ -7247,6 +7232,26 @@ impl Runtime {
             self.release_environment(scope);
         }
         prepared
+    }
+
+    #[inline(never)]
+    fn initialize_classic_for(
+        &mut self, program: &Rc<Program>, initial: StmtId, environment: usize,
+        this: &Value, host: &mut dyn Host,
+    ) -> Result<Vec<String>, Fault> {
+        let mut per_iteration = Vec::new();
+        if let StmtKind::Declare(kind @ (Declaration::Let | Declaration::Const), declarations) = &program.stmts[initial].kind {
+            for (pattern, _) in declarations {
+                for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
+                    self.put_binding(environment, name.clone(), None, *kind, false)?;
+                    if *kind == Declaration::Let {
+                        per_iteration.push(name);
+                    }
+                }
+            }
+        }
+        self.statement(program, initial, environment, this, host)?;
+        Ok(per_iteration)
     }
 
     fn collect_native_iterable(

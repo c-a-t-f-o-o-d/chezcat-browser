@@ -24,6 +24,7 @@ pub(super) enum Instruction {
     EnterSwitch { statement: StmtId, leave: usize },
     LeaveSwitch,
     EnterFor { statement: StmtId, advance: usize, after: usize },
+    RefreshForBindings,
     LeaveFor,
     EnterForOf { statement: StmtId, after: usize },
     NextForOf(StmtId),
@@ -86,6 +87,10 @@ pub(super) fn lexical_for_of(program: &Program, id: StmtId) -> Option<(Declarati
         return None;
     };
     Some((*kind, declarations[0].0, source))
+}
+
+fn for_let_initializer(program: &Program, initial: Option<StmtId>) -> bool {
+    initial.is_some_and(|id| matches!(program.stmts[id].kind, StmtKind::Declare(Declaration::Let, _)))
 }
 
 #[derive(Clone, Copy)]
@@ -631,9 +636,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::Switch { cases, body, .. } => cases.len() + body.len() + 1,
                         StmtKind::If(_, _, Some(_)) => 3,
                         StmtKind::If(_, _, None) => 1,
-                        StmtKind::For(None, condition, advance, _) => {
+                        StmtKind::For(initial, condition, advance, _) => {
                             1 + usize::from(condition.is_some()) + usize::from(advance.is_some())
-                                + 2 * usize::from(!generator)
+                                + 2 * usize::from(!generator) + usize::from(for_let_initializer(program, *initial))
                         }
                         StmtKind::ForOf(..) => 4,
                         StmtKind::Try(_, catch, finally) => {
@@ -659,7 +664,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
         }
         let children_eligible = eligible && (
-            matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _) | StmtKind::For(None, _, _, _))
+            matches!(kind, StmtKind::Block(_) | StmtKind::If(..) | StmtKind::Try(_, _, _))
+                || matches!(kind, StmtKind::For(initial, _, _, _) if !generator || initial.is_none())
                 || lexical_for_of(program, id).is_some()
                 || (!generator && matches!(kind, StmtKind::Switch { .. }))
         );
@@ -718,7 +724,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
     // Other split ancestors still need explicit subtree unwinding.
     for (id, target, switch_break) in jumps {
         let async_loop = !generator && (
-            matches!(program.stmts[target].kind, StmtKind::For(None, _, _, _)) || lexical_for_of(program, target).is_some()
+            matches!(program.stmts[target].kind, StmtKind::For(..)) || lexical_for_of(program, target).is_some()
         );
         if split.contains(&target) && !switch_break && !async_loop {
             let message = if generator { "A jump to a statement split by yield is not implemented." }
@@ -737,7 +743,7 @@ enum Emit {
     FinishBranch(Range<usize>),
     FinishJump(usize),
     FinishSwitch(usize),
-    FinishFor { statement: StmtId, entry: Option<usize>, start: usize, test: bool, advance: Option<ExprId> },
+    FinishFor { statement: StmtId, entry: Option<usize>, start: usize, test: bool, advance: Option<ExprId>, refresh: bool },
     FinishForOf(usize),
     FinishTry { handler: usize, catch: Option<StmtId>, finally: Option<StmtId> },
     FinishCatch(usize),
@@ -808,8 +814,11 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 push(&mut code, Instruction::LeaveSwitch)?;
                 continue;
             }
-            Emit::FinishFor { statement, entry, start, test, advance } => {
+            Emit::FinishFor { statement, entry, start, test, advance, refresh } => {
                 let advance_at = code.len();
+                if refresh {
+                    push(&mut code, Instruction::RefreshForBindings)?;
+                }
                 if let Some(expression) = advance {
                     push(&mut code, Instruction::Evaluate {
                         statement, expression, action: Resume::Discard,
@@ -905,7 +914,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     push(&mut pending, next)?;
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
-                StmtKind::For(None, condition, advance, body) => {
+                StmtKind::For(initial, condition, advance, body) => {
                     let entry = if generator {
                         None
                     } else {
@@ -921,6 +930,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     }
                     push(&mut pending, Emit::FinishFor {
                         statement: id, entry, start, test: condition.is_some(), advance: *advance,
+                        refresh: for_let_initializer(program, *initial),
                     })?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
@@ -1051,7 +1061,7 @@ mod tests {
             "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
             "while(false){await p;}",
-            "for(let i=0;i<2;i++){await p;}",
+            "for(let i=await p;i<2;i++){await p;}",
             "for(;await p;){await p;}",
             "for(;true;await p){await p;}",
             "for(var item of p){await item;}",
@@ -1100,6 +1110,7 @@ mod tests {
             ("async function f(p){return ((use(await p)??base)?.item??fallback).done;}", 7),
             ("async function f(p){try{}finally{await p;}}", 7),
             ("async function f(p){for(;test();advance()){await p;}}", 8),
+            ("async function f(p){for(let i=0;i<2;i++){await p;}}", 9),
             ("async function f(p){for(;;)return await p;}", 4),
             ("async function f(p){for(let value of p){await value;}}", 7),
             ("async function f(p){for(let value of p){await value;if(value)continue;break;}}", 9),
