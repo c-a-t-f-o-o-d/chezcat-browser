@@ -32,6 +32,88 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_for_of_body_retains_the_iterator_and_closes_on_abrupt_exit() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var release, reject, normal, returned, rejected, nativeSum, tdz=false, trace='', saved=[], counts={};
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var reason={}, shared=[9];
+function values(label){
+    var stats=counts[label]={gets:0,steps:0,closes:0};
+    return {[Symbol.iterator](){
+        var at=0;
+        var iterator={
+            get next(){
+                stats.gets++;
+                return function(){
+                    if(this!==iterator)throw 'wrong next receiver';
+                    stats.steps++;
+                    return at<2 ? {done:false,value:++at} : {done:true};
+                };
+            },
+            return(){
+                if(this!==iterator)throw 'wrong return receiver';
+                stats.closes++;
+                trace+=label+':close|';
+                if(label==='throw')throw 'ignored close exception';
+                return {};
+            }
+        };
+        return iterator;
+    }};
+}
+async function run(label){
+    try{
+        for(let item of values(label)){
+            if(label==='normal')saved.push(()=>item);
+            try{
+                await (label==='throw' ? failed : gate);
+            }finally{
+                trace+=label+':inner'+item+'|';
+            }
+            if(label==='return')return item;
+        }
+        return 'done';
+    }finally{trace+=label+':outer|';}
+}
+async function uninitialized(){
+    try{for(let shared of shared){await gate;}}
+    catch(error){if(error.name!=='ReferenceError')throw error;tdz=true;}
+}
+async function nativeValues(){
+    let sum=0;
+    for(const [item] of [[2],[3]]){await gate;sum+=item;}
+    return sum;
+}
+run('normal').then(value=>normal=value);
+run('return').then(value=>returned=value);
+run('throw').catch(error=>rejected=error);
+uninitialized();
+nativeValues().then(value=>nativeSum=value);
+if(trace!==''||!tdz||counts.normal.gets!==1||counts.normal.steps!==1||
+    counts.return.steps!==1||counts.throw.steps!==1)throw 'for-of prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(normal!=='done'||returned!==1||rejected!==reason||nativeSum!==5||saved[0]()!==1||saved[1]()!==2||
+    counts.normal.gets!==1||counts.return.gets!==1||counts.throw.gets!==1||
+    counts.normal.steps!==3||counts.normal.closes!==0||
+    counts.return.steps!==1||counts.return.closes!==1||counts.throw.steps!==1||counts.throw.closes!==1||
+    !trace.includes('return:inner1|return:close|return:outer|')||
+    !trace.includes('throw:inner1|throw:close|throw:outer|'))throw 'iteration, close, or callback order';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_for_body_runs_test_body_and_update_in_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

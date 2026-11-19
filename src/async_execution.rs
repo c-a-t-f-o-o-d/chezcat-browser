@@ -5,6 +5,16 @@ use super::async_plan::{Instruction, Resume};
 use super::function_reachability::Edge;
 use super::*;
 
+enum ExitScope {
+    Try(TryScope),
+    ForOf(Box<ForOfScope>),
+}
+
+struct ForOfScope {
+    record: iterator_protocol::Record,
+    environments: usize,
+}
+
 struct TryScope {
     statement: StmtId,
     after: usize,
@@ -122,7 +132,7 @@ pub(super) struct Activation {
     strict: bool,
     next: usize,
     environments: Vec<usize>,
-    try_scopes: Vec<TryScope>,
+    exit_scopes: Vec<ExitScope>,
     pending: Option<PendingAwait>,
     expression_value: Option<Value>,
     assignments: Vec<Reference>,
@@ -151,12 +161,16 @@ impl Activation {
                     .saturating_mul(std::mem::size_of::<usize>()),
             )
             .saturating_add(
-                self.try_scopes
+                self.exit_scopes
                     .capacity()
-                    .saturating_mul(std::mem::size_of::<TryScope>()),
+                    .saturating_mul(std::mem::size_of::<ExitScope>()),
             )
             .saturating_add(self.finally_completions().fold(0usize, |bytes, completion| {
                 bytes.saturating_add(completion.retained_bytes())
+            }))
+            .saturating_add(self.active_iterators().fold(0usize, |bytes, scope| {
+                bytes.saturating_add(std::mem::size_of::<ForOfScope>())
+                    .saturating_add(scope.record.retained_bytes())
             }))
     }
 
@@ -165,7 +179,8 @@ impl Activation {
         // charge. Program storage is already charged and retained by callee.
         self.environments
             .len()
-            .saturating_add(self.try_scopes.len())
+            .saturating_add(self.exit_scopes.len())
+            .saturating_add(self.active_iterators().count())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
                 + usize::from(self.expression_value.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
@@ -200,6 +215,9 @@ impl Activation {
             if let Some(value) = completion.value() {
                 Edge::value(value, add);
             }
+        }
+        for scope in self.active_iterators() {
+            scope.record.reachability_edges(add);
         }
         if let Some(context) = self.invocation {
             add(Edge::Environment(context.environment));
@@ -253,9 +271,16 @@ impl Activation {
     }
 
     fn finally_completions(&self) -> impl Iterator<Item = &FinallyCompletion> {
-        self.try_scopes.iter().filter_map(|scope| match &scope.phase {
-            TryPhase::Finally(completion) => completion.as_deref(),
-            TryPhase::Body { .. } => None,
+        self.exit_scopes.iter().filter_map(|scope| match scope {
+            ExitScope::Try(TryScope { phase: TryPhase::Finally(completion), .. }) => completion.as_deref(),
+            _ => None,
+        })
+    }
+
+    fn active_iterators(&self) -> impl Iterator<Item = &ForOfScope> {
+        self.exit_scopes.iter().filter_map(|scope| match scope {
+            ExitScope::ForOf(iterator) => Some(iterator.as_ref()),
+            _ => None,
         })
     }
 }
@@ -300,7 +325,7 @@ impl Runtime {
             strict: self.strict,
             next: 0,
             environments,
-            try_scopes: Vec::new(),
+            exit_scopes: Vec::new(),
             pending: None,
             expression_value: None,
             assignments: Vec::new(),
@@ -399,14 +424,14 @@ impl Runtime {
             let result = self.await_instruction(&mut frame, resumed.take(), host);
             let result = match result {
                 Ok(Progress::Return(value)) => {
-                    self.unwind_await_try_scopes(&mut frame, Ok(Control::Return(value)), host)
+                    self.unwind_await_exit_scopes(&mut frame, Ok(Control::Return(value)), host)
                 }
                 Err(error) => {
                     // An abrupt result abandons the current expression before
                     // a handler can start another one.
                     frame.assignments.clear();
                     frame.expression_value = None;
-                    self.unwind_await_try_scopes(&mut frame, Err(error), host)
+                    self.unwind_await_exit_scopes(&mut frame, Err(error), host)
                 }
                 other => other,
             };
@@ -635,6 +660,14 @@ impl Runtime {
                     self.release_environment(scope);
                     Ok(Progress::Continue)
                 }
+                Instruction::EnterForOf(statement) => {
+                    self.enter_await_for_of(frame, statement, environment, host)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
+                Instruction::NextForOf { statement, after } => {
+                    self.next_await_for_of(frame, statement, after, environment, host)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
                 Instruction::BranchFalse {
                     statement,
                     condition,
@@ -661,27 +694,13 @@ impl Runtime {
                     Ok(Progress::Continue)
                 }
                 Instruction::PushTry { statement, after, catch_entry, finally_entry } => {
-                    if frame.try_scopes.len() >= MAX_EVAL_DEPTH {
-                        return Err(Fault::new("Async try nesting limit reached (128)."));
-                    }
-                    if frame.try_scopes.len() == frame.try_scopes.capacity() {
-                        self.await_storage(
-                            frame
-                                .retained_bytes()
-                                .saturating_add(std::mem::size_of::<TryScope>()),
-                            (frame.try_scopes.len() + 1)
-                                .saturating_mul(std::mem::size_of::<TryScope>()),
-                        )?;
-                        frame.try_scopes.try_reserve_exact(1).map_err(|_| {
-                            Fault::new("Unable to allocate bounded async try stack.")
-                        })?;
-                    }
-                    frame.try_scopes.push(TryScope {
+                    self.reserve_await_exit_scope(frame)?;
+                    frame.exit_scopes.push(ExitScope::Try(TryScope {
                         statement,
                         after,
                         environments: frame.environments.len(),
                         phase: TryPhase::Body { catch_entry, finally_entry },
-                    });
+                    }));
                     Ok(Progress::Continue)
                 }
                 Instruction::FinishTry => self.finish_await_try_body(frame, environment, host),
@@ -919,10 +938,83 @@ impl Runtime {
     }
 
     #[inline(never)]
+    fn reserve_await_exit_scope(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        if frame.exit_scopes.len() >= MAX_EVAL_DEPTH {
+            return Err(Fault::new("Async control nesting limit reached (128)."));
+        }
+        if frame.exit_scopes.len() == frame.exit_scopes.capacity() {
+            let slot = std::mem::size_of::<ExitScope>();
+            self.await_storage(frame.retained_bytes().saturating_add(slot),
+                (frame.exit_scopes.len() + 1).saturating_mul(slot))?;
+            frame.exit_scopes.try_reserve_exact(1)
+                .map_err(|_| Fault::new("Unable to allocate bounded async control stack."))?;
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn enter_await_for_of(
+        &mut self, frame: &mut Activation, statement: StmtId, environment: usize, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let Some((kind, pattern, expression)) = async_plan::lexical_for_of(&frame.program, statement) else {
+            return Err(Fault::new("Invalid async for-of binding."));
+        };
+        self.reserve_await_exit_scope(frame)?;
+        let scope = self.new_lexical_iteration_scope(&frame.program, environment, kind, pattern)?;
+        let marker = self.root_marker();
+        let source = (|| {
+            self.push_transient_root(Edge::Environment(scope))?;
+            self.eval(&frame.program, expression, scope, &frame.this, host)
+        })();
+        self.restore_root_marker(marker);
+        self.release_environment(scope);
+        let source = source?;
+        self.push_transient_value(&source)?;
+        let LoopIterator::Values(record) = self.loop_iterator(source, true, host)? else {
+            unreachable!("for-of requires a value iterator");
+        };
+        let bytes = std::mem::size_of::<ForOfScope>().saturating_add(record.retained_bytes());
+        self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+        frame.exit_scopes.push(ExitScope::ForOf(Box::new(ForOfScope {
+            record, environments: frame.environments.len(),
+        })));
+        Ok(Progress::Continue)
+    }
+
+    #[inline(never)]
+    fn next_await_for_of(
+        &mut self, frame: &mut Activation, statement: StmtId, after: usize, environment: usize, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let Some(ExitScope::ForOf(iterator)) = frame.exit_scopes.last_mut() else {
+            return Err(Fault::new("Async for-of has no active iterator."));
+        };
+        let Some(value) = self.iterator_next(&mut iterator.record, host)? else {
+            frame.exit_scopes.pop();
+            frame.next = after;
+            return Ok(Progress::Continue);
+        };
+        self.step()?;
+        self.push_transient_value(&value)?;
+        let Some((kind, pattern, _)) = async_plan::lexical_for_of(&frame.program, statement) else {
+            return Err(Fault::new("Invalid async for-of binding."));
+        };
+        self.reserve_await_environment(frame)?;
+        let scope = self.new_lexical_iteration_scope(&frame.program, environment, kind, pattern)?;
+        frame.environments.push(scope);
+        self.push_transient_root(Edge::Environment(scope))?;
+        self.initialize_pattern(
+            &frame.program, pattern, value, binding_patterns::Mode::Initialize(scope), scope, &frame.this, host,
+        )?;
+        Ok(Progress::Continue)
+    }
+
+    #[inline(never)]
     fn finish_await_try_body(
         &mut self, frame: &mut Activation, environment: usize, host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
-        let scope = frame.try_scopes.pop().ok_or_else(|| Fault::new("Invalid async try exit."))?;
+        let Some(ExitScope::Try(scope)) = frame.exit_scopes.pop() else {
+            return Err(Fault::new("Invalid async try exit."));
+        };
         let TryPhase::Body { finally_entry, .. } = scope.phase else {
             return Err(Fault::new("Invalid async try body exit."));
         };
@@ -960,14 +1052,16 @@ impl Runtime {
         };
         scope.phase = TryPhase::Finally(pending);
         // The scope just popped for this try owns the same stack slot.
-        frame.try_scopes.push(scope);
+        frame.exit_scopes.push(ExitScope::Try(scope));
         frame.next = entry;
         Ok(Progress::Continue)
     }
 
     #[inline(never)]
     fn finish_await_finally(frame: &mut Activation) -> Result<Progress, Fault> {
-        let scope = frame.try_scopes.pop().ok_or_else(|| Fault::new("Invalid async finally exit."))?;
+        let Some(ExitScope::Try(scope)) = frame.exit_scopes.pop() else {
+            return Err(Fault::new("Invalid async finally exit."));
+        };
         let TryPhase::Finally(completion) = scope.phase else {
             return Err(Fault::new("Invalid async finally body exit."));
         };
@@ -1017,15 +1111,25 @@ impl Runtime {
         }
     }
 
-    fn unwind_await_try_scopes(
+    fn unwind_await_exit_scopes(
         &mut self,
         frame: &mut Activation,
         mut completion: Result<Control, Fault>,
         host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
         while !completion.as_ref().is_err_and(|error| error.exception.is_none()) {
-            let Some(scope) = frame.try_scopes.pop() else {
+            let Some(scope) = frame.exit_scopes.pop() else {
                 break;
+            };
+            let scope = match scope {
+                ExitScope::Try(scope) => scope,
+                ExitScope::ForOf(mut iterator) => {
+                    self.unwind_await_environments(frame, iterator.environments);
+                    let marker = self.publish_await_activation(frame)?;
+                    completion = self.iterator_close(&mut iterator.record, completion, host);
+                    self.restore_root_marker(marker);
+                    continue;
+                }
             };
             self.unwind_await_environments(frame, scope.environments);
             let TryPhase::Body { catch_entry, finally_entry } = scope.phase else {
@@ -1092,12 +1196,12 @@ mod tests {
             strict: true,
             next: 1,
             environments: vec![15, 16],
-            try_scopes: vec![TryScope {
+            exit_scopes: vec![ExitScope::Try(TryScope {
                 statement: 0,
                 after: 2,
                 environments: 1,
                 phase: TryPhase::Finally(Some(Box::new(FinallyCompletion::Return(Value::Function(28))))),
-            }],
+            })],
             expression_value: Some(Value::Function(21)),
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
             pending: Some(PendingAwait {
@@ -1151,7 +1255,7 @@ mod tests {
                 + std::mem::size_of::<FinallyCompletion>()
                 + frame.assignments.capacity() * std::mem::size_of::<Reference>()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
-                + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
+                + frame.exit_scopes.capacity() * std::mem::size_of::<ExitScope>()
         );
         frame.pending.as_mut().unwrap().assignment = Some(Reference::ComputedProperty(
             Value::Object(22), Value::Function(23),

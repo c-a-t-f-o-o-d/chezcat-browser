@@ -7,11 +7,23 @@
 //! https://tc39.es/ecma262/#sec-iteratorclose
 
 use super::{Builtin, Fault, Function, Host, Ordinary, Runtime, Value, MAX_CALL_DEPTH};
+use super::function_reachability::Edge;
 
 pub(super) struct Record {
     iterator: Value,
     next: Value,
     done: bool,
+}
+
+impl Record {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.iterator.bytes().saturating_add(self.next.bytes())
+    }
+
+    pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
+        Edge::value(&self.iterator, add);
+        Edge::value(&self.next, add);
+    }
 }
 
 #[derive(Clone, Copy)]

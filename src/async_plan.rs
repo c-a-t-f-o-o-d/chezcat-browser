@@ -20,6 +20,8 @@ pub(super) enum Instruction {
     WriteAssignment { statement: StmtId, action: Resume },
     EnterBlock(StmtId),
     LeaveBlock,
+    EnterForOf(StmtId),
+    NextForOf { statement: StmtId, after: usize },
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
     BranchOnValueFalse(usize),
     Jump(usize),
@@ -58,6 +60,18 @@ fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume
         StmtKind::Return(Some(expression)) => (*expression, Resume::Return),
         _ => return None,
     })
+}
+
+pub(super) fn lexical_for_of(program: &Program, id: StmtId) -> Option<(Declaration, binding_patterns::Id, ExprId)> {
+    let StmtKind::ForOf(initial, source, _) = program.stmts[id].kind else {
+        return None;
+    };
+    let StmtKind::Declare(kind @ (Declaration::Let | Declaration::Const), declarations) =
+        &program.stmts[initial].kind
+    else {
+        return None;
+    };
+    Some((*kind, declarations[0].0, source))
 }
 
 struct AwaitSite {
@@ -332,6 +346,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::For(None, condition, advance, _) => {
                             1 + usize::from(condition.is_some()) + usize::from(advance.is_some())
                         }
+                        StmtKind::ForOf(..) => 4,
                         StmtKind::Try(_, catch, finally) => {
                             2 + 2 * usize::from(catch.is_some_and(|(_, body)| split.contains(&body)))
                                 + 2 * usize::from(finally.is_some_and(|body| split.contains(&body)))
@@ -354,9 +369,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                 continue;
             }
         }
-        let children_eligible = eligible && matches!(kind,
+        let children_eligible = eligible && (matches!(kind,
             StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
-            | StmtKind::For(None, _, _, _));
+            | StmtKind::For(None, _, _, _)) || lexical_for_of(program, id).is_some());
         if children_eligible {
             let before = sites;
             let mut condition_extra = 0;
@@ -392,7 +407,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
             StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body) => {
                 child(*initial, false)?;
-                child(*body, false)?;
+                child(*body, children_eligible)?;
             }
             StmtKind::Break(target) | StmtKind::Continue(target) => push(&mut jumps, (id, *target))?,
             _ => {}
@@ -420,6 +435,7 @@ enum Emit {
     FinishBranch(Range<usize>),
     FinishJump(usize),
     FinishFor { statement: StmtId, start: usize, test: bool, advance: Option<ExprId> },
+    FinishForOf { statement: StmtId, start: usize },
     FinishTry { handler: usize, catch: Option<StmtId>, finally: Option<StmtId> },
     FinishCatch(usize),
     FinishFinally(usize),
@@ -486,6 +502,12 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     let destination = code.len();
                     set_branch_target(&mut code[start..start + 1], destination);
                 }
+                continue;
+            }
+            Emit::FinishForOf { statement, start } => {
+                push(&mut code, Instruction::LeaveBlock)?;
+                push(&mut code, Instruction::Jump(start))?;
+                code[start] = Instruction::NextForOf { statement, after: code.len() };
                 continue;
             }
             Emit::FinishTry { handler, catch, finally } => {
@@ -570,6 +592,13 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     })?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
+                StmtKind::ForOf(_, _, body) => {
+                    push(&mut code, Instruction::EnterForOf(id))?;
+                    let start = code.len();
+                    push(&mut code, Instruction::NextForOf { statement: id, after: 0 })?;
+                    push(&mut pending, Emit::FinishForOf { statement: id, start })?;
+                    push(&mut pending, Emit::Statement(*body))?;
+                }
                 StmtKind::Try(body, catch, finally) => {
                     let handler = code.len();
                     let catch = catch.map(|(_, body)| body).filter(|body| split.contains(body));
@@ -641,6 +670,8 @@ mod tests {
             "for(let i=0;i<2;i++){await p;}",
             "for(;await p;){await p;}",
             "for(;true;await p){await p;}",
+            "for(var item of p){await item;}",
+            "for(let item of await p){await item;}",
             "try{}catch(e){await p;}finally{}",
             "try{}catch{}finally{await p;}",
             "await (await p);",
@@ -682,6 +713,7 @@ mod tests {
             ("async function f(p){try{}finally{await p;}}", 7),
             ("async function f(p){for(;test();advance()){await p;}}", 6),
             ("async function f(p){for(;;)return await p;}", 2),
+            ("async function f(p){for(let value of p){await value;}}", 7),
             ("async function f(p){return yes() && use(await p);}", 3),
             ("async function f(p){return yes() && use(await p).ready;}", 3),
             ("async function f(p){if(yes() && use(await p).ready){noop();}}", 4),

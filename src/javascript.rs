@@ -7018,11 +7018,8 @@ impl Runtime {
         let mut right_scope = None;
         let source = (|| {
             let right_env = if let Some((kind, pattern)) = lexical {
-                let scope = self.new_environment(env, false)?;
+                let scope = self.new_lexical_iteration_scope(program, env, kind, *pattern)?;
                 right_scope = Some(scope);
-                for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
-                    self.put_binding(scope, name, None, kind, false)?;
-                }
                 scope
             } else {
                 env
@@ -7040,11 +7037,8 @@ impl Runtime {
             let mut iteration_scope = None;
             let completion = (|| {
                 let body_env = if let Some((kind, pattern)) = lexical {
-                    let scope = self.new_environment(env, false)?;
+                    let scope = self.new_lexical_iteration_scope(program, env, kind, *pattern)?;
                     iteration_scope = Some(scope);
-                    for name in program.pattern_names_with_work(*pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
-                        self.put_binding(scope, name, None, kind, false)?;
-                    }
                     self.initialize_pattern(
                         program,
                         *pattern,
@@ -7120,6 +7114,23 @@ impl Runtime {
             }
         }
         Ok(Control::Normal(last))
+    }
+
+    #[inline(never)]
+    fn new_lexical_iteration_scope(
+        &mut self, program: &Program, parent: usize, kind: Declaration, pattern: binding_patterns::Id,
+    ) -> Result<usize, Fault> {
+        let scope = self.new_environment(parent, false)?;
+        let prepared = (|| {
+            for name in program.pattern_names_with_work(pattern, |n| self.work_as(n, WorkKind::PatternPreparation))? {
+                self.put_binding(scope, name, None, kind, false)?;
+            }
+            Ok(scope)
+        })();
+        if prepared.is_err() {
+            self.release_environment(scope);
+        }
+        prepared
     }
 
     fn collect_native_iterable(
