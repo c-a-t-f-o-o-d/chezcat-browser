@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PROBE = r'''
 #![allow(dead_code)]
+// Additional probe crate modules
 #[path = JAVASCRIPT_SOURCE]
 mod javascript;
 
@@ -54,11 +56,15 @@ fn representation(value: &Value) -> String {
         Value::Number(value) if value.is_nan() => "number:NaN".into(),
         Value::Number(value) => format!("number:{:016x}", value.to_bits()),
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        #[cfg(chezcat_string_units)]
         Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
         Value::Symbol(_) => "symbol".into(),
         Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(),
         Value::Host(id) => format!("host:{id}"),
+        #[cfg(not(chezcat_string_units))]
+        #[allow(unreachable_patterns)]
+        _ => panic!("This legacy probe cannot encode an unknown JavaScript value"),
     }
 }
 
@@ -2723,12 +2729,10 @@ def main():
             temporary = Path(directory)
             probe_source = temporary / "probe.rs"
             probe = temporary / ("probe.exe" if os.name == "nt" else "probe")
-            probe_source.write_text(
-                PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_path), ensure_ascii=False)),
-                encoding="utf-8",
-            )
+            write_probe = runpy.run_path(str(Path(__file__).with_name("javascript_probe_source.py")))["write_probe"]
+            flags = write_probe(PROBE, ROOT, probe_source)
             subprocess.run(
-                [options.rustc, "--edition=2021", "-O", str(probe_source), "-o", str(probe)],
+                [options.rustc, "--edition=2021", "-O", *flags, str(probe_source), "-o", str(probe)],
                 check=True, capture_output=True, text=True, encoding="utf-8", timeout=120,
             )
             for case in cases:

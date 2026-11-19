@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 import time
@@ -28,6 +29,7 @@ NEXT_JOB = "\n//---NEXT JOB---\n"
 
 PROBE = r'''
 #![allow(dead_code)]
+// Additional probe crate modules
 #[path = JAVASCRIPT_SOURCE]
 mod javascript;
 use javascript::{Host, Runtime, Value};
@@ -46,6 +48,9 @@ fn representation(value: &Value) -> String {
         Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
         Value::Symbol(_) => "symbol".into(), Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(), Value::Host(id) => format!("host:{id}"),
+        #[cfg(not(chezcat_string_units))]
+        #[allow(unreachable_patterns)]
+        _ => panic!("This legacy probe cannot encode an unknown JavaScript value"),
     }
 }
 impl Host for Recorder {
@@ -139,13 +144,11 @@ def source_manifest(root):
 def compile_probe(source_root, directory, rustc="rustc"):
     path = directory / "promise-probe.rs"
     executable = directory / ("promise-probe.exe" if os.name == "nt" else "promise-probe")
-    javascript = source_root / "src/javascript.rs"
-    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(javascript))), encoding="utf-8")
+    write_probe = runpy.run_path(str(Path(__file__).with_name("javascript_probe_source.py")))["write_probe"]
+    flags = write_probe(PROBE, source_root, path)
     available = "pub fn microtask_checkpoint(" in (source_root / "src/promises.rs").read_text(encoding="utf-8") if (source_root / "src/promises.rs").is_file() else False
-    flags = ["--cfg", "chezcat_microtasks"] if available else []
-    value_definition = javascript.read_text(encoding="utf-8").partition("pub enum Value {")[2].partition("\n}")[0]
-    if "StringUnits(Vec<u16>)" in value_definition:
-        flags.extend(["--cfg", "chezcat_string_units"])
+    if available:
+        flags.extend(["--cfg", "chezcat_microtasks"])
     subprocess.run([rustc, "--edition=2021", "-O", *flags, str(path), "-o", str(executable)],
                    capture_output=True, text=True, timeout=120, check=True)
     return executable, available
