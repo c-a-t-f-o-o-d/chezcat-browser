@@ -2824,12 +2824,17 @@ impl Host for Bridge<'_> {
         if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
+        if self.comment_receiver(object) {
+            return matches!(property, "data" | "length" | "nodeValue" | "ownerDocument" | "isConnected" | "baseURI")
+                || dom_tree::node_constant(property).is_some();
+        }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
         object != NAVIGATOR || navigator_readonly(property)
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
-        self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
+        self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object)
+            || self.comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
