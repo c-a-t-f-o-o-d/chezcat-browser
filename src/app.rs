@@ -4500,6 +4500,7 @@ mod select_tests;
 mod tests {
     mod canvas_2d;
     mod canvas_colors;
+    mod canvas_readback;
 
     use super::*;
     use std::io::{Read, Write};

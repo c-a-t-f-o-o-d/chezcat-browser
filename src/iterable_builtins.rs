@@ -74,6 +74,7 @@ impl Runtime {
                     | Builtin::Date(super::date::Op::Constructor)
                     | Builtin::Url(super::url_api::Op::Constructor(_))
                     | Builtin::Rect(super::rect_api::Op::Constructor(_))
+                    | Builtin::ImageData(super::image_data_api::Op::Constructor)
                     | Builtin::DomException(super::dom_exception::Op::Constructor)
                     | Builtin::Promise(
                         super::promises::Op::Constructor | super::promises::Op::AggregateError,

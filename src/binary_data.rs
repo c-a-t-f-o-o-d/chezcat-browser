@@ -10,7 +10,7 @@ use super::{
 };
 use std::cmp::Ordering;
 
-const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+pub(super) const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,11 +83,17 @@ pub(super) enum Data {
     Buffer(Vec<u8>),
     Typed(TypedView),
     View(View),
+    ImageData(super::image_data_api::Data),
 }
 impl Data {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
-        match self { Self::Typed(view) => add(Edge::Object(view.buffer)), Self::View(view) => add(Edge::Object(view.buffer)), Self::Buffer(_) => {} }
+        match self {
+            Self::Typed(view) => add(Edge::Object(view.buffer)),
+            Self::View(view) => add(Edge::Object(view.buffer)),
+            Self::ImageData(image) => add(Edge::Object(image.view)),
+            Self::Buffer(_) => {}
+        }
     }
 
     pub(super) fn tag(&self) -> &'static str {
@@ -95,6 +101,7 @@ impl Data {
             Self::Buffer(_) => "ArrayBuffer",
             Self::Typed(view) => view.kind.name(),
             Self::View(_) => "DataView",
+            Self::ImageData(_) => "Object", // Web IDL supplies the tag on its prototype.
         }
     }
 }
