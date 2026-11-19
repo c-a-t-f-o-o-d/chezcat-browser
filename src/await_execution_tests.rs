@@ -32,6 +32,45 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_strict_comparisons_retain_left_values_through_later_suspension() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', start, release, reject, right, nested, caught, reason={};
+var first=new Promise(function(resolve){start=resolve;});
+var next=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var token={valueOf(){throw 'strict comparison invoked valueOf';}};
+function left(label,value){trace+=label+'|';return value;}
+function mark(value){trace+='mark|';return value;}
+function relay(value){trace+='right|';return value;}
+async function awaitRight(){return left('first',token)===relay(await next);}
+async function awaitBoth(){return mark(await first)===(left('middle','6')!==relay(await next));}
+async function stop(){
+    try{return left('failed',token)===relay(await failed);}
+    catch(error){caught=error;}
+}
+awaitRight().then(value=>right=value);
+awaitBoth().then(value=>nested=value);
+stop();
+if(trace!=='first|failed|'||right!==undefined||nested!==undefined||caught!==undefined)
+    throw 'left operand did not run before right suspension';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "start(true);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='first|failed|mark|middle|'||right!==undefined||nested!==undefined)throw 'nested evaluation order';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(token);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='first|failed|mark|middle|right|right|'||right!==true||nested!==true||caught!==reason)
+    throw 'comparison results, repeated prefix or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_composed_access_reads_selected_receivers_once() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

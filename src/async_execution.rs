@@ -139,6 +139,7 @@ pub(super) struct Activation {
     exit_scopes: Vec<ExitScope>,
     pending: Option<PendingAwait>,
     expression_value: Option<Value>,
+    comparison_operands: Vec<Value>,
     assignments: Vec<Reference>,
 }
 
@@ -151,9 +152,14 @@ impl Activation {
         let references = self.assignment_references().fold(0usize, |bytes, reference| {
             bytes.saturating_add(assignment_reference_bytes(reference))
         });
+        let comparisons = self.comparison_operands.iter().fold(
+            self.comparison_operands.capacity().saturating_mul(std::mem::size_of::<Value>()),
+            |bytes, value| bytes.saturating_add(value.bytes()),
+        );
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
             .saturating_add(self.expression_value.as_ref().map_or(0, Value::bytes))
+            .saturating_add(comparisons)
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_literal().map_or(0, PendingLiteral::retained_bytes))
@@ -185,6 +191,7 @@ impl Activation {
             .len()
             .saturating_add(self.exit_scopes.len())
             .saturating_add(self.active_iterators().count())
+            .saturating_add(self.comparison_operands.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
                 + usize::from(self.expression_value.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
@@ -198,6 +205,9 @@ impl Activation {
         add(Edge::Object(self.outer));
         Edge::value(&self.this, add);
         if let Some(value) = &self.expression_value {
+            Edge::value(value, add);
+        }
+        for value in &self.comparison_operands {
             Edge::value(value, add);
         }
         if let Some(call) = self.pending_call() {
@@ -332,6 +342,7 @@ impl Runtime {
             exit_scopes: Vec::new(),
             pending: None,
             expression_value: None,
+            comparison_operands: Vec::new(),
             assignments: Vec::new(),
         });
         self.drive_await_body(frame, None, host)
@@ -434,6 +445,7 @@ impl Runtime {
                     // An abrupt result abandons the current expression before
                     // a handler can start another one.
                     frame.assignments.clear();
+                    frame.comparison_operands.clear();
                     frame.expression_value = None;
                     self.unwind_await_exit_scopes(&mut frame, Err(error), host)
                 }
@@ -726,10 +738,15 @@ impl Runtime {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
                 }
-                Instruction::StrictComparison { statement, operator, right, action } => {
+                Instruction::CaptureComparison(statement) => {
+                    self.capture_await_comparison(frame)
+                        .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
+                Instruction::StrictComparison { statement, operator, action } => {
                     let result = (|| {
-                        let left = frame.take_expression_value()?;
-                        let right = self.eval(&frame.program, right, environment, &frame.this, host)?;
+                        let right = frame.take_expression_value()?;
+                        let left = frame.comparison_operands.pop()
+                            .ok_or_else(|| Fault::new("Async comparison has no left operand."))?;
                         let value = self.binary_value(operator, left, right, host)?;
                         self.await_resume_action(frame, action, value, host)
                     })();
@@ -840,6 +857,27 @@ impl Runtime {
                 .map_err(|_| Fault::new("Unable to allocate bounded async assignment stack."))?;
         }
         Ok(())
+    }
+
+    #[inline(never)]
+    fn capture_await_comparison(&mut self, frame: &mut Activation) -> Result<Progress, Fault> {
+        let value = frame.take_expression_value()?;
+        let operands = &frame.comparison_operands;
+        if operands.len() >= MAX_EVALUATION_FRAMES {
+            return Err(Fault::new("Async comparison nesting limit reached (4096)."));
+        }
+        let retained = frame.retained_bytes().saturating_add(value.bytes());
+        if operands.len() == operands.capacity() {
+            let slot = std::mem::size_of::<Value>();
+            self.await_storage(retained.saturating_add(slot),
+                (operands.len() + 1).saturating_mul(slot).saturating_add(value.bytes()))?;
+            frame.comparison_operands.try_reserve_exact(1)
+                .map_err(|_| Fault::new("Unable to allocate bounded async comparison stack."))?;
+        } else {
+            self.await_storage(retained, value.bytes())?;
+        }
+        frame.comparison_operands.push(value);
+        Ok(Progress::Continue)
     }
 
     fn finish_await_assignment(
@@ -1268,6 +1306,7 @@ mod tests {
                 )))),
             })],
             expression_value: Some(Value::Function(21)),
+            comparison_operands: vec![Value::Function(29), Value::String("left".into())],
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
             pending: Some(PendingAwait {
                 statement: 0,
@@ -1292,7 +1331,7 @@ mod tests {
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13, 17, 19, 20, 21, 26, 28] {
+        for function in [11, 13, 17, 19, 20, 21, 26, 28, 29] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
@@ -1318,6 +1357,7 @@ mod tests {
                 + std::mem::size_of::<PendingMethod>() + "invoke".len()
                 + std::mem::size_of::<PendingLiteral>() + "entry".len()
                 + std::mem::size_of::<FinallyCompletion>()
+                + frame.comparison_operands.capacity() * std::mem::size_of::<Value>() + "left".len()
                 + frame.assignments.capacity() * std::mem::size_of::<Reference>()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.exit_scopes.capacity() * std::mem::size_of::<ExitScope>()
