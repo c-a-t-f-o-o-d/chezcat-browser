@@ -2,6 +2,7 @@
 //! https://tc39.es/ecma262/#sec-generatorfunction-definitions
 //! https://tc39.es/ecma262/#sec-generator-objects
 use super::function_reachability::Edge;
+use super::iterator_protocol::{Delegated, Record};
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -24,6 +25,7 @@ pub(super) struct Activation {
     callee: usize,
     environment: usize,
     next: usize,
+    delegate: Option<Record>,
     scopes: [Option<usize>; 4],
     this: Value,
     invocation: Option<InvocationContext>,
@@ -33,12 +35,14 @@ pub(super) struct Activation {
 
 enum Progress {
     Yield(Value),
+    Forwarded(Value),
     Complete(Value),
 }
 
 impl Activation {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>().saturating_add(self.this.bytes())
+            .saturating_add(self.delegate.as_ref().map_or(0, Record::retained_bytes))
     }
 
     fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
@@ -47,6 +51,9 @@ impl Activation {
             add(Edge::Environment(scope));
         }
         Edge::value(&self.this, add);
+        if let Some(delegate) = &self.delegate {
+            delegate.reachability_edges(add);
+        }
     }
 }
 
@@ -58,7 +65,10 @@ impl State {
     }
 
     pub(super) fn reachability_cost(&self) -> usize {
-        if matches!(self, Self::SuspendedStart(_) | Self::SuspendedYield(_)) { 6 } else { 0 }
+        match self {
+            Self::SuspendedStart(frame) | Self::SuspendedYield(frame) => 6 + 2 * usize::from(frame.delegate.is_some()),
+            _ => 0,
+        }
     }
 
     pub(super) fn environment_roots(&self, roots: &mut Vec<usize>) {
@@ -181,7 +191,7 @@ impl Runtime {
         self.finish_transient_inhibition(inhibited);
         let result = prepared.and_then(|environment| {
             let frame = Activation {
-                program: Rc::clone(program), template, callee, environment, next: 0, scopes,
+                program: Rc::clone(program), template, callee, environment, next: 0, delegate: None, scopes,
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
             };
@@ -204,15 +214,19 @@ impl Runtime {
             None => self.generator_prototype()?,
         };
         let retained = frame.retained_bytes();
-        if retained > self.limits.heap.retained_values.saturating_sub(self.value_bytes) {
-            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
-        }
-        self.work(retained)?;
+        self.check_generator_retention(retained)?;
         let id = self.new_object(None)?;
         self.objects[id].prototype = Some(prototype);
         self.objects[id].generator = Some(State::SuspendedStart(Box::new(frame)));
         self.value_bytes += retained;
         Ok(Value::Object(id))
+    }
+
+    fn check_generator_retention(&mut self, bytes: usize) -> Result<(), Fault> {
+        if bytes > self.limits.heap.retained_values.saturating_sub(self.value_bytes) {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
+        }
+        self.work(bytes)
     }
 
     fn release_generator_scopes(&mut self, scopes: [Option<usize>; 4]) {
@@ -236,11 +250,17 @@ impl Runtime {
         }
         let (State::SuspendedStart(mut frame) | State::SuspendedYield(mut frame)) =
             std::mem::replace(state, State::Executing) else { unreachable!() };
-        let progress = match operation {
-            Op::Next => self.resume_generator(&mut frame, host),
-            Op::Return | Op::Throw => self.generator_abrupt_value(operation, args).map(Progress::Complete),
+        let progress = if matches!(operation, Op::Next) || frame.delegate.is_some() {
+            let input = args.first().unwrap_or(&Value::Undefined);
+            self.resume_generator(&mut frame, operation, input, host)
+        } else {
+            self.generator_abrupt_value(operation, args).map(Progress::Complete)
         };
         let value = match progress {
+            Ok(Progress::Forwarded(result)) => {
+                self.objects[id].generator = Some(State::SuspendedYield(frame));
+                return Ok(result);
+            }
             Ok(Progress::Yield(value)) => match self.generator_result(value, false) {
                 Ok(result) => {
                     self.objects[id].generator = Some(State::SuspendedYield(frame));
@@ -282,7 +302,9 @@ impl Runtime {
     }
 
     #[inline(never)]
-    fn resume_generator(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
+    fn resume_generator(
+        &mut self, frame: &mut Activation, operation: Op, input: &Value, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
         self.step()?;
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
@@ -295,14 +317,16 @@ impl Runtime {
                     rooted = runtime.push_transient_root(edge);
                 }
             });
-            let result = rooted.and_then(|()| runtime.run_generator_body(frame, host));
+            let result = rooted.and_then(|()| runtime.run_generator_body(frame, operation, input, host));
             runtime.restore_root_marker(marker);
             result
         })
     }
 
     #[inline(never)]
-    fn run_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
+    fn run_generator_body(
+        &mut self, frame: &mut Activation, operation: Op, input: &Value, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
         let previous_invocation = self.invocation;
         let previous_native_caller = self.native_access_caller;
         let previous_strict = self.strict;
@@ -311,7 +335,14 @@ impl Runtime {
         self.strict = frame.program.templates[frame.template].strict;
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;
-        let result = self.drive_generator_body(frame, host);
+        let result = (|| {
+            if frame.delegate.is_some() {
+                if let Some(progress) = self.advance_generator_delegate(frame, operation, input, host)? {
+                    return Ok(progress);
+                }
+            }
+            self.drive_generator_body(frame, host)
+        })();
         self.transient_roots.owned_call_depth -= 1;
         self.call_depth -= 1;
         self.invocation = previous_invocation;
@@ -321,8 +352,7 @@ impl Runtime {
     }
 
     fn drive_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
-        let body = &frame.program.templates[frame.template].body;
-        while let Some(&statement) = body.get(frame.next) {
+        while let Some(&statement) = frame.program.templates[frame.template].body.get(frame.next) {
             frame.next += 1;
             if let StmtKind::Yield(operand) = frame.program.stmts[statement].kind {
                 let value = (|| {
@@ -334,6 +364,12 @@ impl Runtime {
                 })().map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
                 return Ok(Progress::Yield(value));
             }
+            if let StmtKind::YieldFrom(operand) = frame.program.stmts[statement].kind {
+                if let Some(progress) = self.begin_generator_delegate(frame, statement, operand, host)? {
+                    return Ok(progress);
+                }
+                continue;
+            }
             match self.statement(&frame.program, statement, frame.environment, &frame.this, host)? {
                 Control::Normal(_) => {}
                 Control::Return(value) => return Ok(Progress::Complete(value)),
@@ -341,5 +377,45 @@ impl Runtime {
             }
         }
         Ok(Progress::Complete(Value::Undefined))
+    }
+
+    #[inline(never)]
+    fn begin_generator_delegate(
+        &mut self, frame: &mut Activation, statement: StmtId, operand: ExprId, host: &mut dyn Host,
+    ) -> Result<Option<Progress>, Fault> {
+        let marker = self.root_marker();
+        let result = (|| {
+            self.step()?;
+            let value = self.eval(&frame.program, operand, frame.environment, &frame.this, host)?;
+            self.push_transient_value(&value)?;
+            let LoopIterator::Values(record) = self.loop_iterator(value, true, host)? else {
+                unreachable!("yield delegation requires a value iterator");
+            };
+            let bytes = record.retained_bytes();
+            self.check_generator_retention(bytes)?;
+            frame.delegate = Some(record);
+            self.value_bytes += bytes;
+            self.advance_generator_delegate(frame, Op::Next, &Value::Undefined, host)
+        })();
+        self.restore_root_marker(marker);
+        result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+    }
+
+    #[inline(never)]
+    fn advance_generator_delegate(
+        &mut self, frame: &mut Activation, operation: Op, input: &Value, host: &mut dyn Host,
+    ) -> Result<Option<Progress>, Fault> {
+        let record = frame.delegate.as_mut().expect("active yield delegate");
+        let result = self.delegate_iterator(record, operation, input, host)?;
+        if let Delegated::Yield(result) = result {
+            return Ok(Some(Progress::Forwarded(result)));
+        }
+        self.value_bytes -= record.retained_bytes();
+        frame.delegate = None;
+        match result {
+            Delegated::Done => Ok(None),
+            Delegated::Return(value) => Ok(Some(Progress::Complete(value))),
+            Delegated::Yield(_) => unreachable!(),
+        }
     }
 }
