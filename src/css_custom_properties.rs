@@ -306,7 +306,7 @@ fn valid_box(name:&str,value:&str)->bool {
     if name=="font-size" {return font_size_value(value,INITIAL_FONT_SIZE,INITIAL_FONT_SIZE).is_some();}
     if name=="color" {return value=="currentcolor" || color(value).is_some();}
     if matches!(name,"background-color"|"background") {
-        return matches!(value,"transparent"|"none"|"currentcolor") || color(value).is_some();
+        return matches!(value,"transparent"|"none"|"currentcolor") || opaque_background_color(value).is_some();
     }
     if matches!(name,"margin"|"padding") {return box_spacing::shorthand(value,name=="margin").is_some();}
     if name.starts_with("margin-") || name.starts_with("padding-") {
