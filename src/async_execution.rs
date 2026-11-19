@@ -737,6 +737,19 @@ impl Runtime {
                         error.at(&frame.program.source, frame.program.stmts[statement].at)
                     })
                 }
+                Instruction::ReadAccess { statement, expression, action } => {
+                    let result = (|| {
+                        let receiver = frame.take_expression_value()?;
+                        let value = self.eval_resumed_expression(
+                            &frame.program, expression, receiver, environment, &frame.this, host,
+                        )?;
+                        self.push_transient_value(&value)?;
+                        self.await_resume_action(frame, action, value, host)
+                    })();
+                    result.map_err(|error: Fault| {
+                        error.at(&frame.program.source, frame.program.stmts[statement].at)
+                    })
+                }
                 Instruction::Await {
                     statement,
                     operand,

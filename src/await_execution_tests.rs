@@ -32,6 +32,44 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_composed_access_reads_selected_receivers_once() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, finish, hit, miss, reason={}, caught, token={};
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var next=new Promise(function(resolve){finish=resolve;});
+var selected={get ready(){if(this!==selected)throw 'ready receiver';trace+='ready|';return true;}};
+var node={get inner(){if(this!==node)throw 'inner receiver';trace+='inner|';return selected;}};
+function relay(value){trace+='relay|';return value;}
+function nil(){trace+='nil|';return null;}
+function key(){trace+='key|';return 'inner';}
+function fallback(){trace+='fallback|';return {get ready(){trace+='miss-ready|';return 0;}};}
+async function run(input){
+    return (((relay(await input)??nil())?.[key()]??fallback()).ready&&relay(await next));
+}
+run(gate).then(value=>hit=value);
+run(Promise.resolve(null)).then(value=>miss=value);
+run(failed).catch(error=>caught=error);
+if(trace!==''||hit!==undefined||miss!==undefined||caught!==undefined)throw 'read before fulfillment';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(miss!==0||trace!=='relay|nil|fallback|miss-ready|')throw 'short circuits';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(node);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(hit!==undefined||caught!==reason||trace!=='relay|nil|fallback|miss-ready|relay|key|inner|ready|')
+    throw 'selected receiver, property key or rejection';
+finish(token);
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(hit!==token||!trace.endsWith('relay|key|inner|ready|relay|'))throw 'resumed logical result';'ok';");
+}
+
+#[test]
 fn await_execution_strict_comparison_runs_the_right_operand_only_after_the_left() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
