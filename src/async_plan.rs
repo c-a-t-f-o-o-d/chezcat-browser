@@ -40,7 +40,7 @@ pub(super) enum Instruction {
         statement: StmtId,
         operand: ExprId,
         callee: Option<ExprId>,
-        method: Option<ExprId>,
+        method: Option<ArgumentAwait>,
         argument_call: Option<ArgumentAwait>,
         followup_call: Option<FollowupCalls>,
         member_key: Option<ExprId>,
@@ -142,7 +142,7 @@ fn generator_call_yield(
 struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
-    method: Option<ExprId>,
+    method: Option<ArgumentAwait>,
     argument_call: Option<ArgumentAwait>,
     followup_call: Option<FollowupCalls>,
     member_key: Option<ExprId>,
@@ -251,7 +251,7 @@ fn await_value(program: &Program, expression: ExprId) -> Option<AwaitSite> {
 struct AwaitOperand {
     operand: ExprId,
     callee: Option<ExprId>,
-    method: Option<ExprId>,
+    method: Option<ArgumentAwait>,
     argument_call: Option<ArgumentAwait>,
 }
 
@@ -260,8 +260,10 @@ fn await_operand(program: &Program, expression: ExprId) -> Option<AwaitOperand> 
     // of the ordinary member call.
     let (expression, method) = match &program.exprs[expression].kind {
         ExprKind::Call(method, arguments) if matches!(program.exprs[*method].kind, ExprKind::Member(..)) => {
-            let Some(Argument { expression: first, spread: false }) = arguments.first() else { return None };
-            (*first, Some(expression))
+            let index = arguments.iter().position(|argument| !argument.spread
+                && bare_argument_operand(program, argument.expression).is_some()).unwrap_or(0);
+            let Some(Argument { expression: argument, spread: false }) = arguments.get(index) else { return None };
+            (*argument, Some(ArgumentAwait { call: expression, index }))
         }
         _ => (expression, None),
     };
@@ -954,7 +956,7 @@ mod tests {
     fn async_plan_rejects_unreachable_embedded_await_and_cross_scope_jumps_during_parse() {
         for body in [
             "if(false){use(1,await p,await p);}",
-            "return receiver.method(1, await p);",
+            "return receiver.method(1, await p, await p);",
             "return receiver.method(1 + await p);",
             "receiver[await p] = await p;",
             "value += await p;",

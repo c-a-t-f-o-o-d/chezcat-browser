@@ -917,6 +917,45 @@ if(trace!=='receiver|key:write|operand|key:skip|'||stored||result||caught)throw 
 }
 
 #[test]
+fn await_execution_later_member_argument_keeps_receiver_and_prefix() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, outcome, caught, token={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failure=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+function inner(value){return mark('inner',value);}
+let resolved=function(first,second,third,fourth){
+    if(this!==original||first!==1||second!==2||third!==token||fourth!==4)throw 'call receiver and arguments';
+    return mark('method',third);
+};
+let original={get method(){return mark('get',resolved);}};
+let owner=original;
+async function work(input){
+    try{return mark('receiver',owner)[mark('key','method')](
+        mark('first',1),...mark('spread',[2]),inner(await input),mark('suffix',4));}
+    catch(error){caught=error;}
+}
+work(gate).then(value=>outcome=value);
+work(failure);
+if(trace!=='receiver|key|get|first|spread|receiver|key|get|first|spread|'||outcome||caught)
+    throw 'receiver and arguments before suspension';
+owner={method(){throw 'changed receiver';}};
+resolved=function(){throw 'method read twice';};
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='receiver|key|get|first|spread|receiver|key|get|first|spread|inner|suffix|method|'||
+   outcome!==token||caught!==reason)throw 'resumed method or rejected continuation';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_later_bare_argument_retains_prefix_without_evaluating_suffix_early() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"
