@@ -310,16 +310,25 @@ fn bare_argument_operand(program: &Program, argument: ExprId) -> Option<(ExprId,
     }
 }
 
-pub(super) fn plain_call_parts(program: &Program, expression: ExprId) -> Option<(ExprId, &[Argument], bool)> {
-    let (callee, arguments, optional) = match &program.exprs[expression].kind {
-        ExprKind::Call(callee, arguments) => (*callee, arguments.as_slice(), false),
+#[derive(Clone, Copy)]
+pub(super) enum PlainCallKind {
+    Ordinary,
+    Optional,
+    Construct,
+}
+
+pub(super) fn plain_call_parts(program: &Program, expression: ExprId) -> Option<(ExprId, &[Argument], PlainCallKind)> {
+    let (callee, arguments, kind) = match &program.exprs[expression].kind {
+        ExprKind::Call(callee, arguments) => (*callee, arguments.as_slice(), PlainCallKind::Ordinary),
+        ExprKind::Construct(callee, arguments) => (*callee, arguments.as_slice(), PlainCallKind::Construct),
         ExprKind::OptionalChain(callee, steps) => {
             let [optional_chaining::Step::Call { args, optional: true }] = steps.as_slice() else { return None; };
-            (*callee, args.as_slice(), true)
+            (*callee, args.as_slice(), PlainCallKind::Optional)
         }
         _ => return None,
     };
-    matches!(program.exprs[callee].kind, ExprKind::Name(_)).then_some((callee, arguments, optional))
+    (matches!(kind, PlainCallKind::Construct) || matches!(program.exprs[callee].kind, ExprKind::Name(_)))
+        .then_some((callee, arguments, kind))
 }
 
 fn await_in_plain_arguments(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
@@ -347,8 +356,8 @@ fn resumable_await_operand(program: &Program, expression: ExprId) -> Result<bool
     Ok(await_expression(program, expression).is_some() || await_in_plain_arguments(program, expression)?.is_some())
 }
 
-fn nested_bare_call(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
-    if !matches!(plain_call_parts(program, expression), Some((_, _, false))) {
+fn nested_plain_call(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
+    if !matches!(plain_call_parts(program, expression), Some((_, _, PlainCallKind::Ordinary | PlainCallKind::Construct))) {
         return Ok(None);
     }
     if let Some(site) = await_expression(program, expression) {
@@ -458,7 +467,7 @@ fn visit_expression(
                 ExprKind::Assign("=", target, right)
                     if !generator && matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..))
                         && (is_composed_expression(&program.exprs[right].kind)
-                            || nested_bare_call(program, right)?.is_some()
+                            || nested_plain_call(program, right)?.is_some()
                             || (matches!(program.exprs[right].kind, ExprKind::OptionalChain(..))
                                 && await_in_plain_arguments(program, right)?.is_some())) =>
                 {
@@ -469,8 +478,8 @@ fn visit_expression(
                     part = ExpressionPart::CaptureAssignment(target);
                     continue;
                 }
-                ExprKind::Call(..) if !generator => {
-                    if let Some((site, argument)) = nested_bare_call(program, expression)? {
+                ExprKind::Call(..) | ExprKind::Construct(..) if !generator => {
+                    if let Some((site, argument)) = nested_plain_call(program, expression)? {
                         push(&mut pending, ExpressionPart::InvokePlainCall(action))?;
                         push(&mut pending, ExpressionPart::Value(argument, Resume::StoreExpressionValue))?;
                         part = ExpressionPart::CapturePlainCall(site);
