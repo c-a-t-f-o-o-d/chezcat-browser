@@ -252,7 +252,7 @@ if(count!==10)throw 'early errors';'ok';
 
 impl Parser {
     pub(super) fn chain_property(&mut self) -> Result<ExprId, Fault> {
-        let TokenKind::Word(name) = &self.token().kind else {
+        let (TokenKind::Word(name) | TokenKind::EscapedWord(name)) = &self.token().kind else {
             return Err(self.error("Expected a property name after the optional-chain operator."));
         };
         let name = name.clone();
