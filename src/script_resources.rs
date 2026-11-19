@@ -13,6 +13,9 @@ pub struct DynamicScript {
     pub nonce: Option<String>,
     pub policy: crate::csp::PolicySet,
     pub same_origin_only: bool,
+    /// Maximum source the document can admit when the request is prepared.
+    /// Completion rechecks the remaining allowance after other scripts run.
+    pub source_limit: usize,
     pub error: Option<String>,
 }
 
@@ -205,6 +208,9 @@ impl Bridge<'_> {
             nonce,
             policy: self.state.dynamic.policy.clone(),
             same_origin_only,
+            source_limit: self.state.limits.capacity.source_bytes.min(
+                self.state.limits.capacity.retained_source.saturating_sub(self.state.dynamic.source_bytes)
+            ),
             error,
         });
         self.state.dynamic.in_flight += 1;

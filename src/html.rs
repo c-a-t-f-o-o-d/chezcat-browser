@@ -35,6 +35,9 @@ pub struct Document {
     /// CSP nonceability needs duplicate-attribute evidence even though normal
     /// HTML attribute lookup keeps only the first occurrence.
     pub nonce_unsafe_nodes: HashSet<usize>,
+    /// Connected STYLE elements without an associated sheet after their type
+    /// or content security policy was checked. Their text remains in the DOM.
+    pub(crate) withheld_inline_styles: HashSet<usize>,
 }
 
 impl Document {
@@ -191,6 +194,7 @@ fn parse_internal(input: &str, context: Option<&str>, scripting: bool) -> Result
         content_type: "text/html".into(),
         scripting_enabled: false,
         nonce_unsafe_nodes: HashSet::new(),
+        withheld_inline_styles: HashSet::new(),
         nodes: vec![Node {
             kind: NodeKind::Element {
                 tag: context.unwrap_or("#document").into(),

@@ -231,7 +231,7 @@ impl Parser {
                     (key, None)
                 } else {
                     let (name, shorthand) = match self.token().kind.clone() {
-                        TokenKind::Word(name) => {
+                        TokenKind::Word(name) | TokenKind::EscapedWord(name) => {
                             let shorthand = (!super::reserved(&name)).then(|| name.clone());
                             (name, shorthand)
                         }

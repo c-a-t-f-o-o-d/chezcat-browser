@@ -38,6 +38,7 @@ fn specific(tag: &str) -> &'static str {
         "body" => "text link vLink aLink bgColor background onafterprint onbeforeprint onbeforeunload onhashchange onlanguagechange onmessage onmessageerror onoffline ononline onpagehide onpagereveal onpageshow onpageswap onpopstate onrejectionhandled onstorage onunhandledrejection onunload",
         "iframe" => "src srcdoc sandbox contentWindow contentDocument referrerPolicy allow allowFullscreen credentialless loading name width height align frameBorder longDesc marginHeight marginWidth scrolling csp browsingTopics privateToken featurePolicy getSVGDocument",
         "img" => "alt src srcset sizes crossOrigin useMap isMap width height naturalWidth naturalHeight complete currentSrc referrerPolicy decoding loading fetchPriority decode name lowsrc longDesc align hspace vspace border",
+        "canvas" => "width height getContext toDataURL toBlob transferControlToOffscreen",
         "a" => "text coords charset name rev shape",
         "area" => "alt coords shape noHref",
         "input" => "accept alt capture checked defaultChecked files height width src indeterminate list max min multiple pattern size step valueAsDate valueAsNumber useMap webkitdirectory webkitEntries stepDown stepUp showPicker formAction formEnctype formMethod formNoValidate formTarget popoverTargetElement popoverTargetAction alpha colorSpace align",
@@ -76,8 +77,14 @@ impl Bridge<'_> {
     pub(super) fn element_expando_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
             && node_index(object).is_some_and(|node| {
+                let name = tag(self.doc, node);
+                if name == "iframe" {
+                    // Parsed inactive frames expose their interface identity.
+                    // Only script-created frames have ordinary own-property storage.
+                    return self.state.dom.created.contains(&node);
+                }
                 matches!(
-                    tag(self.doc, node),
+                    name,
                     "html"
                         | "head"
                         | "body"
@@ -127,17 +134,22 @@ impl Bridge<'_> {
                         | "button"
                         | "label"
                         | "input"
+                        | "canvas"
                         | "textarea"
                         | "img"
                         | "video"
-                        | "iframe"
                         | "script"
                         | "style"
                         | "link"
                         | "meta"
                         | "title"
-                )
+                ) || crate::javascript::valid_custom_element_name(name)
             })
+    }
+
+    pub(super) fn html_element_receiver(&self, object: u32) -> bool {
+        self.class_list_element_receiver(object)
+            || matches!(self.frame_node_interface(object), Some("HTMLElement" | "HTMLBodyElement" | "HTMLHtmlElement"))
     }
 
     pub(super) fn element_native_property(&self, object: u32, name: &str) -> bool {

@@ -184,6 +184,69 @@ fn custom_event_interface_unpublished_store_failure_restores_both_strings_withou
 }
 
 #[test]
+fn custom_event_utf16_detail_preserves_code_units_and_releases_the_old_payload() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    let retained = page.state.retained;
+    evaluate(&mut page, &mut doc, &mut forms, r#"
+var raw='\uda22x\udf06', e=new CustomEvent('a',{detail:raw});
+var f=document.createEvent('CustomEvent'); f.initCustomEvent('b',false,false,raw);
+if(e.detail!==raw || f.detail!==e.detail || f.detail.length!==3 ||
+   e.detail.charCodeAt(0)!==0xda22 || e.detail.charCodeAt(1)!==120 ||
+   e.detail.charCodeAt(2)!==0xdf06)throw 'lost detail code units';
+"#);
+    assert_eq!(page.state.retained, retained + 2 * (1 + 6));
+    evaluate(&mut page, &mut doc, &mut forms,
+        "f.initCustomEvent('z',false,false,'x'); if(f.detail!=='x'||e.detail!==raw)throw 'detail replacement';");
+    assert_eq!(page.state.retained, retained + 7 + 2);
+}
+
+#[test]
+fn custom_event_utf16_detail_checks_copy_string_retention_and_rollback_boundaries() {
+    let (mut doc, mut forms, mut page) = fixture("var raw='\\uda22x\\udf06', init={detail:raw}, e=new CustomEvent('e',init); e.initCustomEvent('e',true,true,raw); e.preventDefault();");
+    let retained = page.state.retained;
+    let count = page.state.created_events.len();
+    let next = page.state.next_event;
+    let handle = page.state.created_events[0].handle;
+    {
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        let normal_limit = bridge.state.limits.host.string_bytes;
+        bridge.state.limits.host.string_bytes = 5;
+        assert!(bridge.created_event_get(handle, "detail").unwrap().is_err());
+        bridge.state.limits.host.string_bytes = 6;
+        bridge.state.copy_work = 5;
+        assert!(bridge.created_event_get(handle, "detail").unwrap().is_err());
+        bridge.state.copy_work = 6;
+        let detail = bridge.created_event_get(handle, "detail").unwrap().unwrap();
+        assert!(matches!(&detail, Value::StringUnits(units) if units.as_slice() == [0xda22, 120, 0xdf06]));
+        assert_eq!(bridge.state.copy_work, 0);
+        bridge.state.copy_work = 6;
+        let constructor = bridge.construct_custom_event(WINDOW, &[Value::String("x".into())], Some(&[("detail", detail)]));
+        assert!(constructor.is_err());
+        assert_eq!((bridge.state.retained, bridge.state.created_events.len(), bridge.state.next_event), (retained, count, next));
+        bridge.state.limits.host.string_bytes = normal_limit;
+    }
+    let limit = page.state.limits.host.string_bytes;
+    page.state.limits.host.string_bytes = 5;
+    let failed = page.console_eval(&mut doc, &mut forms, "new CustomEvent('x',{detail:raw});");
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    assert!(page.report().contains("CustomEvent detail exceeds the host string bound"), "{}", page.report());
+    page.state.limits.host.string_bytes = limit;
+    let normal_retained = page.state.retained_limit;
+    page.state.retained_limit = retained;
+    let failed = page.console_eval(&mut doc, &mut forms, "e.initCustomEvent('long',false,false,raw);");
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    assert_eq!((page.state.retained, page.state.created_events.len(), page.state.next_event), (retained, count, next));
+    page.state.retained_limit = normal_retained;
+    let allowance = page.runtime.event_property_allowance_for_test(0);
+    let failed = page.console_eval(&mut doc, &mut forms, "new CustomEvent('x',init);");
+    assert_eq!(failed.errors, 1);
+    assert_eq!((page.state.retained, page.state.created_events.len(), page.state.next_event), (retained, count, next + 1));
+    page.runtime.event_property_allowance_for_test(allowance);
+    evaluate(&mut page, &mut doc, &mut forms,
+        "if(e.detail!==raw||e.type!=='e'||!e.bubbles||!e.cancelable||!e.defaultPrevented)throw 'event changed on failure';");
+}
+
+#[test]
 fn custom_event_interface_ordinary_and_fatal_listener_paths_keep_real_detail_and_job_cleanup() {
     for fatal in [false,true] {
         let(mut doc,mut forms,mut page)=fixture("var C=CustomEvent,b=document.getElementById('button'),payload={calls:0},event=new C('run',{detail:payload}),tail=0,queued=0;");

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
-use crate::javascript::{Host, Runtime, Value};
+use crate::javascript::{Host, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -49,6 +49,11 @@ mod script_document_fragments;
 mod script_timezone;
 #[path = "script_computed_style.rs"]
 mod script_computed_style;
+#[path = "script_inline_style.rs"]
+mod script_inline_style;
+#[cfg(test)]
+#[path = "script_inline_easing_tests.rs"]
+mod script_inline_easing_tests;
 use dom_tree::DomState;
 #[path = "script_attr.rs"]
 mod script_attr;
@@ -58,6 +63,11 @@ mod script_hidden_inputs;
 mod script_text_inputs;
 #[path = "script_input_accessors.rs"]
 mod script_input_accessors;
+#[path = "script_canvas.rs"]
+mod script_canvas;
+#[path = "script_canvas_context.rs"]
+mod script_canvas_context;
+use script_canvas_context::Operation as CanvasOperation;
 #[cfg(test)]
 #[path = "script_input_accessor_tests.rs"]
 mod script_input_accessor_tests;
@@ -412,6 +422,7 @@ struct State {
     detached_nodes: HashSet<usize>,
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
+    canvas_contexts: script_canvas_context::Contexts,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
     declined_images: usize,
@@ -489,6 +500,7 @@ impl State {
             detached_nodes: HashSet::new(),
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
+            canvas_contexts: script_canvas_context::Contexts::default(),
             node_list_references: 0,
             attributes: Vec::new(),
             declined_images: 0,
@@ -602,16 +614,12 @@ impl State {
         if extra.len() > self.limits.host.timer_arguments {
             return Err("Timer argument limit reached (30).".into());
         }
-        let bytes = extra
-            .iter()
-            .try_fold(std::mem::size_of_val(extra), |total, value| {
-                total.checked_add(match value {
-                    Value::String(text) => text.len(),
-                    _ => 0,
-                })
-            })
+        let slots = extra.len().checked_mul(std::mem::size_of::<Value>())
             .ok_or("Timer argument size overflow.")?;
-        if bytes > self.limits.host.timer_bytes.saturating_sub(self.timer_bytes) {
+        let bytes = extra.iter().try_fold(slots, |total, value| total.checked_add(value.bytes()))
+            .ok_or("Timer argument size overflow.")?;
+        let retained = self.timer_bytes.checked_add(bytes).ok_or("Timer argument size overflow.")?;
+        if retained > self.limits.host.timer_bytes {
             return Err("Timer argument memory limit reached (256 KiB per document).".into());
         }
         self.copies(bytes)?;
@@ -633,13 +641,36 @@ impl State {
             .checked_add(1)
             .filter(|id| *id <= i32::MAX as u32)
             .ok_or("Timer identifier limit reached.")?;
+        let mut copied = Vec::new();
+        copied.try_reserve_exact(extra.len()).map_err(|_| "Could not reserve timer argument slots.")?;
+        for value in extra {
+            let value = match value {
+                Value::String(text) => {
+                    let mut copy = String::new();
+                    copy.try_reserve_exact(text.len()).map_err(|_| "Could not reserve timer argument text.")?;
+                    copy.push_str(text);
+                    Value::String(copy)
+                }
+                Value::StringUnits(units) => {
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(units.len()).map_err(|_| "Could not reserve timer argument code units.")?;
+                    copy.extend_from_slice(units);
+                    Value::StringUnits(copy)
+                }
+                // All other values retain fixed-size primitive or genuine
+                // object/function/native identities, not another payload.
+                _ => value.clone(),
+            };
+            copied.push(value);
+        }
+        self.timers.try_reserve(1).map_err(|_| "Could not reserve a timer slot.")?;
         self.next_timer = id;
-        self.timer_bytes += bytes;
+        self.timer_bytes = retained;
         self.timers.push(Timer {
             id,
             due,
             callback: callback.clone(),
-            arguments: extra.to_vec(),
+            arguments: copied,
             bytes,
             nesting: self.timer_nesting.saturating_add(1),
         });
@@ -1819,7 +1850,7 @@ impl Page {
         text.push_str(&format!("Animation frames: {} pending callback(s), {} executed. Whole-millisecond monotonic timestamps; 16 ms minimum frame interval.\n", self.state.animation_frames.len(), self.state.animation_callbacks));
         text.push_str(&format!("Accepted script navigation requests: {}.\n", self.state.navigation_requests));
         if let Some(t)=self.state.navigation_timing {text.push_str(&t.report());}
-text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Responsive dynamic selection remains unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
+text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Scripted responsive source-set changes remain unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
         let heap = self.state.limits.heap;
         text.push_str(&format!(
             "Script heap caps: {} properties per object / {} per document; {} object identities; array length {}; {} MiB retained-value payload accounting (not process memory). No up-front reservation.\n",
@@ -1977,7 +2008,7 @@ impl Bridge<'_> {
         ) {
             return Err("DOM values must be primitive strings, numbers, booleans or null.".into());
         }
-        let text = value.to_text();
+        let text = value.scalar_text()?;
         if text.len() > self.state.limits.host.string_bytes {
             return Err(format!("DOM string limit reached ({} KiB).", self.state.limits.host.string_bytes / 1024).into());
         }
@@ -2033,6 +2064,15 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        // HTML style sheet media is a live reference to the element's media
+        // attribute. Type and nonce are checked when updating the style block
+        // on connection; changing either attribute alone does not update it.
+        let sheet_media = self.created_html_style(node) && name.html_is("media");
+        if sheet_media {
+            script_stylesheets::validate_inline_sheet_media(value.as_deref())?;
+        }
+        let repaint_sheet = sheet_media && self.state.dom.connected[node]
+            && self.doc.attr(node, "media") != value.as_deref();
         let input = self.prepare_input_attribute(node, &name, value.as_deref())?;
         let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
@@ -2075,6 +2115,9 @@ impl Bridge<'_> {
         if name.html_is("disabled") {
             self.charge_disabled_refresh(node, value.is_some())?;
         }
+        let canvas_resize = if slot.is_some() || value.is_some() {
+            self.prepare_canvas_resize(node, &name, value.as_deref())?
+        } else { None };
         let NodeKind::Element { attrs, .. } = &mut self.doc.nodes[node].kind else { unreachable!() };
         if slot.is_none() && value.is_some() { attrs.try_reserve(1).map_err(|_| "Attribute storage reservation failed.")?; }
         let factor = if name.html_is("id") { 2 } else { 1 };
@@ -2118,8 +2161,11 @@ impl Bridge<'_> {
         }
         if let Some(plan) = input { plan.commit(self.forms); }
         if let Some(plan) = button { plan.commit(self.forms); }
-        if slot.is_some() || new != 0 { self.state.dom_committed(); }
-        if self.state.tree.active.get(node).copied().unwrap_or(false) {
+        if slot.is_some() || new != 0 {
+            self.state.canvas_contexts.commit_resize(node, canvas_resize);
+            self.state.dom_committed();
+        }
+        if repaint_sheet || self.state.tree.active.get(node).copied().unwrap_or(false) {
             self.state.layout_changed();
         }
         if media_change{self.commit_media_source_change(node)?;}
@@ -2194,9 +2240,13 @@ impl Bridge<'_> {
     }
 
     fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
-        if !text_container(tag(self.doc, node)) {
+        let name = tag(self.doc, node);
+        let detached_style = self.created_html_style(node)
+            && self.state.detached_nodes.contains(&node)
+            && self.state.dom.connected.get(node) == Some(&false);
+        if !text_container(name) && !detached_style {
             return Err(
-                "textContent replacement is limited to plain text containers and buttons.".into(),
+                "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
         }
         // Complete validation before touching any node. Control models and
@@ -2417,13 +2467,23 @@ impl Bridge<'_> {
             let value = script_transform::specified(style, self.state)?;
             return self.string(&value);
         }
-        let value = crate::css::declaration_items(style)
-            .filter_map(|item| item.split_once(':'))
-            .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            .map(|(_, value)| crate::css::declaration_priority(value).0)
-            .last()
-            .unwrap_or("")
-            .to_owned();
+        if name == "animation-timing-function" {
+            let value = script_inline_style::easing_declaration(style, self.state, script_inline_style::EasingText::Cssom)?.map_or_else(String::new, |(value, _)| value);
+            return self.string(&value);
+        }
+        let Some((_, raw)) = script_inline_style::winner(style, name, self.state)? else {
+            return self.string("");
+        };
+        let clean;
+        let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
+        let specified = crate::css::declaration_priority(raw).0;
+        let value = if name == "opacity" {
+            let parsed = metered_opacity(specified, self.state)?
+                .ok_or("The selected inline opacity is invalid.")?;
+            parsed.serialize()?
+        } else {
+            specified.to_owned()
+        };
         self.string(&value)
     }
 
@@ -2435,19 +2495,32 @@ impl Bridge<'_> {
         priority: &str,
     ) -> Result<(), String> {
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
+        if matches!(name, "color" | "background-color") && !value.is_empty() && !crate::css::inline_color_value(value) {
+            return Ok(());
+        }
         let specified;
-        let value = if name == "transform" && !value.is_empty() {
+        let checked = matches!(name, "transform" | "opacity");
+        let value = if checked && !value.is_empty() {
             if value.trim().is_empty() || !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
                 return Ok(());
             }
-            specified = match script_transform::normalize(value, self.state)? {
-                Ok(value) => value,
-                Err(crate::css::TransformSyntax::Invalid) => return Ok(()),
-                Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
+            specified = if name == "opacity" {
+                let Some(parsed) = metered_opacity(value, self.state)? else { return Ok(()); };
+                parsed.serialize()?
+            } else {
+                match script_transform::normalize(value, self.state)? {
+                    Ok(value) => value,
+                    Err(crate::css::TransformSyntax::Invalid) => return Ok(()),
+                    Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
+                }
             };
             specified.as_str()
+        } else if name == "animation-timing-function" && !value.is_empty() {
+            if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") { return Ok(()); }
+            specified = match script_inline_style::normalize_easing(value, self.state, script_inline_style::EasingText::Specified)? { Some(value) => value, None => return Ok(()) };
+            specified.as_str()
         } else {value};
-        let priority = if name == "transform" && value.is_empty() {""} else {priority};
+        let priority = if (checked || name == "animation-timing-function") && value.is_empty() {""} else {priority};
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2456,34 +2529,20 @@ impl Bridge<'_> {
             return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
         }
         self.state.copies(existing.len())?;
+        if name == "animation-timing-function" && !value.is_empty() {
+            if let Some((prior, important)) = script_inline_style::easing_declaration(existing, self.state, script_inline_style::EasingText::Specified)? {
+                if prior == value && important == priority.eq_ignore_ascii_case("important") { return Ok(()); }
+            }
+        }
         if name == "transform" && value.is_empty()
             && matches!(script_transform::declaration(existing, self.state)?, script_transform::Declaration::Absent)
         {
             return Ok(());
         }
-        let mut style = String::new();
-        for item in crate::css::declaration_items(existing).filter(|item| !item.trim().is_empty()) {
-            if item
-                .split_once(':')
-                .is_some_and(|(key, _)| key.trim().eq_ignore_ascii_case(name))
-            {
-                continue;
-            }
-            style.push_str(item.trim());
-            style.push(';');
-        }
-        if !value.trim().is_empty() {
-            style.push_str(name);
-            style.push(':');
-            style.push_str(value.trim());
-            if !priority.is_empty() {
-                style.push_str(" !important");
-            }
-            style.push(';');
-        }
-        if style.len() > self.state.limits.host.string_bytes {
-            return Err(format!("Inline style exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
-        }
+        self.state.work(1 + existing.len().saturating_mul(2))?;
+        self.state.copies(existing.len().saturating_add(name.len()).saturating_add(value.len()).saturating_add(14))?;
+        let limit = self.state.limits.host.string_bytes;
+        let Some(style) = script_inline_style::replace(existing, name, value.trim(), priority, limit, self.state)? else { return Ok(()); };
         self.attribute(node, "style", Some(style))
     }
 }
@@ -2491,11 +2550,15 @@ impl Bridge<'_> {
 impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        self.element_sibling_member(object, property)
+        property == "style" && self.element_expando_receiver(object)
+            || self.element_sibling_member(object, property)
+            || self.document_inherited_property(object,property)
             || self.assigned_slot_lookup(object, property)
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
             || self.input_accessor_member(object, property)
+            || self.canvas_member(object, property)
+            || property == "getContext" && self.canvas_receiver(object)
             || self.text_prototype_property(object, property)
             || script_element_properties::ordinary_interface_member(property)
                 && self.concrete_html_interface(object).is_some()
@@ -2503,26 +2566,33 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)).then_some(WINDOW))}
-    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {object==DOCUMENT&&!self.document_native_property(property)}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+    fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
+        object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
+    }
     fn exposed_native_prototype(&self,object:u32)->bool {
-        self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+        self.document_interface_receiver(object) || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+            || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
+        if self.document_interface_receiver(object) {return false;}
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement");
+            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement");
         }
         self.exposed_native_prototype(object)
     }
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if self.canvas_context_receiver(object) {
+            return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, "CanvasRenderingContext2D")) });
+        }
         if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
         if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
@@ -2552,7 +2622,8 @@ impl Host for Bridge<'_> {
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
             else {(WINDOW,"Node")})
-        } else if object==DOCUMENT || self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
+        } else if object==DOCUMENT {Some((WINDOW,"Document"))}
+        else if self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
         let known=node.is_some() || matches!(object,DOCUMENT|CONSOLE|NAVIGATOR|PLUGINS|MIME_TYPES|DOCUMENT_IMAGES|LOCATION|PERFORMANCE|PERFORMANCE_TIMING|HISTORY)
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
@@ -2586,6 +2657,8 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
+        if self.frame_document_prototype_lookup(object,property) {return false;}
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
             // existing item/forEach calls. Other properties use their ordinary
@@ -2614,7 +2687,8 @@ impl Host for Bridge<'_> {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
-        if self.node_list_receiver(object) {true}
+        if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
+        else if self.node_list_receiver(object) || self.frame_document_prototype_lookup(object,property) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
         else if self.node_tree_method_member(object,property) {true}
@@ -2626,6 +2700,8 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if script_inline_style::handle(object) {return Some(WINDOW);}
+        if self.canvas_context_receiver(object) {return Some(WINDOW);}
         if let Some(owner)=self.computed_style_owner(object) {return Some(owner);}
         if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
@@ -2643,6 +2719,13 @@ impl Host for Bridge<'_> {
                 .bounding_rect(self.doc, self.forms, node, &mut self.state.host_work, &mut self.state.copy_work)
         })())
     }
+    fn canvas_readback_source(
+        &mut self,
+        object: u32,
+        output_bytes: usize,
+    ) -> Result<&crate::canvas_2d_bitmap::CanvasBitmap, String> {
+        self.canvas_pixels_for_readback(object, output_bytes)
+    }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
@@ -2652,6 +2735,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if script_inline_style::handle(object) && (property == "length" || collection_index(property).is_some()) { return true; }
         if self.html_offset_member(object, property) {return true;}
         if self.node_list_iteration_member(object,property) {return false;}
         if self.element_sibling_member(object,property) || self.assigned_slot_lookup(object,property) && self.slottable(object).is_some() {return true;}
@@ -2676,13 +2760,13 @@ impl Host for Bridge<'_> {
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
-        if property=="type"&&self.style_type_receiver(object){return true;}
+        if self.style_text_attribute(object, property) { return true; }
         if self.media_element_receiver(object)&&property=="src"{return true;}
         property=="srcdoc" && self.class_list_element_receiver(object) && node_index(object).is_some_and(|node|self.iframe_srcdoc_property(node))
             || self.class_list_receiver(object) && property == "value"
@@ -2700,6 +2784,9 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if let Some((name, true)) = script_canvas::accessor(method) {
+            return self.canvas_receiver(object).then_some(name);
+        }
         if let Some((name, true)) = script_input_accessors::accessor(method) {
             return self.input_receiver(object).then_some(name);
         }
@@ -2712,6 +2799,7 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if self.canvas_member(object, property) {return true;}
         if script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object) {return true;}
         if property=="currentTime" && self.media_interface_receiver(object) {return true;}
         node_index(object).is_some_and(|node| tag(self.doc, node) == "img")
@@ -2720,6 +2808,9 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return if operation.accepts(self, object) { operation.conversions() } else { &[] };
+        }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[(0, true)]; }
         if object == WINDOW && method == "Text" {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
@@ -2727,6 +2818,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
         if (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method {
+                "item" => &[(0, false)],
                 "setProperty" if matches!(args.get(1), Some(Value::Null)) => &[(0, true), (2, true)],
                 "setProperty" => &[(0, true), (1, true), (2, true)],
                 "getPropertyValue" | "removeProperty" => &[(0, true)],
@@ -2809,6 +2901,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if script_inline_style::handle(object) && method == "item" { return Some(1); }
+        if let Some(operation) = CanvasOperation::parse(method) { return Some(operation.arity()); }
         if object==WINDOW && method=="getComputedStyle" {return Some(1);}
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "getPropertyValue" | "removeProperty" => Some(1), "setProperty" => Some(2), _ => None };
@@ -2840,6 +2934,11 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
+            && self.event_target_interface(object) { return Some(object); }
+        if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
+        if CanvasOperation::parse(method).is_some() && self.event_target_interface(object) {return Some(object);}
+        if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_scroll_offsets::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if Offset::getter(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -2848,7 +2947,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
@@ -2899,7 +2998,7 @@ impl Host for Bridge<'_> {
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
         property == "value" && self.input_accessor_member(object, property)
-            || property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && self.attr_element_receiver(object)
@@ -2908,6 +3007,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if script_inline_style::handle(object) && method == "item" { return 1; }
+        if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
         if method == script_node_contains::CONTAINS_METHOD { return 1; }
         if object==WINDOW && method=="getComputedStyle" {return 1;}
@@ -2980,11 +3081,25 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            if !self.html_element_receiver(object) {
+                return Err(("TypeError", "The style accessor requires an HTMLElement.".into()));
+            }
+            if self.is_frame_handle(object) {
+                return Err(("NotSupportedError", "Inline CSS declarations on child document nodes are unavailable.".into()));
+            }
+            return Ok(());
+        }
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return if operation.accepts(self, object) { Ok(()) }
+                else { Err(("TypeError", "Canvas operation requires its genuine native receiver.".into())) };
+        }
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
+        if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if method=="NodeList" && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"NodeList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object)?;
@@ -2995,6 +3110,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
+        }
+        if self.event_target_interface(object) && method=="Document" {
+            return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
@@ -3139,6 +3257,9 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
+            return Err(("NotSupportedError", format!("Canvas 2D drawing state {property:?} is not implemented.")));
+        }
         if property=="currentTime" && self.media_interface_receiver(object) {
             if !self.state.enabled || !self.doc.scripting_enabled {
                 return Err(("InvalidStateError","Scripting is disabled.".into()));
@@ -3195,6 +3316,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.canvas_context_receiver(object) {return true;}
         if self.event_receiver(object) {return true;}
         if self.standalone_target_owner(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
@@ -3214,6 +3336,7 @@ impl Host for Bridge<'_> {
         // Authorize this protocol explicitly for this realm's Window, Document
         // and real DOM nodes; other native capabilities keep the default deny.
         matches!(object, WINDOW | DOCUMENT)
+            || self.canvas_context_receiver(object)
             || self.class_list_receiver(object)
             || self.attr_receiver(object)
             || self.constructed_event_receiver(object)
@@ -3226,6 +3349,10 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if script_inline_style::handle(object) {
+            return self.attr_element_receiver(node_handle((object - STYLE_BASE) as usize))
+                .then(|| script_inline_style::method(property)).flatten();
+        }
         if self.computed_style_receiver(object) {return match property {"getPropertyValue"=>Some("getPropertyValue"),"setProperty"=>Some("setProperty"),"removeProperty"=>Some("removeProperty"),_=>None};}
         if self.node_list_iteration_member(object,property) {return None;}
         // Named form controls use the native field path; other genuine
@@ -3293,6 +3420,19 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            return self.event_target_interface(object) && self.html_element_receiver(receiver);
+        }
+        if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {
+            return script_inline_style::handle(receiver) && self.attr_element_receiver(node_handle((receiver - STYLE_BASE) as usize));
+        }
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.event_target_interface(object) && operation.accepts(self, receiver);
+        }
+        if method=="\0Document.get.documentElement" && self.event_target_interface(object) {return self.document_interface_receiver(receiver);}
+        if script_canvas::accessor(method).is_some() && self.event_target_interface(object) {
+            return self.canvas_receiver(receiver);
+        }
         if script_input_accessors::accessor(method).is_some() && self.event_target_interface(object) {
             return self.input_receiver(receiver);
         }
@@ -3300,7 +3440,7 @@ impl Host for Bridge<'_> {
             return self.element_selector_receiver(receiver);
         }
         if Offset::getter(method).is_some() && self.event_target_interface(object) {
-            return self.html_offset_receiver(receiver);
+            return self.html_element_receiver(receiver);
         }
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
@@ -3422,6 +3562,8 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if script_inline_style::handle(object) {return self.inline_keys(object, false);}
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
         if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
@@ -3462,13 +3604,28 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_keys(&mut self,object:u32) -> Result<Vec<String>,String> {
+        if script_inline_style::handle(object) {return self.inline_keys(object, true);}
         if self.element_expando_receiver(object) {
             return Err("Inherited native Element property enumeration is not implemented.".into());
         }
         self.own_keys(object)
     }
 
+    fn enumeration_member(&mut self, object: u32, name: &str) -> Result<bool, String> {
+        if script_inline_style::handle(object) {
+            // Supported inline CSS properties, IDL members and live own indices
+            // are enumerable. Presence validates the receiver and current list.
+            return self.has(object, name);
+        }
+        self.own_data(object, name).map(|slot| slot.is_some())
+    }
+
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if script_inline_style::handle(object) {
+            let node = self.style_node(object)?;
+            return match collection_index(property) { Some(index) => self.inline_index(node, index), None => Ok(None) };
+        }
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(None);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(None);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
@@ -3520,6 +3677,8 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if script_inline_style::handle(object) { return Ok(self.own_data(object, property)?.is_none()); }
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(true);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(true);}
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(true);}
@@ -3572,7 +3731,14 @@ impl Host for Bridge<'_> {
         &self,
         object: u32,
         method: &str,
+        args: &[Value],
     ) -> Option<(usize, &'static [&'static str])> {
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return self.canvas_context_dictionary(object, args);
+        }
+        if method == crate::javascript::canvas_readback::METHOD {
+            return Some((4, &["colorSpace", "pixelFormat"]));
+        }
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
@@ -3591,10 +3757,20 @@ impl Host for Bridge<'_> {
     }
 
     fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        if method == crate::javascript::canvas_readback::METHOD { return Some(true); }
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return matches!(member, "colorSpace" | "colorType").then_some(true);
+        }
         (self.event_target_interface(object)&&(matches!(method,"UIEvent"|"MouseEvent")&&member=="detail"
             || method=="MouseEvent"&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method == crate::javascript::canvas_readback::METHOD {
+            return crate::javascript::canvas_readback::validate_setting(member, value);
+        }
+        if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
+            return script_canvas_context::option_validation(member,value);
+        }
         if matches!(method,"UIEvent"|"MouseEvent")&&member=="view"&&self.event_target_interface(object) {
             self.ui_view_argument(object,Some(value))?;
         }
@@ -3615,6 +3791,9 @@ impl Host for Bridge<'_> {
         args: &[Value],
         fields: Option<&[(&str, Value)]>,
     ) -> Result<Value, String> {
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.canvas_context_call(object, operation, args, fields);
+        }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
@@ -3711,6 +3890,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(false);}
         if script_computed_style::index(object).is_some() {self.state.work(1)?;return if self.computed_style_receiver(object) {Ok(script_computed_style::attribute_member(property)||self.method(object,property).is_some())} else {Err("Invalid computed declaration receiver.".into())};}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(false);}
         if self.element_selector_member(object,property) {self.state.work(1)?;return Ok(false);}
@@ -3830,11 +4010,9 @@ impl Host for Bridge<'_> {
                 ));
         }
         if object >= STYLE_BASE {
-            self.style_node(object)?;
-            return Ok(matches!(
-                property,
-                "setProperty" | "getPropertyValue" | "removeProperty"
-            ) || css_name(property).is_ok());
+            let node = self.style_node(object)?;
+            if let Some(index) = collection_index(property) { return Ok(index < self.inline_names(node)?.len()); }
+            return Ok(property == "length" || script_inline_style::method(property).is_some() || css_name(property).is_ok());
         }
         if object == CONSOLE {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
@@ -4004,6 +4182,13 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.canvas_context_receiver(object) {
+            self.state.work(1)?;
+            if script_canvas_context::unsupported_state(property) {
+                return Err(format!("Canvas 2D drawing state {property:?} is not implemented."));
+            }
+            return Ok(Value::Undefined);
+        }
         self.state.work(1)?;
         if script_computed_style::index(object).is_some() {return self.computed_style_get(object,property);}
         if self.node_list_iteration_member(object,property)&&property!="length" {return Ok(Value::Undefined);}
@@ -4128,6 +4313,8 @@ impl Host for Bridge<'_> {
             // An empty direct key is an absent ordinary property, not a CSS
             // declaration name. Validate the handle before reporting absence.
             if property.is_empty() { return Ok(Value::Undefined); }
+            if property == "length" { return Ok(Value::Number(self.inline_names(node)?.len() as f64)); }
+            if let Some(index) = collection_index(property) { return Ok(self.inline_index(node, index)?.unwrap_or(Value::Undefined)); }
             return self.get_style(node, &css_name(property)?);
         }
         if let Some(value) = self.handler(object, property)? {
@@ -4340,6 +4527,9 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.canvas_context_receiver(object) {
+            return Err(format!("Setting native Canvas 2D property {property:?} is not implemented."));
+        }
         if let Some(axis) = script_scroll_offsets::axis(property).filter(|_| self.element_selector_receiver(object)) {
             let Value::Number(number) = value else {return Err("Scroll offset requires numeric conversion.".into());};
             self.element_scroll_offset(object, axis, Some(number))?;
@@ -4362,7 +4552,11 @@ impl Host for Bridge<'_> {
             let Value::Number(seconds)=value else {return Err("Media time requires numeric conversion.".into());};
             return self.set_media_time(node_index(object).unwrap(),seconds);
         }
-        if property=="type"&&self.style_type_receiver(object){let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"type",Some(text));}
+        if self.style_text_attribute(object, property) {
+            let node = self.node(object)?;
+            let text = self.text(&value)?;
+            return self.attribute(node, property, Some(text));
+        }
         if self.media_element_receiver(object)&&property=="src" {let node=self.node(object)?;let text=self.text(&value)?;return self.attribute(node,"src",Some(text));}
         if script_named_map::element(object).is_some() { self.named_map_get(object, "length")?; return Err("NamedNodeMap property writes are not implemented.".into()); }
         if script_class_list::element(object).is_some() {
@@ -4449,6 +4643,9 @@ impl Host for Bridge<'_> {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }
             let value = self.text(&value)?;
             return self.attribute(node,"class",Some(value));
+        }
+        if self.canvas_member(object, property) {
+            return self.canvas_dimension_set(object, property, &value);
         }
         if property=="srcdoc" && self.iframe_srcdoc_property(node) {
             let text=self.text(&value)?;
@@ -4593,6 +4790,22 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+            self.state.work(1)?;
+            let node = self.node(object)?;
+            if method == ELEMENT_STYLE_GET {
+                return Ok(Value::Host(STYLE_BASE + node as u32));
+            }
+            // Web IDL forwards this write to the native declaration's cssText.
+            // Whole declaration replacement is outside the checked property setter.
+            return Err("Setting HTMLElement.style requires CSSStyleDeclaration.cssText replacement, which is unavailable.".into());
+        }
+        if let Some(operation) = CanvasOperation::parse(method) {
+            return self.canvas_context_call(object, operation, args, None);
+        }
+        if let Some((name, false)) = script_canvas::accessor(method) {
+            return self.canvas_dimension_get(object, name);
+        }
         if let Some((name, false)) = script_input_accessors::accessor(method) {
             self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;
             return self.get(object, name);
@@ -4621,6 +4834,10 @@ impl Host for Bridge<'_> {
             return self.create_dom_node(NodeKind::Text(data));
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
+        if method=="\0Document.get.documentElement" {
+            if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
+            return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
+        }
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if method == script_clone_node::CLONE_METHOD { return self.clone_node(object, args.first().is_some_and(Value::truthy)); }
         if method == script_node_contains::CONTAINS_METHOD { return self.node_contains(object, args); }
@@ -4853,6 +5070,10 @@ impl Host for Bridge<'_> {
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
+            if method == "item" {
+                let index = timer_integer(args.first().ok_or("Style item requires an index.")?)? as u32 as usize;
+                return Ok(self.inline_index(node, index)?.unwrap_or_else(|| Value::String(String::new())));
+            }
             if method == "setProperty" && (2..=3).contains(&args.len()) {
                 let name = self.text(&args[0])?;
                 let name = css_declaration_name(&name)?;
@@ -5084,8 +5305,18 @@ fn prefix(text: &str, maximum: usize) -> &str {
     &text[..end]
 }
 fn css_declaration_name(name: &str) -> Result<String, String> {
-    if name.eq_ignore_ascii_case("transform") {return Ok("transform".into());}
+    if crate::css::computed_custom_property_name(name) { return Ok(name.to_owned()); }
+    if name.len() <= 64 {
+        let lower = name.to_ascii_lowercase();
+        if script_inline_style::PROPERTIES.binary_search(&lower.as_str()).is_ok() { return Ok(lower); }
+    }
     css_name(name)
+}
+fn metered_opacity<'a>(value: &'a str, state: &mut State) -> Result<Option<crate::css::SpecifiedOpacity<'a>>, String> {
+    let (work, copies) = crate::css::transform_source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)?;
+    Ok(crate::css::specified_opacity(value))
 }
 fn css_name(name: &str) -> Result<String, String> {
     if name.len() > 64 {
@@ -5100,70 +5331,7 @@ fn css_name(name: &str) -> Result<String, String> {
             css.push(ch);
         }
     }
-    if !matches!(
-        css.as_str(),
-        "display"
-            | "transform"
-            | "overflow"
-            | "position"
-            | "inset"
-            | "top"
-            | "right"
-            | "bottom"
-            | "left"
-            | "color"
-            | "background"
-            | "background-color"
-            | "background-image"
-            | "background-repeat"
-            | "background-position"
-            | "background-size"
-            | "font"
-            | "font-family"
-            | "font-size"
-            | "font-weight"
-            | "font-style"
-            | "text-decoration"
-            | "text-decoration-line"
-            | "text-align"
-            | "line-height"
-            | "white-space"
-            | "width"
-            | "height"
-            | "min-width"
-            | "max-width"
-            | "min-height"
-            | "max-height"
-            | "margin"
-            | "margin-top"
-            | "margin-right"
-            | "margin-bottom"
-            | "margin-left"
-            | "padding"
-            | "padding-top"
-            | "padding-right"
-            | "padding-bottom"
-            | "padding-left"
-            | "border"
-            | "border-width"
-            | "border-color"
-            | "border-style"
-            | "box-sizing"
-            | "vertical-align"
-            | "flex"
-            | "flex-grow"
-            | "flex-shrink"
-            | "flex-basis"
-            | "flex-direction"
-            | "flex-wrap"
-            | "justify-content"
-            | "align-items"
-            | "align-self"
-            | "gap"
-            | "row-gap"
-            | "column-gap"
-            | "order"
-    ) {
+    if script_inline_style::PROPERTIES.binary_search(&css.as_str()).is_err() {
         return Err(format!(
             "CSS property {name:?} is not supported by the script bridge."
         ));
@@ -5171,6 +5339,9 @@ fn css_name(name: &str) -> Result<String, String> {
     Ok(css)
 }
 fn validate_css_value(name: &str, value: &str, string_limit: usize) -> Result<(), String> {
+    if name.starts_with("--") && !crate::css::inline_custom_value(value) {
+        return Err("The custom property exceeds the supported inline value syntax.".into());
+    }
     if name == "background-image" {
         // Reuse the genuine single-image parser. Shared declaration boundaries
         // preserve semicolons and bangs inside URL payloads. Escaped mutation
@@ -5227,10 +5398,22 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         let (name, value) = item
             .split_once(':')
             .ok_or("Style declaration needs a colon.")?;
-        let name = css_declaration_name(name.trim())?;
+        let raw_name = name;
+        let name = if crate::css::easing_trim(raw_name).eq_ignore_ascii_case("animation-timing-function") {
+            "animation-timing-function".to_owned()
+        } else if name.trim().eq_ignore_ascii_case("transform") || name.trim().eq_ignore_ascii_case("opacity") {
+            name.trim().to_ascii_lowercase()
+        } else {
+            let name = css_name(name.trim())?;
+            if name == "animation-timing-function" {
+                return Err("Raw easing declarations require the CSS animation-timing-function property name.".into());
+            }
+            name
+        };
         // Priority is separate grammar. Keep the ordinary value guard on
         // everything before a genuine trailing priority marker.
-        let value = if name == "transform" { crate::css::declaration_priority(value).0 } else { value.trim() };
+        let value = if name == "animation-timing-function" { crate::css::easing_priority(value).0 }
+            else if matches!(name.as_str(), "transform" | "opacity") { crate::css::declaration_priority(value).0 } else { value.trim() };
         validate_css_value(&name, value, string_limit)?;
     }
     if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
@@ -5272,6 +5455,9 @@ mod script_computed_overflow_tests;
 #[cfg(test)]
 #[path = "script_computed_position_tests.rs"]
 mod script_computed_position_tests;
+#[cfg(test)]
+#[path = "script_computed_opacity_tests.rs"]
+mod script_computed_opacity_tests;
 
 #[cfg(test)]
 #[path = "script_selector_negation_tests.rs"]
@@ -5784,6 +5970,54 @@ document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('rel
             1
         );
         assert_ne!(doc.title, "denied");
+    }
+
+    #[test]
+    fn detached_style_text_content_replaces_real_text_without_activating_a_sheet() {
+        let (mut doc, mut forms, mut page, startup) = setup(
+            "<title>Original</title><form><input id=neighbor value=seed></form>",
+            &[],
+        );
+        assert_eq!(startup.errors, 0);
+        page.set_geometry(crate::script_geometry::Geometry::new(
+            640, 360, 1.0, &HashMap::new(), HashMap::new(), &crate::fonts::Book::empty(),
+        ));
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var styleNode=document.createElement('style'), nodes=styleNode.childNodes;
+var neighbor=document.getElementById('neighbor');
+neighbor.value='edited';
+var css='#neighbor { opacity: 0 } /* <script>plain text</script> */';
+styleNode.textContent=css;
+var oldText=styleNode.firstChild;
+if(nodes.length!==1 || nodes[0]!==oldText || oldText.nodeType!==3 ||
+   oldText.parentNode!==styleNode || oldText.ownerDocument!==document ||
+   styleNode.textContent!==css || oldText.data!==css ||
+   styleNode.isConnected || oldText.isConnected ||
+   getComputedStyle(neighbor).opacity!=='1')throw 'first text or detached stylesheet';
+styleNode.textContent='second';
+if(nodes!==styleNode.childNodes || nodes.length!==1 || oldText.parentNode!==null ||
+   oldText.data!==css || nodes[0]===oldText || nodes[0].data!=='second')throw 'replacement';
+var second=nodes[0];
+styleNode.textContent=null;
+if(styleNode.textContent!=='' || nodes.length!==0 || second.parentNode!==null ||
+   second.data!=='second' || neighbor.value!=='edited' || neighbor.defaultValue!=='seed')
+    throw 'removal or neighboring input';
+document.title='Detached text verified';
+"#);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "Detached text verified");
+        assert!(page.take_dynamic_stylesheets().is_empty());
+        assert!(page.take_dynamic_scripts().is_empty());
+        let saved = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='retained';var held=styleNode.firstChild;");
+        assert_eq!(saved.errors, 0, "{}", page.report());
+        page.state.node_limit = doc.nodes.len();
+        let before = (doc.nodes.len(), page.state.dom_commits);
+        let failed = page.console_eval(&mut doc, &mut forms, "styleNode.textContent='too many nodes';");
+        assert_eq!(failed.errors, 1);
+        assert!(page.report().contains("DOM appended-node limit reached"));
+        assert_eq!((doc.nodes.len(), page.state.dom_commits), before);
+        let check = page.console_eval(&mut doc, &mut forms, "if(styleNode.firstChild!==held || held.data!=='retained' || held.parentNode!==styleNode)throw 'partial replacement';");
+        assert_eq!(check.errors, 0, "{}", page.report());
     }
 
     #[test]
@@ -6901,3 +7135,11 @@ mod browser_budget_tests {
 #[cfg(test)]
 #[path = "script_timer_global_tests.rs"]
 mod timer_global_tests;
+
+#[cfg(test)]
+#[path = "script_canvas_dimension_tests.rs"]
+mod canvas_dimension_tests;
+
+#[cfg(test)]
+#[path = "script_canvas_protocol_tests.rs"]
+mod canvas_protocol_tests;

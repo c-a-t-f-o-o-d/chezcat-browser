@@ -10,9 +10,12 @@ use std::sync::{Arc, Condvar, Mutex};
 #[path = "app_image_tests.rs"]
 mod tests;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Slot { Background, ScriptImage, ResponsiveImage }
+
 struct Job {
     epoch: u64,
-    background: bool,
+    slot: Slot,
     request: DynamicImage,
     blocking: Arc<crate::blocking::Policy>,
     network: crate::network_trace::Trace,
@@ -22,7 +25,7 @@ struct Job {
 
 struct Completion {
     epoch: u64,
-    background: bool,
+    slot: Slot,
     request: DynamicImage,
     result: Result<crate::image::DecodedImage, String>,
     events: Vec<String>,
@@ -31,7 +34,7 @@ struct Completion {
 struct Shared {
     queue: VecDeque<Job>,
     completed: VecDeque<Completion>,
-    active: Option<(usize, bool, Arc<AtomicBool>)>,
+    active: Option<(usize, Slot, Arc<AtomicBool>)>,
     stopping: bool,
     wake: loader::Wake,
 }
@@ -48,7 +51,7 @@ impl Worker {
                 while guard.queue.is_empty() && !guard.stopping { guard = shared.1.wait(guard).unwrap(); }
                 if guard.stopping { return; }
                 let job = guard.queue.pop_front().unwrap();
-                guard.active = Some((job.request.node, job.background, job.cancel.clone()));
+                guard.active = Some((job.request.node, job.slot, job.cancel.clone()));
                 job
             };
             let mut events = Vec::new();
@@ -62,7 +65,7 @@ impl Worker {
                     // busy. Each individual decode has the decoder's own bound.
                     let used = guard.completed.iter().filter_map(|completion| completion.result.as_ref().ok()).try_fold(0usize, |used, asset| asset.retained_bytes().ok().and_then(|bytes| used.checked_add(bytes))).unwrap_or(usize::MAX);
                     result = result.and_then(|mut asset| { loader::fit_image_budget(&mut asset, used)?; Ok(asset) });
-                    guard.completed.push_back(Completion { epoch: job.epoch, background: job.background, request: job.request, result, events });
+                    guard.completed.push_back(Completion { epoch: job.epoch, slot: job.slot, request: job.request, result, events });
                 }
                 guard.wake.clone()
             };
@@ -87,17 +90,17 @@ impl Worker {
     }
 
     pub(super) fn set_wake(&self, wake: loader::Wake) { self.state.0.lock().unwrap().wake = wake; }
-    fn poll(&self, backgrounds_only: bool) -> Option<Completion> {
+    fn poll(&self, scripts_paused: bool) -> Option<Completion> {
         let (result, wake) = {
             let mut state = self.state.0.lock().unwrap();
-            // CSS image publication is independent of scripting. Leave element
+            // CSS and responsive images are independent of scripting. Leave script
             // completions queued while script jobs are paused, preserving their
             // original FIFO when ordinary polling resumes.
-            let result = if backgrounds_only {
-                state.completed.iter().position(|completion| completion.background)
+            let result = if scripts_paused {
+                state.completed.iter().position(|completion| completion.slot != Slot::ScriptImage)
                     .and_then(|index| state.completed.remove(index))
             } else { state.completed.pop_front() };
-            let more = if backgrounds_only { state.completed.iter().any(|completion| completion.background) }
+            let more = if scripts_paused { state.completed.iter().any(|completion| completion.slot != Slot::ScriptImage) }
                 else { !state.completed.is_empty() };
             (result, more.then(|| state.wake.clone()))
         };
@@ -105,11 +108,11 @@ impl Worker {
         result
     }
 
-    fn cancel_node(&self, node: usize, background: bool) {
+    fn cancel_node(&self, node: usize, slot: Slot) {
         let mut state = self.state.0.lock().unwrap();
-        if let Some((active, slot, cancel)) = &state.active { if *active == node && *slot == background { cancel.store(true, Ordering::Relaxed); } }
-        state.queue.retain(|job| job.request.node != node || job.background != background);
-        state.completed.retain(|completion| completion.request.node != node || completion.background != background);
+        if let Some((active, active_slot, cancel)) = &state.active { if *active == node && *active_slot == slot { cancel.store(true, Ordering::Relaxed); } }
+        state.queue.retain(|job| job.request.node != node || job.slot != slot);
+        state.completed.retain(|completion| completion.request.node != node || completion.slot != slot);
     }
 
     pub(super) fn cancel(&self) {
@@ -161,9 +164,9 @@ fn fetch(job: &Job, trust: &crate::trust::Store, cookies: Arc<crate::cookies::Se
                 job.request.policy.allows_image(usize::MAX, &Location { url: Some(url.clone()), path: None, root: None, fragment: String::new() })
             };
             let pool = crate::http::Pool::new(&job.cancel, trust).with_cookie_session(cookies, Some(origin.clone())).with_network_trace(job.network.clone()).with_resource_filter(&filter);
-            let response = pool.fetch_kind(url, 8 * 1024 * 1024, Some(origin), crate::http::FetchMode::Normal, if job.background { "BACKGROUND IMAGE" } else { "IMAGE" })?;
+            let response = pool.fetch_kind(url, 8 * 1024 * 1024, Some(origin), crate::http::FetchMode::Normal, if job.slot == Slot::Background { "BACKGROUND IMAGE" } else { "IMAGE" })?;
             events.extend(response.events);
-            if !(200..300).contains(&response.status) { return Err(format!("HTTP {} while fetching a {} image.", response.status, if job.background { "background" } else { "dynamic" })); }
+            if !(200..300).contains(&response.status) { return Err(format!("HTTP {} while fetching a {} image.", response.status, if job.slot == Slot::Background { "background" } else { "dynamic" })); }
             response.body
         } else {
             if job.request.origin.url.is_some() { return Err("A web document cannot load local files.".into()); }
@@ -173,7 +176,8 @@ fn fetch(job: &Job, trust: &crate::trust::Store, cookies: Arc<crate::cookies::Se
     check()?;
     let mut asset = crate::image::decode_asset_checked(&bytes, &check)?;
     loader::fit_image_budget(&mut asset, 0)?;
-    events.push(format!("{} IMAGE node {}: decoded {} x {} pixels", if job.background { "BACKGROUND" } else { "DYNAMIC" }, job.request.node, asset.bitmap.width, asset.bitmap.height));
+    let label = match job.slot { Slot::Background => "BACKGROUND", Slot::ScriptImage => "DYNAMIC", Slot::ResponsiveImage => "RESPONSIVE" };
+    events.push(format!("{label} IMAGE node {}: decoded {} x {} pixels", job.request.node, asset.bitmap.width, asset.bitmap.height));
     Ok(asset)
 }
 
@@ -182,17 +186,18 @@ impl App {
         if self.dynamic_images.is_none() {
             self.dynamic_images = Some(Worker::new(self.wake.clone(), self.trust.clone(), self.cookies.clone())?);
         }
-        let job = Job { epoch: self.script_epoch, background: true, request, blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)), network: self.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: self.images_enabled };
+        let job = Job { epoch: self.script_epoch, slot: Slot::Background, request, blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)), network: self.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: self.images_enabled };
         self.dynamic_images.as_ref().unwrap().submit(job)
     }
 
     pub(super) fn cancel_background_image(&self, node: usize) {
-        if let Some(worker) = &self.dynamic_images { worker.cancel_node(node, true); }
+        if let Some(worker) = &self.dynamic_images { worker.cancel_node(node, Slot::Background); }
     }
 
     pub(super) fn cancel_image_requests(&mut self) {
         if let Some(worker) = &self.dynamic_images { worker.cancel(); }
         self.pending_images.clear();
+        self.cancel_responsive_images();
         let removed = self.scripting.as_mut().map(|page| page.take_image_changes().1).unwrap_or_default();
         let changed = !removed.is_empty();
         for node in removed { self.images.remove(&node); self.animations.remove(&node); self.image_densities.remove(&node); }
@@ -205,7 +210,9 @@ impl App {
         let (changed, removed, requests) = page.take_image_changes();
         let any = !changed.is_empty();
         for node in changed {
-            if let Some(worker) = &self.dynamic_images { worker.cancel_node(node, false); }
+            if let Some(worker) = &self.dynamic_images { worker.cancel_node(node, Slot::ScriptImage); }
+            self.cancel_responsive_node(node);
+            self.invalidate_responsive_source(node);
             self.pending_images.remove(&node);
         }
         let restyle = !removed.is_empty();
@@ -220,7 +227,7 @@ impl App {
             }
             let node = request.node;
             let generation = request.generation;
-            let job = Job { epoch: self.script_epoch, background: false, request: request.clone(), blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)), network: self.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: self.images_enabled };
+            let job = Job { epoch: self.script_epoch, slot: Slot::ScriptImage, request: request.clone(), blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)), network: self.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: self.images_enabled };
             match self.dynamic_images.as_ref().unwrap().submit(job) {
                 Ok(()) => { self.pending_images.insert(node, generation); }
                 Err(error) => self.finish_dynamic_image(&request, Err(error)),
@@ -237,10 +244,15 @@ impl App {
         let backgrounds_only = self.script_jobs_paused();
         let Some(completion) = self.dynamic_images.as_ref().and_then(|worker| worker.poll(backgrounds_only)) else { return false; };
         if completion.epoch != self.script_epoch { return false; }
-        if completion.background {
+        if completion.slot == Slot::Background {
             self.events.extend(completion.events);
             self.finish_background_image(&completion.request, completion.result);
             return true;
+        }
+        if completion.slot == Slot::ResponsiveImage {
+            if !self.responsive_image_current(&completion.request) { return false; }
+            self.events.extend(completion.events);
+            return self.finish_responsive_image(&completion.request, completion.result);
         }
         if self.pending_images.get(&completion.request.node) != Some(&completion.request.generation) { return false; }
         self.pending_images.remove(&completion.request.node);
@@ -248,6 +260,18 @@ impl App {
         self.events.extend(completion.events);
         self.finish_dynamic_image(&completion.request, completion.result);
         true
+    }
+
+    pub(super) fn submit_responsive_image(&mut self, request: DynamicImage) -> Result<(), String> {
+        if self.dynamic_images.is_none() {
+            self.dynamic_images = Some(Worker::new(self.wake.clone(), self.trust.clone(), self.cookies.clone())?);
+        }
+        let job = Job { epoch: self.script_epoch, slot: Slot::ResponsiveImage, request, blocking: Arc::new(crate::blocking::Policy::new(&self.profile.data().settings.blocking)), network: self.network.clone(), cancel: Arc::new(AtomicBool::new(false)), enabled: self.images_enabled };
+        self.dynamic_images.as_ref().unwrap().submit(job)
+    }
+
+    pub(super) fn cancel_responsive_worker(&self, node: usize) {
+        if let Some(worker) = &self.dynamic_images { worker.cancel_node(node, Slot::ResponsiveImage); }
     }
 
     fn finish_dynamic_image(&mut self, request: &DynamicImage, result: Result<crate::image::DecodedImage, String>) {

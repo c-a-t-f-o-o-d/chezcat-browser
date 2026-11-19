@@ -55,6 +55,7 @@ enum Key {
     Bool(bool),
     Number(u64),
     String(String),
+    StringUnits(Vec<u16>),
     Symbol(usize),
     Object(usize),
     Function(usize),
@@ -347,6 +348,7 @@ impl Runtime {
                 value.to_bits()
             }),
             Value::String(value) => Key::String(value.clone()),
+            Value::StringUnits(units) => Key::StringUnits(units.clone()),
             Value::Symbol(id) => Key::Symbol(*id),
             Value::Object(id) => Key::Object(*id),
             Value::Function(id) => Key::Function(*id),

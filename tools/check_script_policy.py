@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -23,7 +24,7 @@ import threading
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tools" / "https-demo"
-SOURCE_LIMIT = 512 * 1024
+SOURCE_LIMIT = 16 * 1024 * 1024
 
 
 class Server(ThreadingHTTPServer):
@@ -49,7 +50,7 @@ class Server(ThreadingHTTPServer):
         return f"{'https' if self.secure else 'http'}://localhost:{self.server_port}"
 
 
-def dynamic(target, title, attribute="", fail=False):
+def dynamic(target, title, attribute="", fail=False, on_result=""):
     result = "error" if fail else "load"
     return f"""<!doctype html><html><head><title>Pending script</title></head><body>
 <script nonce=Owner>
@@ -58,6 +59,7 @@ var delivered=0;var s=document.createElement('script');s.src={json.dumps(target)
 s.on{result}=function(){{
   if(document.cookie!=='owner=one')throw Error('cross-origin cookie mutation');
   if(s.textContent!=='')throw Error('network source inserted into DOM');
+  {on_result}
   document.title={json.dumps(title)};
 }};
 s.on{'load' if fail else 'error'}=function(){{throw Error('unexpected script event');}};
@@ -89,6 +91,7 @@ document.title='Parser cross-origin OK';</script></body></html>"""
                            "/coep-report", "/redirect-downgrade"):
             extra.append(("Set-Cookie", "owner=one; Secure; Path=/"))
             target, title, attribute, fail = peer + "/asset.js", "Dynamic cross-origin OK", "", False
+            on_result = ""
             if self.path == "/redirect":
                 target, title = "/leave.js", "Redirect credentials OK"
             elif self.path.startswith("/csp-"):
@@ -103,8 +106,10 @@ document.title='Parser cross-origin OK';</script></body></html>"""
                 target, title, fail = peer + "/not-js.js", "MIME refusal OK", True
             elif self.path == "/large":
                 target, title = peer + "/large.js", "Large script OK"
+                on_result = "if(largeSourceAccepted!==1)throw Error('script tail did not run');"
             elif self.path == "/oversize":
                 target, title, fail = peer + "/oversize.js", "Source limit OK", True
+                on_result = "if(typeof largeSourceStarted!=='undefined')throw Error('partial script ran');"
             elif self.path == "/corp":
                 target, title, fail = peer + "/corp.js", "CORP refusal OK", True
             elif self.path in ("/corp-site-allow", "/corp-site-deny"):
@@ -126,10 +131,13 @@ document.title='Parser cross-origin OK';</script></body></html>"""
                     title, fail = "COEP refusal OK", True
             elif self.path == "/redirect-downgrade":
                 target, title, fail = peer + "/downgrade.js", "Downgrade redirect refusal OK", True
-            body = dynamic(target, title, attribute, fail)
+            body = dynamic(target, title, attribute, fail, on_result)
         elif self.path == "/parser-csp-redirect":
             extra.append(("Content-Security-Policy", "script-src 'self' 'nonce-Owner'"))
             body = "<title>Parser CSP pending</title><script src=/leave.js></script><script nonce=Owner>document.title='Parser CSP redirect OK';</script>"
+        elif self.path == "/parser-large":
+            body = f"""<title>Parser source pending</title><script src='{peer}/large.js'></script><script>
+if(largeSourceStarted===1 && largeSourceAccepted===1)document.title='Parser source OK';</script>"""
         elif self.path == "/parser-corp":
             body = f"<title>Parser CORP OK</title><script src='{peer}/corp.js'></script>"
         elif self.path == "/parser-coep":
@@ -163,12 +171,13 @@ document.title='Parser cross-origin OK';</script></body></html>"""
             body = "var remote=7;"
         elif self.path == "/not-js.js":
             body = "throw Error('MIME restriction failed');"
-        elif self.path == "/large.js":
+        elif self.path in ("/large.js", "/oversize.js"):
             mime = "text/javascript"
-            body = "/*" + "x" * 370000 + "*/var largeSourceAccepted=1;"
-        elif self.path == "/oversize.js":
-            mime = "text/javascript"
-            body = "/*" + "x" * SOURCE_LIMIT + "*/throw Error('source limit failed');"
+            length = SOURCE_LIMIT + int(self.path == "/oversize.js")
+            start = "var largeSourceStarted=1;/*"
+            tail = "*/var largeSourceAccepted=1;"
+            body = start + "x" * (length - len(start) - len(tail)) + tail
+            extra.append(("Content-Encoding", "gzip"))
         elif self.path == "/downgrade.js":
             status = 302
             extra.append(("Location", peer.replace("https:", "http:") + "/forbidden.js"))
@@ -176,6 +185,8 @@ document.title='Parser cross-origin OK';</script></body></html>"""
         else:
             status, body = 404, "Unexpected fixture request"
         data = body.encode()
+        if ("Content-Encoding", "gzip") in extra:
+            data = gzip.compress(data, compresslevel=1, mtime=0)
         self.send_response(status)
         self.send_header("Content-Type", mime + "; charset=utf-8")
         for name, value in extra:
@@ -220,7 +231,8 @@ def exercise(browser, folder, results):
             report = folder / (path.removeprefix("/") + ".txt")
             process = subprocess.run([str(browser), first.origin + path, "--trust-file",
                 str(trust or FIXTURES / "ca.pem"), "--no-profile", "--activity-report", str(report),
-                "--wait-ms", "350"], capture_output=True, text=True, timeout=30)
+                "--wait-ms", "5000" if path in ("/large", "/oversize") else "350"],
+                capture_output=True, text=True, timeout=30)
             text = report.read_text(encoding="utf-8") if report.exists() else ""
             require((process.returncode == 0) == succeeds, f"{path}: {process.stderr}")
             if title:
@@ -250,7 +262,8 @@ def exercise(browser, folder, results):
         run("/mixed", "Mixed content refusal OK", ["/mixed"], [], "mixed content")
         run("/mime", "MIME refusal OK", ["/mime"], ["/not-js.js"], "JavaScript Content-Type")
         run("/large", "Large script OK", ["/large"], ["/large.js"])
-        run("/oversize", "Source limit OK", ["/oversize"], ["/oversize.js"], "limit")
+        run("/parser-large", "Parser source OK", ["/parser-large"], ["/large.js"])
+        run("/oversize", "Source limit OK", ["/oversize"], ["/oversize.js"], "Decompressed data exceeds its output limit")
         run("/corp", "CORP refusal OK", ["/corp"], ["/corp.js"], "Cross-Origin-Resource-Policy")
         run("/corp-site-allow", "CORP same-site OK", ["/corp-site-allow"], ["/corp-site.js"])
         run("/corp-site-deny", "CORP site refusal OK", ["/corp-site-deny"], ["/corp-site.js"], "same-site requires")

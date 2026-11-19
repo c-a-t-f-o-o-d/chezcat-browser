@@ -7,6 +7,8 @@ mod audio;
 mod audio_output;
 mod blocking;
 mod build_identity;
+mod canvas_2d_bitmap;
+mod canvas_color;
 mod compression;
 mod cookies;
 mod crypto_aead;
@@ -30,6 +32,7 @@ mod forms;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod history;
 mod html;
+mod html_canvas;
 mod http;
 mod image;
 mod image_data;

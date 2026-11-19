@@ -345,7 +345,7 @@ impl Parser {
             return Err(self.unsupported("Computed super properties are not implemented."));
         }
         self.need(".")?;
-        let TokenKind::Word(name) = &self.token().kind else {
+        let (TokenKind::Word(name) | TokenKind::EscapedWord(name)) = &self.token().kind else {
             return Err(self.error("Expected a literal super property name."));
         };
         if name.len() > self.capacity.property_bytes {

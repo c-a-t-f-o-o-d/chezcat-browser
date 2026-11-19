@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value};
+use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -114,6 +114,8 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
+                    self.define_node_attribute(prototype, window, "style",
+                        ELEMENT_STYLE_GET, Some(ELEMENT_STYLE_SET))?;
                     for (key, operation) in [
                         ("offsetParent", "\0HTMLElement.get.offsetParent"),
                         ("offsetLeft", "\0HTMLElement.get.offsetLeft"),
@@ -130,6 +132,7 @@ impl Runtime {
             let element=self.native_constructor_prototypes[&(window,"Element")];
             self.define_svg_element_interface(window, element)?;
             self.define_concrete_html_node_interfaces(window, parent)?;
+            self.define_canvas_2d_interface(window)?;
             // CharacterData is a separate genuine Node suffix. Text gets its
             // own Slottable prototype below; Comment retains this suffix.
             let node=self.native_constructor_prototypes[&(window,"Node")];
@@ -149,21 +152,26 @@ impl Runtime {
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
             self.define_text_interface(window, character)?;
-            // Fragment is a separate Node subtype, never an Element suffix.
-            let node=*self.native_constructor_prototypes.get(&(window,"Node")).ok_or_else(||Fault::new("Missing Node prototype."))?;
-            let Value::Function(node_constructor)=self.objects[node].properties["constructor"].value.as_value()?.clone() else {return Err(Fault::new("Invalid Node constructor."));};
-            let allocation=self.allocate_host_function_with_length(window,"DocumentFragment",0).map_err(Fault::new)?;
-            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
-            let fragment=self.new_object(None)?;
-            self.objects[fragment].prototype=Some(Ordinary::Object(node));
-            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(node_constructor));
-            let constructor=Value::Function(allocation.id);
-            self.store_property(fragment,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
-            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(fragment),Some((false,false,false)))?;
-            self.store_symbol_property(fragment,self.symbol_to_string_tag.unwrap(),Value::String("DocumentFragment".into()),Some((false,false,true)))?;
-            self.put_binding(self.global_environment,"DocumentFragment".into(),Some(constructor),super::Declaration::Var,false)?;
-            self.global_attributes.insert("DocumentFragment".into(),(false,true,true));
-            self.native_constructor_prototypes.insert((window,"DocumentFragment"),fragment);
+            for name in ["DocumentFragment","Document"] {
+                let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
+                if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+                let prototype=self.new_object(None)?;
+                self.objects[prototype].prototype=Some(Ordinary::Object(node));
+                self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(node_constructor));
+                let constructor=Value::Function(allocation.id);
+                self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+                self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
+                if name=="Document" {
+                    self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
+                    // HTML defines this Window property as an alias of the very same interface object.
+                    self.put_binding(self.global_environment,"HTMLDocument".into(),Some(constructor.clone()),super::Declaration::Var,false)?;
+                    self.global_attributes.insert("HTMLDocument".into(),(false,true,true));
+                }
+                self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
+                self.global_attributes.insert(name.into(),(false,true,true));
+                self.native_constructor_prototypes.insert((window,name),prototype);
+            }
             if let Some(key)=image {
                 let image=*self.native_constructor_prototypes.get(&key).ok_or_else(||Fault::new("Missing canonical Image prototype."))?;
                 self.objects[image].prototype=Some(Ordinary::Object(parent));
@@ -255,6 +263,21 @@ impl Runtime {
                     self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
                 }
             }
+            if name == "HTMLCanvasElement" {
+                for (key, getter, setter) in [
+                    ("width", "\0HTMLCanvasElement.get.width", "\0HTMLCanvasElement.set.width"),
+                    ("height", "\0HTMLCanvasElement.get.height", "\0HTMLCanvasElement.set.height"),
+                ] {
+                    self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                }
+                self.define_canvas_operation(
+                    prototype,
+                    window,
+                    "getContext",
+                    "\0HTMLCanvasElement.getContext",
+                    1,
+                )?;
+            }
 
             // Existing native constructor roots keep both prototype chains
             // alive across realm parking, deferred calls and collection.
@@ -266,6 +289,103 @@ impl Runtime {
             self.global_attributes.insert(name.into(), (false, true, true));
         }
         Ok(())
+    }
+
+    /// A rendering context is an independent Web IDL object, not a Node or
+    /// EventTarget. Each owner realm supplies its actual ordinary prototype;
+    /// only a genuine host context can satisfy the methods' receiver checks.
+    fn define_canvas_2d_interface(&mut self, window: u32) -> Result<(), Fault> {
+        let allocation = self
+            .allocate_host_function_with_length(window, "CanvasRenderingContext2D", 0)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+            // The bridge rejects construction as an illegal constructor. This
+            // does not opt another native family into class-base support.
+            *constructible = true;
+        }
+        let prototype = self.new_object(None)?;
+        let constructor = Value::Function(allocation.id);
+        self.store_property(
+            prototype,
+            "constructor".into(),
+            constructor.clone(),
+            Some((false, true, true)),
+        )?;
+        self.store_property(
+            self.function_properties[allocation.id],
+            "prototype".into(),
+            Value::Object(prototype),
+            Some((false, false, false)),
+        )?;
+        let tag = self
+            .symbol_to_string_tag
+            .ok_or_else(|| Fault::new("Missing canvas context class-tag symbol."))?;
+        self.store_symbol_property(
+            prototype,
+            tag,
+            Value::String("CanvasRenderingContext2D".into()),
+            Some((false, false, true)),
+        )?;
+        self.define_readonly_node_getter(
+            prototype,
+            window,
+            "canvas",
+            "\0CanvasRenderingContext2D.get.canvas",
+        )?;
+        self.define_node_attribute(
+            prototype,
+            window,
+            "fillStyle",
+            "\0CanvasRenderingContext2D.get.fillStyle",
+            Some("\0CanvasRenderingContext2D.set.fillStyle"),
+        )?;
+        for (name, operation) in [
+            ("clearRect", "\0CanvasRenderingContext2D.clearRect"),
+            ("fillRect", "\0CanvasRenderingContext2D.fillRect"),
+            ("getImageData", super::canvas_readback::METHOD),
+        ] {
+            self.define_canvas_operation(prototype, window, name, operation, 4)?;
+        }
+        self.native_constructor_prototypes
+            .insert((window, "CanvasRenderingContext2D"), prototype);
+        self.put_binding(
+            self.global_environment,
+            "CanvasRenderingContext2D".into(),
+            Some(constructor),
+            super::Declaration::Var,
+            false,
+        )?;
+        self.global_attributes
+            .insert("CanvasRenderingContext2D".into(), (false, true, true));
+        Ok(())
+    }
+
+    fn define_canvas_operation(
+        &mut self,
+        prototype: usize,
+        window: u32,
+        name: &'static str,
+        operation: &'static str,
+        length: usize,
+    ) -> Result<(), Fault> {
+        let method = self
+            .allocate_host_function_with_length(window, operation, length)
+            .map_err(Fault::new)?;
+        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+            *receiver_required = true;
+        }
+        self.store_property(
+            self.function_properties[method.id],
+            "name".into(),
+            Value::String(name.into()),
+            Some((false, false, true)),
+        )?;
+        self.store_property(
+            prototype,
+            name.into(),
+            Value::Function(method.id),
+            Some((true, true, true)),
+        )
     }
 
     /// A class may inherit a genuine nonallocating interface even though
@@ -886,6 +1006,18 @@ mod expando_tests {
         fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String> {Err("No native write".into())}
         fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String> {Err("No native call".into())}
     }
+    #[test]
+    fn element_inline_style_property_ignored_arguments_do_not_become_permanent_host_roots() {
+        let mut runtime = Runtime::for_test();
+        let mut host = Native { enabled: true, reads: 0 };
+        let id = runtime.new_object(None).unwrap();
+        for operation in [ELEMENT_STYLE_GET, ELEMENT_STYLE_SET] {
+            let error = runtime.call_host(42, operation, &[Value::Object(id)], &mut host).unwrap_err();
+            assert!(error.message.contains("No native call"), "{}", error.message);
+            assert!(!runtime.exported_object_roots.contains(&id));
+        }
+    }
+
     #[test]
     fn native_expando_allocation_failure_is_atomic_and_recovery_preserves_native_paths() {
         let mut runtime=Runtime::for_test();runtime.bind_browser_global(77).unwrap();

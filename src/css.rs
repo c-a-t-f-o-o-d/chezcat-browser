@@ -1,5 +1,8 @@
 //! A bounded CSS subset for block, inline and basic flex layout.
 use std::collections::HashMap;
+#[path="css_stylesheet_cache.rs"]
+mod stylesheet_cache;
+pub(crate) use stylesheet_cache::StylesheetCache;
 
 #[path="css_media.rs"]
 mod media;
@@ -10,11 +13,15 @@ mod custom_properties;
 mod computed_style;
 pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
 pub(crate) fn computed_custom_property_name(name: &str) -> bool { custom_properties::custom_name(name) }
+pub(crate) fn inline_custom_value(value: &str) -> bool { value.len() <= 2048 && custom_properties::valid_syntax(value) }
 #[path="css_overflow.rs"]
 mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_opacity.rs"]
+mod opacity;
+pub(crate) use opacity::{serialize as serialize_opacity, specified as specified_opacity, Specified as SpecifiedOpacity};
 #[path="css_box_spacing.rs"]
 mod box_spacing;
 #[path="css_radius.rs"]
@@ -24,6 +31,9 @@ mod background_clip;
 pub use background_clip::BackgroundClip;
 #[path="css_line_height.rs"]
 mod line_height;
+#[path = "css_grid_alignment.rs"]
+mod grid_alignment;
+pub use grid_alignment::Justify;
 #[cfg(test)]
 #[path="css_height_variable_tests.rs"]
 mod height_variable_tests;
@@ -32,6 +42,11 @@ mod height_variable_tests;
 mod root_selector_tests;
 #[path="css_translate.rs"]
 mod translate;
+#[path="css_easing.rs"]
+mod easing;
+pub(crate) use easing::{normalize as normalize_easing, specified as specified_easing, source_cost as easing_source_cost};
+pub(crate) use easing::valid as inline_easing_value;
+pub(crate) use easing::{priority as easing_priority, trim as easing_trim};
 pub use translate::Transform;
 pub(crate) use translate::{normalize_transform, TransformSyntax};
 pub(crate) use translate::source_cost as transform_source_cost;
@@ -66,8 +81,8 @@ impl StylesheetLimits {
         let remaining=self.rules.checked_sub(usage.rules).ok_or("Stylesheet rule accounting overflow.")?;
         let mut declarations_exhausted=false;
         let count=media::walk(source,remaining,None,|_,body,_| {
-            // Admission counts declarations but does not execute the new
-            // transform grammar before a caller can reserve its work.
+            // Admission counts declarations before executing the additional
+            // computed-property grammars with a caller's reserved work.
             if parse_declarations_inner(body,MAX_DECLARATIONS+1,false,None).expect("unmetered admission").len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
             true
         })?;
@@ -80,35 +95,71 @@ impl StylesheetLimits {
 /// The same ordered, whole-sheet admission is used for rendering and reports.
 /// A refusal never supplies a prefix to the parser or consumes the next sheet's
 /// allowance. The DOM retains the author's complete text.
-fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
-    let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
+enum SheetCandidate<'a> {
+    Source(usize, std::borrow::Cow<'a, str>),
+    Error(String),
+}
+
+// One source/scope traversal for admission, fresh parsing and cache validation.
+// Keep errors in document order, including refused inline source allocation.
+fn stylesheet_sources_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>,mut meter:Option<&mut CssBudget<'_>>) -> Result<Vec<SheetCandidate<'a>>,String> {
+    if let Some(meter)=meter.as_deref_mut() {
+        meter.copies(doc.nodes.len().saturating_mul(std::mem::size_of::<bool>()+2*std::mem::size_of::<usize>()+2*std::mem::size_of::<SheetCandidate<'_>>()))?;
+    }
+    let mut sources=Vec::new();
     let mut seen=vec![false;doc.nodes.len()];let mut stack=if doc.nodes.is_empty(){Vec::new()}else{vec![0]};
     while let Some(node)=stack.pop() {
+        if let Some(meter)=meter.as_deref_mut() {meter.work(3)?;}
         if node>=doc.nodes.len() || seen[node] {continue;}seen[node]=true;
         let entry=&doc.nodes[node];
         let tag=match &entry.kind {NodeKind::Element{tag,..}=>tag.as_str(),_=>""};
         if matches!(tag,"template"|"iframe"|"object") || tag=="noscript"&&doc.scripting_enabled {continue;}
+        if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len())?;}
         stack.extend(entry.children.iter().rev().copied().filter(|&child|child!=0));
         if !matches!(tag,"style"|"link") {continue;}
+        if tag == "style" && doc.withheld_inline_styles.contains(&node) {continue;}
+        if let Some(meter)=meter.as_deref_mut() {
+            if let NodeKind::Element{attrs,..}=&entry.kind {
+                meter.work(attrs.len().saturating_mul(2))?;
+                for attr in attrs {
+                    meter.work(attr.name.bytes().max(1).div_ceil(64))?;
+                    if attr.name.html_is("media") {meter.work(attr.value.len().max(1).div_ceil(64).saturating_mul(4))?;}
+                }
+            }
+        }
         if !media_supported(doc.attr(node,"media").unwrap_or("")) {continue;}
         let source=if tag=="link" {
             let source=if let Some((_,source))=replacement.filter(|(owner,_)|*owner==node) {source} else {let Some(source)=external.get(&node) else {continue;};source.as_str()};
             std::borrow::Cow::Borrowed(source)
         } else {
+            if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len().saturating_mul(2))?;}
             let mut length=Some(0usize);
             for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {length=length.and_then(|n|n.checked_add(text.len()));}}
-            let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {errors.push(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance."));continue;};
+            let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {sources.push(SheetCandidate::Error(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance.")));continue;};
+            if let Some(meter)=meter.as_deref_mut() {meter.work(length.max(1).div_ceil(64).saturating_mul(2))?;meter.copies(length)?;}
             let mut source=String::new();
-            if source.try_reserve(length).is_err() {errors.push(format!("CSS node {node}: stylesheet allocation failed."));continue;}
+            if source.try_reserve(length).is_err() {sources.push(SheetCandidate::Error(format!("CSS node {node}: stylesheet allocation failed.")));continue;}
             for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {source.push_str(text);}}
             std::borrow::Cow::Owned(source)
         };
+        sources.push(SheetCandidate::Source(node,source));
+    }
+    Ok(sources)
+}
+
+fn admit_stylesheets<'a>(doc:&Document,sources:Vec<SheetCandidate<'a>>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+    let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
+    for candidate in sources {
+        let (node,source)=match candidate {SheetCandidate::Source(node,source)=>(node,source),SheetCandidate::Error(error)=>{errors.push(error);continue;}};
         match doc.stylesheet_limits.accept(&source,usage) {
             Ok(next)=>{usage=next;accepted.push((node,source));},
             Err(error)=>errors.push(format!("CSS node {node}: {error}")),
         }
     }
     (accepted,errors,usage)
+}
+fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+    admit_stylesheets(doc,stylesheet_sources_with(doc,external,replacement,None).expect("unbudgeted stylesheet source collection"))
 }
 pub(crate) fn accepted_stylesheets<'a>(doc:&'a Document,external:&'a HashMap<usize,String>)->(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {accepted_stylesheets_with(doc,external,None)}
 pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<(),String> {
@@ -312,6 +363,8 @@ pub struct Style {
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
+    /// Computed scalar. Ordinary HTML paint groups composite after descendants.
+    pub opacity: f64,
     pub background: Option<u32>,
     /// Retain currentColor through explicit inheritance; background holds the
     /// used opaque color after this element's foreground cascade finishes.
@@ -361,6 +414,8 @@ pub struct Style {
     pub align_content: FlexPack,
     pub align_items: FlexAlign,
     pub align_self: Option<FlexAlign>,
+    pub justify_items: Justify,
+    pub justify_self: Justify,
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub flex_basis: Length,
@@ -378,6 +433,7 @@ impl Default for Style {
             overflow: Overflow::default(),
             inset: [Length::Auto; 4],
             color: 0x26364a,
+            opacity: 1.0,
             background: None,
             background_current_color: false,
             background_clip: Some(BackgroundClip::BorderBox),
@@ -420,6 +476,8 @@ impl Default for Style {
             align_content: FlexPack::Stretch,
             align_items: FlexAlign::Stretch,
             align_self: None,
+            justify_items: Justify::Normal,
+            justify_self: Justify::Auto,
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Length::Auto,
@@ -579,9 +637,13 @@ struct AttributeSelector {
     value: Option<String>,
     operator: AttributeOperator,
     ascii_insensitive: bool,
+    substring_prefix: Vec<usize>,
 }
 #[derive(Clone,Copy,Debug)]
-enum AttributeOperator {Exact,Token}
+enum AttributeOperator {Exact,Token,Dash,Prefix,Suffix,Substring}
+
+#[path="css_attribute_substrings.rs"]
+mod attribute_substrings;
 
 #[derive(Clone, Copy, Debug)]
 enum Relation {
@@ -728,7 +790,7 @@ pub(crate) fn compute_with_environment_and_properties(
     environment: Option<MediaEnvironment>,
 ) -> CascadeOutput {
     // Only an explicitly supplied script budget makes the shared core fallible.
-    compute_cascade(doc, external, checked, environment, None, None).expect("unbudgeted CSS cascade")
+    compute_cascade(doc, external, checked, environment, None, None, None, false).expect("unbudgeted CSS cascade")
 }
 
 pub(crate) fn compute_with_environment_and_properties_budgeted(
@@ -738,11 +800,11 @@ pub(crate) fn compute_with_environment_and_properties_budgeted(
     environment: Option<MediaEnvironment>,
     budget: &mut CssBudget<'_>,
 ) -> Result<CascadeOutput, String> {
-    compute_cascade(doc, external, checked, environment, Some(budget), None)
+    compute_cascade(doc, external, checked, environment, Some(budget), None, None, false)
 }
 
 /// Preserve the established layout allowance while reserving the additional
-/// transform parser, cascade and snapshot work before it runs.
+/// transform/opacity parser, cascade and snapshot work before it runs.
 pub(crate) fn compute_with_environment_and_properties_transform_budgeted(
     doc: &Document,
     external: &HashMap<usize, String>,
@@ -750,7 +812,28 @@ pub(crate) fn compute_with_environment_and_properties_transform_budgeted(
     environment: Option<MediaEnvironment>,
     budget: &mut CssBudget<'_>,
 ) -> Result<CascadeOutput, String> {
-    compute_cascade(doc, external, checked, environment, None, Some(budget))
+    compute_cascade(doc, external, checked, environment, None, Some(budget), None, false)
+}
+
+pub(crate) fn compute_with_environment_and_properties_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, cache: Option<&StylesheetCache>,
+) -> CascadeOutput {
+    compute_cascade(doc,external,checked,environment,None,None,cache,true).expect("unbudgeted cached CSS cascade")
+}
+
+pub(crate) fn compute_with_environment_and_properties_budgeted_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, budget: &mut CssBudget<'_>, cache: Option<&StylesheetCache>,
+) -> Result<CascadeOutput,String> {
+    compute_cascade(doc,external,checked,environment,Some(budget),None,cache,true)
+}
+
+pub(crate) fn compute_with_environment_and_properties_transform_budgeted_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, budget: &mut CssBudget<'_>, cache: Option<&StylesheetCache>,
+) -> Result<CascadeOutput,String> {
+    compute_cascade(doc,external,checked,environment,None,Some(budget),cache,true)
 }
 
 fn reserve_transform_storage(
@@ -766,6 +849,7 @@ fn reserve_transform_storage(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_cascade(
     doc: &Document,
     external: &HashMap<usize, String>,
@@ -773,8 +857,13 @@ fn compute_cascade(
     environment: Option<MediaEnvironment>,
     mut meter: Option<&mut CssBudget<'_>>,
     mut transform_meter: Option<&mut CssBudget<'_>>,
+    previous_sheets: Option<&StylesheetCache>,
+    retain_sheets: bool,
 ) -> Result<CascadeOutput, String> {
-    if let Some(meter) = meter.as_deref_mut() { meter.document(doc, external)?; }
+    if let Some(meter) = meter.as_deref_mut() {
+        if previous_sheets.is_some() {meter.document_structure(doc)?;}
+        else {meter.document(doc, external)?;}
+    }
     let mut parents = vec![None; doc.nodes.len()];
     let mut previous_elements = vec![None; doc.nodes.len()];
     for (parent, node) in doc.nodes.iter().enumerate() {
@@ -831,24 +920,10 @@ fn compute_cascade(
                     if matches!(tag.as_str(), "template" | "iframe" | "object") || doc.scripting_enabled && tag == "noscript");
         }
     }
-    let mut rules = Vec::new();
-    let mut has_transform_rules = false;
-    for (owner, source) in accepted_stylesheets(doc, external).0 {
-        let first = rules.len();
-        // Preserve existing whole-sheet refusal/rollback. Only an exhausted
-        // transform job budget escapes this optional parser as a job failure.
-        if let Err(SheetParseFailure::TransformBudget(error)) =
-            parse_sheet_with_media_inner(&source,&mut rules,environment,doc.stylesheet_limits.rules,
-                transform_meter.as_deref_mut()) { return Err(error); }
-        for rule in &mut rules[first..] {
-            for declaration in &mut rule.declarations {
-                declaration.stylesheet = Some(owner);
-                if declaration.name == "transform" {
-                    has_transform_rules = true;
-                }
-            }
-        }
-    }
+    let prepared = stylesheet_cache::prepare(doc,external,environment,previous_sheets,retain_sheets,
+        meter.as_deref_mut(),transform_meter.as_deref_mut())?;
+    let rules = prepared.rules();
+    let has_transform_rules = prepared.has_transform;
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut variables = vec![custom_properties::Variables::default(); doc.nodes.len()];
@@ -856,6 +931,10 @@ fn compute_cascade(
     let mut complete = true;
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
+    let mut canvas_foregrounds = HashMap::new();
+    // Default opacity 1 requires no retained per-node allocation. A None entry
+    // records an indeterminate winner rather than fabricating that default.
+    let mut opacities: HashMap<usize, Option<f64>> = HashMap::new();
     let mut transform_known = Vec::new();
     if has_transform_rules {
         if transform_meter.is_some() {
@@ -880,6 +959,7 @@ fn compute_cascade(
         let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
         let parent_position_known = parents[index].map_or(true, |parent| position_known[parent]);
         let parent_transform_known = parents[index].and_then(|parent| transform_known.get(parent)).copied().unwrap_or(true);
+        let parent_opacity_known = parents[index].and_then(|parent| opacities.get(&parent)).is_none_or(Option::is_some);
         variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
@@ -900,6 +980,7 @@ fn compute_cascade(
         let NodeKind::Element { tag, .. } = &node.kind else {
             let mut inherited = parent;
             inherited.transform = Transform::None;
+            inherited.opacity = 1.0;
             computed[index] = inherited;
             continue;
         };
@@ -1100,6 +1181,9 @@ fn compute_cascade(
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
+        let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
+        let mut sheet_opacity = (1.0, true);
+        let mut opacity_known = true;
         for (priority, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
@@ -1107,6 +1191,21 @@ fn compute_cascade(
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
+            if declaration.name == "opacity" {
+                let mut apply_opacity = |budget: &mut custom_properties::Budget| {
+                    opacity::apply(&mut style,declaration,priority.1,&mut sheet_opacity,
+                        (parent.opacity,parent_opacity_known),&mut opacity_known,&variables[index],budget)
+                };
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.variables(&mut variable_budget,apply_opacity)?;
+                } else if let Some(meter) = transform_meter.as_deref_mut() {
+                    // This force-layout entry meters newly introduced property
+                    // work without charging the established full cascade twice.
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget,apply_opacity)?;
+                } else { apply_opacity(&mut variable_budget); }
+                continue;
+            }
             if declaration.name == "font" {
                 let value = declaration.value.trim().to_ascii_lowercase();
                 if apply_font(&mut style,&parent,declaration,&value) && !priority.1 {
@@ -1115,7 +1214,9 @@ fn compute_cascade(
                 continue;
             }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
+                if grid_alignment::apply(&mut style,&parent,declaration,priority.1,&mut sheet_grid_alignment,&variables[index],budget) {
+                    true
+                } else if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
                     true
                 } else if background_clip::apply(&mut style,&parent,declaration,priority.1,&mut sheet_background_clip,&variables[index],budget) {
                     true
@@ -1188,6 +1289,20 @@ fn compute_cascade(
         {
             style.display = Display::Block;
         }
+        if crate::html_canvas::element(doc, index) {
+            let first = canvas_foregrounds.is_empty();
+            if let Some(meter) = meter.as_deref_mut() { meter.canvas_foreground(first)?; }
+            else if let Some(meter) = transform_meter.as_deref_mut() { meter.canvas_foreground(first)?; }
+            canvas_foregrounds.try_reserve(1).map_err(|_| "Canvas foreground snapshot reservation failed.")?;
+            canvas_foregrounds.insert(index, style.color);
+        }
+        if !opacity_known || style.opacity != 1.0 {
+            let first = opacities.is_empty();
+            if let Some(meter) = meter.as_deref_mut() { meter.opacity(first)?; }
+            else if let Some(meter) = transform_meter.as_deref_mut() { meter.opacity(first)?; }
+            opacities.try_reserve(1).map_err(|_| "Opacity snapshot reservation failed.")?;
+            opacities.insert(index, opacity_known.then_some(style.opacity));
+        }
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
@@ -1201,7 +1316,7 @@ fn compute_cascade(
     if has_transform_declarations {
         has_transform_geometry |= !complete;
     }
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry) })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -1357,7 +1472,7 @@ fn user_agent(style: &mut Style, tag: &str, link: bool, hidden: bool) {
     }
 }
 
-fn without_comments(source: &str) -> String {
+pub(crate) fn without_comments(source: &str) -> String {
     let bytes = source.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
     let mut position = 0;
@@ -2306,11 +2421,20 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
             value: None,
             operator:AttributeOperator::Exact,
             ascii_insensitive,
+            substring_prefix: Vec::new(),
         });
     }
-    // Presence, exact equality and whitespace-token equality. Other operators
-    // and namespaces reject rather than matching a broader set.
-    let operator=if bytes.get(*position)==Some(&b'~') {*position+=1;AttributeOperator::Token}else{AttributeOperator::Exact};
+    // An operator is contiguous. Namespace syntax and malformed operators must
+    // still reject the entire selector, rather than broaden an attribute test.
+    let operator = match bytes.get(*position) {
+        Some(b'~') => AttributeOperator::Token,
+        Some(b'|') => AttributeOperator::Dash,
+        Some(b'^') => AttributeOperator::Prefix,
+        Some(b'$') => AttributeOperator::Suffix,
+        Some(b'*') => AttributeOperator::Substring,
+        _ => AttributeOperator::Exact,
+    };
+    if !matches!(operator, AttributeOperator::Exact) { *position += 1; }
     if bytes.get(*position) != Some(&b'=') {
         return None;
     }
@@ -2359,11 +2483,17 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
         return None;
     }
     *position += 1;
+    let substring_prefix = if matches!(operator, AttributeOperator::Substring) {
+        attribute_substrings::prefix_table(&value, ascii_insensitive)?
+    } else {
+        Vec::new()
+    };
     Some(AttributeSelector {
         name,
         value: Some(value),
         operator,
         ascii_insensitive,
+        substring_prefix,
     })
 }
 
@@ -2599,6 +2729,7 @@ fn matches_selector(
                             && !expected.as_bytes().iter().any(u8::is_ascii_whitespace)
                             && actual.split_ascii_whitespace().any(|token|if attribute.ascii_insensitive {token.eq_ignore_ascii_case(expected)}else{token==expected})
                     }
+                    _ => attribute_substrings::matches(attribute, actual, expected, context, budget),
                 };
                 if !matches {
                     return false;
@@ -2690,6 +2821,85 @@ fn matches_selector(
 fn parse_declarations(source: &str) -> Vec<Declaration> {
     parse_declarations_bounded(source,MAX_DECLARATIONS)
 }
+
+/// CSSOM specified order keeps the winning occurrence, including its original
+/// position. Use the renderer's declaration tokenizer and custom-name grammar.
+pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut meter: Option<&mut CssBudget<'_>>) -> Result<Vec<String>, String> {
+    use std::collections::BTreeMap;
+    let declarations = parse_declarations_inner(source, MAX_DECLARATIONS + 1, true, meter.as_deref_mut())?;
+    if declarations.len() > MAX_DECLARATIONS { return Err("Inline CSS declaration limit reached.".into()); }
+    let mut winners: BTreeMap<String, (usize, bool)> = BTreeMap::new();
+    let mut order = 0;
+    for decl in declarations {
+        let name = decl.name.as_str();
+        if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
+        let value = decl.value.to_ascii_lowercase();
+        let variable = value.contains("var(");
+        let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
+        if name == "animation-timing-function" {
+            if let Some(meter) = meter.as_deref_mut() { meter.work(easing_source_cost(value.len()).0)?; }
+        }
+        let expanded: &[&str] = match name {
+            "margin" | "padding" => {
+                if !variable && !wide && box_spacing::shorthand(&value, name == "margin").is_none() { continue; }
+                if name == "margin" { &["margin-top","margin-right","margin-bottom","margin-left"] }
+                else { &["padding-top","padding-right","padding-bottom","padding-left"] }
+            }
+            "inset" => {
+                if !variable && !wide && lengths(&value, true, true).is_none() { continue; }
+                &["top","right","bottom","left"]
+            }
+            "flex" => {
+                if !variable && !wide && flex_shorthand(&value).is_none() { continue; }
+                &["flex-grow","flex-shrink","flex-basis"]
+            }
+            "gap" => {
+                if !variable && !wide && gap_values(&value).is_none() { continue; }
+                &["row-gap", "column-gap"]
+            }
+            // These shorthands reset additional longhands outside the inline
+            // bridge. A partial expansion would expose incorrect indices.
+            "background" | "border" | "border-color" | "border-width" | "border-style" |
+            "font" | "overflow" | "text-decoration" => {
+                return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
+            }
+            "color" | "background-color" if !inline_color_value(&value) => continue,
+            "animation-timing-function" if !inline_easing_value(&value) => continue,
+            "width" | "height" | "min-width" | "min-height" if !variable && !wide && parse_length(&value, true, false).is_none() => continue,
+            "max-width" | "max-height" if !variable && !wide && value != "none" && parse_length(&value, false, false).is_none() => continue,
+            "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
+            "row-gap" | "column-gap" if !variable && !wide && value != "normal" && parse_length(&value, false, false).is_none() => continue,
+            s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
+            s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
+            _ => std::slice::from_ref(&name),
+        };
+        for &longhand in expanded {
+            if !winners.get(longhand).is_some_and(|(_, important)| *important && !decl.important) {
+                winners.insert(longhand.into(), (order, decl.important));
+            }
+            order += 1;
+        }
+        if winners.len() > MAX_DECLARATIONS { return Err("Expanded inline CSS declaration limit reached.".into()); }
+    }
+    let mut names: Vec<_> = winners.into_iter().collect();
+    names.sort_unstable_by_key(|(_, (order, _))| *order);
+    Ok(names.into_iter().map(|(name, _)| name).collect())
+}
+
+pub(crate) fn inline_color_value(value: &str) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer")
+        || value.contains("var(") && custom_properties::valid_syntax(&value)
+        || parse_solid_color(&value).is_some()
+}
+
+fn gap_values(value: &str) -> Option<[Length; 2]> {
+    let mut parts = value.split_ascii_whitespace();
+    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else {parse_length(part, false, false)};
+    let row = length(parts.next()?)?;
+    let column = match parts.next() { Some(part) => length(part)?, None => row };
+    parts.next().is_none().then_some([row, column])
+}
 // Shared raw declaration boundaries for the parser and native style bridge.
 // This preserves quoted/parenthesized URL payloads without allocating a split
 // snapshot or inventing a second interpretation of semicolons.
@@ -2700,13 +2910,14 @@ pub(crate) struct DeclarationItems<'a> {
     quote: char,
     depth: usize,
     escaped: bool,
+    open_comment: bool,
     finished: bool,
 }
 pub(crate) fn declaration_items(source: &str) -> DeclarationItems<'_> {
-    DeclarationItems { source, chars: source.char_indices(), start: 0, quote: '\0', depth: 0, escaped: false, finished: false }
+    DeclarationItems { source, chars: source.char_indices(), start: 0, quote: '\0', depth: 0, escaped: false, open_comment: false, finished: false }
 }
 impl DeclarationItems<'_> {
-    pub(crate) fn complete(&self) -> bool { self.finished && self.quote == '\0' && self.depth == 0 && !self.escaped }
+    pub(crate) fn complete(&self) -> bool { self.finished && self.quote == '\0' && self.depth == 0 && !self.escaped && !self.open_comment }
 }
 impl<'a> Iterator for DeclarationItems<'a> {
     type Item = &'a str;
@@ -2724,6 +2935,16 @@ impl<'a> Iterator for DeclarationItems<'a> {
                 continue;
             }
             if matches!(character, '\'' | '"') { self.quote = character; continue; }
+            if character == '/' && self.chars.as_str().starts_with('*') {
+                self.chars.next();
+                self.open_comment = true;
+                while let Some((_, next)) = self.chars.next() {
+                    if next == '*' && self.chars.as_str().starts_with('/') {
+                        self.chars.next(); self.open_comment = false; break;
+                    }
+                }
+                continue;
+            }
             if matches!(character,'('| '[' | '{') { self.depth += 1; }
             if matches!(character,')'| ']' | '}') { self.depth = self.depth.saturating_sub(1); }
             if character != ';' || self.depth != 0 { continue; }
@@ -2745,26 +2966,32 @@ pub(crate) fn declaration_priority(value: &str) -> (&str, bool) {
 fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
     parse_declarations_inner(source,maximum,true,None).expect("unmetered declarations")
 }
-fn parse_declarations_inner(source:&str,maximum:usize,validate_transform:bool,
+fn parse_declarations_inner(source:&str,maximum:usize,validate_values:bool,
     mut transform_meter:Option<&mut CssBudget<'_>>)->Result<Vec<Declaration>,String> {
     let source = without_comments(source);
     let mut declarations = Vec::new();
     for item in declaration_items(&source) {
         if let Some((name, value)) = item.split_once(':') {
-            let raw_name = name.trim();
+            let raw_name = if name.trim().eq_ignore_ascii_case("animation-timing-function") { easing_trim(name) } else { name.trim() };
             if raw_name.len() > 64 { continue; }
             let name = if raw_name.starts_with("--") { raw_name.to_owned() } else { raw_name.to_ascii_lowercase() };
-            let (value, important) = declaration_priority(value);
+            let (value, important) = if name == "animation-timing-function" { easing_priority(value) } else { declaration_priority(value) };
             let custom = name.starts_with("--");
             if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && (!value.is_empty() || custom)
                 && (!custom || custom_properties::custom_name(&name))
                 && (name != "position" || position::valid_declaration(value))
                 && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
-                if name == "transform" && validate_transform {
+                if name == "transform" && validate_values {
                     if let Some(meter) = transform_meter.as_deref_mut() {
                         meter.source(name.len().saturating_add(value.len()))?;
                     }
                     if !translate::valid_declaration(value) {continue;}
+                }
+                if name == "opacity" && validate_values {
+                    if let Some(meter) = transform_meter.as_deref_mut() {
+                        meter.source(name.len().saturating_add(value.len()))?;
+                    }
+                    if !opacity::valid_declaration(value) { continue; }
                 }
                 declarations.push(Declaration {
                     name,
@@ -3122,7 +3349,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             } else if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
                 style.background = None;
                 style.background_current_color = false;
-            } else if let Some(color) = color(&value) {
+            } else if let Some(color) = opaque_background_color(&value) {
                 style.background = Some(color);
                 style.background_current_color = false;
             }
@@ -3189,7 +3416,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 } else if value == "currentcolor" {
                     Some(Some(style.color))
                 } else {
-                    color(&value).map(Some)
+                    opaque_background_color(&value).map(Some)
                 };
                 if let Some(background) = background {
                     style.background = background;
@@ -3419,22 +3646,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "gap" => {
-            let values: Option<Vec<_>> = value
-                .split_ascii_whitespace()
-                .take(3)
-                .map(|part| {
-                    if part == "normal" {
-                        Some(Length::Px(0.0))
-                    } else {
-                        parse_length(part, false, false)
-                    }
-                })
-                .collect();
-            match values.as_deref() {
-                Some([row]) => style.gap = [*row, *row],
-                Some([row, column]) => style.gap = [*row, *column],
-                _ => {}
-            }
+            if let Some(gap) = gap_values(&value) { style.gap = gap; }
         }
         "row-gap" | "column-gap" => {
             if let Some(value) = if value == "normal" {
@@ -3603,6 +3815,118 @@ fn border_color_value(value:&str)->Option<(Option<u32>,u8)> {
     color(value).map(|rgb|(Some(rgb),255))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ParsedColor {
+    Solid(u32),
+    CurrentColor,
+}
+
+/// A solid color stores straight sRGB as 0xAARRGGBB. The caller resolves
+/// currentColor against the element when the color is assigned.
+pub(crate) fn parse_solid_color(value: &str) -> Option<ParsedColor> {
+    if value.len() > 2048 || !value.is_ascii() {
+        return None;
+    }
+    let value = value.trim_matches(color_whitespace).to_ascii_lowercase();
+    if value == "currentcolor" {
+        return Some(ParsedColor::CurrentColor);
+    }
+    if value == "transparent" {
+        return Some(ParsedColor::Solid(0));
+    }
+    if let Some(hex) = value.strip_prefix('#') {
+        if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        let number = u32::from_str_radix(hex, 16).ok()?;
+        let expand = |number: u32| {
+            ((number >> 8) & 15) * 0x110000
+                + ((number >> 4) & 15) * 0x1100
+                + (number & 15) * 0x11
+        };
+        let (rgb, alpha) = match hex.len() {
+            3 => (expand(number), 255),
+            4 => (expand(number >> 4), (number & 15) * 17),
+            6 => (number, 255),
+            8 => (number >> 8, number & 255),
+            _ => return None,
+        };
+        return Some(ParsedColor::Solid((alpha << 24) | rgb));
+    }
+    if let Some((rgb, alpha)) = functional_rgb(&value) {
+        return Some(ParsedColor::Solid(((alpha.round() as u32) << 24) | rgb));
+    }
+    named_color(&value).map(|rgb| ParsedColor::Solid(0xff00_0000 | rgb))
+}
+
+fn color_whitespace(ch: char) -> bool {
+    matches!(ch, ' ' | '\t' | '\n' | '\r' | '\x0c')
+}
+
+fn opaque_background_color(value: &str) -> Option<u32> {
+    if value.starts_with("rgb(") || value.starts_with("rgba(") {
+        let (rgb, alpha) = functional_rgb(value)?;
+        return (alpha == 255.0).then_some(rgb);
+    }
+    color(value)
+}
+
+// Keep alpha unrounded on the 0–255 scale. Canvas stores it in an 8-bit
+// channel; an opaque-only background must recognize partial alpha first.
+fn functional_rgb(value: &str) -> Option<(u32, f64)> {
+    if value.len() > 2048 {
+        return None;
+    }
+    let body = value.strip_prefix("rgb(")
+        .or_else(|| value.strip_prefix("rgba("))?
+        .strip_suffix(')')?;
+    let (channels, alpha, legacy) = if body.contains(',') {
+        if body.contains('/') {
+            return None;
+        }
+        let mut fields = body.split(',').map(|part| part.trim_matches(color_whitespace));
+        let channels = [fields.next()?, fields.next()?, fields.next()?];
+        let alpha = fields.next();
+        if fields.next().is_some() {
+            return None;
+        }
+        (channels, alpha, true)
+    } else {
+        let mut sections = body.split('/');
+        let mut fields = sections
+            .next()?
+            .split(color_whitespace)
+            .filter(|part| !part.is_empty());
+        let channels = [fields.next()?, fields.next()?, fields.next()?];
+        let alpha = sections.next().map(|part| part.trim_matches(color_whitespace));
+        if fields.next().is_some() || sections.next().is_some() {
+            return None;
+        }
+        (channels, alpha, false)
+    };
+    // Legacy comma syntax requires all three channels to use the same unit.
+    if legacy && channels.iter().any(|part| part.ends_with('%') != channels[0].ends_with('%')) {
+        return None;
+    }
+    let mut rgb = 0;
+    for (channel, shift) in channels.into_iter().zip([16, 8, 0]) {
+        let number = if let Some(percent) = channel.strip_suffix('%') {
+            rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0
+        } else {
+            rgba_number(channel)?.clamp(0.0, 255.0)
+        };
+        rgb |= (number.round() as u32) << shift;
+    }
+    let alpha = match alpha {
+        None => 255.0,
+        Some(alpha) => match alpha.strip_suffix('%') {
+            Some(percent) => rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0,
+            None => rgba_number(alpha)?.clamp(0.0, 1.0) * 255.0,
+        },
+    };
+    Some((rgb, alpha))
+}
+
 fn parse_border(value:&str)->Option<(Length,bool,Option<u32>,u8)> {
     let mut width = Length::Px(3.0);
     let mut solid = false;
@@ -3661,6 +3985,10 @@ fn color(value: &str) -> Option<u32> {
         }
         return None;
     }
+    named_color(value)
+}
+
+fn named_color(value: &str) -> Option<u32> {
     Some(match value {
         "black" => 0x000000,
         "silver" => 0xc0c0c0,
@@ -3716,6 +4044,46 @@ mod background_tests {
         assert_eq!(style.background_repeat, [true, true]);
         assert_eq!(style.background_position, [ObjectPosition::START; 2]);
         assert_eq!(style.background_size, BackgroundSize::Auto);
+    }
+
+    #[test]
+    fn opaque_functional_background_checks_opacity_before_byte_rounding() {
+        for value in [
+            "rgba(12,34,56,.999)", "rgb(12 34 56 / 99.9%)", "rgba(12,34,56,0)",
+            "rgb(12,,34,56)", "rgba(12,34%,56,1)", "rgb(12 34 56 / 1.)",
+        ] {
+            assert_eq!(opaque_background_color(value), None, "{value}");
+        }
+        assert_eq!(opaque_background_color(&format!("rgba(12,34,56,{}1)", " ".repeat(2048))), None);
+        assert_eq!(opaque_background_color("rgba(12,34,56)"), Some(0x0c2238));
+        assert_eq!(opaque_background_color("rgb(12 34 56 / 120%)"), Some(0x0c2238));
+        assert_eq!(parse_solid_color("rgba(12,34,56,.999)"), Some(ParsedColor::Solid(0xff0c2238)));
+    }
+
+    #[test]
+    fn opaque_functional_background_variable_and_shorthand_share_cascade_rules() {
+        let doc = crate::html::parse(r#"<style>
+            .base{--paint:rgba(24,68,101,1);background-image:url(Tile.ppm);background-clip:content-box}
+            #long{background-color:var(--paint)}#short{background:var(--paint)}
+            #sheet{background:rgba(24,68,101,1)}#partial{background:rgba(24,68,101,.999)}
+            </style><div class=base id=long></div><div class=base id=short></div>
+            <div class=base id=sheet style='background-clip:revert-layer'></div>
+            <div class=base id=partial style='background-clip:revert-layer'></div>"#);
+        let styles = compute(&doc, &HashMap::new());
+        let long = &styles[node(&doc, "long")];
+        assert_eq!(long.background, Some(0x184465));
+        assert_eq!(long.background_image.as_ref().unwrap().url, "Tile.ppm");
+        assert_eq!(long.background_clip, Some(BackgroundClip::ContentBox));
+        for id in ["short", "sheet"] {
+            let style = &styles[node(&doc, id)];
+            assert_eq!(style.background, Some(0x184465), "{id}");
+            assert_eq!(style.background_clip, Some(BackgroundClip::BorderBox), "{id}");
+            assert_initial(style);
+        }
+        let partial = &styles[node(&doc, "partial")];
+        assert_eq!(partial.background, None);
+        assert_eq!(partial.background_image, long.background_image);
+        assert_eq!(partial.background_clip, Some(BackgroundClip::ContentBox));
     }
 
     #[test]
@@ -4562,10 +4930,10 @@ mod tests {
             "[type~=]",
             "[type~ =checkbox]",
             "[type~==checkbox]",
-            "[type|=checkbox]",
-            "[type^=check]",
-            "[type$=box]",
-            "[type*=check]",
+            "[type| =checkbox]",
+            "[type^==check]",
+            "[type$=]",
+            "[type**=check]",
             "[ns|type]",
             "[*|type]",
             "[type=]",
@@ -4768,3 +5136,7 @@ mod position_tests;
 #[cfg(test)]
 #[path="css_translate_tests.rs"]
 mod translate_tests;
+
+#[cfg(test)]
+#[path="css_attribute_substring_tests.rs"]
+mod attribute_substring_tests;

@@ -564,8 +564,19 @@ impl Runtime {
     }
 
     fn json_quote(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
+        self.json_quote_chars(output, text.chars().map(Ok))
+    }
+
+    fn json_quote_chars(&mut self, output: &mut String, chars: impl Iterator<Item=Result<char, std::char::DecodeUtf16Error>>) -> Result<(), Fault> {
         self.append_string(output, "\"")?;
-        for ch in text.chars() {
+        for character in chars {
+            let ch = match character {
+                Ok(ch) => ch,
+                Err(error) => {
+                    self.append_string(output, &format!("\\u{:04x}", error.unpaired_surrogate()))?;
+                    continue;
+                }
+            };
             let escaped = match ch {
                 '"' => Some("\\\""),
                 '\\' => Some("\\\\"),
@@ -619,6 +630,7 @@ impl Runtime {
                 self.append_string(output, &text)
             }
             Value::String(value) => self.json_quote(output, &value),
+            Value::StringUnits(units) => self.json_quote_chars(output, char::decode_utf16(units)),
             Value::Host(_) => Err(Fault::new(
                 "JSON serialization of host objects is not implemented.",
             )),
@@ -715,6 +727,7 @@ impl Runtime {
             let value = self.get_property_with_host(*id, &index.to_string(), host)?;
             let key = match value {
                 Value::String(text) => Some(text),
+                Value::StringUnits(_) => return Err(Fault::new("JSON property keys containing unpaired UTF-16 surrogates are not implemented.")),
                 Value::Number(number) => Some(number_text(number)),
                 value
                     if matches!(
@@ -791,6 +804,7 @@ impl Runtime {
             } else {
                 value.clamp(0.0, 10.0) as usize
             }),
+            Some(Value::StringUnits(_)) => return Err(Fault::new("JSON indentation containing unpaired UTF-16 surrogates is not implemented.")),
             Some(Value::String(value)) => {
                 let mut units = 0;
                 let mut gap = String::new();

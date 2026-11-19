@@ -41,6 +41,12 @@ pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
         || name == "noscript" && scripting
 }
 
+// Script and HTML iframe elements have an identity in the embedding document
+// even when their contents are excluded from ordinary element queries.
+pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) -> bool {
+    name == "script" || name == "iframe" && namespace == crate::html::Namespace::Html
+}
+
 fn common_node_property(name: &str) -> bool {
     matches!(
         name,
@@ -105,8 +111,10 @@ impl State {
             connected[node] = true;
             tree.parents[node] = parent;
             let name = tag(doc, node);
-            let inert = inert || name != "script" && inert_dom_tag(name, doc.scripting_enabled);
-            if !inert {
+            let inert_children = inert_dom_tag(name, doc.scripting_enabled);
+            // The embedding element belongs to this document. Indexing it
+            // leaves its fallback subtree inert and never creates a child window.
+            if !inert && (!inert_children || exposes_inert_host(name, doc.nodes[node].namespace)) {
                 tree.active[node] = true;
                 tree.order.push(node);
                 if name == "body" && tree.body.is_none() {
@@ -134,7 +142,7 @@ impl State {
                     .children
                     .iter()
                     .rev()
-                    .map(|&child| (child, Some(node), inert || name == "script")),
+                    .map(|&child| (child, Some(node), inert || inert_children)),
             );
         }
         // Saved handles and static NodeLists retain detached ordinary subtrees,
@@ -167,6 +175,19 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    // Document parsing can retain markup-shaped iframe fallback instead of
+    // the single raw Text node required by HTML. Those arena entries have no
+    // public child identity. Empty iframes have a known, ordinary child list.
+    pub(super) fn check_iframe_child_topology(&self, node: usize) -> Result<(), String> {
+        let item = self.doc.nodes.get(node).ok_or("Invalid child topology owner.")?;
+        if !item.children.is_empty() && item.namespace == crate::html::Namespace::Html
+            && matches!(&item.kind, NodeKind::Element { tag, .. } if tag == "iframe")
+        {
+            return Err("Iframe fallback child topology requires raw-text document parsing.".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn comment_receiver(&self, object:u32)->bool {
         node_index(object).is_some_and(|node|self.dom_accessible(node)
             && matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)))
@@ -278,12 +299,12 @@ impl Bridge<'_> {
                 || self.state.detached_nodes.contains(&node)
                 || self.state.detached_images.contains(&node)
                 || self.state.dom.created.contains(&node) { return true; }
-        // A script raw-text child is a retained Text node, not executable
-        // markup. Exposing that identity never marks its subtree query-active
-        // or changes the guarded script insertion/content mutation policies.
+        // A raw-text child retains its Text identity when the sheet or script
+        // connects. Its containing resource still owns all content mutations.
         if matches!(self.doc.nodes[node].kind, NodeKind::Text(_))
             && self.state.dom.connected.get(node)==Some(&true)
-            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent| tag(self.doc,parent)=="script") {
+            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
+                tag(self.doc,parent)=="script" || self.created_html_style(parent)) {
             return true;
         }
         if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }
@@ -295,8 +316,10 @@ impl Bridge<'_> {
         for _ in 0..self.doc.nodes.len() {
             if current == 0 { return true; }
             let name = tag(self.doc, current);
-            if name == "script" && current != node
-                || name != "script" && inert_dom_tag(name, self.doc.scripting_enabled) { return false; }
+            if inert_dom_tag(name, self.doc.scripting_enabled)
+                && (current != node || !exposes_inert_host(name, self.doc.nodes[current].namespace)) {
+                return false;
+            }
             let Some(parent) = self.state.tree.parents.get(current).copied().flatten() else { return false; };
             let Some(parent_node) = self.doc.nodes.get(parent) else { return false; };
             if !parent_node.children.contains(&current) { return false; }
@@ -316,13 +339,14 @@ impl Bridge<'_> {
         tag(self.doc, node) == "link" && self.state.dom.created.contains(&node)
     }
 
-    /// Created, detached STYLE metadata only. Parsed/admitted styles and
-    /// stylesheet insertion/content retain their existing separate guards.
-    pub(super) fn style_type_receiver(&self,object:u32)->bool {
-        node_index(object).is_some_and(|node|self.state.dom.created.contains(&node)
-            && self.state.dom.connected.get(node)==Some(&false)
-            && self.doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html
-                && matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")))
+    pub(super) fn created_html_style(&self, node: usize) -> bool {
+        self.state.dom.created.contains(&node) && self.doc.nodes.get(node).is_some_and(|entry|
+            entry.namespace == crate::html::Namespace::Html
+                && matches!(&entry.kind, NodeKind::Element { tag, .. } if tag == "style"))
+    }
+
+    pub(super) fn style_text_attribute(&self, object: u32, property: &str) -> bool {
+        matches!(property, "type" | "media") && node_index(object).is_some_and(|node|self.created_html_style(node))
     }
 
     pub(super) fn dom_script(&self, node: usize) -> bool {
@@ -511,7 +535,7 @@ impl Bridge<'_> {
         };
         let node = self.dom_node(node_handle(node))?;
         if self.anchor_url_property(node, property) { return Ok(Some(true)); }
-        if property=="type"&&self.style_type_receiver(object){return Ok(Some(true));}
+        if self.style_text_attribute(object, property) { return Ok(Some(true)); }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {
@@ -603,9 +627,9 @@ impl Bridge<'_> {
         }
         let node = self.dom_node(object)?;
         if self.anchor_url_property(node, property) { return self.anchor_url_get(node, property).map(Some); }
-        if property=="type"&&self.style_type_receiver(object){
-            let raw=self.doc.attr(node,"type").unwrap_or("");
-            if raw.len()>self.state.limits.host.string_bytes{return Err("Style type result exceeds the configured string allowance.".into());}
+        if self.style_text_attribute(object, property) {
+            let raw=self.doc.attr(node,property).unwrap_or("");
+            if raw.len()>self.state.limits.host.string_bytes{return Err("Style attribute exceeds the configured string allowance.".into());}
             self.state.copies(raw.len())?;return Ok(Some(Value::String(raw.to_owned())));
         }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.image_source(node).map(Some);}
@@ -689,6 +713,7 @@ impl Bridge<'_> {
                 "parentNode" => return self.element_parent(node, true).map(Some),
                 "parentElement" => return self.element_parent(node, false).map(Some),
                 "firstChild" | "lastChild" => {
+                    self.check_iframe_child_topology(node)?;
                     self.state.work(self.doc.nodes[node].children.len())?;
                     let children = &self.doc.nodes[node].children;
                     let child = if property == "firstChild" {
@@ -752,9 +777,10 @@ impl Bridge<'_> {
             let nonce = self.doc.attr(node, "nonce").unwrap_or("").to_owned();
             return self.string(&nonce).map(Some);
         }
-        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent") {
+        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent")
+            || self.created_html_style(node) && property == "textContent" {
             return self
-                .dom_script_text(node)
+                .raw_child_text(node)
                 .map(|text| Some(Value::String(text)));
         }
         if self.dom_script(node) {
@@ -855,6 +881,10 @@ impl Bridge<'_> {
     /// Only innerHTML opts in to traversal of an old bare LINK. Its separate
     /// precommit stylesheet-state check must pass before children are replaced.
     pub(super) fn mutation_subtree_for_fragment(&mut self, root: usize, bare_links: bool) -> Result<(Vec<usize>, usize), String> {
+        self.checked_mutation_subtree(root, bare_links, false)
+    }
+
+    fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
         let mut depth = 0;
@@ -883,7 +913,6 @@ impl Bridge<'_> {
                         | "form"
                         | "fieldset"
                         | "legend"
-                        | "style"
                         | "title"
                         | "object"
                         | "embed"
@@ -892,6 +921,7 @@ impl Bridge<'_> {
                         | "template"
                         | "video" | "audio" | "source"
                 )
+                || name == "style" && !(direct_style && root == node && self.created_html_style(node))
                 || matches!(name, "option" | "optgroup") && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
@@ -1111,7 +1141,22 @@ impl Bridge<'_> {
         if let Some(old_parent) = old_parent {
             self.mutation_ancestors(old_parent)?;
         }
-        let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
+        let direct_style = self.created_html_style(child);
+        if direct_style {
+            // Other entry points separately validate fragment splices, native
+            // resources and namespaces. Never admit one through this path.
+            let mut current = Some(parent);
+            while let Some(node) = current.filter(|&n| n != 0) {
+                self.state.work(1)?;
+                let name = tag(self.doc, node);
+                if self.doc.nodes[node].namespace != crate::html::Namespace::Html
+                    || crate::html::is_void(name) || inert_dom_tag(name, self.doc.scripting_enabled) {
+                    return Err("Inline stylesheet connection requires an ordinary HTML parent.".into());
+                }
+                current = self.state.tree.parents[node];
+            }
+        }
+        let (descendants, depth) = self.checked_mutation_subtree(child, false, direct_style).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
         self.validate_button_children(parent,&descendants)?;
@@ -1138,6 +1183,7 @@ impl Bridge<'_> {
         )?;
         let was_connected = self.state.dom.connected[child];
         let connected = method != "removeChild" && self.state.dom.connected[parent];
+        let sheet = if direct_style { Some(self.prepare_inline_sheet(child, connected)?) } else { None };
         let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
@@ -1174,6 +1220,7 @@ impl Bridge<'_> {
             }
         }
         form_plan.commit(self.forms);
+        if let Some(sheet) = sheet { self.commit_inline_sheet(child, sheet); }
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();
@@ -1199,15 +1246,16 @@ impl Bridge<'_> {
         Ok(Value::Host(node_handle(child)))
     }
 
-    fn dom_script_text(&mut self, node: usize) -> Result<String, String> {
+    fn raw_child_text(&mut self, node: usize) -> Result<String, String> {
         let mut text = String::new();
         for &child in &self.doc.nodes[node].children {
             self.state.work(1)?;
             if let NodeKind::Text(value) = &self.doc.nodes[child].kind {
                 if text.len().saturating_add(value.len()) > self.state.limits.host.string_bytes {
-                    return Err("Script text exceeds 32 KiB.".into());
+                    return Err("Raw element text exceeds the configured string allowance.".into());
                 }
                 self.state.copies(value.len())?;
+                text.try_reserve(value.len()).map_err(|_| "Raw element text reservation failed.")?;
                 text.push_str(value);
             }
         }
