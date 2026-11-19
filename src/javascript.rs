@@ -4149,6 +4149,20 @@ impl Runtime {
             && self.function_realms.get(*id).copied().flatten() == self.active_realm)
     }
 
+    fn invoke_plain_call(
+        &mut self,
+        function: Value,
+        arguments: &[Value],
+        direct: Option<(usize, &Value)>,
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        if let Some(scope) = direct.filter(|_| self.is_eval(&function)) {
+            self.string_eval(arguments.first().unwrap_or(&Value::Undefined), Some(scope), host)
+        } else {
+            self.call_value(function, arguments, Value::Undefined, host)
+        }
+    }
+
     fn global_this(&mut self) -> Result<Value, Fault> {
         if let Some((handle, _)) = self.browser_global {
             Ok(Value::Host(handle))
@@ -7683,17 +7697,8 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         let function = self.eval(program, callee, env, this, host)?;
         let args = self.eval_argument_list(program, arguments, env, this, host)?;
-        if matches!(&program.exprs[callee].kind, ExprKind::Name(name) if name == "eval")
-            && self.is_eval(&function)
-        {
-            self.string_eval(
-                args.first().unwrap_or(&Value::Undefined),
-                Some((env, this)),
-                host,
-            )
-        } else {
-            self.call_value(function, &args, Value::Undefined, host)
-        }
+        let direct = matches!(&program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
+        self.invoke_plain_call(function, &args, direct.then_some((env, this)), host)
     }
 
     // Resolve the receiver/key/callee completely before descending into the
@@ -11684,6 +11689,25 @@ caught;
                 .to_text(),
             "5"
         );
+    }
+
+    #[test]
+    fn await_execution_direct_eval_keeps_the_resumed_scope_and_csp_check() {
+        for allowed in [false, true] {
+            let (mut runtime, mut host) = test_runtime();
+            host.eval_permission = Some(allowed);
+            runtime.execute(r#"
+async function work() {
+    let token = 'local';
+    try { return eval(await Promise.resolve('token')); }
+    catch (error) { return error.name; }
+}
+work().then(function(value) { test.record(value); });
+"#, &mut host).unwrap();
+            assert!(host.records.is_empty());
+            assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+            assert_eq!(host.records, [if allowed { "local" } else { "EvalError" }]);
+        }
     }
 
     #[test]

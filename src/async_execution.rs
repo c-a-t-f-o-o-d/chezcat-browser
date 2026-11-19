@@ -12,6 +12,17 @@ struct Catch {
     environments: usize,
 }
 
+struct PendingAwait {
+    statement: StmtId,
+    action: Resume,
+    call: Option<PendingCall>,
+}
+
+struct PendingCall {
+    function: Value,
+    direct_eval: bool,
+}
+
 pub(super) struct Activation {
     program: Rc<Program>,
     template: usize,
@@ -25,7 +36,7 @@ pub(super) struct Activation {
     next: usize,
     environments: Vec<usize>,
     catches: Vec<Catch>,
-    pending: Option<(StmtId, Resume)>,
+    pending: Option<PendingAwait>,
 }
 
 impl Activation {
@@ -36,6 +47,7 @@ impl Activation {
     pub(super) fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
+            .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(
                 self.environments
                     .capacity()
@@ -54,13 +66,16 @@ impl Activation {
         self.environments
             .len()
             .saturating_add(self.catches.len())
-            .saturating_add(5)
+            .saturating_add(5 + usize::from(self.pending_call().is_some()))
     }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
         add(Edge::Function(self.callee));
         add(Edge::Object(self.outer));
         Edge::value(&self.this, add);
+        if let Some(call) = self.pending_call() {
+            Edge::value(&call.function, add);
+        }
         if let Some(context) = self.invocation {
             add(Edge::Environment(context.environment));
         }
@@ -81,6 +96,10 @@ impl Activation {
             .last()
             .copied()
             .ok_or_else(|| Fault::new("Missing async lexical environment."))
+    }
+
+    fn pending_call(&self) -> Option<&PendingCall> {
+        self.pending.as_ref().and_then(|pending| pending.call.as_ref())
     }
 }
 
@@ -280,7 +299,7 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let (statement, action) = frame
+                let PendingAwait { statement, action, call } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -288,7 +307,17 @@ impl Runtime {
                     self.work(value.bytes())?;
                     Err(Fault::thrown(value))
                 } else {
-                    self.await_resume_action(frame, action, value, host)
+                    (|| {
+                        let value = if let Some(call) = call {
+                            let direct = call.direct_eval.then_some((frame.environment()?, &frame.this));
+                            let result = self.invoke_plain_call(call.function, &[value], direct, host)?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        self.await_resume_action(frame, action, value, host)
+                    })()
                 };
                 return result.map_err(|error| {
                     error.at(&frame.program.source, frame.program.stmts[statement].at)
@@ -390,14 +419,27 @@ impl Runtime {
                 Instruction::Await {
                     statement,
                     operand,
+                    callee,
                     action,
                 } => {
                     let result = (|| {
+                        let call = if let Some(callee) = callee {
+                            let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
+                            self.push_transient_value(&function)?;
+                            self.await_storage(
+                                frame.retained_bytes().saturating_add(function.bytes()),
+                                function.bytes(),
+                            )?;
+                            let direct_eval = matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
+                            Some(PendingCall { function, direct_eval })
+                        } else {
+                            None
+                        };
                         let value =
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some((statement, action));
+                        frame.pending = Some(PendingAwait { statement, action, call });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -549,11 +591,15 @@ mod tests {
                 after: 2,
                 environments: 1,
             }],
-            pending: Some((0, Resume::Discard)),
+            pending: Some(PendingAwait {
+                statement: 0,
+                action: Resume::Discard,
+                call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
+            }),
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13] {
+        for function in [11, 13, 17] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
