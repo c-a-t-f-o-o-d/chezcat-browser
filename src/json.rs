@@ -5,7 +5,7 @@
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
-    Runtime, Value, MAX_PARSE_DEPTH,
+    Runtime, Value,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
@@ -31,6 +31,38 @@ struct ParseFrame {
     next: usize,
     entry: bool,
     allow_end: bool,
+}
+
+fn reserve_json_frames<T>(
+    frames: &mut Vec<T>,
+    additional: usize,
+    budget: usize,
+    other_bytes: usize,
+    operation: &str,
+) -> Result<(), Fault> {
+    let required = frames.len().saturating_add(additional);
+    if required <= frames.capacity() {
+        return Ok(());
+    }
+    let max_frames = budget.saturating_sub(other_bytes) / size_of::<T>();
+    let exhausted = || Fault::new(format!("JSON {operation} scratch limit reached ({budget} bytes)."));
+    if required > max_frames {
+        return Err(exhausted());
+    }
+    let target = required.max(frames.capacity().saturating_mul(2).min(max_frames));
+    frames.try_reserve_exact(target - frames.len()).map_err(|_| {
+        Fault::new(format!("Unable to allocate JSON {operation} frames."))
+    })?;
+    if frames.capacity() > max_frames {
+        return Err(exhausted());
+    }
+    Ok(())
+}
+
+fn key_storage(keys: &Vec<String>) -> usize {
+    keys.iter().fold(keys.capacity() * size_of::<String>(), |bytes, key| {
+        bytes.saturating_add(key.capacity())
+    })
 }
 
 impl Reader<'_> {
@@ -61,7 +93,8 @@ impl Reader<'_> {
             .snapshot_bytes
             .saturating_sub(old)
             .saturating_add(bytes);
-        if retained > runtime.limits.heap.retained_values.saturating_sub(frame_bytes) {
+        let scratch = frame_bytes.saturating_add(runtime.json_scratch_bytes);
+        if retained > runtime.limits.heap.retained_values.saturating_sub(scratch) {
             return Err(Fault::new(format!("JSON reviver snapshot limit reached ({} bytes).", runtime.limits.heap.retained_values)));
         }
         runtime.work(bytes)?;
@@ -335,23 +368,13 @@ impl Reader<'_> {
         frames: &mut Vec<ParseFrame>,
         additional: usize,
     ) -> Result<(), Fault> {
-        let required = frames.len() + additional;
-        if required <= frames.capacity() {
-            return Ok(());
-        }
-        let budget = runtime.limits.heap.retained_values;
-        let max_frames = budget.saturating_sub(self.snapshot_bytes) / size_of::<ParseFrame>();
-        if required > max_frames {
-            return Err(Fault::new(format!("JSON parse scratch limit reached ({budget} bytes).")));
-        }
-        let target = required.max(frames.capacity().saturating_mul(2).min(max_frames));
-        frames.try_reserve_exact(target - frames.len()).map_err(|_| {
-            Fault::new("Unable to allocate JSON parse frames.")
-        })?;
-        if frames.capacity() > max_frames {
-            return Err(Fault::new(format!("JSON parse scratch limit reached ({budget} bytes).")));
-        }
-        Ok(())
+        reserve_json_frames(
+            frames,
+            additional,
+            runtime.limits.heap.retained_values,
+            runtime.json_scratch_bytes.saturating_add(self.snapshot_bytes),
+            "parse",
+        )
     }
 }
 
@@ -365,6 +388,14 @@ struct WriteFrame {
     id: usize,
     entries: Entries,
     wrote: bool,
+    scratch_bytes: usize,
+}
+
+#[derive(Default)]
+struct Writer {
+    output: String,
+    frames: Vec<WriteFrame>,
+    ancestors: BTreeSet<usize>,
 }
 
 struct ReviveFrame {
@@ -374,6 +405,7 @@ struct ReviveFrame {
     context: usize,
     entries: Option<Entries>,
     snapshot_matches: bool,
+    scratch_bytes: usize,
 }
 
 fn json_same_value(left: &Value, right: &Value) -> bool {
@@ -386,14 +418,14 @@ fn json_same_value(left: &Value, right: &Value) -> bool {
 }
 
 impl Runtime {
-    fn json_depth(&self, depth: usize) -> Result<(), Fault> {
-        if self.eval_depth.saturating_add(depth) > MAX_PARSE_DEPTH {
-            Err(Fault::new(
-                "JSON combined evaluation/nesting limit reached (64).",
-            ))
-        } else {
-            Ok(())
+    fn charge_json_scratch(&mut self, bytes: usize, operation: &str) -> Result<(), Fault> {
+        let budget = self.limits.heap.retained_values;
+        let total = self.json_scratch_bytes.saturating_add(bytes);
+        if total > budget {
+            return Err(Fault::new(format!("JSON {operation} scratch limit reached ({budget} bytes).")));
         }
+        self.json_scratch_bytes = total;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -405,14 +437,14 @@ impl Runtime {
         self.work(value.bytes())?;
         let source = value.script_text()?;
         self.json_parse_source(&source, false)
-            .map(|(value, _)| value)
+            .map(|(value, _, _)| value)
     }
 
     fn json_parse_source(
         &mut self,
         source: &str,
         capture: bool,
-    ) -> Result<(Value, Snapshots), Fault> {
+    ) -> Result<(Value, Snapshots, usize), Fault> {
         let max_source = self.limits.capacity.string_bytes;
         if source.len() > max_source {
             return Err(Fault::new(format!("JSON source limit reached ({max_source} bytes).")));
@@ -433,10 +465,21 @@ impl Runtime {
             self.properties = checkpoint.1;
             self.value_bytes = checkpoint.2;
         }
-        result.map(|value| (value, reader.snapshots.unwrap_or_default()))
+        result.map(|value| (value, reader.snapshots.unwrap_or_default(), reader.snapshot_bytes))
     }
 
     pub(super) fn json_parse_builtin(
+        &mut self,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let outer_scratch = self.json_scratch_bytes;
+        let result = self.json_parse_builtin_value(args, host);
+        self.json_scratch_bytes = outer_scratch;
+        result
+    }
+
+    fn json_parse_builtin_value(
         &mut self,
         args: &[Value],
         host: &mut dyn Host,
@@ -448,10 +491,11 @@ impl Runtime {
         let callback = args
             .get(1)
             .filter(|value| matches!(value, Value::Function(_)));
-        let (root, snapshots) = self.json_parse_source(&source, callback.is_some())?;
+        let (root, snapshots, snapshot_bytes) = self.json_parse_source(&source, callback.is_some())?;
         let Some(callback) = callback else {
             return Ok(root);
         };
+        self.charge_json_scratch(snapshot_bytes, "reviver")?;
         let holder = self.new_object(None)?;
         self.store_property(holder, "".into(), root, Some((true, true, true)))?;
         let first = self.json_revive_frame(
@@ -461,7 +505,8 @@ impl Runtime {
             &source,
             host,
         )?;
-        let mut frames = vec![first];
+        let mut frames = Vec::new();
+        self.json_push_revive_frame(&mut frames, first)?;
         loop {
             self.step()?;
             let frame = frames.last_mut().unwrap();
@@ -483,9 +528,8 @@ impl Runtime {
                 } else {
                     None
                 };
-                self.json_depth(frames.len() + 1)?;
                 let child = self.json_revive_frame(holder, key, snapshot, &source, host)?;
-                frames.push(child);
+                self.json_push_revive_frame(&mut frames, child)?;
                 continue;
             }
             let frame = frames.pop().unwrap();
@@ -500,7 +544,24 @@ impl Runtime {
                 return Ok(result);
             }
             self.json_revive_property(&frame.holder, frame.key, result, host)?;
+            self.json_scratch_bytes -= frame.scratch_bytes;
         }
+    }
+
+    fn json_push_revive_frame(
+        &mut self,
+        frames: &mut Vec<ReviveFrame>,
+        frame: ReviveFrame,
+    ) -> Result<(), Fault> {
+        self.charge_json_scratch(frame.scratch_bytes, "reviver")?;
+        let previous_frame_bytes = frames.capacity() * size_of::<ReviveFrame>();
+        reserve_json_frames(
+            frames, 1, self.limits.heap.retained_values,
+            self.json_scratch_bytes - previous_frame_bytes, "reviver",
+        )?;
+        self.json_scratch_bytes += frames.capacity() * size_of::<ReviveFrame>() - previous_frame_bytes;
+        frames.push(frame);
+        Ok(())
     }
 
     fn json_revive_frame(
@@ -532,12 +593,15 @@ impl Runtime {
                 Some((true, true, true)),
             )?;
         }
+        let mut scratch_bytes = key.capacity().saturating_add(value.bytes());
         let entries = if let Some(object) = Ordinary::from_value(&value) {
             let id = self.ordinary_id(object)?;
             Some(if let Some(length) = self.object(id)?.length {
                 Entries::Array { next: 0, length }
             } else {
-                Entries::Object(self.enumerable_keys(id)?.into_iter())
+                let keys = self.enumerable_keys(id)?;
+                scratch_bytes = scratch_bytes.saturating_add(key_storage(&keys));
+                Entries::Object(keys.into_iter())
             })
         } else {
             None
@@ -549,6 +613,7 @@ impl Runtime {
             context,
             entries,
             snapshot_matches,
+            scratch_bytes,
         })
     }
 
@@ -643,11 +708,11 @@ impl Runtime {
     fn json_write_value(
         &mut self,
         value: Value,
-        output: &mut String,
-        frames: &mut Vec<WriteFrame>,
+        writer: &mut Writer,
         listed: bool,
     ) -> Result<(), Fault> {
         self.step()?;
+        let Writer { output, frames, ancestors } = writer;
         match value {
             Value::Null | Value::Undefined | Value::Function(_) | Value::Symbol(_) => {
                 self.append_string(output, "null")
@@ -668,14 +733,15 @@ impl Runtime {
                 "JSON serialization of host objects is not implemented.",
             )),
             Value::Object(id) => {
-                self.json_depth(frames.len() + 1)?;
-                if frames.iter().any(|frame| frame.id == id) {
+                if ancestors.contains(&id) {
                     return Err(Fault::exception(
                         "TypeError",
                         "JSON.stringify cannot serialize a circular object.",
                     ));
                 }
                 let length = self.object(id)?.length;
+                // Account for the ancestor key and its tree bookkeeping.
+                let mut scratch_bytes = 4 * size_of::<usize>();
                 let entries = if let Some(length) = length {
                     Entries::Array { next: 0, length }
                 } else if listed {
@@ -683,13 +749,24 @@ impl Runtime {
                 } else {
                     // JSON visits enumerable string keys only. Symbol-keyed
                     // properties are not read, even when their values cycle.
-                    Entries::Object(self.enumerable_keys(id)?.into_iter())
+                    let keys = self.enumerable_keys(id)?;
+                    scratch_bytes = scratch_bytes.saturating_add(key_storage(&keys));
+                    Entries::Object(keys.into_iter())
                 };
+                self.charge_json_scratch(scratch_bytes, "stringify")?;
+                let previous_frame_bytes = frames.capacity() * size_of::<WriteFrame>();
+                reserve_json_frames(
+                    frames, 1, self.limits.heap.retained_values,
+                    self.json_scratch_bytes - previous_frame_bytes, "stringify",
+                )?;
+                self.json_scratch_bytes += frames.capacity() * size_of::<WriteFrame>() - previous_frame_bytes;
                 self.append_string(output, if length.is_some() { "[" } else { "{" })?;
+                ancestors.insert(id);
                 frames.push(WriteFrame {
                     id,
                     entries,
                     wrote: false,
+                    scratch_bytes,
                 });
                 Ok(())
             }
@@ -755,7 +832,7 @@ impl Runtime {
         };
         let mut keys = Vec::new();
         let mut seen = BTreeSet::new();
-        let mut bytes = 0usize;
+        let outer_scratch = self.json_scratch_bytes;
         for index in 0..length {
             self.step()?;
             let value = self.get_property_with_host(*id, &index.to_string(), host)?;
@@ -786,22 +863,29 @@ impl Runtime {
                     let added = key.len() * 2
                         + 2 * std::mem::size_of::<String>()
                         + 3 * std::mem::size_of::<usize>();
-                    bytes = bytes.saturating_add(added);
-                    if bytes > self.limits.heap.retained_values {
-                        return Err(Fault::new(
-                            format!("JSON property list snapshot limit reached ({} bytes).", self.limits.heap.retained_values),
-                        ));
-                    }
+                    self.charge_json_scratch(added, "property list snapshot")?;
                     self.work(added)?;
                     seen.insert(key.clone());
                     keys.push(key);
                 }
             }
         }
+        self.json_scratch_bytes = outer_scratch;
         Ok(Some(keys))
     }
 
     pub(super) fn json_stringify(
+        &mut self,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let outer_scratch = self.json_scratch_bytes;
+        let result = self.json_stringify_value(args, host);
+        self.json_scratch_bytes = outer_scratch;
+        result
+    }
+
+    fn json_stringify_value(
         &mut self,
         args: &[Value],
         host: &mut dyn Host,
@@ -811,6 +895,9 @@ impl Runtime {
             .get(1)
             .filter(|value| matches!(value, Value::Function(_)));
         let property_list = self.json_property_list(args.get(1), host)?;
+        if let Some(keys) = &property_list {
+            self.charge_json_scratch(key_storage(keys), "stringify")?;
+        }
         let converted_space = match args.get(2) {
             Some(value)
                 if matches!(
@@ -867,10 +954,10 @@ impl Runtime {
         ) {
             return Ok(Value::Undefined);
         }
-        let mut output = String::new();
-        let mut frames = Vec::new();
-        self.json_write_value(value, &mut output, &mut frames, property_list.is_some())?;
-        while let Some(mut frame) = frames.pop() {
+        let mut writer = Writer::default();
+        self.json_write_value(value, &mut writer, property_list.is_some())?;
+        while let Some(mut frame) = writer.frames.pop() {
+            let output = &mut writer.output;
             self.step()?;
             let array = matches!(frame.entries, Entries::Array { .. });
             let key = match &mut frame.entries {
@@ -904,28 +991,30 @@ impl Runtime {
                         Value::Undefined | Value::Function(_) | Value::Symbol(_)
                     )
                 {
-                    frames.push(frame);
+                    writer.frames.push(frame);
                     continue;
                 }
                 if frame.wrote {
-                    self.append_string(&mut output, ",")?;
+                    self.append_string(output, ",")?;
                 }
                 frame.wrote = true;
-                self.json_indent(&mut output, &gap, frames.len() + 1)?;
+                self.json_indent(output, &gap, writer.frames.len() + 1)?;
                 if !array {
-                    self.json_quote(&mut output, &key)?;
-                    self.append_string(&mut output, if gap.is_empty() { ":" } else { ": " })?;
+                    self.json_quote(output, &key)?;
+                    self.append_string(output, if gap.is_empty() { ":" } else { ": " })?;
                 }
-                frames.push(frame);
-                self.json_write_value(value, &mut output, &mut frames, property_list.is_some())?;
+                writer.frames.push(frame);
+                self.json_write_value(value, &mut writer, property_list.is_some())?;
             } else {
                 if frame.wrote {
-                    self.json_indent(&mut output, &gap, frames.len())?;
+                    self.json_indent(output, &gap, writer.frames.len())?;
                 }
-                self.append_string(&mut output, if array { "]" } else { "}" })?;
+                self.append_string(output, if array { "]" } else { "}" })?;
+                writer.ancestors.remove(&frame.id);
+                self.json_scratch_bytes -= frame.scratch_bytes;
             }
         }
-        self.checked_value(Value::String(output))
+        self.checked_value(Value::String(writer.output))
     }
 }
 
@@ -955,6 +1044,26 @@ mod tests {
                 .to_text(),
             "ok"
         );
+    }
+
+    #[test]
+    fn json_callbacks_share_scratch_with_the_caller_and_restore_it_after_failure() {
+        let mut runtime = Runtime::for_test();
+        let occupied = runtime.limits.heap.retained_values - 1;
+        runtime.json_scratch_bytes = occupied;
+        for (source, expected) in [
+            ("JSON.parse('[]');", "JSON parse scratch limit"),
+            ("JSON.stringify([]);", "JSON stringify scratch limit"),
+        ] {
+            let error = runtime.execute(source, &mut NoHost).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(runtime.json_scratch_bytes, occupied);
+            runtime.begin_job();
+        }
+        runtime.json_scratch_bytes = 0;
+        let result = runtime.execute("JSON.stringify(JSON.parse('[1]'));", &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "[1]");
+        assert_eq!(runtime.json_scratch_bytes, 0);
     }
 
     #[test]
