@@ -5,9 +5,10 @@
 //! https://tc39.es/ecma262/multipage/ecmascript-language-expressions.html
 
 use super::{
-    optional_chaining::Step, template_literals::Part, Argument, ExprId, ExprKind, Fault, Parser,
-    TokenKind, MAX_EXPRESSION_FRAMES,
+    compilation_storage_limit, optional_chaining::Step, template_literals::Part,
+    Argument, ExprId, ExprKind, Fault, Parser, TokenKind,
 };
+use std::mem::size_of;
 
 const POWER: u8 = 13;
 
@@ -83,22 +84,6 @@ enum Phase {
     Finish(ExprId),
 }
 
-// Reserve geometrically but do not request capacity beyond an existing limit.
-// No source/token/tree is cloned into a continuation. Allocation failure follows
-// the fatal resource path rather than publishing an incomplete program.
-fn reserve_one<T>(values: &mut Vec<T>, limit: usize) -> Result<(), Fault> {
-    if values.len() >= limit {
-        return Err(Fault::new("Expression scratch storage limit reached."));
-    }
-    if values.len() == values.capacity() {
-        let next = values.capacity().saturating_mul(2).max(4).min(limit);
-        values
-            .try_reserve_exact(next - values.len())
-            .map_err(|_| Fault::new("Expression scratch allocation failed."))?;
-    }
-    Ok(())
-}
-
 impl Parser {
     pub(super) fn continuation_assignment(&mut self) -> Result<ExprId, Fault> {
         self.expression_goal(Goal::expression(1))
@@ -115,23 +100,57 @@ impl Parser {
         // Every normal pop already released its slot. These are precisely this
         // invocation's outstanding slots, not its caller's suspended work.
         self.expression_frames -= pending.len();
+        self.expression_storage_bytes -= pending.capacity() * size_of::<Frame>();
         self.allow_in = previous_in;
         result
     }
 
-    fn trim_expression_frames(&self, pending: &mut Vec<Frame>) -> Result<(), Fault> {
-        // A native helper can reenter this machine. Do not retain an old 4096-
-        // slot high-water allocation in each of 64 otherwise-empty callers.
-        // Geometric contraction bounds suspended capacity by live slots plus a
-        // constant per native entry; moving frames neither clones nor recharges.
+    fn trim_expression_frames(&mut self, pending: &mut Vec<Frame>) {
+        // Release unused capacity before an expression can enter a native
+        // parser helper and suspend this buffer.
         if pending.capacity() > pending.len().saturating_mul(2).max(4) {
-            let mut compact = Vec::new();
-            compact
-                .try_reserve_exact(pending.len())
-                .map_err(|_| Fault::new("Expression scratch allocation failed."))?;
-            compact.append(pending);
-            *pending = compact;
+            let old = pending.capacity();
+            pending.shrink_to(pending.len().max(4));
+            self.expression_storage_bytes -= (old - pending.capacity()) * size_of::<Frame>();
         }
+    }
+
+    pub(super) fn reserve_expression_record<T>(
+        &mut self,
+        values: &mut Vec<T>,
+        entry_limit: Option<usize>,
+    ) -> Result<(), Fault> {
+        if values.len() < values.capacity() {
+            return Ok(());
+        }
+        self.check_compilation_progress()?;
+        let spare = self.capacity.compilation_bytes.saturating_sub(self.compilation_bytes());
+        let old = values.capacity();
+        let available = spare / size_of::<T>();
+        let allowed = entry_limit.map_or(available, |limit| limit.saturating_sub(old));
+        let growth = old.max(4).min(available).min(allowed);
+        let fault = || compilation_storage_limit(self.capacity).at(&self.program.source, self.at());
+        if growth == 0 {
+            return Err(fault());
+        }
+        values.try_reserve_exact(growth).map_err(|_| fault())?;
+        let added = (values.capacity() - old).saturating_mul(size_of::<T>());
+        if added > spare {
+            let error = fault();
+            // The vector owns the allocation even when the allocator returned
+            // more capacity than requested. Its unwind still releases it.
+            self.expression_storage_bytes += added;
+            return Err(error);
+        }
+        self.expression_storage_bytes += added;
+        Ok(())
+    }
+
+    pub(super) fn charge_expression_text(&mut self, bytes: usize) -> Result<(), Fault> {
+        if bytes > self.capacity.compilation_bytes.saturating_sub(self.compilation_bytes()) {
+            return Err(compilation_storage_limit(self.capacity).at(&self.program.source, self.at()));
+        }
+        self.expression_storage_bytes += bytes;
         Ok(())
     }
 
@@ -140,10 +159,16 @@ impl Parser {
         pending: &mut Vec<Frame>,
         frame: Frame,
     ) -> Result<(), Fault> {
-        if self.expression_frames >= MAX_EXPRESSION_FRAMES {
-            return Err(self.unsupported("Pending expression limit reached (4096)."));
+        #[cfg(test)]
+        if let Some(limit) = self.capacity.test_expression_frames {
+            if self.expression_frames >= limit {
+                return Err(self.unsupported(format!("Pending expression limit reached ({limit}).")));
+            }
         }
-        reserve_one(pending, MAX_EXPRESSION_FRAMES)?;
+        if self.expression_frames % 4096 == 0 {
+            self.check_compilation_progress()?;
+        }
+        self.reserve_expression_record(pending, None)?;
         pending.push(frame);
         self.expression_frames += 1;
         Ok(())
@@ -161,9 +186,9 @@ impl Parser {
         // entries, including those already in the AST, bounds aggregate buffers
         // across suspended calls and guarded parser reentry, not only one call.
         if self.argument_entries >= self.capacity.ast_nodes {
-            return Err(self.unsupported("Call argument storage limit reached (131072)."));
+            return Err(self.unsupported(format!("Call argument storage limit reached ({}).", self.capacity.ast_nodes)));
         }
-        reserve_one(args, self.capacity.arguments)?;
+        self.reserve_expression_record(args, Some(self.capacity.arguments))?;
         args.push(argument);
         self.argument_entries += 1;
         Ok(())
@@ -176,11 +201,14 @@ impl Parser {
         at: usize,
     ) -> Result<(), Fault> {
         if owner.chain.is_some() {
-            if owner.steps.len() >= MAX_EXPRESSION_FRAMES {
-                return Err(self.unsupported("Optional-chain step limit reached (4096)."));
+            #[cfg(test)]
+            if let Some(limit) = self.capacity.test_expression_frames {
+                if owner.steps.len() >= limit {
+                    return Err(self.unsupported(format!("Optional-chain step limit reached ({limit}).")));
+                }
             }
             self.check_nodes()?;
-            reserve_one(&mut owner.steps, MAX_EXPRESSION_FRAMES)?;
+            self.reserve_expression_record(&mut owner.steps, None)?;
             self.program.chain_steps += 1;
             owner.steps.push(step);
         } else {
@@ -299,7 +327,7 @@ impl Parser {
         mut context: Context,
         pending: &mut Vec<Frame>,
     ) -> Result<(Context, Phase), Fault> {
-        self.trim_expression_frames(pending)?;
+        self.trim_expression_frames(pending);
         let phase = if context.goal.minimum <= 1 && self.yield_count.is_some() && self.eat("yield") {
             *self.yield_count.as_mut().expect("generator expression context") += 1;
             if self.yield_operand_omitted() {
