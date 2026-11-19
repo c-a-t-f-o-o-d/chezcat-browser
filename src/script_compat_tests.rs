@@ -107,13 +107,18 @@ var thrown=false;try{detachedStyle.type={toString:function(){throw 17;}};}catch(
 document.title='detached-style-type-ok';
 "#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"detached-style-type-ok");assert!(!page.has_host_tasks());assert!(page.take_dynamic_stylesheets().is_empty());
     let style=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let nodes=doc.nodes.len();let commits=page.state.dom_commits;
-    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.innerHTML='body{display:none}';"]{
-        let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,commits);assert!(doc.nodes[style].children.is_empty());assert!(!page.has_host_tasks());
-    }
+    let failed = page.console_eval(&mut doc, &mut forms, "detachedStyle.innerHTML='body{display:none}';");
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    assert_eq!(doc.nodes.len(), nodes);
+    assert_eq!(page.state.dom_commits, commits);
+    assert!(doc.nodes[style].children.is_empty());
+    assert!(!page.has_host_tasks());
     let text = page.console_eval(&mut doc, &mut forms, "detachedStyle.textContent='body{display:none}';if(detachedStyle.isConnected||detachedStyle.firstChild.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'detached style text or type';");
     assert_eq!(text.errors, 0, "{}", page.report());
     assert_eq!(doc.nodes.len(), nodes + 1);
     assert_eq!(doc.nodes[style].children.len(), 1);
+    let connected = page.console_eval(&mut doc, &mut forms, "var text=detachedStyle.firstChild; document.body.appendChild(detachedStyle); if(!detachedStyle.isConnected||text!==detachedStyle.firstChild||text.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'connected style text or type';");
+    assert_eq!(connected.errors, 0, "{}", page.report());
     assert!(!page.has_host_tasks());
 }
 

@@ -205,7 +205,7 @@ impl<'a> CssBudget<'a> {
     // covers both admission and parse passes, token validation and their Vec /
     // String storage; selector matching and variable expansion are charged
     // separately below. Refused complete sources pay for inspection too.
-    pub(super) fn source(&mut self, bytes: usize) -> Result<(), String> {
+    pub(crate) fn source(&mut self, bytes: usize) -> Result<(), String> {
         self.work(bytes.max(1).div_ceil(64).saturating_mul(512))?;
         self.copies(bytes.saturating_mul(64))
     }
