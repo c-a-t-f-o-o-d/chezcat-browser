@@ -337,7 +337,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_accessible(&self, node: usize) -> bool {
-        if node == 0 || node >= self.doc.nodes.len() { return false; }
+        if node == 0 || node >= self.doc.nodes.len() || self.inert_adopted_node(node_handle(node)) {
+            return false;
+        }
         if self.state.tree.active.get(node).copied().unwrap_or(false)
                 || self.state.detached_nodes.contains(&node)
                 || self.state.detached_images.contains(&node)

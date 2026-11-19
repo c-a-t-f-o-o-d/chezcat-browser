@@ -2692,9 +2692,12 @@ impl Host for Bridge<'_> {
     fn mutation_callback_error(&mut self, message: &str) {
         self.state.error("MutationObserver callback", message);
     }
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {
+        if self.inert_adopted_node(object) { return Some(WINDOW); }
+        self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
-        object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
+        self.inert_adopted_node(object) && self.inert_owns_property(object, property)
+            || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
         self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
@@ -3085,7 +3088,7 @@ impl Host for Bridge<'_> {
             return match method { "getPropertyValue" | "removeProperty" => Some(1), "setProperty" => Some(2), _ => None };
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
-        if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some(0);}
+        if method==script_node_root::ROOT_METHOD && self.get_root_receiver(object) {return Some(0);}
         if method == script_clone_node::CLONE_METHOD { return Some(0); }
         if method == script_node_contains::CONTAINS_METHOD { return Some(1); }
         if object==DOCUMENT && method=="createComment" {return Some(1);}
@@ -3188,6 +3191,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method == "appendChild" && self.template_fragment_receiver(object) { return &[0]; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
         if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
@@ -3212,6 +3216,7 @@ impl Host for Bridge<'_> {
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if method == script_inert_documents::parser::PARSE { return 2; }
+        if method == "appendChild" && self.template_fragment_receiver(object) { return 1; }
         if method == DOCUMENT_IMPORT_NODE { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
@@ -3292,6 +3297,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == "appendChild" && self.template_fragment_receiver(object) {
+            return self.validate_template_append(object, args);
+        }
         if method == script_inert_documents::parser::PARSE {
             return match args.get(1) {
                 Some(Value::String(mime)) if mime == "text/html" => Ok(()),
@@ -3728,12 +3736,15 @@ impl Host for Bridge<'_> {
         }
         if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
         if dom_tree::node_mutation_method(method) {
-            if self.event_target_interface(object) { return self.node_mutation_receiver(receiver); }
+            if self.event_target_interface(object) {
+                return self.node_mutation_receiver(receiver)
+                    || method == "appendChild" && self.template_fragment_receiver(receiver);
+            }
             let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
             if parent(object) {return parent(receiver);}
         }
-        if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
+        if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.get_root_receiver(receiver);}
         if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.clone_node_receiver(receiver); }
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
             return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
@@ -5117,6 +5128,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == "appendChild" && self.template_fragment_receiver(object) {
+            return self.append_template_child(object, args);
+        }
         if crate::javascript::abort_interface::operation(method) {
             return self.abort_call(object, method, args);
         }
