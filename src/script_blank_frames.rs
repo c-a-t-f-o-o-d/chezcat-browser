@@ -538,6 +538,41 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn global_is_finite_is_an_ordinary_per_realm_window_function() {
+        let source = format!("{CREATE}{}", r#"
+var main=isFinite, child=w.isFinite;
+var d=Object.getOwnPropertyDescriptor(window,'isFinite'),cd=w.Object.getOwnPropertyDescriptor(w,'isFinite');
+if(d.value!==main||d.enumerable||!d.writable||!d.configurable||
+   cd.value!==child||cd.enumerable||!cd.writable||!cd.configurable)throw 'global descriptors';
+if(main!==window.isFinite||main===Number.isFinite||main===child||
+   child.name!=='isFinite'||child.length!==1||Object.hasOwn(child,'prototype')||
+   Object.getPrototypeOf(main)!==Function.prototype||Object.getPrototypeOf(child)!==w.Function.prototype)
+    throw 'stable native identity and realm';
+var caught=false;
+try{new main();}catch(e){caught=e instanceof TypeError;}
+if(!caught)throw 'nonconstructible global function';
+caught=false;
+try{child(Symbol());}catch(e){caught=Object.getPrototypeOf(e)===w.TypeError.prototype;}
+if(!caught)throw 'conversion exception realm';
+window.isFinite=17;
+if(isFinite!==17||!child('4')||!main('7'))throw 'replace and retained callable';
+if(!delete window.isFinite||typeof isFinite!=='undefined'||'isFinite' in window||
+   Object.getOwnPropertyDescriptor(window,'isFinite')!==undefined||w.isFinite!==child)
+    throw 'deletion and child independence';
+Object.defineProperty(window,'isFinite',d);
+if(isFinite!==main||Number.isFinite('7')||!isFinite('7'))throw 'restored ordinary binding';
+"#);
+        let (mut doc, mut forms, mut page, outcome) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        page.set_location(&crate::navigation::Location {
+            url: Some(crate::url::parse("https://other.test/").unwrap().0),
+            path: None, fragment: String::new(), root: None,
+        });
+        let denied = page.console_eval(&mut doc, &mut forms, "w.isFinite;");
+        assert_eq!(denied.errors, 1, "{}", page.report());
+    }
+
+    #[test]
     fn animation_saved_natives_keep_supported_targets_and_foreign_origin_checks() {
         let source=format!("{CREATE}{}",r#"
 var frame=requestAnimationFrame,cancel=cancelAnimationFrame,effects=0,refused=0;
