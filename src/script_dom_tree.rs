@@ -542,6 +542,11 @@ impl Bridge<'_> {
         if node_index(object).is_some()
             && matches!(method, "appendChild" | "insertBefore" | "removeChild")
         {
+            if let (true, Some(Value::Host(handle))) = (method != "removeChild", args.first()) {
+                if let Some(template) = self.empty_inert_fragment(*handle) {
+                    return self.validate_empty_fragment_insertion(object, template, method, args);
+                }
+            }
             if !matches!(args.first(), Some(Value::Host(handle)) if node_index(*handle).is_some()) {
                 return Err(("TypeError", format!("{method} requires a DOM node.")));
             }
@@ -564,6 +569,45 @@ impl Bridge<'_> {
                         return Err(("NotFoundError","The node is not a child of this parent.".into()));
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_empty_fragment_insertion(
+        &self,
+        object: u32,
+        template: Option<u32>,
+        method: &str,
+        args: &[Value],
+    ) -> Result<(), (&'static str, String)> {
+        let parent = node_index(object).filter(|&node| self.dom_accessible(node))
+            .ok_or_else(|| ("TypeError", "Fragment destination is unavailable.".into()))?;
+        if !matches!(self.doc.nodes[parent].kind, NodeKind::Element { .. } | NodeKind::DocumentFragment) {
+            return Err(("HierarchyRequestError", "This Node cannot contain children.".into()));
+        }
+        if let Some(host) = template.and_then(node_index) {
+            let mut ancestor = Some(parent);
+            for _ in 0..=MAX_DOM_DEPTH {
+                let Some(node) = ancestor else { break; };
+                if node == host {
+                    return Err(("HierarchyRequestError", "Fragment insertion would create a DOM cycle.".into()));
+                }
+                ancestor = self.state.tree.parents[node];
+            }
+        }
+        if method == "insertBefore" {
+            match args.get(1) {
+                Some(Value::Null | Value::Undefined) => {}
+                Some(Value::Host(reference)) if *reference == DOCUMENT || self.inert_node_type(*reference).is_some()
+                    || node_index(*reference).is_some() => {
+                    if !node_index(*reference).is_some_and(|node|
+                        self.dom_accessible(node) && self.state.tree.parents[node] == Some(parent))
+                    {
+                        return Err(("NotFoundError", "The reference node is not a child of this parent.".into()));
+                    }
+                }
+                _ => return Err(("TypeError", "insertBefore requires a node or null reference.".into())),
             }
         }
         Ok(())
@@ -1168,6 +1212,15 @@ impl Bridge<'_> {
         let Some(Value::Host(handle)) = args.first() else {
             return Err("A DOM node is required.".into());
         };
+        if method != "removeChild" {
+            if let Some(template) = self.empty_inert_fragment(*handle) {
+                self.validate_empty_fragment_insertion(node_handle(parent), template, method, args)
+                    .map_err(|(name, error)| format!("{name}: {error}"))?;
+                // DOM pre-insertion only moves a fragment's children. An empty
+                // fragment retains its document, including template ownership.
+                return Ok(Value::Host(*handle));
+            }
+        }
         let child = self.dom_node(*handle)?;
         if self.fragment_receiver(*handle) && method!="removeChild" {return self.splice_document_fragment(parent,method,args);}
         let reference = if method == "insertBefore" {

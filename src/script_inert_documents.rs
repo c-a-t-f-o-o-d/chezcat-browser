@@ -198,6 +198,14 @@ impl Bridge<'_> {
         self.state.inert_documents.node(object).map(|node| node.children.as_slice())
     }
 
+    pub(super) fn empty_inert_fragment(&self, object: u32) -> Option<Option<u32>> {
+        let node = self.state.inert_documents.node(object)?;
+        match node.kind {
+            Kind::Fragment { template } if node.parent.is_none() && node.children.is_empty() => Some(template),
+            _ => None,
+        }
+    }
+
     fn parsed_source(&self, source: ParsedSource) -> Option<(&Node, bool)> {
         match source {
             ParsedSource::Loaded(index) => Some((self.doc.nodes.get(index)?, self.doc.nonce_unsafe_nodes.contains(&index))),

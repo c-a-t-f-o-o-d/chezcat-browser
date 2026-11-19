@@ -3919,6 +3919,42 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn empty_inert_fragment_insertion_preserves_owner_and_checks_destination() {
+    let (doc, _, page, result) = page(
+        "<html><head><title>Fixture</title></head><body><iframe hidden></iframe><main>Text</main></body></html>",
+        &[r#"
+var template=document.createElement('template'), fragment=template.content;
+var owner=fragment.ownerDocument, head=document.head, first=head.firstChild;
+var main=document.querySelector('main'), clone=fragment.cloneNode(false);
+if(owner===document||owner.defaultView!==null||clone===fragment||clone.ownerDocument!==owner)
+    throw 'inert provenance';
+if(head.appendChild(fragment)!==fragment||head.insertBefore(clone,first)!==clone||
+   head.insertBefore(fragment,null)!==fragment||head.firstChild!==first||head.lastChild!==first)
+    throw 'empty insertion';
+if(fragment.ownerDocument!==owner||template.content!==fragment||fragment.parentNode!==null||
+   fragment.isConnected||fragment.getRootNode()!==fragment||fragment.firstChild!==null)
+    throw 'fragment identity changed';
+function refuses(name, run) {
+    try{run();}catch(e){if(e.name===name)return;throw e;}
+    throw 'missing '+name;
+}
+refuses('NotFoundError',function(){head.insertBefore(fragment,main);});
+refuses('TypeError',function(){head.insertBefore(fragment,{});});
+refuses('HierarchyRequestError',function(){Node.prototype.appendChild.call(main.firstChild,fragment);});
+refuses('HierarchyRequestError',function(){template.appendChild(fragment);});
+template.innerHTML='<script src="/guard"></script><iframe src="/guard"></iframe>';
+refuses('TypeError',function(){head.appendChild(fragment);});
+if(head.firstChild!==first||head.lastChild!==first||fragment.ownerDocument!==owner||
+   fragment.firstChild.nodeName!=='SCRIPT'||fragment.lastChild.nodeName!=='IFRAME')
+    throw 'failed insertion changed tree';
+document.title='empty fragment verified';
+"#],
+    );
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "empty fragment verified");
+}
+
+#[test]
 fn template_content_append_keeps_real_identity_and_adopts_into_inert_ownership() {
     let (mut doc, mut forms, mut page, _) = page(r#"<html><body><iframe hidden srcdoc="early" id=early></iframe><div id=app></div></body></html>"#, &[]);
     let result = page.console_eval(&mut doc, &mut forms, r#"
