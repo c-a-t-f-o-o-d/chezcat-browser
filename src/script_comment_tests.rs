@@ -65,6 +65,39 @@ document.title = 'verified-comment-interface';
 }
 
 #[test]
+fn cdata_section_has_the_text_interface_ancestry_and_html_creation_rejects() {
+    let (doc, _, page) = fixture("<html><head></head><body></body></html>", r#"
+var C = window.CDATASection, P = C.prototype;
+if (C.name !== 'CDATASection' || C.length !== 0 || Object.getPrototypeOf(C) !== Text ||
+    Object.getPrototypeOf(P) !== Text.prototype || P.constructor !== C ||
+    P[Symbol.toStringTag] !== 'CDATASection' || new Text() instanceof C) throw 'CDATASection interface identity';
+var invalid = 0;
+try { new C(); } catch (e) { if (e instanceof TypeError) invalid++; else throw e; }
+try { C(); } catch (e) { if (e instanceof TypeError) invalid++; else throw e; }
+var make = Document.prototype.createCDATASection, other = document.implementation.createHTMLDocument('inert');
+if (make.name !== 'createCDATASection' || make.length !== 1 || document.createCDATASection !== make ||
+    other.createCDATASection !== make || Object.hasOwn(document,'createCDATASection') ||
+    Object.hasOwn(other,'createCDATASection')) throw 'Document factory identity';
+var calls = 0, value = {toString:function(){calls++;return 'contains ]]>'; }}, rejected = 0;
+for (var owner of [document, other]) {
+    try { make.call(owner, value); } catch (e) {
+        if (e instanceof DOMException && e.name === 'NotSupportedError' && e.code === 9) rejected++;
+        else throw e;
+    }
+}
+try { make.call({}, value); } catch (e) { if (e instanceof TypeError) invalid++; else throw e; }
+try { make.call(document); } catch (e) { if (e instanceof TypeError) invalid++; else throw e; }
+try { make.call(document,Symbol()); } catch (e) { if (e instanceof TypeError) invalid++; else throw e; }
+var marker = {}, caught;
+try { make.call(other, {toString:function(){throw marker;}}); } catch (e) { caught = e; }
+if (invalid !== 5 || rejected !== 2 || calls !== 2 || caught !== marker) throw 'factory brand, conversion and exceptions';
+document.title = 'verified-cdata-html-interface';
+"#);
+    assert_eq!(doc.title, "verified-cdata-html-interface");
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn comment_data_nullable_setters_and_readonly_length_preserve_comment_kind() {
     let (doc,_,_)=fixture("<html><head></head><body></body></html>",r#"
 var c=document.createComment(''),calls=0;

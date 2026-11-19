@@ -469,6 +469,7 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
+pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
 pub(crate) const ELEMENT_INNER_HTML_GET: &str = "\0Element.get.innerHTML";
 pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
@@ -8886,9 +8887,9 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         if let Err((kind,message))=host.validate_call(object,method,args) {
-            // Finite media controls distinguish genuine class identity from an
-            // unavailable player without forging a successful empty player.
-            if matches!(method,"\0Media.load"|"\0Media.pause")&&kind=="NotSupportedError" {
+            if kind == "NotSupportedError"
+                && matches!(method, CREATE_CDATA_SECTION | "\0Media.load" | "\0Media.pause")
+            {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));
             }

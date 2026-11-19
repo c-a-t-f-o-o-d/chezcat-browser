@@ -3,7 +3,7 @@
 
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
-    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
+    CREATE_CDATA_SECTION, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -189,8 +189,7 @@ impl Runtime {
             self.define_svg_element_interface(window, element)?;
             self.define_concrete_html_node_interfaces(window, parent)?;
             self.define_canvas_2d_interface(window)?;
-            // CharacterData is a separate genuine Node suffix. Text gets its
-            // own Slottable prototype below; Comment retains this suffix.
+            // Text and Comment inherit CharacterData. Only Text includes Slottable.
             let node=self.native_constructor_prototypes[&(window,"Node")];
             let node_constructor=self.objects[node].properties["constructor"].value.as_value()?.clone();
             let Value::Function(node_constructor)=node_constructor else {return Err(Fault::new("Invalid CharacterData parent constructor."));};
@@ -209,6 +208,8 @@ impl Runtime {
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
             self.define_character_data_interface(window, character, "Text")?;
             self.define_character_data_interface(window, character, "Comment")?;
+            let text = self.native_constructor_prototypes[&(window, "Text")];
+            self.define_character_data_interface(window, text, "CDATASection")?;
             for name in ["DocumentFragment","Document"] {
                 let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;
                 if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
@@ -221,6 +222,15 @@ impl Runtime {
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
+                    let method = self.allocate_host_function_with_length(window, CREATE_CDATA_SECTION, 1)
+                        .map_err(Fault::new)?;
+                    if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+                        *receiver_required = true;
+                    }
+                    self.store_property(self.function_properties[method.id], "name".into(),
+                        Value::String("createCDATASection".into()), Some((false, false, true)))?;
+                    self.store_property(prototype, "createCDATASection".into(),
+                        Value::Function(method.id), Some((true, true, true)))?;
                     // HTML defines this Window property as an alias of the very same interface object.
                     self.put_binding(self.global_environment,"HTMLDocument".into(),Some(constructor.clone()),super::Declaration::Var,false)?;
                     self.global_attributes.insert("HTMLDocument".into(),(false,true,true));
@@ -539,9 +549,9 @@ impl Runtime {
     }
 
     fn define_character_data_interface(
-        &mut self, window: u32, character_data: usize, name: &'static str,
+        &mut self, window: u32, parent: usize, name: &'static str,
     ) -> Result<(), Fault> {
-        let parent_constructor = self.objects[character_data].properties
+        let parent_constructor = self.objects[parent].properties
             .get("constructor")
             .ok_or_else(|| Fault::new("Missing CharacterData constructor."))?
             .value.as_value()?.clone();
@@ -550,11 +560,14 @@ impl Runtime {
         };
         let allocation = self.allocate_host_function_with_length(window, name, 0)
             .map_err(Fault::new)?;
-        if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+        if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
+            self.functions.get_mut(allocation.id)
+        {
             *constructible = true;
+            *illegal_interface_constructor = name == "CDATASection";
         }
         let prototype = self.new_object(None)?;
-        self.objects[prototype].prototype = Some(Ordinary::Object(character_data));
+        self.objects[prototype].prototype = Some(Ordinary::Object(parent));
         self.objects[self.function_properties[allocation.id]].prototype =
             Some(Ordinary::Function(parent_function));
         let constructor = Value::Function(allocation.id);

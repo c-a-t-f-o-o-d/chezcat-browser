@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    CREATE_CDATA_SECTION, ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[path = "script_promises.rs"]
@@ -2902,6 +2902,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
         if self.inert_implementation(object) && method == script_inert_documents::CREATE {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
@@ -3038,7 +3039,8 @@ impl Host for Bridge<'_> {
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if self.event_target_interface(object)
-            && matches!(method, script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
+            && matches!(method, CREATE_CDATA_SECTION | script_inert_documents::GET
+                | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
             return Some(object);
         }
@@ -3120,6 +3122,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method == CREATE_CDATA_SECTION { return 1; }
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { 2 } else { 1 };
         }
@@ -3243,6 +3246,9 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method=="Document" {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
+        if method == CREATE_CDATA_SECTION {
+            return Err(("NotSupportedError", "HTML documents cannot create CDATA sections.".into()));
+        }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
         if method == script_node_contains::CONTAINS_METHOD { return self.validate_node_contains(object, args); }
@@ -3272,7 +3278,7 @@ impl Host for Bridge<'_> {
         if method=="pause" && self.media_element_receiver(object) && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("InvalidStateError","Scripting is disabled.".into()));}
         if object==WINDOW && method=="requestAnimationFrame" && !matches!(args.first(),Some(Value::Function(_))) {return Err(("TypeError","requestAnimationFrame requires a callable callback.".into()));}
         if self.event_target_interface(object)
-            && (matches!(method,"Node"|"Element"|"HTMLElement"|"SVGElement"|"CharacterData"|"HTMLMediaElement"|"HTMLVideoElement")
+            && (matches!(method,"Node"|"Element"|"HTMLElement"|"SVGElement"|"CharacterData"|"CDATASection"|"HTMLMediaElement"|"HTMLVideoElement")
                 || crate::javascript::ORDINARY_HTML_SUBCLASSES.iter().any(|&(_, name)| name == method))
         {
             return Err(("TypeError","Illegal constructor for this native interface.".into()));
@@ -3556,7 +3562,9 @@ impl Host for Bridge<'_> {
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
         if self.event_target_interface(object) {
-            if method == script_inert_documents::GET { return receiver == DOCUMENT || self.inert_document(receiver); }
+            if matches!(method, CREATE_CDATA_SECTION | script_inert_documents::GET) {
+                return receiver == DOCUMENT || self.inert_document(receiver);
+            }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
