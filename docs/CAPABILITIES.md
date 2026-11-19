@@ -147,6 +147,12 @@ actual parent; initial/unset remain content-box. Fractional flex main sizes are
 retained until cumulative pixel allocation so two 50% items fit odd widths while
 real padding/minimum overflow still wraps.
 
+After the initial load settles, viewport and zoom changes can select a new
+source for a parser-discovered responsive image. A successful decode replaces
+the displayed bitmap, while a failed replacement leaves the previous image
+visible. A density change for the same URL reuses the decoded pixels. Repeated
+selection uses bounded work and the existing image request policy.
+
 Nested matching media rules use the real CSS viewport and an explicit desktop
 mouse profile. Tests distinguish full viewport width from available line width,
 retain fractional zoom thresholds, and verify geometry/background pixels/link
