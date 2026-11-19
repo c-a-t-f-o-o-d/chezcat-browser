@@ -215,6 +215,7 @@ pub struct App {
     home_location: Location,
     raw: String,
     styles: HashMap<usize, String>,
+    stylesheet_cache: Option<crate::css::StylesheetCache>,
     style_bases: HashMap<usize, Location>,
     backgrounds: HashMap<usize, std::sync::Arc<Bitmap>>,
     background_requests: HashMap<usize, backgrounds::Request>,
@@ -349,6 +350,7 @@ impl App {
             home_location: location.clone(),
             raw: START.to_owned(),
             styles: HashMap::new(),
+            stylesheet_cache: None,
             style_bases: HashMap::new(),
             backgrounds: HashMap::new(),
             background_requests: HashMap::new(),
@@ -1574,6 +1576,7 @@ impl App {
         self.base_location = loaded.base;
         self.base_is_document_url = loaded.base_is_document_url;
         self.document = loaded.document;
+        self.stylesheet_cache = None;
         // The viewport may have changed since loading began. Startup scripts
         // can synchronously request styles before the first reflow.
         self.document.media_environment = Some(self.css_media_environment());
@@ -1718,7 +1721,7 @@ impl App {
                     .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
                     .map(|control| control.checked)
             };
-            layout::build_viewport_with_fonts(
+            layout::build_viewport_with_fonts_cached(
                 &self.document,
                 self.width - 12,
                 self.viewport_height(),
@@ -1727,8 +1730,10 @@ impl App {
                 &sizes,
                 Some(&checked),
                 &self.fonts,
+                self.stylesheet_cache.as_ref(),
             )
         };
+        if self.alternate.is_none() { self.stylesheet_cache = self.page.stylesheet_cache.clone(); }
         self.sync_background_images();
         self.sync_media_controls();
         self.observe_layout();
@@ -5861,6 +5866,9 @@ mod computed_opacity_tests;
 #[cfg(test)]
 #[path = "app_opacity_paint_tests.rs"]
 mod opacity_paint_tests;
+#[cfg(test)]
+#[path="app_stylesheet_cache_tests.rs"]
+mod stylesheet_cache_tests;
 
 #[cfg(test)]
 #[path="app_element_sibling_tests.rs"]

@@ -4,7 +4,7 @@
 
 [![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Development focus](https://img.shields.io/static/v1?label=Focus&message=Web%20compatibility&color=6d28d9)](#active--upcoming-milestones)
-[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
+[![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 
 *Delivering repeatable web page improvements through shared, spec-aligned browser capabilities.*
 
@@ -158,11 +158,9 @@ Neither depends on supporting every website first.
 
 ## Delivery — Frequent Source, Verified Builds
 
-**Keep the current CI approach.** The development agent reviews failures and fixes
-the affected work through the existing local, PR, and hosted checks. The proposed
-asynchronous handoff is deferred; no workflow, branch-protection, or promotion
-change is enabled by this documentation. Development source continues to advance
-independently of owner-requested releases.
+Development PRs use focused checks. Trusted pushes run source privacy and
+configuration checks. The agent owns failure diagnosis and repair. Full regression,
+offline journeys and package verification belong to owner-requested releases.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
@@ -183,8 +181,8 @@ under verification; do not claim failed delivery succeeded. See
 > [!NOTE]
 > **One practical development cycle:** reproduce a concrete failure, implement
 > the shared fix, run focused affected and security-negative checks, inspect the
-> changed workflow, then commit and submit it through the applicable PR/CI gates.
-> Full regression belongs at integration boundaries—not after every small edit.
+> changed workflow, then submit and merge one PR. Start the next change from
+> updated main.
 
 Public feature branches should receive coherent, reviewable progress frequently.
 A named release is not required for a commit, PR, CI run, or development build.

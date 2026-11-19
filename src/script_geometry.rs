@@ -14,6 +14,9 @@ pub(crate) use scroll_offsets::Axis;
 
 #[path = "script_geometry_offset_coordinates.rs"]
 mod offset_coordinates;
+#[cfg(test)]
+#[path="script_geometry_stylesheet_cache_tests.rs"]
+mod stylesheet_cache_tests;
 
 fn live_checked(forms: &Forms, node: usize) -> Option<bool> {
     forms.controls.get(&node)
@@ -34,6 +37,7 @@ pub struct Geometry {
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
     computed_properties: Option<crate::css::ComputedProperties>,
+    stylesheet_cache: Option<crate::css::StylesheetCache>,
     scroll_heights:Vec<Option<i32>>,
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
@@ -69,6 +73,7 @@ impl Geometry {
             fonts: fonts.clone(),
             boxes: None,
             computed_properties: None,
+            stylesheet_cache: None,
             scroll_heights:Vec::new(),
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
@@ -165,6 +170,7 @@ impl Geometry {
         self.update_scroll_range(layout.height);
         self.boxes = Some(layout.client_boxes.clone());
         self.computed_properties = Some(layout.computed_properties.clone());
+        self.stylesheet_cache = layout.stylesheet_cache.clone();
         self.scroll_heights=layout.scroll_heights.clone();
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -191,7 +197,7 @@ impl Geometry {
             budget.work(layout::offset_parent_work(doc))?;
             budget.copies(layout::offset_parent_storage(doc.nodes.len()))?;
             let checked = |node| live_checked(forms, node);
-            let layout = layout::build_viewport_with_fonts_budgeted(
+            let layout = layout::build_viewport_with_fonts_budgeted_cached(
                 doc,
                 self.width,
                 self.height,
@@ -201,11 +207,13 @@ impl Geometry {
                 Some(&checked),
                 &self.fonts,
                 &mut budget,
+                self.stylesheet_cache.as_ref(),
             )?;
             self.remaining -= 1;
             self.update_scroll_range(layout.height);
             self.boxes = Some(layout.client_boxes);
             self.computed_properties = Some(layout.computed_properties);
+            self.stylesheet_cache = layout.stylesheet_cache;
             self.scroll_heights=layout.scroll_heights;
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
@@ -235,10 +243,11 @@ impl Geometry {
             let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
             let checked = |node| live_checked(forms, node);
             let mut budget = crate::css::CssBudget::new(host_work, copy_work);
-            let cascade = crate::css::compute_with_environment_and_properties_budgeted(
-                doc, &self.styles, Some(&checked), Some(environment), &mut budget,
+            let cascade = crate::css::compute_with_environment_and_properties_budgeted_cached(
+                doc, &self.styles, Some(&checked), Some(environment), &mut budget, self.stylesheet_cache.as_ref(),
             )?;
             self.computed_properties = Some(cascade.computed_properties);
+            self.stylesheet_cache = cascade.stylesheet_cache;
         }
         *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
         Ok(self.computed_properties.as_ref().expect("computed cascade was installed"))

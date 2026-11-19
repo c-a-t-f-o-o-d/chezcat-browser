@@ -1,5 +1,8 @@
 //! A bounded CSS subset for block, inline and basic flex layout.
 use std::collections::HashMap;
+#[path="css_stylesheet_cache.rs"]
+mod stylesheet_cache;
+pub(crate) use stylesheet_cache::StylesheetCache;
 
 #[path="css_media.rs"]
 mod media;
@@ -89,36 +92,71 @@ impl StylesheetLimits {
 /// The same ordered, whole-sheet admission is used for rendering and reports.
 /// A refusal never supplies a prefix to the parser or consumes the next sheet's
 /// allowance. The DOM retains the author's complete text.
-fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
-    let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
+enum SheetCandidate<'a> {
+    Source(usize, std::borrow::Cow<'a, str>),
+    Error(String),
+}
+
+// One source/scope traversal for admission, fresh parsing and cache validation.
+// Keep errors in document order, including refused inline source allocation.
+fn stylesheet_sources_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>,mut meter:Option<&mut CssBudget<'_>>) -> Result<Vec<SheetCandidate<'a>>,String> {
+    if let Some(meter)=meter.as_deref_mut() {
+        meter.copies(doc.nodes.len().saturating_mul(std::mem::size_of::<bool>()+2*std::mem::size_of::<usize>()+2*std::mem::size_of::<SheetCandidate<'_>>()))?;
+    }
+    let mut sources=Vec::new();
     let mut seen=vec![false;doc.nodes.len()];let mut stack=if doc.nodes.is_empty(){Vec::new()}else{vec![0]};
     while let Some(node)=stack.pop() {
+        if let Some(meter)=meter.as_deref_mut() {meter.work(3)?;}
         if node>=doc.nodes.len() || seen[node] {continue;}seen[node]=true;
         let entry=&doc.nodes[node];
         let tag=match &entry.kind {NodeKind::Element{tag,..}=>tag.as_str(),_=>""};
         if matches!(tag,"template"|"iframe"|"object") || tag=="noscript"&&doc.scripting_enabled {continue;}
+        if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len())?;}
         stack.extend(entry.children.iter().rev().copied().filter(|&child|child!=0));
         if !matches!(tag,"style"|"link") {continue;}
         if tag == "style" && doc.withheld_inline_styles.contains(&node) {continue;}
+        if let Some(meter)=meter.as_deref_mut() {
+            if let NodeKind::Element{attrs,..}=&entry.kind {
+                meter.work(attrs.len().saturating_mul(2))?;
+                for attr in attrs {
+                    meter.work(attr.name.bytes().max(1).div_ceil(64))?;
+                    if attr.name.html_is("media") {meter.work(attr.value.len().max(1).div_ceil(64).saturating_mul(4))?;}
+                }
+            }
+        }
         if !media_supported(doc.attr(node,"media").unwrap_or("")) {continue;}
         let source=if tag=="link" {
             let source=if let Some((_,source))=replacement.filter(|(owner,_)|*owner==node) {source} else {let Some(source)=external.get(&node) else {continue;};source.as_str()};
             std::borrow::Cow::Borrowed(source)
         } else {
+            if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len().saturating_mul(2))?;}
             let mut length=Some(0usize);
             for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {length=length.and_then(|n|n.checked_add(text.len()));}}
-            let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {errors.push(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance."));continue;};
+            let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {sources.push(SheetCandidate::Error(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance.")));continue;};
+            if let Some(meter)=meter.as_deref_mut() {meter.work(length.max(1).div_ceil(64).saturating_mul(2))?;meter.copies(length)?;}
             let mut source=String::new();
-            if source.try_reserve(length).is_err() {errors.push(format!("CSS node {node}: stylesheet allocation failed."));continue;}
+            if source.try_reserve(length).is_err() {sources.push(SheetCandidate::Error(format!("CSS node {node}: stylesheet allocation failed.")));continue;}
             for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {source.push_str(text);}}
             std::borrow::Cow::Owned(source)
         };
+        sources.push(SheetCandidate::Source(node,source));
+    }
+    Ok(sources)
+}
+
+fn admit_stylesheets<'a>(doc:&Document,sources:Vec<SheetCandidate<'a>>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+    let mut accepted=Vec::new();let mut errors=Vec::new();let mut usage=StylesheetUsage::default();
+    for candidate in sources {
+        let (node,source)=match candidate {SheetCandidate::Source(node,source)=>(node,source),SheetCandidate::Error(error)=>{errors.push(error);continue;}};
         match doc.stylesheet_limits.accept(&source,usage) {
             Ok(next)=>{usage=next;accepted.push((node,source));},
             Err(error)=>errors.push(format!("CSS node {node}: {error}")),
         }
     }
     (accepted,errors,usage)
+}
+fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,String>,replacement:Option<(usize,&'a str)>) -> (Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {
+    admit_stylesheets(doc,stylesheet_sources_with(doc,external,replacement,None).expect("unbudgeted stylesheet source collection"))
 }
 pub(crate) fn accepted_stylesheets<'a>(doc:&'a Document,external:&'a HashMap<usize,String>)->(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {accepted_stylesheets_with(doc,external,None)}
 pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<(),String> {
@@ -745,7 +783,7 @@ pub(crate) fn compute_with_environment_and_properties(
     environment: Option<MediaEnvironment>,
 ) -> CascadeOutput {
     // Only an explicitly supplied script budget makes the shared core fallible.
-    compute_cascade(doc, external, checked, environment, None, None).expect("unbudgeted CSS cascade")
+    compute_cascade(doc, external, checked, environment, None, None, None, false).expect("unbudgeted CSS cascade")
 }
 
 pub(crate) fn compute_with_environment_and_properties_budgeted(
@@ -755,7 +793,7 @@ pub(crate) fn compute_with_environment_and_properties_budgeted(
     environment: Option<MediaEnvironment>,
     budget: &mut CssBudget<'_>,
 ) -> Result<CascadeOutput, String> {
-    compute_cascade(doc, external, checked, environment, Some(budget), None)
+    compute_cascade(doc, external, checked, environment, Some(budget), None, None, false)
 }
 
 /// Preserve the established layout allowance while reserving the additional
@@ -767,7 +805,28 @@ pub(crate) fn compute_with_environment_and_properties_transform_budgeted(
     environment: Option<MediaEnvironment>,
     budget: &mut CssBudget<'_>,
 ) -> Result<CascadeOutput, String> {
-    compute_cascade(doc, external, checked, environment, None, Some(budget))
+    compute_cascade(doc, external, checked, environment, None, Some(budget), None, false)
+}
+
+pub(crate) fn compute_with_environment_and_properties_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, cache: Option<&StylesheetCache>,
+) -> CascadeOutput {
+    compute_cascade(doc,external,checked,environment,None,None,cache,true).expect("unbudgeted cached CSS cascade")
+}
+
+pub(crate) fn compute_with_environment_and_properties_budgeted_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, budget: &mut CssBudget<'_>, cache: Option<&StylesheetCache>,
+) -> Result<CascadeOutput,String> {
+    compute_cascade(doc,external,checked,environment,Some(budget),None,cache,true)
+}
+
+pub(crate) fn compute_with_environment_and_properties_transform_budgeted_cached(
+    doc: &Document, external: &HashMap<usize,String>, checked: Option<&dyn Fn(usize)->Option<bool>>,
+    environment: Option<MediaEnvironment>, budget: &mut CssBudget<'_>, cache: Option<&StylesheetCache>,
+) -> Result<CascadeOutput,String> {
+    compute_cascade(doc,external,checked,environment,None,Some(budget),cache,true)
 }
 
 fn reserve_transform_storage(
@@ -783,6 +842,7 @@ fn reserve_transform_storage(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compute_cascade(
     doc: &Document,
     external: &HashMap<usize, String>,
@@ -790,8 +850,13 @@ fn compute_cascade(
     environment: Option<MediaEnvironment>,
     mut meter: Option<&mut CssBudget<'_>>,
     mut transform_meter: Option<&mut CssBudget<'_>>,
+    previous_sheets: Option<&StylesheetCache>,
+    retain_sheets: bool,
 ) -> Result<CascadeOutput, String> {
-    if let Some(meter) = meter.as_deref_mut() { meter.document(doc, external)?; }
+    if let Some(meter) = meter.as_deref_mut() {
+        if previous_sheets.is_some() {meter.document_structure(doc)?;}
+        else {meter.document(doc, external)?;}
+    }
     let mut parents = vec![None; doc.nodes.len()];
     let mut previous_elements = vec![None; doc.nodes.len()];
     for (parent, node) in doc.nodes.iter().enumerate() {
@@ -848,24 +913,10 @@ fn compute_cascade(
                     if matches!(tag.as_str(), "template" | "iframe" | "object") || doc.scripting_enabled && tag == "noscript");
         }
     }
-    let mut rules = Vec::new();
-    let mut has_transform_rules = false;
-    for (owner, source) in accepted_stylesheets(doc, external).0 {
-        let first = rules.len();
-        // Preserve existing whole-sheet refusal/rollback. Only an exhausted
-        // transform job budget escapes this optional parser as a job failure.
-        if let Err(SheetParseFailure::TransformBudget(error)) =
-            parse_sheet_with_media_inner(&source,&mut rules,environment,doc.stylesheet_limits.rules,
-                transform_meter.as_deref_mut()) { return Err(error); }
-        for rule in &mut rules[first..] {
-            for declaration in &mut rule.declarations {
-                declaration.stylesheet = Some(owner);
-                if declaration.name == "transform" {
-                    has_transform_rules = true;
-                }
-            }
-        }
-    }
+    let prepared = stylesheet_cache::prepare(doc,external,environment,previous_sheets,retain_sheets,
+        meter.as_deref_mut(),transform_meter.as_deref_mut())?;
+    let rules = prepared.rules();
+    let has_transform_rules = prepared.has_transform;
 
     let mut computed = vec![Style::default(); doc.nodes.len()];
     let mut variables = vec![custom_properties::Variables::default(); doc.nodes.len()];
@@ -1255,7 +1306,7 @@ fn compute_cascade(
     if has_transform_declarations {
         has_transform_geometry |= !complete;
     }
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities) })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
