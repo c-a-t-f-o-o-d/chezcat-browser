@@ -147,6 +147,11 @@ mod runtime_diagnostics;
 mod string_substr;
 #[path = "string_concat.rs"]
 mod string_concat;
+#[path = "string_last_index_of.rs"]
+mod string_last_index_of;
+#[cfg(test)]
+#[path = "string_last_index_of_tests.rs"]
+mod string_last_index_of_tests;
 #[path = "global_operations.rs"]
 mod global_operations;
 #[path = "iterable_builtins.rs"]
@@ -9408,6 +9413,7 @@ impl Runtime {
         if let Value::String(text) = object {
             if method == "concat" { return self.string_concat(&text,args,host); }
             if method == "substr" { return self.string_substr(&text,args,host); }
+            if method == "lastIndexOf" { return self.string_last_index_of(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
             }

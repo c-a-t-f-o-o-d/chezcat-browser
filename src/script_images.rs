@@ -40,6 +40,53 @@ impl ImagesState {
 }
 
 impl Page {
+    pub(crate) fn begin_environment_images(&mut self, doc: &Document) -> Result<(), String> {
+        self.begin_job();
+        self.state.rebuild(doc)
+    }
+
+    pub(crate) fn prepare_environment_image(&mut self, node: usize, source: &str, network_attempt: bool) -> Result<Option<u64>, String> {
+        if self.state.dom.connected.get(node) != Some(&true) || self.state.tree.active.get(node) != Some(&true) { return Ok(None); }
+        if network_attempt && self.state.images.attempts >= MAX_IMAGE_REQUESTS { return Err("Dynamic image attempt limit reached.".into()); }
+        let generation = self.state.images.entries.get(&node).map_or(Some(1), |entry| entry.generation.checked_add(1))
+            .ok_or("Image request generation exhausted.")?;
+        self.state.copies(source.len())?;
+        self.state.images.entries.try_reserve(1).map_err(|_| "Image entry reservation failed.")?;
+        let entry = self.state.images.entries.entry(node).or_default();
+        entry.generation = generation;
+        entry.selected = source.to_owned();
+        entry.pending = true;
+        if network_attempt { self.state.images.attempts += 1; }
+        Ok(Some(generation))
+    }
+
+    pub(crate) fn environment_image_current(&self, node: usize, generation: u64) -> bool {
+        self.state.images.entries.get(&node).is_some_and(|entry| entry.pending && entry.generation == generation)
+            && self.environment_image_node_active(node)
+    }
+
+    pub(crate) fn environment_image_node_active(&self, node: usize) -> bool {
+        self.state.dom.connected.get(node) == Some(&true) && self.state.tree.active.get(node) == Some(&true)
+    }
+
+    pub(crate) fn environment_image_loaded(&self, node: usize, generation: u64) -> bool {
+        self.state.images.entries.get(&node).is_some_and(|entry| !entry.pending && entry.generation == generation)
+            && self.environment_image_node_active(node)
+    }
+
+    pub(crate) fn cancel_environment_image(&mut self, node: usize, generation: u64) {
+        if let Some(entry) = self.state.images.entries.get_mut(&node).filter(|entry| entry.generation == generation) {
+            entry.pending = false;
+        }
+    }
+
+    pub(crate) fn settle_environment_image(&mut self, node: usize, generation: u64, success: bool) {
+        if let Some(entry) = self.state.images.entries.get_mut(&node).filter(|entry| entry.generation == generation) {
+            entry.pending = false;
+            if success { entry.available = true; entry.current = entry.selected.clone(); }
+        }
+    }
+
     pub fn set_initial_images(&mut self, sources: HashMap<usize, String>, present: &HashMap<usize, std::sync::Arc<crate::image::Bitmap>>, pending: bool, enabled: bool) {
         for (node, source) in sources {
             let available = present.contains_key(&node);

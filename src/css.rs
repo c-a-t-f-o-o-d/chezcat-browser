@@ -16,6 +16,9 @@ mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_opacity.rs"]
+mod opacity;
+pub(crate) use opacity::{serialize as serialize_opacity, specified as specified_opacity, Specified as SpecifiedOpacity};
 #[path="css_box_spacing.rs"]
 mod box_spacing;
 #[path="css_radius.rs"]
@@ -72,8 +75,8 @@ impl StylesheetLimits {
         let remaining=self.rules.checked_sub(usage.rules).ok_or("Stylesheet rule accounting overflow.")?;
         let mut declarations_exhausted=false;
         let count=media::walk(source,remaining,None,|_,body,_| {
-            // Admission counts declarations but does not execute the new
-            // transform grammar before a caller can reserve its work.
+            // Admission counts declarations before executing the additional
+            // computed-property grammars with a caller's reserved work.
             if parse_declarations_inner(body,MAX_DECLARATIONS+1,false,None).expect("unmetered admission").len()>MAX_DECLARATIONS {declarations_exhausted=true;return false;}
             true
         })?;
@@ -318,6 +321,8 @@ pub struct Style {
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
+    /// Computed scalar only. Group opacity painting is not yet implemented.
+    pub opacity: f64,
     pub background: Option<u32>,
     /// Retain currentColor through explicit inheritance; background holds the
     /// used opaque color after this element's foreground cascade finishes.
@@ -384,6 +389,7 @@ impl Default for Style {
             overflow: Overflow::default(),
             inset: [Length::Auto; 4],
             color: 0x26364a,
+            opacity: 1.0,
             background: None,
             background_current_color: false,
             background_clip: Some(BackgroundClip::BorderBox),
@@ -752,7 +758,7 @@ pub(crate) fn compute_with_environment_and_properties_budgeted(
 }
 
 /// Preserve the established layout allowance while reserving the additional
-/// transform parser, cascade and snapshot work before it runs.
+/// transform/opacity parser, cascade and snapshot work before it runs.
 pub(crate) fn compute_with_environment_and_properties_transform_budgeted(
     doc: &Document,
     external: &HashMap<usize, String>,
@@ -867,6 +873,9 @@ fn compute_cascade(
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
     let mut canvas_foregrounds = HashMap::new();
+    // Default opacity 1 requires no retained per-node allocation. A None entry
+    // records an indeterminate winner rather than fabricating that default.
+    let mut opacities: HashMap<usize, Option<f64>> = HashMap::new();
     let mut transform_known = Vec::new();
     if has_transform_rules {
         if transform_meter.is_some() {
@@ -891,6 +900,7 @@ fn compute_cascade(
         let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
         let parent_position_known = parents[index].map_or(true, |parent| position_known[parent]);
         let parent_transform_known = parents[index].and_then(|parent| transform_known.get(parent)).copied().unwrap_or(true);
+        let parent_opacity_known = parents[index].and_then(|parent| opacities.get(&parent)).is_none_or(Option::is_some);
         variables[index] = inherited_variables.clone();
         if inert[index]
             || doc.scripting_enabled
@@ -911,6 +921,7 @@ fn compute_cascade(
         let NodeKind::Element { tag, .. } = &node.kind else {
             let mut inherited = parent;
             inherited.transform = Transform::None;
+            inherited.opacity = 1.0;
             computed[index] = inherited;
             continue;
         };
@@ -1111,6 +1122,8 @@ fn compute_cascade(
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
+        let mut sheet_opacity = (1.0, true);
+        let mut opacity_known = true;
         for (priority, declaration) in &applicable {
             if declaration.name == "transform" {
                 continue;
@@ -1118,6 +1131,21 @@ fn compute_cascade(
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
+            if declaration.name == "opacity" {
+                let mut apply_opacity = |budget: &mut custom_properties::Budget| {
+                    opacity::apply(&mut style,declaration,priority.1,&mut sheet_opacity,
+                        (parent.opacity,parent_opacity_known),&mut opacity_known,&variables[index],budget)
+                };
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.variables(&mut variable_budget,apply_opacity)?;
+                } else if let Some(meter) = transform_meter.as_deref_mut() {
+                    // This force-layout entry meters newly introduced property
+                    // work without charging the established full cascade twice.
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget,apply_opacity)?;
+                } else { apply_opacity(&mut variable_budget); }
+                continue;
+            }
             if declaration.name == "font" {
                 let value = declaration.value.trim().to_ascii_lowercase();
                 if apply_font(&mut style,&parent,declaration,&value) && !priority.1 {
@@ -1206,6 +1234,13 @@ fn compute_cascade(
             canvas_foregrounds.try_reserve(1).map_err(|_| "Canvas foreground snapshot reservation failed.")?;
             canvas_foregrounds.insert(index, style.color);
         }
+        if !opacity_known || style.opacity != 1.0 {
+            let first = opacities.is_empty();
+            if let Some(meter) = meter.as_deref_mut() { meter.opacity(first)?; }
+            else if let Some(meter) = transform_meter.as_deref_mut() { meter.opacity(first)?; }
+            opacities.try_reserve(1).map_err(|_| "Opacity snapshot reservation failed.")?;
+            opacities.insert(index, opacity_known.then_some(style.opacity));
+        }
         computed[index] = style;
     }
     let overflows = computed.iter().zip(overflow_known).map(|(style, known)| known.iter().all(|known| *known).then_some(style.overflow)).collect();
@@ -1219,7 +1254,7 @@ fn compute_cascade(
     if has_transform_declarations {
         has_transform_geometry |= !complete;
     }
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds) })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities) })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -2869,7 +2904,7 @@ pub(crate) fn declaration_priority(value: &str) -> (&str, bool) {
 fn parse_declarations_bounded(source:&str,maximum:usize)->Vec<Declaration> {
     parse_declarations_inner(source,maximum,true,None).expect("unmetered declarations")
 }
-fn parse_declarations_inner(source:&str,maximum:usize,validate_transform:bool,
+fn parse_declarations_inner(source:&str,maximum:usize,validate_values:bool,
     mut transform_meter:Option<&mut CssBudget<'_>>)->Result<Vec<Declaration>,String> {
     let source = without_comments(source);
     let mut declarations = Vec::new();
@@ -2884,11 +2919,17 @@ fn parse_declarations_inner(source:&str,maximum:usize,validate_transform:bool,
                 && (!custom || custom_properties::custom_name(&name))
                 && (name != "position" || position::valid_declaration(value))
                 && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
-                if name == "transform" && validate_transform {
+                if name == "transform" && validate_values {
                     if let Some(meter) = transform_meter.as_deref_mut() {
                         meter.source(name.len().saturating_add(value.len()))?;
                     }
                     if !translate::valid_declaration(value) {continue;}
+                }
+                if name == "opacity" && validate_values {
+                    if let Some(meter) = transform_meter.as_deref_mut() {
+                        meter.source(name.len().saturating_add(value.len()))?;
+                    }
+                    if !opacity::valid_declaration(value) { continue; }
                 }
                 declarations.push(Declaration {
                     name,

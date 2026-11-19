@@ -46,6 +46,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "max-width",
     "min-height",
     "min-width",
+    "opacity",
     "order",
     "overflow",
     "padding",
@@ -107,7 +108,7 @@ fn declaration(item: &str) -> Option<(&str, &str)> {
     Some((&item[..end], value))
 }
 
-pub(super) fn winner<'a>(style: &'a str, name: &str) -> Option<(usize, &'a str)> {
+pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Result<Option<(usize, &'a str)>, String> {
     let mut winner = None;
     let mut important = false;
     for (index, item) in crate::css::declaration_items(style).enumerate() {
@@ -125,18 +126,27 @@ pub(super) fn winner<'a>(style: &'a str, name: &str) -> Option<(usize, &'a str)>
             raw
         };
         let (specified, priority) = if name == "animation-timing-function" { crate::css::easing_priority(value) } else { crate::css::declaration_priority(value) };
+        if important && !priority {
+            continue;
+        }
         if matches!(name, "color" | "background-color")
             && !crate::css::inline_color_value(specified)
         {
             continue;
         }
-        if name == "animation-timing-function" && !crate::css::inline_easing_value(specified) { continue; }
-        if !important || priority {
-            winner = Some((index, raw));
-            important = priority;
+        if name == "animation-timing-function" {
+            // Validation formats bounded specified numbers even on removal.
+            // Charge this actual candidate here, not an unrelated whole style.
+            state.work(crate::css::easing_source_cost(specified.len()).0)?;
+            if !crate::css::inline_easing_value(specified) { continue; }
         }
+        if name == "opacity" && metered_opacity(specified, state)?.is_none() {
+            continue;
+        }
+        winner = Some((index, raw));
+        important = priority;
     }
-    winner
+    Ok(winner)
 }
 
 pub(super) fn replace(
@@ -145,8 +155,9 @@ pub(super) fn replace(
     value: &str,
     priority: &str,
     limit: usize,
+    state: &mut State,
 ) -> Result<Option<String>, String> {
-    let winning = winner(existing, name).map(|(index, _)| index);
+    let winning = winner(existing, name, state)?.map(|(index, _)| index);
     if winning.is_none() && value.is_empty() {
         return Ok(None);
     }
@@ -214,9 +225,9 @@ pub(super) fn normalize_easing(value: &str, state: &mut State, kind: EasingText)
 }
 
 pub(super) fn easing_declaration(style: &str, state: &mut State, kind: EasingText) -> Result<Option<(String, bool)>, String> {
-    state.work(1 + style.len().saturating_mul(128))?;
+    state.work(1 + style.len().saturating_mul(4))?;
     state.copies(style.len())?;
-    let Some((_, raw)) = winner(style, "animation-timing-function") else { return Ok(None); };
+    let Some((_, raw)) = winner(style, "animation-timing-function", state)? else { return Ok(None); };
     let clean;
     let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); clean.as_str() } else { raw };
     let (value, important) = crate::css::easing_priority(raw);
@@ -310,6 +321,25 @@ mod tests {
     }
 
     #[test]
+    fn inline_easing_and_opacity_share_checked_writes_without_replacing_each_other() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let result = page.console_eval(&mut doc, &mut forms, r#"
+var mixed=document.createElement('div');
+mixed.setAttribute('style','OPACITY:.2;ANIMATION-TIMING-FUNCTION:ease; width:24px');
+mixed.style.width='30px';
+if(mixed.style.opacity!=='0.2'||mixed.style.animationTimingFunction!=='ease'||mixed.style.width!=='30px')throw 'raw CSS spelling and neighboring write';
+mixed.style.animationTimingFunction='cubic-bezier(.1234564,0,1,1)';
+var stored=mixed.getAttribute('style');
+if(stored.indexOf('0.1234564')<0||mixed.style.opacity!=='0.2')throw 'precise easing and genuine opacity';
+mixed.style.opacity=null;
+if(mixed.style.opacity!==''||mixed.style.animationTimingFunction!=='cubic-bezier(0.123456, 0, 1, 1)'||mixed.getAttribute('style').indexOf('0.1234564')<0)throw 'opacity legacy null must preserve precise easing';
+mixed.style.opacity=.75;mixed.style.animationTimingFunction=null;
+if(mixed.style.opacity!=='0.75'||mixed.style.animationTimingFunction!==''||mixed.style.width!=='30px'||mixed.style.length!==2)throw 'easing legacy null must preserve opacity and width';
+"#);
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn inline_style_enumeration_inherited_members_and_live_own_indices() {
         let (mut doc, mut forms, mut page) = fixture();
         let result = page.console_eval(&mut doc, &mut forms, r#"
@@ -375,9 +405,10 @@ if(added.indexOf('0')!==-1||empty[0]!=='color')throw 'new index must wait for ne
 
     #[test]
     fn inline_style_enumeration_replacement_keeps_unrelated_raw_comments_and_priorities() {
+        let (_, _, mut page) = fixture();
         let raw =
             "--Ink: one !important; /* punctuation :; */ color /**/ : red;   width:2px!important;";
-        let result = replace(raw, "color", "blue", "", 256).unwrap().unwrap();
+        let result = replace(raw, "color", "blue", "", 256, &mut page.state).unwrap().unwrap();
         assert_eq!(
             result,
             "--Ink: one !important;color:blue;   width:2px!important;"
@@ -386,8 +417,8 @@ if(added.indexOf('0')!==-1||empty[0]!=='color')throw 'new index must wait for ne
             crate::css::inline_declaration_names(&result, PROPERTIES, None).unwrap(),
             ["--Ink", "color", "width"]
         );
-        assert!(replace(raw, "color", "blue", "", 4).is_err());
-        assert!(replace(raw, "--ink", "", "", 256).unwrap().is_none());
+        assert!(replace(raw, "color", "blue", "", 4, &mut page.state).is_err());
+        assert!(replace(raw, "--ink", "", "", 256, &mut page.state).unwrap().is_none());
     }
 
     #[test]

@@ -167,6 +167,40 @@ fn inline_easing_copy_or_work_refusal_preserves_raw_and_commit_identity() {
 }
 
 #[test]
+fn inline_easing_empty_removal_prepays_each_candidate_and_refuses_atomically() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let node = (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some("tile")).unwrap();
+    let raw = doc.attr(node, "style").unwrap().to_owned();
+    let commits = page.state.dom_commits;
+    let normal_work = page.state.host_work;
+    let copies = page.state.copy_work;
+    let limit = page.state.limits.host.string_bytes;
+    page.state.host_work = 0;
+    assert!(script_inline_style::replace(&raw, "animation-timing-function", "", "", limit, &mut page.state).is_err());
+    assert_eq!(page.state.copy_work, copies, "pure validation does not allocate before its debit");
+    assert_eq!(doc.attr(node, "style"), Some(raw.as_str()));
+    assert_eq!(page.state.dom_commits, commits);
+    {
+        let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        // Enough for ordinary scans, one unit short of the actual candidate's
+        // validation: the checked removal must stop before DOM publication.
+        bridge.state.host_work = 1 + raw.len() * 2 + crate::css::easing_source_cost("EASE-IN".len()).0 - 1;
+        assert!(bridge.set_style(node, "animation-timing-function", "", "").is_err());
+        assert_eq!(bridge.state.host_work, 0);
+        assert_eq!(bridge.doc.attr(node, "style"), Some(raw.as_str()));
+        assert_eq!(bridge.state.dom_commits, commits);
+        bridge.state.host_work = normal_work;
+        bridge.set_style(node, "animation-timing-function", "", "").unwrap();
+        assert!(!bridge.doc.attr(node, "style").unwrap().contains("animation-timing-function"));
+        assert!(bridge.state.dom_commits > commits);
+    }
+    let unrelated = "width:24px;".repeat(100);
+    page.state.host_work = unrelated.len() * 5 + 10;
+    assert!(script_inline_style::easing_declaration(&unrelated, &mut page.state, script_inline_style::EasingText::Cssom).unwrap().is_none());
+    assert!(page.state.host_work > 0, "unrelated declarations pay only the ordinary linear scan");
+}
+
+#[test]
 fn inline_easing_noop_compares_precise_specified_numbers_not_rounded_readback() {
     let mut doc = crate::html::parse("<!doctype html><body><div id=precise style='animation-timing-function:cubic-bezier(.1234561,0,1,1);color:red'></div>");
     doc.scripting_enabled = true;
