@@ -81,6 +81,70 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
 }
 
 #[test]
+fn autonomous_element_identity_uses_the_html_and_dom_name_rules() {
+    use crate::javascript::valid_custom_element_name;
+    for name in ["a-", "data-panel", "x-α", "note-🙂", "x-@", "x-=", "x-:", "x-\u{b}"] {
+        assert!(valid_custom_element_name(name), "{name:?}");
+    }
+    for name in [
+        "", "x", "-x", "1-name", "α-name", "X-name", "x-Name", "x-\0", "x-/",
+        "x->", "x- ", "x-\t", "x-\n", "x-\r", "x-\u{c}",
+        "annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri",
+        "font-face-format", "font-face-name", "missing-glyph",
+    ] {
+        assert!(!valid_custom_element_name(name), "{name:?}");
+    }
+}
+
+#[test]
+fn autonomous_element_identity_preserves_namespace_owner_and_native_guards() {
+    let (mut doc, mut forms, mut page) = fixture_with(concat!(
+        "<notice-line id='custom'></notice-line><font-face id='reserved'></font-face>",
+        "<svg><notice-line id='foreign'/></svg><template><notice-line id='hidden'></notice-line></template>",
+    ));
+    for name in ["reserved", "foreign", "hidden"] {
+        let handle = node_handle(id(&doc, name));
+        let bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        assert_eq!(bridge.concrete_html_interface(handle), None, "{name}");
+        assert!(!bridge.element_expando_receiver(handle), "{name}");
+    }
+    run(&mut doc, &mut forms, &mut page, r#"
+var notice=document.getElementById('custom'), C=HTMLElement, proto=C.prototype;
+var label=Symbol('notice');
+Object.defineProperty(notice,'entry',{value:3,configurable:true});
+notice[label]=notice;
+if(notice.entry!==3||notice[label]!==notice||!delete notice.entry||Object.hasOwn(notice,'entry'))
+    throw 'ordinary own data';
+var normalized=document.createElement('Notice-Line');
+if(normalized.localName!=='notice-line'||Object.getPrototypeOf(normalized)!==proto||
+   stringify.call(notice)!=='[object HTMLElement]')throw 'normalized factory or interface tag';
+class Unregistered extends HTMLElement {}
+for(var construct of [function(){new C();},function(){new Unregistered();}]){
+    var rejected=false;try{construct();}catch(e){if(e.name!=='TypeError')throw e;rejected=true;}
+    if(!rejected)throw 'unregistered construction';
+}
+var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);
+var w=f.contentWindow, read=w.Function('value','return value.constructor;');
+if(read(notice)!==C||w.HTMLElement===C||notice instanceof w.HTMLElement||
+   Object.getPrototypeOf(w.document.body)!==w.HTMLBodyElement.prototype)
+    throw 'genuine owner prototype';
+"#);
+    for source in [
+        "Object.getPrototypeOf(document.createElementNS('http://www.w3.org/1999/xhtml','notice-Line'));",
+        "Object.setPrototypeOf(notice,{});",
+        "Object.defineProperty(notice,'ownerDocument',{value:null});",
+    ] {
+        assert_eq!(page.console_eval(&mut doc, &mut forms, source).errors, 1, "{source}");
+    }
+    page.set_location(&location("https://other-dom-string.test/changed"));
+    assert_eq!(page.console_eval(&mut doc, &mut forms, "read(notice);").errors, 1);
+    assert!(page.report().contains("same-origin"), "{}", page.report());
+    page.set_location(&location("https://dom-string.test/path/page"));
+    run(&mut doc, &mut forms, &mut page,
+        "if(read(notice)!==C||notice[label]!==notice||notice.ownerDocument!==document)throw 'restored owner and state';");
+}
+
+#[test]
 fn document_interface_script_uses_the_owner_realm_constructor_and_node_prototype() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc, &mut forms, &mut page, r#"
