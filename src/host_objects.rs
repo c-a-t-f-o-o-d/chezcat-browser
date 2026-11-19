@@ -340,6 +340,7 @@ impl Runtime {
         for (name, operation) in [
             ("clearRect", "\0CanvasRenderingContext2D.clearRect"),
             ("fillRect", "\0CanvasRenderingContext2D.fillRect"),
+            ("getImageData", super::canvas_readback::METHOD),
         ] {
             self.define_canvas_operation(prototype, window, name, operation, 4)?;
         }

@@ -23,6 +23,8 @@ mod array_ops;
 mod base64;
 #[path = "binary_data.rs"]
 mod binary_data;
+#[path = "canvas_readback.rs"]
+pub(crate) mod canvas_readback;
 #[path = "binding_length.rs"]
 mod binding_length;
 #[path = "binding_character.rs"]
@@ -108,6 +110,8 @@ mod collections;
 mod date;
 #[path = "rect_api.rs"]
 mod rect_api;
+#[path = "image_data_api.rs"]
+mod image_data_api;
 #[path = "dom_exception.rs"]
 mod dom_exception;
 #[path = "expression_parser.rs"]
@@ -453,6 +457,13 @@ pub trait Host {
     fn native_access_owner(&self, _object: u32) -> Option<u32> { None }
     /// Real renderer border-box snapshot, when the host implements this method.
     fn bounding_rect_snapshot(&mut self, _object: u32) -> Option<Result<[f64; 4], String>> { None }
+    fn canvas_readback_source(
+        &mut self,
+        _object: u32,
+        _output_bytes: usize,
+    ) -> Result<&crate::canvas_2d_bitmap::CanvasBitmap, String> {
+        Err("Canvas pixels are unavailable.".into())
+    }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
     /// Preserve a native named-read/presence fallback after ordinary own keys.
@@ -3271,6 +3282,7 @@ enum Builtin {
     Date(date::Op),
     Url(url_api::Op),
     Rect(rect_api::Op),
+    ImageData(image_data_api::Op),
     DomException(dom_exception::Op),
     Eval,
     JsonParse,
@@ -3522,6 +3534,7 @@ pub struct Runtime {
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
     rect_roots: rect_api::Roots,
+    image_data_prototype: Option<usize>,
     dom_exception_roots: dom_exception::Roots,
     string_prototype: Option<usize>,
     number_prototype: Option<usize>,
@@ -3668,6 +3681,7 @@ impl Runtime {
             date_prototype: None,
             url_roots: url_api::Roots::default(),
             rect_roots: rect_api::Roots::default(),
+            image_data_prototype: None,
             dom_exception_roots: dom_exception::Roots::default(),
             string_prototype: None,
             number_prototype: None,
@@ -3722,7 +3736,7 @@ impl Runtime {
             job_failed_fatally: false,
             diagnostics: runtime_diagnostics::Data::default(),
             failed_window_realms: HashSet::new(),
-            deferred_intrinsics: (if defer_families { 7 } else { 0 }) | 8 | 16,
+            deferred_intrinsics: intrinsic_realms::startup_deferred_families(defer_families),
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
@@ -3791,6 +3805,8 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::RECT_GLOBALS)?; }
         if self.deferred_intrinsics & 16 == 0 { self.initialize_dom_exception()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::DOM_EXCEPTION_GLOBALS)?; }
+        if self.deferred_intrinsics & 32 == 0 { self.initialize_image_data()?; }
+        else { self.reserve_deferred_global_orders(intrinsic_realms::IMAGE_DATA_GLOBALS)?; }
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -7947,6 +7963,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Rect(rect_api::Op::Constructor(mutable)))) => {
                 self.rect_construct(*mutable, args, host)
             }
+            Some(Function::Native(Builtin::ImageData(image_data_api::Op::Constructor))) => {
+                self.image_data_construct(args, host)
+            }
             Some(Function::Native(Builtin::DomException(dom_exception::Op::Constructor))) => {
                 self.dom_exception_construct(args,host)
             }
@@ -8529,13 +8548,22 @@ impl Runtime {
                     converted[index] = self.checked_value(if string_hint {
                         Value::String(primitive.script_text()?)
                     } else {
-                        Value::Number(primitive.script_number()?)
+                        let number = primitive.script_number()?;
+                        Value::Number(if method == canvas_readback::METHOD {
+                            canvas_readback::enforce_long(number)?
+                        } else {
+                            number
+                        })
                     })?;
                 }
             }
             &converted
         };
-        for value in args { self.pin_exported_value(value); }
+        // Readback consumes converted arguments inside this transient call. Its
+        // native pixel source receives no script object or function handles.
+        if method != canvas_readback::METHOD {
+            for value in args { self.pin_exported_value(value); }
+        }
         for &index in host.native_reference_arguments(object,method) {
             if let Some(Value::Host(handle))=args.get(index) {self.validate_native_access(*handle,host)?;}
         }
@@ -8641,6 +8669,9 @@ impl Runtime {
                 }
                 fields = Some(values);
             }
+        }
+        if method == canvas_readback::METHOD {
+            return self.canvas_image_data(object, args, fields.as_deref(), host);
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
@@ -8972,6 +9003,9 @@ impl Runtime {
             }
             Some(Function::Native(Builtin::Rect(operation))) => {
                 return self.rect_builtin(*operation, args, this, host);
+            }
+            Some(Function::Native(Builtin::ImageData(operation))) => {
+                return self.image_data_builtin(*operation, this);
             }
             Some(Function::Native(Builtin::DomException(operation))) => {
                 return self.dom_exception_builtin(*operation,this);
@@ -9664,6 +9698,7 @@ impl Runtime {
             | Builtin::Date(_)
             | Builtin::Url(_)
             | Builtin::Rect(_)
+            | Builtin::ImageData(_)
             | Builtin::DomException(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)

@@ -906,6 +906,22 @@ fn api_exports_are_permanent_deduplicated_roots_without_payload_or_work_copies()
 }
 
 #[test]
+fn image_data_reachability_follows_retained_view_and_its_backing_buffer() {
+    let mut runtime = Runtime::for_test();
+    let image = runtime.new_rgba_image_data(1, 1, |_| Ok(())).unwrap();
+    let Value::Object(wrapper) = image else { panic!("ImageData wrapper") };
+    let Some(super::binary_data::Data::ImageData(data)) = &runtime.objects[wrapper].binary else { panic!("ImageData record") };
+    let view = data.view;
+    let buffer = runtime.typed_view(view).unwrap().buffer;
+    for roots in [&[][..], std::slice::from_ref(&image)] {
+        let graph = runtime.mark_persistent_functions(roots, false).unwrap();
+        for id in [wrapper, view, buffer] {
+            assert_eq!(graph.objects[id], !roots.is_empty());
+        }
+    }
+}
+
+#[test]
 fn reachability_snapshot_rejects_unregistered_transient_state_and_invalid_roots() {
     let mut runtime = Runtime::new();
     runtime.call_depth = 1;

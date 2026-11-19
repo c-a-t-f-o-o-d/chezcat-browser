@@ -91,6 +91,7 @@ pub(super) enum Operation {
     Canvas,
     GetFillStyle,
     SetFillStyle,
+    GetImageData,
     FillRect,
     ClearRect,
 }
@@ -102,6 +103,7 @@ impl Operation {
             "\0CanvasRenderingContext2D.get.canvas" => Some(Self::Canvas),
             "\0CanvasRenderingContext2D.get.fillStyle" => Some(Self::GetFillStyle),
             "\0CanvasRenderingContext2D.set.fillStyle" => Some(Self::SetFillStyle),
+            crate::javascript::canvas_readback::METHOD => Some(Self::GetImageData),
             "\0CanvasRenderingContext2D.fillRect" => Some(Self::FillRect),
             "\0CanvasRenderingContext2D.clearRect" => Some(Self::ClearRect),
             _ => None,
@@ -112,7 +114,7 @@ impl Operation {
         match self {
             Self::GetContext | Self::SetFillStyle => 1,
             Self::Canvas | Self::GetFillStyle => 0,
-            Self::FillRect | Self::ClearRect => 4,
+            Self::FillRect | Self::ClearRect | Self::GetImageData => 4,
         }
     }
 
@@ -120,7 +122,7 @@ impl Operation {
         match self {
             Self::GetContext | Self::SetFillStyle => &[(0, true)],
             Self::Canvas | Self::GetFillStyle => &[],
-            Self::FillRect | Self::ClearRect => &[(0, false), (1, false), (2, false), (3, false)],
+            Self::FillRect | Self::ClearRect | Self::GetImageData => &[(0, false), (1, false), (2, false), (3, false)],
         }
     }
 
@@ -192,6 +194,19 @@ impl Bridge<'_> {
 
     pub(super) fn canvas_context_receiver(&self, object: u32) -> bool {
         self.canvas_context_node(object).is_some()
+    }
+
+    pub(super) fn canvas_pixels_for_readback(
+        &mut self,
+        object: u32,
+        output_bytes: usize,
+    ) -> Result<&CanvasBitmap, String> {
+        let node = self.canvas_context_node(object).ok_or("Unavailable canvas context.")?;
+        self.state.work(output_bytes / 4)?;
+        self.state.copies(output_bytes)?;
+        // Only this context's script-created backing is accessible. CSS,
+        // neighboring page pixels and decoded external images never enter it.
+        Ok(&self.state.canvas_contexts.surfaces[&node].surface)
     }
 
     pub(super) fn canvas_context_dictionary(
@@ -312,6 +327,9 @@ impl Bridge<'_> {
             .ok_or("Unavailable canvas context.")?;
         if operation == Operation::Canvas {
             return Ok(Value::Host(node_handle(node)));
+        }
+        if operation == Operation::GetImageData {
+            return Err("Canvas readback requires native ImageData allocation.".into());
         }
         if operation == Operation::GetFillStyle {
             let color = self.state.canvas_contexts.surfaces[&node].fill_style;
@@ -477,6 +495,36 @@ mod tests {
             if(style.get.call(ctx)!=='#336699')throw 'foreign attribute reset state';
             a.setAttribute('width',a.getAttribute('width'));
             if(style.get.call(ctx)!=='#000000')throw 'same-value content attribute kept drawing state';
+        "#);
+    }
+
+    #[test]
+    fn canvas_readback_protocol_converts_coordinates_in_order_and_reads_after_settings() {
+        let (mut doc, mut forms, mut page, _) = fixture();
+        eval(&mut doc, &mut forms, &mut page, r#"
+            var canvas=document.getElementById('first'), ctx=canvas.getContext('2d');
+            var read=ctx.getImageData,calls=0,token={};
+            var later={valueOf(){calls++;throw token;}};
+            try{read.call(canvas,later,0,1,1);throw 'wrong receiver accepted';}
+            catch(e){if(!(e instanceof TypeError))throw e;}
+            try{read.call(ctx,2147483648,later,1,1);throw 'coordinate overflow accepted';}
+            catch(e){if(!(e instanceof TypeError))throw e;}
+            if(calls!==0)throw 'conversion continued after refusal';
+            var order='', opts={get colorSpace(){order+='c';ctx.fillStyle='#a20';ctx.fillRect(0,0,1,1);return 'srgb';},
+                get pixelFormat(){order+='p';return 'rgba-unorm8';}};
+            var pixels=read.call(ctx,-0.9,0,1.8,1,opts).data;
+            if(order!=='cp'||pixels[0]!==170||pixels[1]!==34||pixels[2]!==0||pixels[3]!==255)
+                throw 'settings, integer conversion or snapshot timing';
+            try{read.call(ctx,0,0,0,1,{get colorSpace(){throw token;}});throw 'missing conversion';}
+            catch(e){if(e!==token)throw e;}
+            try{read.call(ctx,0,0,0,1);throw 'zero width';}
+            catch(e){if(!(e instanceof DOMException)||e.name!=='IndexSizeError')throw e;}
+            try{read.call(ctx,0,0,1,1,5);throw 'primitive dictionary accepted';}
+            catch(e){if(!(e instanceof TypeError))throw e;}
+            try{read.call(ctx,0,0,1,1,{pixelFormat:'unrecognized'});throw 'invalid enum accepted';}
+            catch(e){if(!(e instanceof TypeError))throw e;}
+            try{read.call(ctx,0,0,1,1,{pixelFormat:'rgba-float16'});throw 'wrong pixel format';}
+            catch(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw e;}
         "#);
     }
 

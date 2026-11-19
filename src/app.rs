@@ -4498,8 +4498,10 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod attribute_substrings;
     mod canvas_2d;
     mod canvas_colors;
+    mod canvas_readback;
     mod inline_style_keys;
 
     use super::*;
