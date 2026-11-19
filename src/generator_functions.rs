@@ -2,6 +2,7 @@
 //! https://tc39.es/ecma262/#sec-generatorfunction-definitions
 //! https://tc39.es/ecma262/#sec-generator-objects
 use super::function_reachability::Edge;
+use super::async_plan::Instruction;
 use super::iterator_protocol::{Delegated, Record};
 use super::*;
 
@@ -27,10 +28,17 @@ pub(super) struct Activation {
     next: usize,
     delegate: Option<Record>,
     scopes: [Option<usize>; 4],
+    lexical_scopes: Vec<usize>,
+    try_scopes: Vec<TryScope>,
     this: Value,
     invocation: Option<InvocationContext>,
     realm: Option<usize>,
     native_caller: Option<Option<u32>>,
+}
+
+struct TryScope {
+    statement: StmtId,
+    lexical_depth: usize,
 }
 
 enum Progress {
@@ -43,11 +51,20 @@ impl Activation {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>().saturating_add(self.this.bytes())
             .saturating_add(self.delegate.as_ref().map_or(0, Record::retained_bytes))
+            .saturating_add(self.lexical_scopes.capacity().saturating_mul(std::mem::size_of::<usize>()))
+            .saturating_add(self.try_scopes.capacity().saturating_mul(std::mem::size_of::<TryScope>()))
+    }
+
+    fn environment(&self) -> usize {
+        self.lexical_scopes.last().copied().unwrap_or(self.environment)
     }
 
     fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
         add(Edge::Function(self.callee));
         for scope in self.scopes.into_iter().flatten() {
+            add(Edge::Environment(scope));
+        }
+        for &scope in &self.lexical_scopes {
             add(Edge::Environment(scope));
         }
         Edge::value(&self.this, add);
@@ -66,7 +83,9 @@ impl State {
 
     pub(super) fn reachability_cost(&self) -> usize {
         match self {
-            Self::SuspendedStart(frame) | Self::SuspendedYield(frame) => 6 + 2 * usize::from(frame.delegate.is_some()),
+            Self::SuspendedStart(frame) | Self::SuspendedYield(frame) => {
+                6 + frame.lexical_scopes.len() + 2 * usize::from(frame.delegate.is_some())
+            }
             _ => 0,
         }
     }
@@ -74,6 +93,7 @@ impl State {
     pub(super) fn environment_roots(&self, roots: &mut Vec<usize>) {
         if let Self::SuspendedStart(frame) | Self::SuspendedYield(frame) = self {
             roots.extend(frame.scopes.into_iter().flatten());
+            roots.extend(frame.lexical_scopes.iter().copied());
         }
     }
 }
@@ -192,6 +212,7 @@ impl Runtime {
         let result = prepared.and_then(|environment| {
             let frame = Activation {
                 program: Rc::clone(program), template, callee, environment, next: 0, delegate: None, scopes,
+                lexical_scopes: Vec::new(), try_scopes: Vec::new(),
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
             };
@@ -250,11 +271,11 @@ impl Runtime {
         }
         let (State::SuspendedStart(mut frame) | State::SuspendedYield(mut frame)) =
             std::mem::replace(state, State::Executing) else { unreachable!() };
-        let progress = if matches!(operation, Op::Next) || frame.delegate.is_some() {
-            let input = args.first().unwrap_or(&Value::Undefined);
+        let input = args.first().unwrap_or(&Value::Undefined);
+        let progress = if matches!(operation, Op::Next) || frame.delegate.is_some() || !frame.try_scopes.is_empty() {
             self.resume_generator(&mut frame, operation, input, host)
         } else {
-            self.generator_abrupt_value(operation, args).map(Progress::Complete)
+            self.generator_abrupt_value(operation, input).map(Progress::Complete)
         };
         let value = match progress {
             Ok(Progress::Forwarded(result)) => {
@@ -273,6 +294,7 @@ impl Runtime {
         };
         self.objects[id].generator = Some(State::Completed);
         self.value_bytes -= frame.retained_bytes();
+        self.unwind_generator_scopes(&mut frame, 0);
         self.release_generator_scopes(frame.scopes);
         self.generator_result(value?, true)
     }
@@ -284,13 +306,13 @@ impl Runtime {
     fn completed_generator(&mut self, operation: Op, args: &[Value]) -> Result<Value, Fault> {
         let value = match operation {
             Op::Next => Value::Undefined,
-            Op::Return | Op::Throw => self.generator_abrupt_value(operation, args)?,
+            Op::Return | Op::Throw => self.generator_abrupt_value(operation, args.first().unwrap_or(&Value::Undefined))?,
         };
         self.generator_result(value, true)
     }
 
-    fn generator_abrupt_value(&mut self, operation: Op, args: &[Value]) -> Result<Value, Fault> {
-        let value = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+    fn generator_abrupt_value(&mut self, operation: Op, input: &Value) -> Result<Value, Fault> {
+        let value = self.copy_value(input)?;
         if matches!(operation, Op::Throw) { Err(Fault::thrown(value)) } else { Ok(value) }
     }
 
@@ -340,9 +362,16 @@ impl Runtime {
                 if let Some(progress) = self.advance_generator_delegate(frame, operation, input, host)? {
                     return Ok(progress);
                 }
+            } else if !matches!(operation, Op::Next) {
+                return self.generator_abrupt_value(operation, input).map(Progress::Complete);
             }
             self.drive_generator_body(frame, host)
         })();
+        let result = match result {
+            Ok(Progress::Complete(value)) => self.finish_generator_body(frame, Ok(Control::Return(value)), host),
+            Err(error) => self.finish_generator_body(frame, Err(error), host),
+            suspended => suspended,
+        };
         self.transient_roots.owned_call_depth -= 1;
         self.call_depth -= 1;
         self.invocation = previous_invocation;
@@ -352,41 +381,143 @@ impl Runtime {
     }
 
     fn drive_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
-        while let Some(&statement) = frame.program.templates[frame.template].body.get(frame.next) {
+        let template = &frame.program.templates[frame.template];
+        if template.resumption_plan.is_empty() {
+            let control = self.statements(&frame.program, &template.body, frame.environment, &frame.this, host)?;
+            return Self::generator_completion(control);
+        }
+        while let Some(&instruction) = frame.program.templates[frame.template].resumption_plan.get(frame.next) {
             frame.next += 1;
-            if let StmtKind::Yield(operand) = frame.program.stmts[statement].kind {
-                let value = (|| {
-                    self.step()?;
-                    match operand {
-                        Some(operand) => self.eval(&frame.program, operand, frame.environment, &frame.this, host),
-                        None => Ok(Value::Undefined),
-                    }
-                })().map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
-                return Ok(Progress::Yield(value));
-            }
-            if let StmtKind::YieldFrom(operand) = frame.program.stmts[statement].kind {
-                if let Some(progress) = self.begin_generator_delegate(frame, statement, operand, host)? {
-                    return Ok(progress);
+            let control = match instruction {
+                Instruction::Statement(statement) => {
+                    self.statement(&frame.program, statement, frame.environment(), &frame.this, host)?
                 }
-                continue;
-            }
-            match self.statement(&frame.program, statement, frame.environment, &frame.this, host)? {
-                Control::Normal(_) => {}
-                Control::Return(value) => return Ok(Progress::Complete(value)),
-                _ => return Err(Fault::new("Unexpected loop control outside a loop.")),
+                Instruction::Yield(statement) => {
+                    if let Some(progress) = self.yield_generator_statement(frame, statement, host)? {
+                        return Ok(progress);
+                    }
+                    continue;
+                }
+                Instruction::EnterBlock(statement) => {
+                    self.enter_generator_block(frame, statement, host)?;
+                    continue;
+                }
+                Instruction::LeaveBlock => {
+                    self.step()?;
+                    let scope = frame.lexical_scopes.pop().expect("compiled generator block exit");
+                    self.release_environment(scope);
+                    continue;
+                }
+                Instruction::PushTry { statement, .. } => {
+                    self.step()?;
+                    self.reserve_generator_stack(&mut frame.try_scopes)?;
+                    frame.try_scopes.push(TryScope { statement, lexical_depth: frame.lexical_scopes.len() });
+                    continue;
+                }
+                Instruction::FinishTry => {
+                    self.step()?;
+                    self.finish_generator_try(frame, Ok(Control::Normal(None)), host)?
+                }
+                _ => unreachable!("instruction outside the generator subset"),
+            };
+            if !matches!(control, Control::Normal(_)) {
+                return Self::generator_completion(control);
             }
         }
         Ok(Progress::Complete(Value::Undefined))
     }
 
+    fn generator_completion(control: Control) -> Result<Progress, Fault> {
+        match control {
+            Control::Normal(_) => Ok(Progress::Complete(Value::Undefined)),
+            Control::Return(value) => Ok(Progress::Complete(value)),
+            _ => Err(Fault::new("Unexpected loop control outside a loop.")),
+        }
+    }
+
+    #[inline(never)]
+    fn yield_generator_statement(
+        &mut self, frame: &mut Activation, statement: StmtId, host: &mut dyn Host,
+    ) -> Result<Option<Progress>, Fault> {
+        let result = (|| {
+            self.step()?;
+            match frame.program.stmts[statement].kind {
+                StmtKind::Yield(operand) => {
+                    let value = match operand {
+                        Some(expr) => self.eval(&frame.program, expr, frame.environment(), &frame.this, host)?,
+                        None => Value::Undefined,
+                    };
+                    Ok(Some(Progress::Yield(value)))
+                }
+                StmtKind::YieldFrom(operand) => self.begin_generator_delegate(frame, operand, host),
+                _ => unreachable!("compiled yield statement"),
+            }
+        })();
+        result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+    }
+
+    #[inline(never)]
+    fn reserve_generator_stack<T>(&mut self, stack: &mut Vec<T>) -> Result<(), Fault> {
+        if stack.len() >= MAX_EVAL_DEPTH {
+            return Err(Fault::new("Generator scope nesting limit reached (128)."));
+        }
+        if stack.len() == stack.capacity() {
+            let before = stack.capacity();
+            self.check_generator_retention(std::mem::size_of::<T>())?;
+            stack.try_reserve_exact(1).map_err(|_| Fault::new("Unable to allocate bounded generator scopes."))?;
+            let added = (stack.capacity() - before).saturating_mul(std::mem::size_of::<T>());
+            self.value_bytes += added;
+            if self.value_bytes > self.limits.heap.retained_values {
+                return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
+            }
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn enter_generator_block(
+        &mut self, frame: &mut Activation, statement: StmtId, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.step()?;
+        self.reserve_generator_stack(&mut frame.lexical_scopes)?;
+        let scope = self.new_environment(frame.environment(), false)?;
+        frame.lexical_scopes.push(scope);
+        let StmtKind::Block(body) = &frame.program.stmts[statement].kind else { unreachable!() };
+        self.prepare(&frame.program, body, scope, false, host)
+    }
+
+    fn unwind_generator_scopes(&mut self, frame: &mut Activation, depth: usize) {
+        while frame.lexical_scopes.len() > depth {
+            self.release_environment(frame.lexical_scopes.pop().expect("owned generator scope"));
+        }
+    }
+
+    #[inline(never)]
+    fn finish_generator_try(
+        &mut self, frame: &mut Activation, completion: Result<Control, Fault>, host: &mut dyn Host,
+    ) -> Result<Control, Fault> {
+        let scope = frame.try_scopes.pop().expect("compiled generator try exit");
+        self.unwind_generator_scopes(frame, scope.lexical_depth);
+        self.finish_try_statement(&frame.program, scope.statement, completion, frame.environment(), &frame.this, host)
+    }
+
+    #[inline(never)]
+    fn finish_generator_body(
+        &mut self, frame: &mut Activation, mut completion: Result<Control, Fault>, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        while !frame.try_scopes.is_empty() && !completion.as_ref().is_err_and(|error| error.exception.is_none()) {
+            completion = self.finish_generator_try(frame, completion, host);
+        }
+        completion.and_then(Self::generator_completion)
+    }
+
     #[inline(never)]
     fn begin_generator_delegate(
-        &mut self, frame: &mut Activation, statement: StmtId, operand: ExprId, host: &mut dyn Host,
+        &mut self, frame: &mut Activation, operand: ExprId, host: &mut dyn Host,
     ) -> Result<Option<Progress>, Fault> {
         let marker = self.root_marker();
         let result = (|| {
-            self.step()?;
-            let value = self.eval(&frame.program, operand, frame.environment, &frame.this, host)?;
+            let value = self.eval(&frame.program, operand, frame.environment(), &frame.this, host)?;
             self.push_transient_value(&value)?;
             let LoopIterator::Values(record) = self.loop_iterator(value, true, host)? else {
                 unreachable!("yield delegation requires a value iterator");
@@ -398,7 +529,7 @@ impl Runtime {
             self.advance_generator_delegate(frame, Op::Next, &Value::Undefined, host)
         })();
         self.restore_root_marker(marker);
-        result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+        result
     }
 
     #[inline(never)]

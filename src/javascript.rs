@@ -1824,7 +1824,7 @@ struct Template {
     dynamic_source: bool,
     arrow: bool,
     kind: FunctionKind,
-    await_plan: Vec<async_plan::Instruction>,
+    resumption_plan: Vec<async_plan::Instruction>,
     constructible: bool,
     class_constructor: bool,
     class_element: bool,
@@ -1850,13 +1850,13 @@ struct Program {
     patterns: Vec<binding_patterns::Pattern>,
     body: Vec<StmtId>,
     chain_steps: usize,
-    await_plan_nodes: usize,
+    resumption_plan_nodes: usize,
 }
 
 impl Program {
     fn node_count(&self) -> usize {
         self.exprs.len() + self.stmts.len() + self.chain_steps + self.patterns.len()
-            + self.classes.len() + self.class_members + self.await_plan_nodes
+            + self.classes.len() + self.class_members + self.resumption_plan_nodes
     }
 }
 
@@ -1892,6 +1892,7 @@ struct Parser {
     // Present only in an async function body. Nested function and parameter
     // goals cannot claim a suspension point from the enclosing template.
     await_count: Option<usize>,
+    yield_count: Option<usize>,
     new_target_allowed: bool,
     super_property_allowed: bool,
     super_call_allowed: bool,
@@ -1965,7 +1966,7 @@ impl Parser {
                 patterns: Vec::new(),
                 body: Vec::new(),
                 chain_steps: 0,
-                await_plan_nodes: 0,
+                resumption_plan_nodes: 0,
             },
             tokens,
             delimiter_ends,
@@ -1984,6 +1985,7 @@ impl Parser {
             allow_in: true,
             functions: 0,
             await_count: None,
+            yield_count: None,
             new_target_allowed,
             super_property_allowed,
             super_call_allowed,
@@ -2043,7 +2045,9 @@ impl Parser {
             self.depth = active_depth;
             self.enter()?;
             self.functions = body.function_depth;
-            self.await_count = (self.program.templates[body.template].kind == FunctionKind::Async).then_some(0);
+            let kind = self.program.templates[body.template].kind;
+            self.await_count = (kind == FunctionKind::Async).then_some(0);
+            self.yield_count = (kind == FunctionKind::Generator).then_some(0);
             self.new_target_allowed = body.new_target_allowed;
             self.super_property_allowed = body.super_property_allowed;
             self.super_call_allowed = body.super_call_allowed;
@@ -2055,8 +2059,7 @@ impl Parser {
             if self.expression_frames != 0 || self.if_branches != 0 {
                 return Err(self.unsupported("Undrained parser continuations before deferred body."));
             }
-            let kind = self.program.templates[body.template].kind;
-            let (statements, strict, own_strict) = self.function_body(kind)?;
+            let (statements, strict, own_strict) = self.function_body()?;
             if self.current != body.end + 1 {
                 return Err(self.error("Function body exceeded its token range."));
             }
@@ -2081,7 +2084,7 @@ impl Parser {
             let template = &mut self.program.templates[body.template];
             template.strict = strict;
             template.body = statements;
-            self.attach_await_plan(body.template, self.await_count.unwrap_or(0))?;
+            self.attach_resumption_plan(body.template, self.await_count.or(self.yield_count).unwrap_or(0))?;
             self.depth -= 1;
             if self.expression_frames != 0 || self.if_branches != 0 {
                 return Err(self.unsupported("Undrained parser continuations after deferred body."));
@@ -2090,11 +2093,11 @@ impl Parser {
         Ok(())
     }
 
-    fn attach_await_plan(&mut self, template: usize, count: usize) -> Result<(), Fault> {
+    fn attach_resumption_plan(&mut self, template: usize, count: usize) -> Result<(), Fault> {
         if count != 0 {
             let plan = async_plan::compile(&self.program, template, count, self.capacity.ast_nodes)?;
-            self.program.await_plan_nodes += plan.len();
-            self.program.templates[template].await_plan = plan;
+            self.program.resumption_plan_nodes += plan.len();
+            self.program.templates[template].resumption_plan = plan;
         }
         Ok(())
     }
@@ -2215,7 +2218,7 @@ impl Parser {
         *active = false;
         false
     }
-    fn function_body(&mut self, kind: FunctionKind) -> Result<(Vec<StmtId>, bool, bool), Fault> {
+    fn function_body(&mut self) -> Result<(Vec<StmtId>, bool, bool), Fault> {
         self.need("{")?;
         let previous = self.strict;
         let mut body = Vec::new();
@@ -2225,11 +2228,7 @@ impl Parser {
             if matches!(self.token().kind, TokenKind::End) {
                 return Err(self.error("Unterminated function body."));
             }
-            let statement = if kind == FunctionKind::Generator && self.is("yield") {
-                self.generator_yield_statement()?
-            } else {
-                self.statement()?
-            };
+            let statement = self.statement()?;
             own_strict |= self.directive(statement, &mut directives);
             body.push(statement);
         }
@@ -2238,10 +2237,7 @@ impl Parser {
         Ok((body, strict, own_strict))
     }
 
-    fn generator_yield_statement(&mut self) -> Result<StmtId, Fault> {
-        self.enter()?;
-        let at = self.at();
-        self.need("yield")?;
+    fn generator_yield_statement(&mut self) -> Result<StmtKind, Fault> {
         let kind = if self.token().newline() || self.is(";") || self.is("}")
             || matches!(self.token().kind, TokenKind::End)
         {
@@ -2252,9 +2248,8 @@ impl Parser {
             StmtKind::Yield(Some(self.assignment_with_in()?))
         };
         self.semi()?;
-        let statement = self.stmt(kind, at)?;
-        self.depth -= 1;
-        Ok(statement)
+        *self.yield_count.as_mut().expect("generator statement context") += 1;
+        Ok(kind)
     }
     fn strict_binding(&self, name: &str, strict: bool) -> Result<(), Fault> {
         if strict && matches!(name, "eval" | "arguments") {
@@ -2436,6 +2431,8 @@ impl Parser {
             StmtKind::Throw(value)
         } else if self.eat("try") {
             self.try_body()?
+        } else if self.yield_count.is_some() && self.eat("yield") {
+            self.generator_yield_statement()?
         } else if self.eat("return") {
             if self.functions == 0 {
                 return Err(self.error("return is only valid inside a function."));
@@ -2595,7 +2592,7 @@ impl Parser {
             dynamic_source: false,
             arrow: false,
             kind,
-            await_plan: Vec::new(),
+            resumption_plan: Vec::new(),
             constructible: kind == FunctionKind::Ordinary,
             class_constructor: false,
             class_element: false,
@@ -2700,7 +2697,7 @@ impl Parser {
                 dynamic_source: false,
                 arrow: true,
                 kind: FunctionKind::from_async(asynchronous),
-                await_plan: Vec::new(),
+                resumption_plan: Vec::new(),
                 constructible: false,
                 class_constructor: false,
                 class_element: false,
@@ -2750,7 +2747,7 @@ impl Parser {
             dynamic_source: false,
             arrow: true,
             kind: FunctionKind::from_async(asynchronous),
-            await_plan: Vec::new(),
+            resumption_plan: Vec::new(),
             constructible: false,
             class_constructor: false,
             class_element: false,
@@ -2763,7 +2760,7 @@ impl Parser {
             trailing_parameter_comma,
             body,
         });
-        self.attach_await_plan(template, count)?;
+        self.attach_resumption_plan(template, count)?;
         self.expr(ExprKind::Function(template), at)
     }
 
