@@ -1532,6 +1532,7 @@ impl Page {
         self.begin_job();
         let before = self.state.errors;
         self.state.ready = "complete";
+        self.dispatch_to(doc, forms, DOCUMENT, "readystatechange", false, false);
         self.dispatch_to(doc, forms, WINDOW, "load", false, false);
         // dispatch_to includes each callback's microtask checkpoint. A queued
         // Location request already captured its history handling before this.

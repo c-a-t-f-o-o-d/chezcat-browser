@@ -13,14 +13,22 @@ const MARKUP: &str = r##"<!doctype html><html><head><title>Before startup</title
 <p id="state">not ready</p><p id="timer">not run</p><p id="loaded">not loaded</p>
 <a href="#tail">Tail</a><img id="image" src="/held.ppm"><p id="tail">Tail anchor</p>
 <script>
-var count=1; var loads=0;
+var count=1; var loads=0; var completed=0; var completionCheckpoint=false;
 document.title='Interactive page';
 document.getElementById('change').onclick=function(){count+=5;};
 document.addEventListener('DOMContentLoaded',function(){
   document.getElementById('state').textContent=document.readyState;
 });
 setTimeout(function(){document.getElementById('timer').textContent='timer-'+count;},0);
+document.addEventListener('readystatechange',function(event){
+  if(document.readyState!=='complete'||this!==document||event.target!==document||
+     event.currentTarget!==document||event.bubbles||event.cancelable||!event.isTrusted)
+     throw 'native document readiness identity';
+  completed+=1;
+  queueMicrotask(function(){completionCheckpoint=document.readyState==='complete';});
+});
 window.addEventListener('load',function(){
+  if(completed!==1||!completionCheckpoint)throw 'readiness event and its checkpoint must precede load';
   loads+=1;
   document.title='Loaded '+count;
   document.getElementById('loaded').textContent=document.readyState+'-'+loads+'-'+document.getElementById('entry').value;
