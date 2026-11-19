@@ -32,6 +32,53 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_for_body_runs_test_body_and_update_in_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, result, tail, refused, reason={}, saved=[];
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function test(index){trace+='test'+index+'|';return index<2;}
+function next(index){trace+='update'+index+'|';return index+1;}
+async function count(){
+    let index=0;
+    for(;test(index);index=next(index)){
+        let snapshot=index;
+        saved.push(()=>snapshot);
+        trace+='enter'+snapshot+'|';
+        await gate;
+        trace+='leave'+snapshot+'|';
+    }
+    for(;false;) {await failed;throw 'unreachable';}
+    return index;
+}
+async function stop(){
+    try{for(;;){await failed;return 'unreachable';}}
+    finally{tail='done';}
+}
+async function returnEarly(){
+    for(;; next(9)){return await gate;}
+}
+count().then(value=>result=value);
+stop().catch(error=>refused=error);
+returnEarly().then(value=>tail+=value);
+if(trace!=='test0|enter0|'||result!==undefined||tail!==undefined||refused!==undefined)
+    throw 'loop ran past an await';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(7);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='test0|enter0|leave0|update0|test1|enter1|leave1|update1|test2|'||
+    result!==2||tail!=='done7'||refused!==reason||saved[0]()!==0||saved[1]()!==1)
+    throw 'loop ordering, scope or abrupt exit';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_suspending_finally_preserves_or_overrides_the_incoming_completion() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"
