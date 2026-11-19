@@ -3,8 +3,11 @@
 //! backtracking stack. Compiler visits, instructions and copied checkpoints
 //! spend one shared document-job work budget. Unsupported syntax never becomes a broader match.
 
-const MAX_PATTERN: usize = 4096;
-const MAX_CODE: usize = 4096;
+// Flat alternation tables reach tens of KiB without deeper syntax or a
+// deeper matching stack. Keep both source and expansion explicitly bounded.
+const MAX_PATTERN: usize = 32 * 1024;
+const MAX_CODE: usize = 32 * 1024;
+const PATTERN_LIMIT: &str = "Regular-expression pattern limit reached (32 KiB).";
 const MAX_DEPTH: usize = 32;
 const MAX_GROUPS: usize = 16;
 const MAX_GROUP_NAME_BYTES: usize = 256;
@@ -849,7 +852,7 @@ impl Compiler<'_> {
         spend(self.budget, 1)?;
         if self.code.len() == MAX_CODE {
             return Err(Error::Limit(
-                "Regular-expression bytecode limit reached (4096).",
+                "Regular-expression bytecode limit reached (32768).",
             ));
         }
         let at = self.code.len();
@@ -1141,7 +1144,7 @@ impl Regex {
     pub fn compile(pattern: &str, flags: &str, budget: &mut usize) -> Result<Self, Error> {
         if pattern.len() > MAX_PATTERN {
             return Err(Error::Limit(
-                "Regular-expression pattern limit reached (4 KiB).",
+                PATTERN_LIMIT,
             ));
         }
         spend(budget, pattern.len().saturating_add(flags.len()))?;
@@ -1156,7 +1159,7 @@ impl Regex {
     /// would change character classes, ranges and their matched captures.
     pub fn compile_units(pattern: &[u16], flags: &str, budget: &mut usize) -> Result<Self, Error> {
         if pattern.len() > MAX_PATTERN {
-            return Err(Error::Limit("Regular-expression pattern limit reached (4 KiB)."));
+            return Err(Error::Limit(PATTERN_LIMIT));
         }
         spend(budget, pattern.len())?;
         // Keep the scalar entry point's byte ceiling. A paired surrogate costs
@@ -1177,7 +1180,7 @@ impl Regex {
             at += 1;
         }
         if bytes > MAX_PATTERN {
-            return Err(Error::Limit("Regular-expression pattern limit reached (4 KiB)."));
+            return Err(Error::Limit(PATTERN_LIMIT));
         }
         spend(budget, bytes.saturating_add(flags.len()))?;
         let flags = Flags::parse(flags)?;
@@ -1781,6 +1784,40 @@ mod tests {
             let regex = Regex::compile(pattern, "", &mut budget).unwrap();
             assert_eq!(regex.find(&[97,97,97,97], 0, false, &mut budget).unwrap().unwrap().end(), end);
         }
+    }
+
+    #[test]
+    fn wide_flat_alternation_keeps_order_and_bounded_utf16_matching() {
+        use std::fmt::Write;
+
+        let mut pattern = String::from("&(?:");
+        for index in 0..2_125 {
+            write!(pattern, "r{index:04}xy;|").unwrap();
+        }
+        pattern.push_str(r"#[xX][0-9a-fA-F]+;?|#[0-9]+;?)");
+        assert!(pattern.len() > 18_390);
+        let mut budget = 2_000_000;
+        let regex = Regex::compile(&pattern, "g", &mut budget).unwrap();
+        let input: Vec<_> = "x &r2124xy; y &#x4a; and &#12;".encode_utf16().collect();
+        let mut start = 0;
+        for expected in ["&r2124xy;", "&#x4a;", "&#12;"] {
+            let found = regex.find(&input, start, false, &mut budget).unwrap().unwrap();
+            assert_eq!(String::from_utf16(&input[found.start()..found.end()]).unwrap(), expected);
+            start = found.end();
+        }
+        assert!(regex.find(&input, start, false, &mut budget).unwrap().is_none());
+        assert!(matches!(Regex::compile(&pattern, "g", &mut 256), Err(Error::Limit(_))));
+    }
+
+    #[test]
+    fn wide_pattern_admission_retains_source_and_bytecode_limits() {
+        let over = "a".repeat(MAX_PATTERN + 1);
+        assert!(matches!(Regex::compile(&over, "", &mut 2_000_000), Err(Error::Limit(PATTERN_LIMIT))));
+        let over_units: Vec<_> = "😺".repeat(MAX_PATTERN / 4 + 1).encode_utf16().collect();
+        assert!(matches!(Regex::compile_units(&over_units, "u", &mut 2_000_000), Err(Error::Limit(PATTERN_LIMIT))));
+        let expanded = "(?:ab){1000}".repeat(17);
+        assert!(matches!(Regex::compile(&expanded, "", &mut 2_000_000),
+            Err(Error::Limit("Regular-expression bytecode limit reached (32768)."))));
     }
 
     #[test]
