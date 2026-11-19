@@ -98,6 +98,72 @@ document.title = 'verified-cdata-html-interface';
 }
 
 #[test]
+fn processing_instruction_keeps_distinct_character_data_document_and_layout() {
+    let (mut doc, mut forms, mut page) = fixture("<html><head></head><body><div id=p>A<span id=s>B</span></div></body></html>", r#"
+var C = window.ProcessingInstruction, P = C.prototype, parent = document.getElementById('p');
+var make = Document.prototype.createProcessingInstruction, order = '';
+if (C.length !== 1 || C.name !== 'ProcessingInstruction' || Object.getPrototypeOf(C) !== CharacterData ||
+    Object.getPrototypeOf(P) !== CharacterData.prototype || P.constructor !== C ||
+    make.length !== 2 || make !== document.createProcessingInstruction) throw 'ProcessingInstruction interfaces';
+var getTarget = Object.getOwnPropertyDescriptor(P,'target').get;
+var node = new C({toString:function(){order+='target';return '雪:mode';}}, {
+    toString:function(){order+='data';return 'mode="local"';}
+});
+if (order !== 'targetdata' || getTarget.call(node) !== '雪:mode' || node.target !== '雪:mode' ||
+    Object.hasOwn(node,'target') || node.nodeName !== node.target || node.nodeType !== Node.PROCESSING_INSTRUCTION_NODE ||
+    node.data !== 'mode="local"' || node.length !== 12 || node.parentNode !== null || node.ownerDocument !== document ||
+    Object.getPrototypeOf(node) !== P || !(node instanceof C) || !(node instanceof CharacterData) ||
+    node instanceof Text || node instanceof Comment || new C('mode').data !== '' ||
+    new C('mode',undefined).data !== '' || new C('mode',null).data !== 'null') throw 'genuine native node';
+var marker = document.implementation.createHTMLDocument('independent');
+var remote = make.call(marker, 'mode', undefined);
+if (marker.createProcessingInstruction !== make || remote.ownerDocument !== marker || remote.data !== 'undefined' ||
+    remote.textContent !== remote.data || remote.nodeValue !== remote.data || remote.target !== 'mode' ||
+    remote.length !== 9 || remote.parentNode !== null || Object.getPrototypeOf(remote) !== P) throw 'separate inert owner';
+var exceptions = 0;
+for (var input of ['', '1mode', 'white space']) try { new C(input); } catch (e) {
+    if (e instanceof DOMException && e.name === 'InvalidCharacterError') exceptions++; else throw e;
+}
+try { make.call(document, 'mode', 'bad?>'); } catch (e) {
+    if (e instanceof DOMException && e.name === 'InvalidCharacterError') exceptions++; else throw e;
+}
+try { make.call({}, {toString:function(){throw 'wrong receiver converted';}},'data'); } catch (e) {
+    if (e instanceof TypeError) exceptions++; else throw e;
+}
+try { getTarget.call(document.createComment('fake')); } catch (e) { if (e instanceof TypeError) exceptions++; else throw e; }
+try { C('mode'); } catch (e) { if (e instanceof TypeError) exceptions++; else throw e; }
+try { make.call(document,'mode'); } catch (e) { if (e instanceof TypeError) exceptions++; else throw e; }
+if (exceptions !== 8) throw 'required arguments, XML validation and receiver brand';
+var copy = node.cloneNode(), span = document.getElementById('s');
+parent.insertBefore(node,span);
+if (parent.firstChild.nextSibling !== node || node.nextElementSibling !== span ||
+    parent.textContent !== 'AB' || parent.innerHTML !== 'A<?雪:mode mode="local"?><span id="s">B</span>') throw 'native tree and serialization';
+var walker = document.createTreeWalker(parent,NodeFilter.SHOW_PROCESSING_INSTRUCTION);
+if (walker.nextNode() !== node || walker.nextNode() !== null || copy === node ||
+    copy.target !== node.target || copy.data !== node.data || copy.ownerDocument !== document) throw 'filter and cloning';
+var records = [], observer = new MutationObserver(function(items){records=items;});
+observer.observe(node,{characterData:true,characterDataOldValue:true});
+node.nodeValue = 'edited';
+var change = observer.takeRecords();
+if (copy.data === node.data || node.textContent !== 'edited' || parent.textContent !== 'AB' ||
+    change.length !== 1 || change[0].type !== 'characterData' || change[0].target !== node ||
+    change[0].oldValue !== 'mode="local"') throw 'character data write and observation';
+var shield = document.createElement('script');
+document.title = 'verified-processing-instruction';
+"#);
+    assert_eq!(doc.title, "verified-processing-instruction");
+    assert_eq!(doc.nodes.iter().filter(|node| matches!(node.kind, NodeKind::ProcessingInstruction { .. })).count(), 5);
+    let commits = page.state.dom_commits;
+    let outcome = page.console_eval(&mut doc, &mut forms, "shield.appendChild(copy);");
+    assert_eq!(outcome.errors, 1);
+    assert!(page.report().contains("Created scripts accept text children only"));
+    assert_eq!(page.state.dom_commits, commits);
+    evaluate(&mut page, &mut doc, &mut forms,
+        "if (shield.firstChild !== null || copy.parentNode !== null) throw 'native script source protection';");
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn comment_data_nullable_setters_and_readonly_length_preserve_comment_kind() {
     let (doc,_,_)=fixture("<html><head></head><body></body></html>",r#"
 var c=document.createComment(''),calls=0;

@@ -55,6 +55,12 @@ impl Bridge<'_> {
                     append(self.state, &mut out, data)?;
                     append(self.state, &mut out, "-->")?;
                 }
+                NodeKind::ProcessingInstruction { target, data } => {
+                    self.state.work(target.len().saturating_add(data.len()))?;
+                    for piece in ["<?", target, " ", data, "?>"] {
+                        append(self.state, &mut out, piece)?;
+                    }
+                }
                 NodeKind::Element { tag, attrs, .. } => {
                     if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
                     if end { append(self.state, &mut out, "</")?; append(self.state, &mut out, tag)?; append(self.state, &mut out, ">")?; continue; }

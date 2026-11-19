@@ -470,6 +470,8 @@ pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
+pub(crate) const CREATE_PROCESSING_INSTRUCTION: &str = "\0Document.createProcessingInstruction";
+pub(crate) const PROCESSING_INSTRUCTION_TARGET_GET: &str = "\0ProcessingInstruction.get.target";
 pub(crate) const ELEMENT_INNER_HTML_GET: &str = "\0Element.get.innerHTML";
 pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
@@ -8889,6 +8891,8 @@ impl Runtime {
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if kind == "NotSupportedError"
                 && matches!(method, CREATE_CDATA_SECTION | "\0Media.load" | "\0Media.pause")
+                || kind == "InvalidCharacterError"
+                    && matches!(method, CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction")
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));

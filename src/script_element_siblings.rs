@@ -25,7 +25,7 @@ impl Bridge<'_> {
         let node=node_index(object).filter(|&node|self.dom_accessible(node))?;
         match self.doc.nodes.get(node)?.kind {
             NodeKind::Element {..}=>Some(Family::Element),
-            NodeKind::Text(_)|NodeKind::Comment(_)=>Some(Family::CharacterData),
+            NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => Some(Family::CharacterData),
             NodeKind::DocumentFragment=>None,
         }
     }
@@ -49,7 +49,7 @@ impl Bridge<'_> {
                 || !self.dom_accessible(current) {
                 return Err("Element sibling ancestry is inert or has unknown namespace provenance.".into());
             }
-            if current!=node && matches!(item.kind,NodeKind::Text(_)|NodeKind::Comment(_)) {
+            if current!=node && item.kind.character_data().is_some() {
                 return Err("CharacterData cannot own an element-sibling subtree.".into());
             }
             let parent=self.state.tree.parents.get(current).ok_or("Invalid element-sibling parent index.")?;
@@ -91,7 +91,7 @@ impl Bridge<'_> {
             }
             match item.kind {
                 NodeKind::Element {..}=>return Ok(Value::Host(node_handle(child))),
-                NodeKind::Text(_)|NodeKind::Comment(_)=>{},
+                NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
                 NodeKind::DocumentFragment=>return Err("A DocumentFragment cannot be a published sibling.".into()),
             }
         }

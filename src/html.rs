@@ -67,7 +67,8 @@ impl Document {
                 .iter()
                 .find(|attr| attr.name.html_is(name.as_ref()))
                 .map(|attr| attr.value.as_str()),
-            NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::DocumentFragment => None,
+            NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
+            | NodeKind::DocumentFragment => None,
         }
     }
 }
@@ -157,8 +158,22 @@ pub enum NodeKind {
     Text(String),
     // Genuine retained DOM Comment data; the current HTML tokenizer still omits parsed comments.
     Comment(String),
+    ProcessingInstruction { target: String, data: String },
     // A genuine detached Node container; insertion splices its children.
     DocumentFragment,
+}
+
+impl NodeKind {
+    pub(crate) fn character_data(&self) -> Option<&str> {
+        match self {
+            Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data),
+            Self::Element { .. } | Self::DocumentFragment => None,
+        }
+    }
+
+    pub(crate) fn is_nonrendered_character_data(&self) -> bool {
+        matches!(self, Self::Comment(_) | Self::ProcessingInstruction { .. })
+    }
 }
 
 pub fn parse(input: &str) -> Document {

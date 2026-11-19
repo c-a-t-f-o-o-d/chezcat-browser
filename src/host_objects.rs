@@ -3,7 +3,8 @@
 
 use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
-    CREATE_CDATA_SECTION, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET,
+    PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -208,6 +209,7 @@ impl Runtime {
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
             self.define_character_data_interface(window, character, "Text")?;
             self.define_character_data_interface(window, character, "Comment")?;
+            self.define_character_data_interface(window, character, "ProcessingInstruction")?;
             let text = self.native_constructor_prototypes[&(window, "Text")];
             self.define_character_data_interface(window, text, "CDATASection")?;
             for name in ["DocumentFragment","Document"] {
@@ -222,15 +224,20 @@ impl Runtime {
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
-                    let method = self.allocate_host_function_with_length(window, CREATE_CDATA_SECTION, 1)
-                        .map_err(Fault::new)?;
-                    if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
-                        *receiver_required = true;
+                    for (name, operation, length) in [
+                        ("createCDATASection", CREATE_CDATA_SECTION, 1),
+                        ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),
+                    ] {
+                        let method = self.allocate_host_function_with_length(window, operation, length)
+                            .map_err(Fault::new)?;
+                        if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
+                            *receiver_required = true;
+                        }
+                        self.store_property(self.function_properties[method.id], "name".into(),
+                            Value::String(name.into()), Some((false, false, true)))?;
+                        self.store_property(prototype, name.into(),
+                            Value::Function(method.id), Some((true, true, true)))?;
                     }
-                    self.store_property(self.function_properties[method.id], "name".into(),
-                        Value::String("createCDATASection".into()), Some((false, false, true)))?;
-                    self.store_property(prototype, "createCDATASection".into(),
-                        Value::Function(method.id), Some((true, true, true)))?;
                     // HTML defines this Window property as an alias of the very same interface object.
                     self.put_binding(self.global_environment,"HTMLDocument".into(),Some(constructor.clone()),super::Declaration::Var,false)?;
                     self.global_attributes.insert("HTMLDocument".into(),(false,true,true));
@@ -558,7 +565,8 @@ impl Runtime {
         let Value::Function(parent_function) = parent_constructor else {
             return Err(Fault::new("Invalid CharacterData constructor."));
         };
-        let allocation = self.allocate_host_function_with_length(window, name, 0)
+        let length = usize::from(name == "ProcessingInstruction");
+        let allocation = self.allocate_host_function_with_length(window, name, length)
             .map_err(Fault::new)?;
         if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
             self.functions.get_mut(allocation.id)
@@ -587,6 +595,9 @@ impl Runtime {
         )?;
         if name == "Text" {
             self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Text.get.assignedSlot")?;
+        }
+        if name == "ProcessingInstruction" {
+            self.define_readonly_node_getter(prototype, window, "target", PROCESSING_INSTRUCTION_TARGET_GET)?;
         }
         self.native_constructor_prototypes.insert((window, name), prototype);
         self.put_binding(

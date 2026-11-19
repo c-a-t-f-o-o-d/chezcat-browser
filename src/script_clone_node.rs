@@ -98,6 +98,9 @@ impl Bridge<'_> {
                 },
                 NodeKind::Text(text) => NodeKind::Text(text.clone()),
                 NodeKind::Comment(text) => NodeKind::Comment(text.clone()),
+                NodeKind::ProcessingInstruction { target, data } => NodeKind::ProcessingInstruction {
+                    target: target.clone(), data: data.clone(),
+                },
                 NodeKind::DocumentFragment => NodeKind::DocumentFragment,
             };
             let unsafe_nonce = self.doc.nonce_unsafe_nodes.contains(&source);
