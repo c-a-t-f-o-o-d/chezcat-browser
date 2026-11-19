@@ -21,7 +21,19 @@ struct PendingAwait {
     followup_call: Option<ExprId>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
+    literal: Option<Box<PendingLiteral>>,
     assignment: Option<Reference>,
+}
+
+struct PendingLiteral {
+    object: usize,
+    key: PropertyKey,
+}
+
+impl PendingLiteral {
+    fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>().saturating_add(property_key_bytes(&self.key))
+    }
 }
 
 struct PendingCall {
@@ -38,14 +50,17 @@ struct PendingMethod {
 
 impl PendingMethod {
     fn retained_bytes(&self) -> usize {
-        let key_bytes = match &self.key {
-            PropertyKey::String(name) => name.len(),
-            PropertyKey::Symbol(_) => 0,
-        };
         std::mem::size_of::<Self>()
             .saturating_add(self.receiver.bytes())
-            .saturating_add(key_bytes)
+            .saturating_add(property_key_bytes(&self.key))
             .saturating_add(self.function.as_ref().map_or(0, Value::bytes))
+    }
+}
+
+fn property_key_bytes(key: &PropertyKey) -> usize {
+    match key {
+        PropertyKey::String(name) => name.len(),
+        PropertyKey::Symbol(_) => 0,
     }
 }
 
@@ -89,6 +104,7 @@ impl Activation {
             .saturating_add(self.expression_value.as_ref().map_or(0, Value::bytes))
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
+            .saturating_add(self.pending_literal().map_or(0, PendingLiteral::retained_bytes))
             .saturating_add(references)
             .saturating_add(self.assignments.capacity().saturating_mul(std::mem::size_of::<Reference>()))
             .saturating_add(
@@ -112,6 +128,7 @@ impl Activation {
             .saturating_add(5 + usize::from(self.pending_call().is_some())
                 + usize::from(self.expression_value.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
+                + usize::from(self.pending_literal().is_some())
                 + 2 * usize::from(self.pending_assignment().is_some()))
             .saturating_add(self.assignments.len().saturating_mul(2))
     }
@@ -131,6 +148,9 @@ impl Activation {
             if let Some(function) = &method.function {
                 Edge::value(function, add);
             }
+        }
+        if let Some(literal) = self.pending_literal() {
+            add(Edge::Object(literal.object));
         }
         for reference in self.assignment_references() {
             Edge::reference(reference, add);
@@ -168,6 +188,10 @@ impl Activation {
 
     fn pending_method(&self) -> Option<&PendingMethod> {
         self.pending.as_ref().and_then(|pending| pending.method.as_deref())
+    }
+
+    fn pending_literal(&self) -> Option<&PendingLiteral> {
+        self.pending.as_ref().and_then(|pending| pending.literal.as_deref())
     }
 
     fn take_expression_value(&mut self) -> Result<Value, Fault> {
@@ -396,7 +420,7 @@ impl Runtime {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
                 let PendingAwait {
-                    statement, action, call, method, followup_call, member_key, chain, assignment,
+                    statement, action, call, method, followup_call, member_key, chain, literal, assignment,
                 } = frame
                     .pending
                     .take()
@@ -451,6 +475,13 @@ impl Runtime {
                             )?;
                             self.push_transient_value(&result)?;
                             result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(literal) = literal {
+                            let PendingLiteral { object, key } = *literal;
+                            self.define_literal_member(object, key, value, object_literals::Kind::Data)?;
+                            Value::Object(object)
                         } else {
                             value
                         };
@@ -627,12 +658,22 @@ impl Runtime {
                     followup_call,
                     member_key,
                     chain,
+                    literal_key,
                     assignment,
                     action,
                 } => {
                     let result = (|| {
                         let assignment = if let Some(target) = assignment {
                             Some(self.prepare_await_assignment(frame, target, host)?)
+                        } else {
+                            None
+                        };
+                        let mut retained = frame.retained_bytes()
+                            .saturating_add(assignment.as_ref().map_or(0, assignment_reference_bytes));
+                        let literal = if let Some(key) = literal_key {
+                            let prepared = self.prepare_await_literal(frame, key, retained, host)?;
+                            retained = retained.saturating_add(prepared.retained_bytes());
+                            Some(prepared)
                         } else {
                             None
                         };
@@ -645,8 +686,6 @@ impl Runtime {
                         if followup_call.is_some() {
                             self.step()?; // Enter the call before evaluating its callee.
                         }
-                        let mut retained = frame.retained_bytes()
-                            .saturating_add(assignment.as_ref().map_or(0, assignment_reference_bytes));
                         let method = if let Some(method) = method {
                             let prepared = self.prepare_await_method(frame, method, retained, host)?;
                             retained = retained.saturating_add(prepared.retained_bytes());
@@ -671,7 +710,7 @@ impl Runtime {
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
                         frame.pending = Some(PendingAwait {
-                            statement, action, call, method, followup_call, member_key, chain, assignment,
+                            statement, action, call, method, followup_call, member_key, chain, literal, assignment,
                         });
                         Ok(Progress::Suspend(promise))
                     })();
@@ -705,6 +744,26 @@ impl Runtime {
         let result = self.copy_value(&value)?;
         self.write_reference(reference, value, host)?;
         Ok(result)
+    }
+
+    #[inline(never)]
+    fn prepare_await_literal(
+        &mut self,
+        frame: &Activation,
+        key: ExprId,
+        retained: usize,
+        host: &mut dyn Host,
+    ) -> Result<Box<PendingLiteral>, Fault> {
+        self.step()?;
+        let object = self.new_object(None)?;
+        self.push_transient_root(Edge::Object(object))?;
+        let key = self.eval(&frame.program, key, frame.environment()?, &frame.this, host)?;
+        self.push_transient_value(&key)?;
+        let key = self.property_key(key, host)?;
+        let literal = PendingLiteral { object, key };
+        let bytes = literal.retained_bytes();
+        self.await_storage(retained.saturating_add(bytes), bytes)?;
+        Ok(Box::new(literal))
     }
 
     #[inline(never)]
@@ -933,6 +992,10 @@ mod tests {
                 followup_call: None,
                 member_key: None,
                 chain: None,
+                literal: Some(Box::new(PendingLiteral {
+                    object: 27,
+                    key: PropertyKey::String("entry".into()),
+                })),
                 assignment: Some(Reference::Binding(18, "target".into())),
             }),
         };
@@ -945,6 +1008,7 @@ mod tests {
         }
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(12))));
         assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(25))));
+        assert!(edges.iter().any(|edge| matches!(edge, Edge::Object(27))));
         for environment in [14, 15, 16, 18] {
             assert!(edges
                 .iter()
@@ -961,6 +1025,7 @@ mod tests {
                 + frame.this.bytes()
                 + "target".len()
                 + std::mem::size_of::<PendingMethod>() + "invoke".len()
+                + std::mem::size_of::<PendingLiteral>() + "entry".len()
                 + frame.assignments.capacity() * std::mem::size_of::<Reference>()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()

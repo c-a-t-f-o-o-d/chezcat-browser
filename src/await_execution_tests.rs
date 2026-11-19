@@ -32,6 +32,47 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_single_property_literal_keeps_the_converted_key_and_own_definition() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, token={}, reason={}, result, plain, caught=0, setters=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var name=Symbol('original'), changing=name;
+Object.defineProperty(Object.prototype,name,{set(value){setters++;},configurable:true});
+function key(){
+    trace+='key|';
+    return {[Symbol.toPrimitive](hint){if(hint!=='string')throw 'key hint';trace+='convert|';return changing;}};
+}
+function input(){trace+='operand|';changing=Symbol('replacement');return gate;}
+function relay(value){trace+='relay|';return value;}
+async function make(){return {[key()]:relay(await input())};}
+async function staticKey(){let item={entry:await Promise.resolve(11)};return item.entry;}
+async function skip(){
+    try{return {entry:relay(await failed)};}catch(error){if(error!==reason)throw error;caught++;}
+}
+make().then(value=>result=value);
+staticKey().then(value=>plain=value);
+skip();
+if(trace!=='key|convert|operand|'||result!==undefined||plain!==undefined||caught||setters)
+    throw 'computed key did not finish before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(plain!==11||result!==undefined||caught||setters)throw 'pending and static literal results';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+var descriptor=Object.getOwnPropertyDescriptor(result,name);
+if(trace!=='key|convert|operand|relay|'||caught!==1||setters||Object.hasOwn(result,changing)||
+    Object.getPrototypeOf(result)!==Object.prototype||descriptor.value!==token||
+    !descriptor.enumerable||!descriptor.writable||!descriptor.configurable)throw 'literal key, descriptor or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_first_member_argument_resumes_trailing_arguments_in_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1148,7 +1189,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "try{}catch(reason){await p;}finally{}",
         "try{}finally{await p;}",
         "var values=[await p];",
-        "var value={entry:await p};",
+        "var value={entry:await p,another:1};",
         "await (await p);",
     ] {
         let mut runtime = Runtime::for_test();
