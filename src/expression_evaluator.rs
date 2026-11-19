@@ -654,9 +654,8 @@ impl Runtime {
                 (State::Argument(call), value)
             }
             ResumedExpression::PlainArgument(prepared, value) => {
-                let ExprKind::Call(_, arguments) = &program.exprs[id].kind else {
-                    unreachable!("a resumed plain argument needs a call");
-                };
+                let (_, arguments, _) = super::async_plan::plain_call_parts(program, id)
+                    .expect("a resumed plain argument needs a call");
                 self.install_resumed_argument_prefix(scratch, prepared.prefix)?;
                 let target = Target::Value { function: prepared.function, direct_eval: prepared.direct_eval };
                 let call = Call { target, arguments, index: prepared.index, start: 0, after: AfterCall::Value };

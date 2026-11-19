@@ -149,6 +149,15 @@ var o={eval:eval};function other(){var marker=36;return o?.eval('marker');}
 if(other()!==34)throw 'member indirect eval';'ok';
 "#,
         );
+        let mut runtime = Runtime::for_test();
+        let mut host = NoHost::default();
+        runtime.execute(r#"
+var marker='global', observed;
+async function evaluate(){var marker='local';return eval?.(await Promise.resolve('marker'));}
+evaluate().then(value=>observed=value);
+"#, &mut host).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+        assert_eq!(runtime.execute("observed", &mut host).unwrap().to_text(), "global");
     }
 
     #[test]
