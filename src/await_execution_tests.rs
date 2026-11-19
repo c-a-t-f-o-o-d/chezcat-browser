@@ -568,6 +568,45 @@ choose(Promise.resolve(0)).then(value=>branch=value);
 }
 
 #[test]
+fn await_execution_object_members_before_and_after_a_suspending_value_keep_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reject, makeResult, caught, token={}, reason={};
+var gate=new Promise(resolve=>release=resolve);
+var failed=new Promise((resolve,fail)=>reject=fail);
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('call',value);}
+var key={toString(){return mark('convert','entry');}};
+async function make(){
+    let item={first:{seed:mark('before',token)},
+        [mark('key',key)]:relay(await mark('operand',gate)),
+        ...mark('spread',{tail:4}),last:mark('after',5)};
+    return item;
+}
+async function stop(){
+    try{return {first:mark('reject-prefix',1),entry:relay(await failed),last:mark('skipped',2)};}
+    catch(error){caught=error;}
+}
+make().then(value=>makeResult=value);
+stop();
+if(trace!=='before|key|convert|operand|reject-prefix|'||makeResult||caught)throw 'literal prefix order';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "reject(reason);release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+var descriptor=Object.getOwnPropertyDescriptor(makeResult,'entry');
+if(trace!=='before|key|convert|operand|reject-prefix|call|spread|after|'||caught!==reason||
+    makeResult.first.seed!==token||descriptor.value!==token||makeResult.tail!==4||makeResult.last!==5||
+    !descriptor.writable||!descriptor.enumerable||!descriptor.configurable)
+    throw 'literal suffix, own descriptor, or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_single_property_literal_keeps_the_converted_key_and_own_definition() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1725,7 +1764,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "try{}catch(reason){await p;}finally{}",
         "try{}catch{}finally{await p;}",
         "var values=[await p];",
-        "var value={entry:await p,another:1};",
+        "var value={entry:await p,another:await p};",
         "await (await p);",
     ] {
         let mut runtime = Runtime::for_test();

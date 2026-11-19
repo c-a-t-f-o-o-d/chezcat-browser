@@ -1,7 +1,7 @@
 //! Owned await activations for the parser's finite statement plan. A resumed
 //! instruction never evaluates the prefix again. Synchronous subtrees use
 //! the ordinary evaluator and its native access checks.
-use super::async_plan::{Instruction, Resume};
+use super::async_plan::{Instruction, LiteralAwait, Resume};
 use super::function_reachability::Edge;
 use super::*;
 
@@ -80,6 +80,7 @@ struct PendingAwait {
 struct PendingLiteral {
     object: usize,
     key: PropertyKey,
+    site: LiteralAwait,
 }
 
 impl PendingLiteral {
@@ -575,8 +576,12 @@ impl Runtime {
                         };
                         let value = apply_logical_not(value, negations);
                         let value = if let Some(literal) = literal {
-                            let PendingLiteral { object, key } = *literal;
+                            let PendingLiteral { object, key, site } = *literal;
                             self.define_literal_member(object, key, value, object_literals::Kind::Data)?;
+                            let remaining = &site.members(&frame.program)[site.member + 1..];
+                            self.eval_object_literal_members(
+                                &frame.program, object, remaining, frame.environment()?, &frame.this, host,
+                            )?;
                             Value::Object(object)
                         } else {
                             value
@@ -772,7 +777,7 @@ impl Runtime {
                     followup_call,
                     member_key,
                     chain,
-                    literal_key,
+                    literal,
                     negations,
                     assignment,
                     action,
@@ -785,8 +790,8 @@ impl Runtime {
                         };
                         let mut retained = frame.retained_bytes()
                             .saturating_add(assignment.as_ref().map_or(0, Reference::assignment_bytes));
-                        let literal = if let Some(key) = literal_key {
-                            let prepared = self.prepare_await_literal(frame, key, retained, host)?;
+                        let literal = if let Some(site) = literal {
+                            let prepared = self.prepare_await_literal(frame, site, retained, host)?;
                             retained = retained.saturating_add(prepared.retained_bytes());
                             Some(prepared)
                         } else {
@@ -889,17 +894,25 @@ impl Runtime {
     fn prepare_await_literal(
         &mut self,
         frame: &Activation,
-        key: ExprId,
+        site: LiteralAwait,
         retained: usize,
         host: &mut dyn Host,
     ) -> Result<Box<PendingLiteral>, Fault> {
         self.step()?;
         let object = self.new_object(None)?;
         self.push_transient_root(Edge::Object(object))?;
-        let key = self.eval(&frame.program, key, frame.environment()?, &frame.this, host)?;
+        let members = site.members(&frame.program);
+        let environment = frame.environment()?;
+        self.eval_object_literal_members(
+            &frame.program, object, &members[..site.member], environment, &frame.this, host,
+        )?;
+        let object_literals::Member::Property { key, .. } = members[site.member] else {
+            unreachable!("compiled async literal member");
+        };
+        let key = self.eval(&frame.program, key, environment, &frame.this, host)?;
         self.push_transient_value(&key)?;
         let key = self.property_key(key, host)?;
-        let literal = PendingLiteral { object, key };
+        let literal = PendingLiteral { object, key, site };
         let bytes = literal.retained_bytes();
         self.await_storage(retained.saturating_add(bytes), bytes)?;
         Ok(Box::new(literal))
@@ -1315,6 +1328,7 @@ mod tests {
                 literal: Some(Box::new(PendingLiteral {
                     object: 27,
                     key: PropertyKey::String("entry".into()),
+                    site: LiteralAwait { expression: 0, member: 0 },
                 })),
                 negations: 0,
                 assignment: Some(Reference::Binding(18, "target".into())),
