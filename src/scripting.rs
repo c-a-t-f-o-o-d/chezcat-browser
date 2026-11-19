@@ -2596,7 +2596,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         property == "style" && self.element_expando_receiver(object)
-            || property == "innerHTML" && self.attr_element_receiver(object)
+            || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
             || property == "target" && self.processing_instruction_receiver(object)
             || property == "content" && self.template_receiver(object)
@@ -2853,7 +2853,7 @@ impl Host for Bridge<'_> {
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
-            || property == "innerHTML" && self.attr_element_receiver(object)
+            || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
             || property == "content" && self.template_receiver(object)
             || self.content_editable_attribute(object, property)
@@ -2887,6 +2887,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property == "innerHTML" && self.template_receiver(object) { return true; }
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
@@ -2914,7 +2915,9 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
-        if method == ELEMENT_INNER_HTML_SET && self.attr_element_receiver(object) {return Some("innerHTML");}
+        if method == ELEMENT_INNER_HTML_SET && (self.attr_element_receiver(object) || self.template_receiver(object)) {
+            return Some("innerHTML");
+        }
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
@@ -3160,11 +3163,12 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
-        property == "value" && self.input_accessor_member(object, property)
+        property == "innerHTML" && self.template_receiver(object)
+            || property == "value" && self.input_accessor_member(object, property)
             || matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
-            || property == "innerHTML" && self.attr_element_receiver(object)
+            || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "border" && node_index(object).is_some_and(|node|
             self.html_border_property(node) && matches!(tag(self.doc, node), "img" | "object"))
     }
@@ -3635,7 +3639,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
-            return self.event_target_interface(object) && self.attr_element_receiver(receiver);
+            return self.event_target_interface(object) && (self.attr_element_receiver(receiver) || self.template_receiver(receiver));
         }
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             return self.event_target_interface(object) && self.html_element_receiver(receiver);
@@ -4411,6 +4415,7 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if property == "innerHTML" && self.template_receiver(object) { return self.template_html(object); }
         if self.inert_interface(object).is_some() { return self.inert_get(object, property); }
         if object == DOCUMENT && property == "implementation" {
             self.state.work(1)?;
@@ -4767,6 +4772,10 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property == "innerHTML" && self.template_receiver(object) {
+            let source = if matches!(value, Value::Null) { String::new() } else { self.text(&value)? };
+            return self.set_template_html(object, &source);
+        }
         if self.inert_interface(object).is_some() {
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));
