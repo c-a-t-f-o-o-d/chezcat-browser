@@ -19,11 +19,15 @@ struct DetachedCopy {
 }
 
 impl Bridge<'_> {
+    pub(super) fn clone_node_receiver(&self, object: u32) -> bool {
+        self.root_node_receiver(object) || self.inert_clone_receiver(object)
+    }
+
     pub(super) fn validate_clone_receiver(&self, object: u32) -> Result<(), (&'static str, String)> {
-        if !self.root_node_receiver(object) {
+        if !self.clone_node_receiver(object) {
             return Err(("TypeError", "cloneNode requires a genuine accessible Node.".into()));
         }
-        if !node_index(object).is_some_and(|node| self.dom_accessible(node)) {
+        if !self.inert_clone_receiver(object) && !node_index(object).is_some_and(|node| self.dom_accessible(node)) {
             return Err(("NotSupportedError", "Cloning this Node interface or child document is unavailable.".into()));
         }
         Ok(())
@@ -31,6 +35,7 @@ impl Bridge<'_> {
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
+        if self.inert_clone_receiver(object) { return self.clone_inert_tree(object, deep); }
         let root = self.dom_node(object)?;
         let base = self.doc.nodes.len();
         let remaining = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))

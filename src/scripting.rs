@@ -3662,7 +3662,7 @@ impl Host for Bridge<'_> {
             if parent(object) {return parent(receiver);}
         }
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.root_node_receiver(receiver);}
-        if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.root_node_receiver(receiver); }
+        if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.clone_node_receiver(receiver); }
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
             return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
         }
