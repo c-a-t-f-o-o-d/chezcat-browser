@@ -24,10 +24,16 @@ struct ClassicForScope {
 
 struct ForOfScope {
     record: iterator_protocol::Record,
+    asynchronous: bool,
     environments: usize,
     statement: StmtId,
     next: usize,
     after: usize,
+}
+
+enum IteratorWait {
+    Next(StmtId),
+    Close { completion: Box<FinallyCompletion>, after_break: Option<usize> },
 }
 
 struct TryScope {
@@ -165,6 +171,7 @@ pub(super) struct Activation {
     environments: Vec<usize>,
     exit_scopes: Vec<ExitScope>,
     pending: Option<PendingAwait>,
+    iterator_wait: Option<IteratorWait>,
     expression_value: Option<Value>,
     comparison_operands: Vec<Value>,
     assignments: Vec<Reference>,
@@ -192,6 +199,7 @@ impl Activation {
             .saturating_add(self.pending_argument_call().map_or(0, PreparedPlainArguments::retained_bytes))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_literal().map_or(0, PendingLiteral::retained_bytes))
+            .saturating_add(self.pending_iterator_close().map_or(0, FinallyCompletion::retained_bytes))
             .saturating_add(references)
             .saturating_add(self.assignments.capacity().saturating_mul(std::mem::size_of::<Reference>()))
             .saturating_add(self.plain_calls.iter().fold(
@@ -233,6 +241,7 @@ impl Activation {
                 + usize::from(self.expression_value.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
                 + usize::from(self.pending_literal().is_some())
+                + usize::from(self.pending_iterator_close().is_some())
                 + 2 * usize::from(self.pending_assignment().is_some()))
             .saturating_add(self.assignments.len().saturating_mul(2))
             .saturating_add(self.pending_argument_call().map_or(0, |call| 1 + call.prefix.len()))
@@ -279,6 +288,9 @@ impl Activation {
                 Edge::value(value, add);
             }
         }
+        if let Some(value) = self.pending_iterator_close().and_then(FinallyCompletion::value) {
+            Edge::value(value, add);
+        }
         for scope in self.active_iterators() {
             scope.record.reachability_edges(add);
         }
@@ -311,6 +323,13 @@ impl Activation {
 
     fn pending_call(&self) -> Option<&PendingCall> {
         self.pending.as_ref().and_then(|pending| pending.call.as_ref())
+    }
+
+    fn pending_iterator_close(&self) -> Option<&FinallyCompletion> {
+        match &self.iterator_wait {
+            Some(IteratorWait::Close { completion, .. }) => Some(completion),
+            _ => None,
+        }
     }
 
     fn pending_argument_call(&self) -> Option<&PreparedPlainArguments> {
@@ -394,6 +413,7 @@ impl Runtime {
             environments,
             exit_scopes: Vec::new(),
             pending: None,
+            iterator_wait: None,
             expression_value: None,
             comparison_operands: Vec::new(),
             assignments: Vec::new(),
@@ -568,6 +588,9 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
+                if let Some(wait) = frame.iterator_wait.take() {
+                    return self.resume_iterator_wait(frame, wait, value, reject, host);
+                }
                 let PendingAwait {
                     statement, action, call, argument_call, method, followup_call, member_key, chain, literal, negations, assignment,
                 } = frame
@@ -1363,13 +1386,22 @@ impl Runtime {
         self.release_environment(scope);
         let source = source?;
         self.push_transient_value(&source)?;
-        let LoopIterator::Values(record) = self.loop_iterator(source, true, host)? else {
-            unreachable!("for-of requires a value iterator");
+        let asynchronous = matches!(frame.program.stmts[statement].kind, StmtKind::ForOf(_, _, _, true));
+        let record = if asynchronous {
+            let method = self.async_iterator_method(&source, host)?
+                .ok_or_else(|| Fault::new("for await over synchronous iterables is not implemented."))?;
+            self.push_transient_value(&method)?;
+            self.iterator_from_method(source, method, host)?
+        } else {
+            let LoopIterator::Values(record) = self.loop_iterator(source, true, host)? else {
+                unreachable!("for-of requires a value iterator");
+            };
+            record
         };
         let bytes = std::mem::size_of::<ForOfScope>().saturating_add(record.retained_bytes());
         self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
         frame.exit_scopes.push(ExitScope::ForOf(Box::new(ForOfScope {
-            record, environments: frame.environments.len(), statement, next: frame.next, after,
+            record, asynchronous, environments: frame.environments.len(), statement, next: frame.next, after,
         })));
         Ok(Progress::Continue)
     }
@@ -1381,11 +1413,28 @@ impl Runtime {
         let Some(ExitScope::ForOf(iterator)) = frame.exit_scopes.last_mut() else {
             return Err(Fault::new("Async for-of has no active iterator."));
         };
+        if iterator.asynchronous {
+            // A rejected step or abrupt result read does not close the iterator.
+            // A successfully read value re-enables closing before binding it.
+            iterator.record.done = true;
+            let value = self.iterator_next_result(&iterator.record, host)?;
+            self.push_transient_value(&value)?;
+            let promise = self.promise_for_await(value, host)?;
+            frame.iterator_wait = Some(IteratorWait::Next(statement));
+            return Ok(Progress::Suspend(promise));
+        }
         let Some(value) = self.iterator_next(&mut iterator.record, host)? else {
             frame.next = iterator.after;
             frame.exit_scopes.pop();
             return Ok(Progress::Continue);
         };
+        self.bind_await_iteration(frame, statement, environment, value, host)
+    }
+
+    fn bind_await_iteration(
+        &mut self, frame: &mut Activation, statement: StmtId, environment: usize,
+        value: Value, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
         self.step()?;
         self.push_transient_value(&value)?;
         let Some((kind, pattern, _)) = async_plan::lexical_for_of(&frame.program, statement) else {
@@ -1399,6 +1448,44 @@ impl Runtime {
             &frame.program, pattern, value, binding_patterns::Mode::Initialize(scope), scope, &frame.this, host,
         )?;
         Ok(Progress::Continue)
+    }
+
+    fn resume_iterator_wait(
+        &mut self, frame: &mut Activation, wait: IteratorWait, value: Value, rejected: bool, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        match wait {
+            IteratorWait::Next(statement) => {
+                let next = (|| {
+                    if rejected { return Err(Fault::thrown(value)); }
+                    let Some(ExitScope::ForOf(iterator)) = frame.exit_scopes.last_mut() else {
+                        return Err(Fault::new("No iterator for the resumed step."));
+                    };
+                    let Some(value) = self.iterator_result_value(&value, host)? else {
+                        frame.next = iterator.after;
+                        frame.exit_scopes.pop();
+                        return Ok(Progress::Continue);
+                    };
+                    iterator.record.done = false;
+                    self.bind_await_iteration(frame, statement, frame.environment()?, value, host)
+                })();
+                next.map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
+            }
+            IteratorWait::Close { completion, after_break } => {
+                if let FinallyCompletion::Throw(error) = *completion {
+                    return Err(error);
+                }
+                if rejected { return Err(Fault::thrown(value)); }
+                if !matches!(value, Value::Object(_) | Value::Function(_) | Value::Host(_)) {
+                    return Err(Fault::exception("TypeError", "Async iterator return must resolve to an object."));
+                }
+                if let Some(after) = after_break {
+                    frame.next = after;
+                    return Ok(Progress::Continue);
+                }
+                let FinallyCompletion::Abrupt(control) = *completion else { unreachable!() };
+                Ok(Progress::Abrupt(control))
+            }
+        }
     }
 
     #[inline(never)]
@@ -1546,8 +1633,43 @@ impl Runtime {
                     }
                     let break_here = matches!(completion, Ok(Control::Break(target, _)) if target == iterator.statement);
                     let marker = self.publish_await_activation(frame)?;
-                    completion = self.iterator_close(&mut iterator.record, completion, host);
-                    self.restore_root_marker(marker);
+                    if iterator.asynchronous {
+                        let close = (|| {
+                            if iterator.record.done { return Ok(None); }
+                            self.push_completion_roots(&completion)?;
+                            let guard = self.inhibit_transient_collection();
+                            let result = (|| {
+                                let Some(value) = self.iterator_return_result(&iterator.record, host)? else {
+                                    return Ok(None);
+                                };
+                                self.push_transient_value(&value)?;
+                                self.promise_for_await(value, host).map(Some)
+                            })();
+                            self.restore_transient_marker(guard);
+                            result
+                        })();
+                        self.restore_root_marker(marker);
+                        match close {
+                            Ok(Some(promise)) => {
+                                let saved = match completion {
+                                    Ok(control) => FinallyCompletion::Abrupt(control),
+                                    Err(error) => FinallyCompletion::Throw(error),
+                                };
+                                let bytes = saved.retained_bytes();
+                                self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+                                frame.iterator_wait = Some(IteratorWait::Close {
+                                    completion: Box::new(saved), after_break: break_here.then_some(iterator.after),
+                                });
+                                return Ok(Progress::Suspend(promise));
+                            }
+                            Ok(None) => {}
+                            Err(error) if error.exception.is_none() || completion.is_ok() => completion = Err(error),
+                            Err(_) => {}
+                        }
+                    } else {
+                        completion = self.iterator_close(&mut iterator.record, completion, host);
+                        self.restore_root_marker(marker);
+                    }
                     if break_here && completion.is_ok() {
                         frame.next = iterator.after;
                         return Ok(Progress::Continue);
@@ -1637,6 +1759,7 @@ mod tests {
             comparison_operands: vec![Value::Function(29), Value::String("left".into())],
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
             plain_calls: Vec::new(),
+            iterator_wait: None,
             pending: Some(PendingAwait {
                 statement: 0,
                 action: Resume::Discard,
