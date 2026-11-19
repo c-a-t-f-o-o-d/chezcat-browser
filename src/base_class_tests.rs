@@ -14,6 +14,36 @@ fn succeeds(source: &str) {
 }
 
 #[test]
+fn computed_class_methods_preserve_symbol_keys_order_and_constructor_identity() {
+    succeeds(r#"
+var order = '';
+var key = {toString: function() { order += 'a'; return 'value'; }};
+class Bag {
+    [Symbol.iterator]() { return this.current; }
+    get [key]() { return this.current; }
+    set [(order += 'b', 'value')](v) { this.current = v; }
+}
+var bag = new Bag();
+bag.value = 9;
+var descriptor = Object.getOwnPropertyDescriptor(Bag.prototype, Symbol.iterator);
+if (order !== 'ab' || bag[Symbol.iterator]() !== 9 || bag.value !== 9 ||
+    descriptor.enumerable || !descriptor.configurable || !descriptor.writable ||
+    descriptor.value.name !== '[Symbol.iterator]') throw 'computed descriptor';
+var Anon = class { static ['name']() { return 'method'; } };
+if (Anon.name() !== 'method') throw 'computed static name';
+class Ordinary { ['constructor']() { return 7; } }
+if (new Ordinary().constructor() !== 7) throw 'computed constructor';
+var tdz = false, badPrototype = false, strictKey = false;
+try { var hidden = class Inner { [Inner]() {} }; } catch (e) { tdz = e instanceof ReferenceError; }
+try { var invalid = class { static ['prototype']() {} }; } catch (e) { badPrototype = e instanceof TypeError; }
+try { var invalid = class { [(unexpectedGlobal = 1, 'key')]() {} }; }
+catch (e) { strictKey = e instanceof ReferenceError; }
+if (!tdz || !badPrototype || !strictKey || typeof unexpectedGlobal !== 'undefined') throw 'class key errors';
+'ok';
+"#);
+}
+
+#[test]
 fn base_class_default_explicit_constructors_return_values_and_bound_new_target() {
     succeeds(r#"
 class Empty {}
@@ -284,7 +314,7 @@ fn base_class_invalid_and_unsupported_syntax_is_rejected_before_program_effects(
     for source in [
         "effects++;class C extends Object{field=effects++;}",
         "effects++;class C{method(){return super[effects++];}}",
-        "effects++;class C{[effects++](){}}",
+        "effects++;class C{[effects++]=effects++;}",
         "effects++;class C{#private(){}}",
         "effects++;class C{value=effects++;}",
         "effects++;class C{static value=effects++;}",
