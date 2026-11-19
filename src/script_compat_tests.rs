@@ -700,6 +700,50 @@ document.title='element-expando-first-ok';
 }
 
 #[test]
+fn tree_walker_masks_preserve_live_cursor_and_native_tree_boundaries() {
+    let (doc, _, page, outcome) = page(
+        "<div id=root><p id=one>A<b id=nested>B</b></p><p id=two>C</p></div>",
+        &[r#"
+var root=document.getElementById('root'), one=document.getElementById('one');
+var two=document.getElementById('two'), nested=document.getElementById('nested');
+var w=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT,null,false);
+if(!(w instanceof TreeWalker)||w.root!==root||w.currentNode!==root||w.whatToShow!==1||w.filter!==null||
+    Object.hasOwn(document,'createTreeWalker')||Document.prototype.createTreeWalker.length!==1)throw 'interfaces';
+var all=Object.getOwnPropertyDescriptor(NodeFilter,'SHOW_ALL');
+if(all.value!==4294967295||all.writable||!all.enumerable||all.configurable||
+    typeof NodeFilter!=='function'||Object.hasOwn(NodeFilter,'prototype'))throw 'constants';
+if(w.parentNode()!==null||w.firstChild()!==one||w.firstChild()!==nested||
+    w.nextSibling()!==null||w.parentNode()!==one||w.nextSibling()!==two||
+    w.previousNode()!==nested||w.previousNode()!==one||w.previousNode()!==root)throw 'element traversal';
+w.currentNode=two;
+var late=document.createElement('i');root.appendChild(late);
+if(w.nextNode()!==late||w.nextNode()!==null||w.currentNode!==late)throw 'live appended node';
+w.currentNode=root;if(w.lastChild()!==late||w.previousSibling()!==two)throw 'reverse siblings';
+var t=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+if(t.firstChild()!==one.firstChild||t.nextSibling()!==nested.firstChild||
+    t.nextSibling()!==two.firstChild||t.previousSibling()!==nested.firstChild||
+    t.parentNode()!==null)throw 'masked ancestors';
+var detached=document.createElement('span'), child=document.createTextNode('detached');
+detached.appendChild(child);t.currentNode=detached;
+if(t.nextNode()!==child||t.root!==root)throw 'detached cursor';
+var calls=0, caught=0;
+try {document.createTreeWalker({}, {valueOf:function(){calls++;return 1;}});} catch(e){if(e instanceof TypeError)caught++;}
+try {TreeWalker.prototype.firstChild.call({});} catch(e){if(e instanceof TypeError)caught++;}
+try {t.currentNode=null;} catch(e){if(e instanceof TypeError)caught++;}
+try {document.createTreeWalker(root,1,function(){calls++;return 1;});} catch(e){if(e.name==='NotSupportedError')caught++;}
+if(calls||caught!==4||t.currentNode!==child)throw 'validation';
+var d=document.createTreeWalker(document,undefined);
+if(d.root!==document||d.firstChild()!==root||d.whatToShow!==4294967295)throw 'document root';
+var none=document.createTreeWalker(root,-4294967296);
+if(none.whatToShow!==0||none.nextNode()!==null||none.currentNode!==root)throw 'empty unsigned mask';
+document.title='tree-walker-ok';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "tree-walker-ok");
+}
+
+#[test]
 fn mutation_observer_batches_direct_detached_character_data_in_microtask_order() {
     let (doc, _, page, outcome) = page("<title>pending</title>", &[r#"
 var text=document.createTextNode('initial'), order='';

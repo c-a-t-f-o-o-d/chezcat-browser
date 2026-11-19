@@ -971,6 +971,7 @@ impl Page {
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
+        runtime.define_tree_walker(WINDOW).expect("fixed tree traversal interfaces");
         runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
         Self { runtime, state }
     }
@@ -2599,6 +2600,21 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn tree_walker_document(&self, document: u32) -> bool {
+        document == DOCUMENT
+    }
+
+    fn tree_walker_node_type(&self, node: u32) -> Option<u32> {
+        if node == DOCUMENT { return Some(9); }
+        if self.attr_receiver(node) { return Some(2); }
+        let index = node_index(node).filter(|&index| self.dom_accessible(index))?;
+        Some(match self.doc.nodes[index].kind {
+            NodeKind::Element { .. } => 1,
+            NodeKind::Text(_) => 3,
+            NodeKind::Comment(_) => 8,
+            NodeKind::DocumentFragment => 11,
+        })
+    }
     fn mutation_observation_target(&self, target: u32) -> Option<bool> {
         self.text_content_receiver(target).then(|| node_index(target).is_some_and(|node|
             self.dom_accessible(node) && matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Comment(_))))
