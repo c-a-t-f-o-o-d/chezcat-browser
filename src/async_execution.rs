@@ -16,6 +16,7 @@ struct PendingAwait {
     statement: StmtId,
     action: Resume,
     call: Option<PendingCall>,
+    member_key: Option<ExprId>,
 }
 
 struct PendingCall {
@@ -302,7 +303,7 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let PendingAwait { statement, action, call } = frame
+                let PendingAwait { statement, action, call, member_key } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -314,6 +315,17 @@ impl Runtime {
                         let value = if let Some(call) = call {
                             let direct = call.direct_eval.then_some((frame.environment()?, &frame.this));
                             let result = self.invoke_plain_call(call.function, &[value], direct, host)?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(key) = member_key {
+                            let key = self.eval(
+                                &frame.program, key, frame.environment()?, &frame.this, host,
+                            )?;
+                            self.push_transient_value(&key)?;
+                            let result = self.read_reference(&Reference::ComputedProperty(value, key), host)?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -471,9 +483,13 @@ impl Runtime {
                     statement,
                     operand,
                     callee,
+                    member_key,
                     action,
                 } => {
                     let result = (|| {
+                        if member_key.is_some() {
+                            self.step()?; // Ordinary member reference construction.
+                        }
                         let call = if let Some(callee) = callee {
                             let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
                             self.push_transient_value(&function)?;
@@ -490,7 +506,7 @@ impl Runtime {
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some(PendingAwait { statement, action, call });
+                        frame.pending = Some(PendingAwait { statement, action, call, member_key });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -623,6 +639,7 @@ mod tests {
                 statement: 0,
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
+                member_key: None,
             }),
         };
         let mut edges = Vec::new();
