@@ -207,6 +207,14 @@ impl<'a> Selector<'a> {
         result
     }
 
+    /// A picture's initial fallback can still change when its media matches.
+    pub(crate) fn environment_sensitive(&self, node: usize) -> bool {
+        self.tag(node, "img")
+            && (self.document.attr(node, "srcset").is_some()
+                || self.parents.get(node).copied().flatten()
+                    .is_some_and(|parent| self.tag(parent, "picture")))
+    }
+
     fn default_source(&self, node: usize) -> Option<SelectedImage> {
         let url = trim(self.document.attr(node, "src")?);
         if url.is_empty() {

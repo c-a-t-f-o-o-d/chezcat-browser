@@ -120,6 +120,8 @@ pub struct Loaded {
     pub images: HashMap<usize, Arc<Bitmap>>,
     pub image_densities: HashMap<usize, f64>,
     pub image_sources: HashMap<usize, String>,
+    pub responsive_images: Vec<usize>,
+    pub image_environment: crate::image_selection::Environment,
     pub animations: HashMap<usize, Arc<Animation>>,
     pub scripts: Vec<Script>,
     pub csp: csp::PolicySet,
@@ -987,6 +989,12 @@ fn load_request_progressively(
         images: HashMap::new(),
         image_densities: HashMap::new(),
         image_sources: HashMap::new(),
+        responsive_images: Vec::new(),
+        image_environment: crate::image_selection::Environment {
+            viewport_width: f64::from(options.viewport_width),
+            viewport_height: f64::from(options.viewport_height),
+            density: f64::from(options.density_milli) / 1000.0,
+        },
         animations: HashMap::new(),
         scripts: Vec::new(),
         csp,
@@ -1072,12 +1080,13 @@ fn load_request_progressively(
         viewport_height: f64::from(options.viewport_height),
         density: f64::from(options.density_milli) / 1000.0,
     };
-    let mut image_plan = image_plan(
+    let (mut image_plan, responsive_images) = image_plan(
         &loaded.document,
         loaded.scripting_blocked.is_none(),
         environment,
         &mut loaded.events,
     );
+    loaded.responsive_images = responsive_images;
     loaded.image_densities = image_plan
         .iter()
         .map(|image| (image.node, image.density))
@@ -1874,10 +1883,11 @@ fn image_plan(
     scripting: bool,
     environment: crate::image_selection::Environment,
     events: &mut Vec<String>,
-) -> Vec<ImageReference> {
+) -> (Vec<ImageReference>, Vec<usize>) {
     let inert = inert_nodes(doc, scripting);
     let selector = crate::image_selection::Selector::new(doc, environment);
     let mut plan = Vec::new();
+    let mut responsive = Vec::new();
     let mut group = 0;
     for (node, item) in doc.nodes.iter().enumerate() {
         if inert[node] {
@@ -1902,13 +1912,22 @@ fn image_plan(
                     .attr(node, "type")
                     .is_some_and(|kind| kind.eq_ignore_ascii_case("image"))
         {
+            if selector.environment_sensitive(node) {
+                if responsive.len() < crate::scripting::MAX_IMAGE_REQUESTS {
+                    responsive.push(node);
+                } else if responsive.len() == crate::scripting::MAX_IMAGE_REQUESTS {
+                    events.push("Responsive image tracking limit reached; further references retain their initial selection.".into());
+                    // One diagnostic, without retaining an unbounded node list.
+                    responsive.push(usize::MAX);
+                }
+            }
             let selection = selector.select(node);
             for diagnostic in selection.diagnostics {
                 events.push(format!("IMAGE node {node}: {diagnostic}"));
             }
             if let Some(selected) = selection.image {
                 if selected.responsive {
-                    events.push(format!("IMAGE node {node}: responsive source node {}, density {:.3}x; selected for {:.0} x {:.0} CSS-pixel viewport at {:.3}x. Resize/zoom takes effect on the next load.", selected.source_node, selected.density, environment.viewport_width, environment.viewport_height, environment.density));
+                    events.push(format!("IMAGE node {node}: responsive source node {}, density {:.3}x; selected for {:.0} x {:.0} CSS-pixel viewport at {:.3}x.", selected.source_node, selected.density, environment.viewport_width, environment.viewport_height, environment.density));
                 }
                 plan.push(ImageReference {
                     node,
@@ -1919,7 +1938,8 @@ fn image_plan(
             }
         }
     }
-    plan
+    responsive.retain(|&node| node != usize::MAX);
+    (plan, responsive)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2319,7 +2339,7 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
-fn inert_nodes(doc: &Document, noscript: bool) -> Vec<bool> {
+pub(crate) fn inert_nodes(doc: &Document, noscript: bool) -> Vec<bool> {
     let mut inert = vec![false; doc.nodes.len()];
     for (i, node) in doc.nodes.iter().enumerate() {
         if inert[i]
@@ -3472,7 +3492,8 @@ mod tests {
             .map(|request| request.split_whitespace().nth(1).unwrap().to_owned())
             .collect();
         assert_eq!(paths, ["/post-image.ppm"]);
-        assert!(image_plan(&loaded.document, true, Default::default(), &mut Vec::new()).is_empty());
+        let (plan, responsive) = image_plan(&loaded.document, true, Default::default(), &mut Vec::new());
+        assert!(plan.is_empty() && responsive.is_empty());
         let folder = Folder::new();
         let path = folder.file("pixel.ppm", "P3\n2 1\n255\n255 0 0 0 255 0\n");
         let local = local(&navigation::explicit(&path).unwrap()).unwrap();

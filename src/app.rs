@@ -55,6 +55,8 @@ pub use platform_continuation::{PlatformCompletion, PlatformRequest};
 pub(crate) mod anchor;
 #[path = "app_images.rs"]
 mod image_jobs;
+#[path = "app_responsive_images.rs"]
+mod responsive_images;
 #[path = "app_backgrounds.rs"]
 mod backgrounds;
 #[path = "app_textarea.rs"]
@@ -223,6 +225,7 @@ pub struct App {
     fonts: crate::fonts::Book,
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
     image_densities: HashMap<usize, f64>,
+    responsive_images: responsive_images::State,
     animations: HashMap<usize, animation::Playback>,
     media: Option<media_ui::Player>,
     media_worker: Option<crate::media::Worker>,
@@ -356,6 +359,7 @@ impl App {
             fonts: crate::fonts::Book::empty(),
             images: HashMap::new(),
             image_densities: HashMap::new(),
+            responsive_images: responsive_images::State::default(),
             animations: HashMap::new(),
             media: None,
             media_worker: None,
@@ -582,6 +586,7 @@ impl App {
         crate::css::MediaEnvironment::desktop_viewport(self.width,self.viewport_height(),self.zoom)
     }
     fn load_options(&self) -> loader::LoadOptions {
+        let image_environment = self.image_selection_environment();
         loader::LoadOptions {
             media_limits: self.media_limits,
             audio_limits: self.audio_limits,
@@ -592,13 +597,9 @@ impl App {
             blocking: std::sync::Arc::new(crate::blocking::Policy::new(
                 &self.profile.data().settings.blocking,
             )),
-            viewport_width: ((self.width - 12).max(1) as f32 / self.zoom)
-                .round()
-                .max(1.0) as u32,
-            viewport_height: (self.viewport_height().max(1) as f32 / self.zoom)
-                .round()
-                .max(1.0) as u32,
-            density_milli: (self.zoom * 1000.0).round().max(1.0) as u32,
+            viewport_width: image_environment.viewport_width as u32,
+            viewport_height: image_environment.viewport_height as u32,
+            density_milli: (image_environment.density * 1000.0).round() as u32,
             media_environment: Some(self.css_media_environment()),
             cookie_origin: self.location.url.clone(),
             cookie_same_site: None,
@@ -621,6 +622,7 @@ impl App {
             || self.dynamic_pending != 0
             || self.pending_stylesheets != 0
             || !self.pending_images.is_empty()
+            || self.responsive_images.pending()
             || !self.pending_backgrounds.is_empty()
             || self
                 .scripting
@@ -765,7 +767,7 @@ impl App {
         }
     }
     pub fn network_needs_tick(&self) -> bool {
-        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty() || !self.pending_backgrounds.is_empty())
+        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty() || self.responsive_images.pending() || !self.pending_backgrounds.is_empty())
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
@@ -775,6 +777,7 @@ impl App {
     fn poll_load_once(&mut self) -> bool {
         let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
+        let responsive_changed = self.process_responsive_images() | self.poll_responsive_image_events();
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()
             | self.poll_dynamic_stylesheets()
@@ -783,7 +786,7 @@ impl App {
             | self.process_image_requests();
         let script_changed = script_changed | self.resume_background_loading();
         let revision = self.network.revision();
-        let mut changed = pause_changed | script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = pause_changed | script_changed | responsive_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         changed |= self.flush_embedded_video();
@@ -796,7 +799,7 @@ impl App {
         if changed && self.view == View::Resources {
             self.refresh_resource_view();
         }
-        changed
+        changed | self.process_responsive_images()
     }
 
     // Shared delivery path: handoff completion retains the ordinary resource,
@@ -1587,6 +1590,12 @@ impl App {
         self.fonts.extend(&loaded.fonts);
         self.images = loaded.images;
         self.image_densities = loaded.image_densities;
+        self.responsive_images = responsive_images::State::new(
+            loaded.responsive_images,
+            loaded.image_environment,
+            &loaded.image_sources,
+            &self.image_densities,
+        );
         self.animations.clear();
         self.install_animations(loaded.animations);
         self.events = loaded.events;
@@ -1757,6 +1766,7 @@ impl App {
             self.chrome.hover = None;
             self.chrome.pressed = None;
             self.reflow();
+            self.process_responsive_images();
         }
         self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
         self.sync_editors();
@@ -1769,6 +1779,7 @@ impl App {
         let fraction = self.scroll as f32 / self.page.height.max(1) as f32;
         self.zoom = zoom.clamp(0.5, 3.0);
         self.reflow();
+        self.process_responsive_images();
         self.set_scroll(((fraction * self.page.height as f32) as i32).clamp(0, self.max_scroll()));
         self.sync_editors();
     }
@@ -4509,6 +4520,8 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    mod responsive_picture;
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
     #[test]

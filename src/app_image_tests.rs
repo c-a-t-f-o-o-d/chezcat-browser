@@ -662,7 +662,7 @@ fn image_slot_job(app: &App, site: &Site, background: bool, generation: u64, sou
     let origin = site.location("/start");
     Job {
         epoch: 19,
-        background,
+        slot: if background { Slot::Background } else { Slot::ScriptImage },
         request: DynamicImage { node: 7, generation, source: source.into(), base: origin.clone(),
             policy: crate::csp::PolicySet::new(&origin), origin },
         blocking: Arc::new(crate::blocking::Policy::new(&app.profile.data().settings.blocking)),
@@ -689,18 +689,18 @@ fn image_worker_slot_cancellation_preserves_other_active_decode_and_removes_only
         worker.submit(active).unwrap();
         image_slot_wait(|| site.requested("/held.ppm"));
         worker.submit(image_slot_job(&app, &site, canceled_background, 2, "/two.ppm")).unwrap();
-        worker.cancel_node(7, canceled_background);
+        worker.cancel_node(7, if canceled_background { Slot::Background } else { Slot::ScriptImage });
         assert!(!active_cancel.load(Ordering::Relaxed), "Other slot's active decode was canceled.");
         assert!(worker.state.0.lock().unwrap().queue.is_empty());
         site.release();
         image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 1);
         let completion = worker.poll(false).unwrap();
-        assert_eq!(completion.background, !canceled_background);
+        assert_eq!(completion.slot == Slot::Background, !canceled_background);
         assert_eq!((completion.epoch, completion.request.node, completion.request.generation), (19, 7, 1));
         let asset = completion.result.as_ref().unwrap();
         assert_eq!((asset.bitmap.width, asset.bitmap.height), (4, 2));
         assert_eq!(asset.bitmap.pixels, [0xff0000ff; 8]);
-        let label = if completion.background { "BACKGROUND IMAGE node 7: decoded 4 x 2 pixels" }
+        let label = if completion.slot == Slot::Background { "BACKGROUND IMAGE node 7: decoded 4 x 2 pixels" }
             else { "DYNAMIC IMAGE node 7: decoded 4 x 2 pixels" };
         assert!(completion.events.iter().any(|event| event == label));
         assert!(!site.requested("/two.ppm"));
@@ -719,17 +719,17 @@ fn image_worker_slot_cancellation_aborts_selected_active_and_preserves_other_que
         worker.submit(active).unwrap();
         image_slot_wait(|| site.requested("/held.ppm"));
         worker.submit(image_slot_job(&app, &site, !canceled_background, 2, "/two.ppm")).unwrap();
-        worker.cancel_node(7, canceled_background);
+        worker.cancel_node(7, if canceled_background { Slot::Background } else { Slot::ScriptImage });
         assert!(active_cancel.load(Ordering::Relaxed));
         {
             let state = worker.state.0.lock().unwrap();
             assert_eq!(state.queue.len(), 1);
-            assert_eq!(state.queue[0].background, !canceled_background);
+            assert_eq!(state.queue[0].slot == Slot::Background, !canceled_background);
         }
         site.release();
         image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 1);
         let completion = worker.poll(false).unwrap();
-        assert_eq!((completion.background, completion.request.generation), (!canceled_background, 2));
+        assert_eq!((completion.slot == Slot::Background, completion.request.generation), (!canceled_background, 2));
         let asset = completion.result.as_ref().unwrap();
         assert_eq!((asset.bitmap.width, asset.bitmap.height), (1, 3));
         assert_eq!(asset.bitmap.pixels, [0xff00ff00; 3]);
@@ -747,11 +747,11 @@ fn image_worker_slot_cancellation_keeps_other_completed_pixels() {
         worker.submit(image_slot_job(&app, &site, false, 1, "/one.ppm")).unwrap();
         worker.submit(image_slot_job(&app, &site, true, 2, "/two.ppm")).unwrap();
         image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 2);
-        worker.cancel_node(7, canceled_background);
+        worker.cancel_node(7, if canceled_background { Slot::Background } else { Slot::ScriptImage });
         let completion = worker.poll(false).unwrap();
-        assert_eq!(completion.background, !canceled_background);
+        assert_eq!(completion.slot == Slot::Background, !canceled_background);
         let asset = completion.result.as_ref().unwrap();
-        let expected: &[u32] = if completion.background { &[0xff00ff00; 3] } else { &[0xffff0000; 2] };
+        let expected: &[u32] = if completion.slot == Slot::Background { &[0xff00ff00; 3] } else { &[0xffff0000; 2] };
         assert_eq!(asset.bitmap.pixels.as_slice(), expected);
         assert!(worker.poll(false).is_none());
     }
@@ -767,14 +767,14 @@ fn image_worker_background_only_poll_leaves_element_fifo_and_pixels_intact() {
     worker.submit(image_slot_job(&app, &site, false, 3, "/one.ppm")).unwrap();
     image_slot_wait(|| worker.state.0.lock().unwrap().completed.len() == 3);
     let background = worker.poll(true).unwrap();
-    assert!(background.background);
+    assert_eq!(background.slot, Slot::Background);
     assert_eq!(background.request.generation, 2);
     assert_eq!(background.result.unwrap().bitmap.pixels, [0xff00ff00; 3]);
     assert!(worker.poll(true).is_none(), "Paused script's element completions must remain queued.");
     assert_eq!(worker.state.0.lock().unwrap().completed.len(), 2);
     for generation in [1, 3] {
         let element = worker.poll(false).unwrap();
-        assert!(!element.background);
+        assert_eq!(element.slot, Slot::ScriptImage);
         assert_eq!(element.request.generation, generation);
         assert_eq!(element.result.unwrap().bitmap.pixels, [0xffff0000; 2]);
     }
