@@ -1244,7 +1244,10 @@ fn template_node_can_park(node: &Node) -> bool {
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::javascript::valid_custom_element_name(tag))
                 && !attrs.iter().any(|attr| attr.name.namespace.is_some()
-                    || attr.name.qualified.starts_with("on") || attr.name.html_is("is"))
+                    || attr.name.qualified.starts_with("on")
+                    // STYLE uses the same native stylesheet admission even if
+                    // its parsed markup carries an ordinary `is` attribute.
+                    || tag != "style" && attr.name.html_is("is"))
         }
         _ => false,
     }

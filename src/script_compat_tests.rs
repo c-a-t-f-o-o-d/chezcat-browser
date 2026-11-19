@@ -3924,7 +3924,7 @@ fn template_fragment_promotes_original_nodes_and_checks_stylesheet_policy() {
         let html = "<html><head><title>Original</title></head><body><iframe hidden></iframe><main id=app>Fixture</main></body></html>";
         let source = r#"
 var template=document.createElement('template');
-template.innerHTML='<theme-scope id="scope"><style>#app{opacity:0.5}</style></theme-scope>';
+template.innerHTML='<theme-scope id="scope"><style is="fixture-sheet">#app{opacity:0.5}</style></theme-scope>';
 var donor=template.content, theme=donor.firstChild, style=theme.firstChild, text=style.firstChild;
 var owner=donor.ownerDocument, marker={}, head=document.head, anchor=head.lastChild;
 var roots=donor.childNodes, nested=theme.childNodes, styleChildren=style.childNodes;
@@ -3935,7 +3935,7 @@ if(theme.isConnected||style.isConnected||document.getElementById('scope')!==null
     throw 'inert stylesheet attached';
 if(head.insertBefore(donor,anchor)!==donor||theme!==document.getElementById('scope')||
    theme.fixtureMarker!==marker||theme.parentNode!==head||theme.nextSibling!==anchor||
-   theme.firstChild!==style||style.firstChild!==text||!style.isConnected||
+   theme.firstChild!==style||style.firstChild!==text||!style.isConnected||style.getAttribute('is')!=='fixture-sheet'||
    theme.ownerDocument!==document||style.ownerDocument!==document||text.ownerDocument!==document)
     throw 'real transferred nodes';
 if(donor.ownerDocument!==owner||template.content!==donor||donor.firstChild!==null||
