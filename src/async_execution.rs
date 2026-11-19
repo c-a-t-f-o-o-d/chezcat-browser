@@ -67,6 +67,7 @@ pub(super) struct Activation {
     environments: Vec<usize>,
     try_scopes: Vec<TryScope>,
     pending: Option<PendingAwait>,
+    logical_input: Option<Value>,
 }
 
 impl Activation {
@@ -77,6 +78,7 @@ impl Activation {
     pub(super) fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             .saturating_add(self.this.bytes())
+            .saturating_add(self.logical_input.as_ref().map_or(0, Value::bytes))
             .saturating_add(self.pending_call().map_or(0, |call| call.function.bytes()))
             .saturating_add(self.pending_method().map_or(0, PendingMethod::retained_bytes))
             .saturating_add(self.pending_assignment().map_or(0, name_reference_bytes))
@@ -99,6 +101,7 @@ impl Activation {
             .len()
             .saturating_add(self.try_scopes.len())
             .saturating_add(5 + usize::from(self.pending_call().is_some())
+                + usize::from(self.logical_input.is_some())
                 + 2 * usize::from(self.pending_method().is_some())
                 + usize::from(self.pending_assignment().is_some()))
     }
@@ -107,6 +110,9 @@ impl Activation {
         add(Edge::Function(self.callee));
         add(Edge::Object(self.outer));
         Edge::value(&self.this, add);
+        if let Some(value) = &self.logical_input {
+            Edge::value(value, add);
+        }
         if let Some(call) = self.pending_call() {
             Edge::value(&call.function, add);
         }
@@ -199,6 +205,7 @@ impl Runtime {
             environments,
             try_scopes: Vec::new(),
             pending: None,
+            logical_input: None,
         });
         self.drive_await_body(frame, None, host)
     }
@@ -541,18 +548,14 @@ impl Runtime {
                     )?;
                     Self::await_control(completion)
                 }
-                Instruction::GuardAwait { statement, left, operator, action } => {
+                Instruction::Logical { statement, operator, target, action } => {
                     let result = (|| {
-                        let value = self.eval(&frame.program, left, environment, &frame.this, host)?;
+                        let value = frame.logical_input.take()
+                            .ok_or_else(|| Fault::new("Async logical test has no input."))?;
                         if !logical_short_circuits(operator, &value) {
                             return Ok(Progress::Continue);
                         }
-                        debug_assert!(matches!(
-                            frame.program.templates[frame.template].await_plan.get(frame.next),
-                            Some(Instruction::Await { .. })
-                        ));
-                        frame.next += 1;
-                        self.push_transient_value(&value)?;
+                        frame.next = target;
                         self.await_resume_action(frame, action, value, host)
                     })();
                     result.map_err(|error: Fault| {
@@ -667,6 +670,11 @@ impl Runtime {
         match action {
             Resume::Discard => Ok(Progress::Continue),
             Resume::Return => Ok(Progress::Return(value)),
+            Resume::StoreLogicalInput => {
+                debug_assert!(frame.logical_input.is_none());
+                frame.logical_input = Some(value);
+                Ok(Progress::Continue)
+            }
             Resume::BranchFalse(target) => {
                 if !value.truthy() {
                     frame.next = target;
@@ -779,6 +787,7 @@ mod tests {
                 after: 2,
                 environments: 1,
             }],
+            logical_input: Some(Value::Function(21)),
             pending: Some(PendingAwait {
                 statement: 0,
                 action: Resume::Discard,
@@ -795,7 +804,7 @@ mod tests {
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13, 17, 19, 20] {
+        for function in [11, 13, 17, 19, 20, 21] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
