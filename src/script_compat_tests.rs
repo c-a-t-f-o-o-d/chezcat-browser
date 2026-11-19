@@ -4163,3 +4163,38 @@ window.addEventListener('load',function(){
     let result = page.console_eval(&mut doc, &mut forms, "if(delivered!==1)throw 'later event effects';");
     assert_eq!(result.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn text_inherited_native_traversal_aliases_reach_an_element_after_stylesheet_text() {
+    let (doc, _, page, result) = page("<html><head><title>Text traversal</title></head><body><iframe hidden></iframe><original-card id=target></original-card></body></html>", &[r#"
+var sheet=document.createElement('style'), target=document.getElementById('target');
+sheet.textContent='#target{color:#123456}';
+document.head.insertBefore(sheet,document.head.firstChild);
+var parent=Object.getOwnPropertyDescriptor(Node.prototype,'parentNode');
+var sibling=Object.getOwnPropertyDescriptor(Node.prototype,'nextSibling');
+Object.defineProperty(Node.prototype,'savedParent',parent);
+Object.defineProperty(Node.prototype,'savedSibling',sibling);
+var raw=sheet.firstChild, detached=document.createTextNode('original');
+if(!(raw instanceof Text)||raw.nodeType!==3||raw.data!=='#target{color:#123456}'||
+   raw.savedParent!==sheet||raw.savedSibling!==null||raw.ownerDocument!==document||
+   !('savedParent' in raw)||detached.savedParent!==null||detached.savedSibling!==null||
+   detached.data!=='original')
+    throw 'real Text getters and native slots';
+var cursor=document, count=0, found=false;
+while(cursor&&count++<40){
+    if(cursor===target){found=true;break;}
+    if(cursor.firstChild){cursor=cursor.firstChild;continue;}
+    while(cursor&&cursor!==document&&!cursor.savedSibling)cursor=cursor.savedParent;
+    cursor=cursor&&cursor!==document?cursor.savedSibling:null;
+}
+if(!found||target.previousElementSibling.contentWindow!==null)
+    throw 'ordinary traversal below the stylesheet';
+delete Node.prototype.savedParent;
+delete Node.prototype.savedSibling;
+if(raw.savedParent!==undefined||'savedSibling' in raw||raw.parentNode!==sheet)
+    throw 'live prototype lookup';
+document.title='text-traversal-ok';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "text-traversal-ok");
+}
