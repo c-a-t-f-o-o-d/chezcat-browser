@@ -464,6 +464,7 @@ struct State {
     dom_commits: Option<u64>,
     limits: crate::javascript::limits::Limits,
     host_work: usize,
+    execution_deadline: Option<Instant>,
     copy_work: usize,
     node_limit: usize,
     retained: usize,
@@ -540,6 +541,7 @@ impl State {
             dom_commits: Some(0),
             limits: crate::javascript::limits::BROWSER,
             host_work: crate::javascript::limits::BROWSER.host_work,
+            execution_deadline: None,
             copy_work: crate::javascript::limits::BROWSER.copy_bytes,
             node_limit: 0,
             retained: 0,
@@ -582,11 +584,17 @@ impl State {
     }
 
     fn work(&mut self, count: usize) -> Result<(), String> {
-        if count > self.host_work {
+        let remaining = self.host_work;
+        let Some(left) = remaining.checked_sub(count) else {
             self.host_work = 0;
             return Err(format!("DOM work limit reached ({} node/host operations per job).", self.limits.host_work));
+        };
+        self.host_work = left;
+        if remaining / 4096 != left / 4096
+            && self.execution_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            return Err("DOM computation time limit reached.".into());
         }
-        self.host_work -= count;
         Ok(())
     }
 
@@ -1024,11 +1032,14 @@ impl Page {
     pub fn begin_job(&mut self) {
         self.refresh_media_official_position();
         self.runtime.begin_job();
+        let deadline = self.runtime.execution_deadline();
+        self.state.execution_deadline = Some(deadline);
         self.state.host_work = self.state.limits.host_work;
         self.state.copy_work = self.state.limits.copy_bytes;
         self.state.timer_nesting = 0;
         if let Some(geometry) = &mut self.state.geometry {
             geometry.begin_job();
+            geometry.set_execution_deadline(deadline);
         }
     }
 
@@ -1425,6 +1436,11 @@ impl Page {
                 self.state.limits.startup_regexp - startup_regexp,
                 started + Duration::from_secs(self.state.limits.startup_seconds),
             );
+            let deadline = self.runtime.execution_deadline();
+            self.state.execution_deadline = Some(deadline);
+            if let Some(geometry) = &mut self.state.geometry {
+                geometry.set_execution_deadline(deadline);
+            }
             self.state.executed += 1;
             if let Err(error) = self.runtime.execute(
                 &source.source,
@@ -1855,6 +1871,11 @@ impl Page {
         text.push_str(&format!("Accepted script navigation requests: {}.\n", self.state.navigation_requests));
         if let Some(t)=self.state.navigation_timing {text.push_str(&t.report());}
 text.push_str(&format!("Classic scripts have independent execution jobs ({} steps / {} seconds / {} MiB string-copy work). Aggregate startup: {} steps / {} seconds / {} MiB string-copy work. Native-stack and allocation guards are separate.\nFresh detached image requests declined: {}. Ordinary connected HTML img source changes use cancelable real resource requests; current/pending/broken state and completion events follow actual decoding. Detached never-connected Image nodes only reflect attributes; no request or load event was fabricated. Scripted responsive source-set changes remain unsupported.\nBeacon requests declined: {}. sendBeacon returns false; no data was queued or transmitted.\n", self.state.limits.steps, self.state.limits.job_seconds, self.state.limits.copy_bytes / (1024 * 1024), self.state.limits.startup_steps, self.state.limits.startup_seconds, self.state.limits.startup_copy / (1024 * 1024), self.state.declined_images, self.state.declined_beacons));
+        text.push_str(&format!(
+            "Native work allowance: {} units per job, {} units during startup.\n",
+            self.state.limits.host_work,
+            self.state.limits.startup_host_work
+        ));
         let heap = self.state.limits.heap;
         text.push_str(&format!(
             "Script heap caps: {} properties per object / {} per document; {} object identities; array length {}; {} MiB retained-value payload accounting (not process memory). No up-front reservation.\n",
@@ -7172,11 +7193,13 @@ mod browser_budget_tests {
         assert_eq!(result.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "16777216");
         page.begin_job();
-        assert_eq!(page.state.host_work, 64_000_000);
+        assert_eq!(page.state.host_work, 768 * 1024 * 1024);
+        assert_eq!(page.state.limits.startup_host_work, 4 * page.state.host_work);
         assert_eq!(page.state.copy_work, 16 * 1024 * 1024 * 1024);
         let report = page.report();
         assert!(report.contains("1000000000 steps / 30 seconds / 16384 MiB"));
         assert!(report.contains("4000000000 steps / 120 seconds / 65536 MiB"));
+        assert!(report.contains("Native work allowance: 805306368 units per job, 3221225472 units during startup."));
         assert!(report.contains("1048576 properties per object / 16777216 per document"));
         assert!(report.contains("1048576 object identities; array length 16777216; 512 MiB"));
     }

@@ -145,7 +145,18 @@ pub(crate) struct CascadeOutput {
 pub(crate) struct CssBudget<'a> {
     host_work: &'a mut usize,
     copy_work: &'a mut usize,
+    deadline: Option<Instant>,
+    next_clock_check: usize,
 }
+
+pub(super) fn check_css_deadline(deadline: Option<Instant>) -> Result<(), String> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        Err("CSS computation time limit reached.".into())
+    } else {
+        Ok(())
+    }
+}
+
 impl<'a> CssBudget<'a> {
     pub(super) fn opacity(&mut self, first: bool) -> Result<(), String> {
         // Sparse hash buckets/control bytes, including the first allocation.
@@ -161,15 +172,32 @@ impl<'a> CssBudget<'a> {
     }
 
     pub(crate) fn new(host_work: &'a mut usize, copy_work: &'a mut usize) -> Self {
+        let next_clock_check = *host_work;
         Self {
             host_work,
             copy_work,
+            deadline: None,
+            next_clock_check,
         }
     }
+
+    pub(crate) fn with_deadline(mut self, deadline: Option<Instant>) -> Self {
+        self.deadline = deadline;
+        self
+    }
+
+    pub(super) fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
     pub(crate) fn work(&mut self, amount: usize) -> Result<(), String> {
         match self.host_work.checked_sub(amount) {
             Some(left) => {
                 *self.host_work = left;
+                if self.deadline.is_some() && left <= self.next_clock_check {
+                    check_css_deadline(self.deadline)?;
+                    self.next_clock_check = left.saturating_sub(4096);
+                }
                 Ok(())
             }
             None => {
@@ -207,7 +235,7 @@ impl<'a> CssBudget<'a> {
     // String storage; selector matching and variable expansion are charged
     // separately below. Refused complete sources pay for inspection too.
     pub(crate) fn source(&mut self, bytes: usize) -> Result<(), String> {
-        self.work(bytes.max(1).div_ceil(64).saturating_mul(512))?;
+        self.work(bytes.max(1).div_ceil(SOURCE_WORK_CHUNK).saturating_mul(SOURCE_WORK_PER_CHUNK))?;
         self.copies(bytes.saturating_mul(64))
     }
     pub(super) fn document_structure(&mut self, doc: &Document) -> Result<(), String> {

@@ -4311,6 +4311,10 @@ impl Runtime {
         self.job_allowance = (self.steps, self.copy_bytes, self.regexp_work);
     }
 
+    pub(crate) fn execution_deadline(&self) -> Instant {
+        self.job_deadline
+    }
+
     pub fn job_usage(&self) -> (usize, usize, usize) {
         (
             self.job_allowance.0 - self.steps,
