@@ -109,6 +109,29 @@ if (!(error instanceof SyntaxError)) throw 'descending range';
 }
 
 #[test]
+fn unicode_regexp_bmp_classes_keep_utf16_positions_and_surrogate_boundaries() {
+    succeeds(r#"
+var re = /(?:[\u0400-\u040f]\u00b7)*[\u0410-\u042f][\u0430-\u044f]*/gu;
+var text = '😀\u0400\u00b7\u0410\u0430😀\u0411';
+re.lastIndex = 1;
+var found = re.exec(text);
+if (!re.unicode || re.flags !== 'gu' || found.index !== 2 ||
+    found[0] !== '\u0400\u00b7\u0410\u0430' || re.lastIndex !== 6 ||
+    re.exec(text).index !== 8 || re.exec(text) !== null || re.lastIndex !== 0)
+    throw 'Unicode search positions';
+var sticky = new RegExp('(?:)', 'uy');
+sticky.lastIndex = 1;
+if (sticky.exec('😀').index !== 0 || sticky.lastIndex !== 0)
+    throw 'sticky inside a surrogate pair';
+if ('😀x'.match(/(?:)/gu).length !== 3 ||
+    '😀x'.replace(/(?:)/gu, '-') !== '-😀-x-' ||
+    '😀x'.split(/(?:)/u).join('|') !== '😀|x')
+    throw 'zero-width Unicode progress';
+'ok';
+"#);
+}
+
+#[test]
 fn utf16_regexp_genuine_class_escape_and_flag_errors_remain_syntax_errors() {
     succeeds(r#"
 var errors=0;

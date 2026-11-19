@@ -36,6 +36,7 @@ pub struct Flags {
     pub insensitive: bool,
     pub multiline: bool,
     pub dot_all: bool,
+    pub unicode: bool,
     pub sticky: bool,
 }
 
@@ -48,10 +49,11 @@ impl Flags {
                 'i' => &mut flags.insensitive,
                 'm' => &mut flags.multiline,
                 's' => &mut flags.dot_all,
+                'u' => &mut flags.unicode,
                 'y' => &mut flags.sticky,
-                'u' | 'v' | 'd' => {
+                'v' | 'd' => {
                     return Err(Error::Unsupported(
-                        "Unicode and indices regexp flags are not implemented.",
+                        "Unicode sets and indices regexp flags are not implemented.",
                     ))
                 }
                 _ => return Err(Error::Syntax("Invalid regular-expression flag.")),
@@ -60,6 +62,9 @@ impl Flags {
                 return Err(Error::Syntax("Duplicate regular-expression flag."));
             }
             *entry = true;
+        }
+        if flags.unicode && flags.insensitive {
+            return Err(Error::Unsupported("Unicode regexp case folding is not implemented."));
         }
         Ok(flags)
     }
@@ -70,12 +75,25 @@ impl Flags {
             (self.insensitive, 'i'),
             (self.multiline, 'm'),
             (self.dot_all, 's'),
+            (self.unicode, 'u'),
             (self.sticky, 'y'),
         ]
         .into_iter()
         .filter_map(|(set, ch)| set.then_some(ch))
         .collect()
     }
+}
+
+fn surrogate(unit: u16) -> bool {
+    (0xd800..=0xdfff).contains(&unit)
+}
+
+fn starts_surrogate_pair(input: &[u16], at: usize) -> bool {
+    matches!(input.get(at..at.saturating_add(2)), Some([0xd800..=0xdbff, 0xdc00..=0xdfff]))
+}
+
+pub(super) fn advance_string_index(input: &[u16], at: usize, unicode: bool) -> usize {
+    at + if unicode && starts_surrogate_pair(input, at) { 2 } else { 1 }
 }
 
 #[derive(Clone, Debug)]
@@ -182,6 +200,7 @@ struct Parser {
     groups: usize,
     depth: usize,
     insensitive: bool,
+    unicode: bool,
     named_mode: bool,
     names: Vec<NamedCapture>,
     alternatives: Vec<(usize, usize)>,
@@ -345,6 +364,7 @@ impl Parser {
             .ok_or(Error::Syntax("Missing regular-expression atom."))?;
         self.at += 1;
         match unit {
+            46 if self.unicode => Err(Error::Unsupported("Unicode regexp dot is not implemented.")),
             46 => self.push(Node::Any),
             94 => self.push(Node::Start),
             36 => self.push(Node::End),
@@ -358,6 +378,8 @@ impl Parser {
                 let capture = if self.eat(b'?' as u16) {
                     if self.eat(b':' as u16) {
                         None
+                    } else if self.unicode {
+                        return Err(Error::Unsupported("Unicode regexp assertions and named groups are not implemented."));
                     } else if self.eat(b'=' as u16) {
                         assertion = Some((true, false));
                         None
@@ -424,6 +446,9 @@ impl Parser {
                     return self.push(Node::Reference(Reference::Name(name)));
                 }
                 if self.peek().is_some_and(|unit| (49..=57).contains(&unit)) {
+                    if self.unicode {
+                        return Err(Error::Unsupported("Unicode regexp backreferences are not implemented."));
+                    }
                     let mut number = 0usize;
                     while let Some(unit @ 48..=57) = self.peek() {
                         number = number
@@ -445,9 +470,10 @@ impl Parser {
             // Complete braced quantifiers without a preceding atom are invalid.
             // Other braces/brackets are literal ExtendedPatternCharacters in
             // the supported non-Unicode grammar (Annex B).
-            123 if self.has_counted(self.at - 1) => Err(Error::Syntax(
+            123 if self.unicode || self.has_counted(self.at - 1) => Err(Error::Syntax(
                 "Unexpected regular-expression quantifier or delimiter.",
             )),
+            93 | 125 if self.unicode => Err(Error::Syntax("Unexpected Unicode regexp delimiter.")),
             42 | 43 | 63 => Err(Error::Syntax(
                 "Unexpected regular-expression quantifier or delimiter.",
             )),
@@ -573,6 +599,9 @@ impl Parser {
         Ok(name)
     }
     fn character(&mut self, unit: u16) -> Result<usize, Error> {
+        if self.unicode && surrogate(unit) {
+            return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
+        }
         if self.insensitive && unit >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -600,6 +629,9 @@ impl Parser {
             .ok_or(Error::Syntax("Trailing regular-expression escape."))?;
         self.at += 1;
         let literal = match unit {
+            68 | 87 | 83 if self.unicode => {
+                return Err(Error::Unsupported("Unicode regexp complemented character sets are not implemented."));
+            }
             100 | 68 => return Ok(ClassPart::Digit(unit == 68)),
             119 | 87 => return Ok(ClassPart::Word(unit == 87)),
             115 | 83 => return Ok(ClassPart::Space(unit == 83)),
@@ -610,6 +642,9 @@ impl Parser {
             102 => 12,
             98 if in_class => 8,
             120 => self.hex(2)?,
+            117 if self.unicode && self.peek() == Some(b'{' as u16) => {
+                return Err(Error::Unsupported("Braced Unicode regexp escapes are not implemented."));
+            }
             117 => self.hex(4)?,
             99 => {
                 let next = self
@@ -644,8 +679,14 @@ impl Parser {
                     "Unicode regexp properties are not implemented.",
                 ))
             }
+            _ if self.unicode && (unit != b'-' as u16 || !in_class)
+                && !b"^$\\.*+?()[]{}|/".iter().any(|&syntax| unit == u16::from(syntax)) =>
+                return Err(Error::Syntax("Invalid Unicode regexp identity escape.")),
             _ => unit,
         };
+        if self.unicode && surrogate(literal) {
+            return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
+        }
         if self.insensitive && literal >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -661,6 +702,9 @@ impl Parser {
         if unit == 92 {
             self.escape(true)
         } else {
+            if self.unicode && surrogate(unit) {
+                return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
+            }
             if self.insensitive && unit >= 128 {
                 return Err(Error::Unsupported(
                     "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -671,6 +715,9 @@ impl Parser {
     }
     fn class(&mut self) -> Result<Class, Error> {
         let inverted = self.eat(b'^' as u16);
+        if inverted && self.unicode {
+            return Err(Error::Unsupported("Unicode regexp inverted classes are not implemented."));
+        }
         let mut parts = Vec::new();
         while self.peek() != Some(b']' as u16) {
             let start = self.class_atom()?;
@@ -684,9 +731,15 @@ impl Parser {
                         if low > high {
                             return Err(Error::Syntax("Reversed regular-expression range."));
                         }
+                        if self.unicode && low <= 0xdfff && high >= 0xd800 {
+                            return Err(Error::Unsupported("Unicode regexp ranges spanning surrogates are not implemented."));
+                        }
                         parts.push(ClassPart::Range(low, high));
                     }
                     (start, end) => {
+                        if self.unicode {
+                            return Err(Error::Syntax("Unicode regexp ranges require character endpoints."));
+                        }
                         // Annex B CharacterRangeOrUnion. This parser receives
                         // classic patterns after flag validation.
                         parts.extend([start, ClassPart::Range(b'-' as u16, b'-' as u16), end]);
@@ -1096,6 +1149,9 @@ impl Regex {
     }
 
     fn compile_prepared(units: Vec<u16>, flags: Flags, budget: &mut usize) -> Result<Self, Error> {
+        // The admitted Unicode atoms consume only single-unit, non-surrogate
+        // characters. The VM can keep UTF-16 capture offsets while search
+        // visits only code-point boundaries.
         let named_mode = has_named_capture(&units);
         let mut parser = Parser {
             units,
@@ -1104,6 +1160,7 @@ impl Regex {
             groups: 0,
             depth: 0,
             insensitive: flags.insensitive,
+            unicode: flags.unicode,
             named_mode,
             names: Vec::new(),
             alternatives: Vec::new(),
@@ -1203,7 +1260,13 @@ impl Regex {
         if start > input.len() {
             return Ok(None);
         }
+        let start = if self.flags.unicode && start > 0 && starts_surrogate_pair(input, start - 1) {
+            start - 1
+        } else { start };
         for beginning in start..=if sticky { start } else { input.len() } {
+            if self.flags.unicode && beginning > start && starts_surrogate_pair(input, beginning - 1) {
+                continue;
+            }
             spend(budget, (self.groups + 1) * 2 + self.marks + 1)?;
             let state = State {
                 pc: 0,
@@ -1671,9 +1734,8 @@ mod tests {
         }
         assert!(matches!(Regex::compile("a{1001}", "", &mut 100_000), Err(Error::Limit(_))));
         assert!(matches!(Regex::compile("{", "", &mut 0), Err(Error::Limit(_))));
-        for flags in ["u", "v"] {
-            assert!(matches!(Regex::compile("{", flags, &mut 100_000), Err(Error::Unsupported(_))));
-        }
+        assert!(matches!(Regex::compile("{", "u", &mut 100_000), Err(Error::Syntax(_))));
+        assert!(matches!(Regex::compile("{", "v", &mut 100_000), Err(Error::Unsupported(_))));
         for (pattern, end) in [("a{2,3}", 3), ("a{2,3}?", 2)] {
             let mut budget = 100_000;
             let regex = Regex::compile(pattern, "", &mut budget).unwrap();
@@ -1716,7 +1778,8 @@ mod tests {
                 "{pattern}"
             );
         }
-        for flags in ["u", "v", "d"] {
+        assert!(matches!(Regex::compile("}", "u", &mut 100_000), Err(Error::Syntax(_))));
+        for flags in ["v", "d"] {
             assert!(matches!(
                 Regex::compile("}", flags, &mut 100_000),
                 Err(Error::Unsupported(_))

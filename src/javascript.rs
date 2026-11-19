@@ -5398,11 +5398,11 @@ impl Runtime {
                     .find(&input, at, true, &mut self.regexp_work)
                     .map_err(Self::regexp_fault)?
                 else {
-                    at += 1;
+                    at = regexp::advance_string_index(&input, at, expression.flags.unicode);
                     continue;
                 };
                 if found.end() == previous {
-                    at += 1;
+                    at = regexp::advance_string_index(&input, at, expression.flags.unicode);
                     continue;
                 }
                 let value = Value::String(self.units_string(&input[previous..at])?);
@@ -5721,7 +5721,8 @@ impl Runtime {
                 "multiline" => Some(Value::Bool(expression.flags.multiline)),
                 "dotAll" => Some(Value::Bool(expression.flags.dot_all)),
                 "sticky" => Some(Value::Bool(expression.flags.sticky)),
-                "unicode" | "unicodeSets" | "hasIndices" => Some(Value::Bool(false)),
+                "unicode" => Some(Value::Bool(expression.flags.unicode)),
+                "unicodeSets" | "hasIndices" => Some(Value::Bool(false)),
                 _ => None,
             };
             if let Some(value) = value {

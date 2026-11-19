@@ -1,6 +1,16 @@
 use super::*;
 
 #[test]
+fn unicode_regexp_subset_preserves_syntax_and_unsupported_boundaries() {
+    for pattern in [r"[\d-q]", r"[q-\d]", "[z-a]", r"\q", "]"] {
+        assert!(matches!(Regex::compile(pattern, "u", &mut 100_000), Err(Error::Syntax(_))), "{pattern}");
+    }
+    for pattern in [".", "[^a]", r"\D", r"\u{1f642}", r"[a-\uE001]", "🙂"] {
+        assert!(matches!(Regex::compile(pattern, "u", &mut 100_000), Err(Error::Unsupported(_))), "{pattern}");
+    }
+}
+
+#[test]
 fn utf16_regexp_raw_compile_matches_independent_class_unit_ranges() {
     let pattern = [91,0xd842,0xd845,45,0xd87a,0xd87d,45,0xdbff,93];
     let regex = Regex::compile_units(&pattern, "g", &mut 100_000).unwrap();
