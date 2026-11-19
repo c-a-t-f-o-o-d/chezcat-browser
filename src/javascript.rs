@@ -283,7 +283,9 @@ const MAX_IF_BRANCHES: usize = 4096;
 // expression continuation stack. Never raise this to enlarge heap capacity.
 const MAX_EVAL_DEPTH: usize = 128;
 const MAX_EVALUATION_FRAMES: usize = 4096;
+#[cfg(test)]
 const MAX_EVALUATION_FRAME_SLOTS: usize = 2 * MAX_EVALUATION_FRAMES;
+#[cfg(test)]
 const MAX_EVALUATION_ARGUMENT_SLOTS: usize = 4 * MAX_EVALUATION_FRAMES;
 #[cfg(any(test, not(windows)))]
 const MAX_CALL_DEPTH: usize = 32;
@@ -3989,6 +3991,7 @@ pub struct Runtime {
     evaluation_frames: usize,
     evaluation_frame_slots: usize,
     evaluation_argument_slots: usize,
+    evaluation_payload_bytes: usize,
     #[cfg(test)]
     recursive_evaluation_oracle: bool,
     #[cfg(test)]
@@ -4141,6 +4144,7 @@ impl Runtime {
             evaluation_frames: 0,
             evaluation_frame_slots: 0,
             evaluation_argument_slots: 0,
+            evaluation_payload_bytes: 0,
             #[cfg(test)]
             recursive_evaluation_oracle: false,
             #[cfg(test)]
@@ -7277,9 +7281,8 @@ impl Runtime {
                 return Err(Fault::new("Evaluation nesting limit reached (128)."));
             }
             if condition_phase {
-                if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
-                    return Err(Fault::new("Pending evaluation limit reached (4096).").at(&program.source, program.exprs[condition].at));
-                }
+                self.check_pending_evaluation()
+                    .map_err(|error| error.at(&program.source, program.exprs[condition].at))?;
                 self.work_as(0, WorkKind::ValueCopy)?;
             }
             condition_phase = !condition_phase;

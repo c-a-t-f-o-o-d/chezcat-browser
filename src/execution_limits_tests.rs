@@ -191,6 +191,8 @@ fn browser_budget_separates_native_guards_from_capacity_policy() {
     assert_eq!(limits::BROWSER.test_call_depth, None);
     assert!(limits::REGRESSION.test_call_depth.is_some());
     assert!(limits::CAPACITY_REGRESSION.test_call_depth.is_some());
+    assert_eq!(limits::BROWSER.test_evaluation_frames, None);
+    assert!(limits::REGRESSION.test_evaluation_frames.is_some());
     assert_eq!(limits::BROWSER.capacity.string_bytes, 8 * 1024 * 1024);
     assert_eq!(limits::REGRESSION.capacity.string_bytes, 128 * 1024);
     assert_eq!(limits::REGRESSION_HEAP.retained_values, 2 * 1024 * 1024);

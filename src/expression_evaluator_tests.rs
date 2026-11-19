@@ -33,6 +33,7 @@ fn clean(runtime: &Runtime) {
     assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
     assert_eq!((runtime.evaluation_frames, runtime.evaluation_frame_slots,
                 runtime.evaluation_argument_slots), (0, 0, 0));
+    assert_eq!(runtime.evaluation_payload_bytes, 0);
 }
 
 fn small_stack(action: impl FnOnce() + Send + 'static) {
@@ -154,6 +155,53 @@ fn heap_evaluation_exact_shared_frame_boundary_and_cleanup() {
             assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
         }
     });
+}
+
+#[test]
+fn browser_heap_evaluation_crosses_the_regression_frame_count_on_one_mib_stack() {
+    small_stack(|| {
+        let mut runtime = Runtime::new();
+        let mut host = Recorder::default();
+        let source = format!("1{};", "+1".repeat(10_000));
+        assert_eq!(runtime.execute(&source, &mut host).unwrap().to_text(), "10001");
+        clean(&runtime);
+    });
+}
+
+#[test]
+fn browser_heap_evaluation_shares_frame_bytes_with_native_roots() {
+    let mut runtime = Runtime::new();
+    let mut host = Recorder::default();
+    let (program, root) = binary_program(1);
+    let original_budget = runtime.limits.heap.retained_values;
+    runtime.transient_roots.roots.try_reserve_exact(64).unwrap();
+    runtime.limits.heap.retained_values = runtime.root_storage_bytes();
+    let error = runtime.eval(&program, root, 0, &Value::Undefined, &mut host).unwrap_err();
+    assert!(error.message.contains("Evaluation scratch storage limit"));
+    clean(&runtime);
+    runtime.limits.heap.retained_values = original_budget;
+    runtime.begin_job();
+    assert_eq!(runtime.eval(&program, root, 0, &Value::Undefined, &mut host).unwrap().to_text(), "2");
+    clean(&runtime);
+}
+
+#[test]
+fn browser_heap_evaluation_charges_live_string_operands_to_scratch() {
+    let mut runtime = Runtime::new();
+    let mut host = Recorder::default();
+    let text = "x".repeat(4096);
+    let source = format!("{}''{};", format!("'{text}'+(").repeat(8), ")".repeat(8));
+    let program = Rc::new(Parser::parse(&source, &mut MAX_REGEXP_WORK.clone()).unwrap());
+    let StmtKind::Expr(root) = program.stmts[program.body[0]].kind else { unreachable!() };
+    let original_budget = runtime.limits.heap.retained_values;
+    runtime.limits.heap.retained_values = 16 * 1024;
+    let error = runtime.eval(&program, root, 0, &Value::Undefined, &mut host).unwrap_err();
+    assert!(error.message.contains("Evaluation scratch storage limit"));
+    clean(&runtime);
+    runtime.limits.heap.retained_values = original_budget;
+    runtime.begin_job();
+    assert_eq!(runtime.eval(&program, root, 0, &Value::Undefined, &mut host).unwrap().to_text().len(), 8 * 4096);
+    clean(&runtime);
 }
 
 #[test]

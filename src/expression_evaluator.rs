@@ -8,8 +8,11 @@
 use super::optional_chaining::{CallTarget, Completion, Step};
 use super::{
     logical_short_circuits, Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference,
-    Runtime, Value, MAX_EVALUATION_FRAMES, MAX_EVALUATION_FRAME_SLOTS, MAX_EVAL_DEPTH,
+    Runtime, Value, MAX_EVAL_DEPTH,
 };
+#[cfg(test)]
+use super::MAX_EVALUATION_FRAME_SLOTS;
+use std::mem::size_of;
 use std::rc::Rc;
 use super::function_reachability::Edge;
 use super::transient_roots::Marker;
@@ -155,6 +158,23 @@ pub(super) fn argument_prefix_retained_bytes(prefix: &Vec<Value>) -> usize {
 }
 
 impl Target {
+    fn pending_bytes(&self) -> usize {
+        match self {
+            Self::Value { function, .. } | Self::Construct(function) => pending_value_bytes(function),
+            Self::Member { receiver, function, key } => {
+                let key = match key { PropertyKey::String(name) => name.capacity(), PropertyKey::Symbol(_) => 0 };
+                pending_value_bytes(receiver)
+                    .saturating_add(key)
+                    .saturating_add(function.as_ref().map_or(0, pending_value_bytes))
+            }
+            Self::Chain(target) => pending_value_bytes(&target.receiver)
+                .saturating_add(target.name.as_ref().map_or(0, String::capacity))
+                .saturating_add(target.function.as_ref().map_or(0, pending_value_bytes)),
+            Self::Super(target) => size_of::<super::derived_context::SuperCallTarget>()
+                .saturating_add(pending_value_bytes(&target.constructor)),
+        }
+    }
+
     fn root_edges(&self, add: &mut impl FnMut(Edge)) {
         match self {
             Self::Value { function, .. } | Self::Construct(function) => Edge::value(function, add),
@@ -216,6 +236,27 @@ enum State<'p> {
 }
 
 impl State<'_> {
+    fn pending_bytes(&self) -> usize {
+        match self {
+            Self::BinaryRight { left, .. } => pending_value_bytes(left),
+            Self::ReadKey { receiver, .. } | Self::MemberKey { receiver, .. }
+                | Self::ChainKey { receiver, .. } => pending_value_bytes(receiver),
+            Self::AssignmentValue { reference, before, .. } => {
+                let retained = match reference {
+                    Reference::Binding(_, name) | Reference::Missing(name) | Reference::Global(name) => name.capacity(),
+                    Reference::Property(receiver, name) => pending_value_bytes(receiver).saturating_add(name.capacity()),
+                    Reference::SymbolProperty(receiver, _) => pending_value_bytes(receiver),
+                    Reference::ComputedProperty(receiver, key) => pending_value_bytes(receiver).saturating_add(pending_value_bytes(key)),
+                    Reference::SuperProperty { receiver, name, .. } => pending_value_bytes(receiver).saturating_add(name.len()),
+                };
+                retained.saturating_add(before.as_ref().map_or(0, pending_value_bytes))
+            }
+            Self::Argument(call) => call.target.pending_bytes(),
+            Self::StartSuper { target, .. } => pending_value_bytes(&target.constructor),
+            _ => 0,
+        }
+    }
+
     fn root_edges(&self, add: &mut impl FnMut(Edge)) {
         match self {
             Self::BinaryRight { left, .. } => Edge::value(left, add),
@@ -276,6 +317,14 @@ fn done<'p>(value: Value) -> Transition<'p> {
     Transition::Done(Completion::Value(value))
 }
 
+fn pending_value_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.capacity(),
+        Value::StringUnits(units) => units.capacity().saturating_mul(size_of::<u16>()),
+        _ => value.bytes(),
+    }
+}
+
 fn reserve<T>(items: &mut Vec<T>, total: &mut usize, limit: usize) -> Result<(), Fault> {
     if items.len() < items.capacity() { return Ok(()); }
     let old = items.capacity();
@@ -303,6 +352,45 @@ fn compact<T>(items: &mut Vec<T>, total: &mut usize) {
 }
 
 impl Runtime {
+    pub(super) fn check_pending_evaluation(&self) -> Result<(), Fault> {
+        #[cfg(test)]
+        if let Some(limit) = self.limits.test_evaluation_frames {
+            if self.evaluation_frames >= limit {
+                return Err(Fault::new(format!("Pending evaluation limit reached ({limit}).")));
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn expression_storage_bytes(&self) -> usize {
+        self.evaluation_frame_slots.saturating_mul(size_of::<Frame<'_>>())
+            .saturating_add(self.evaluation_payload_bytes)
+    }
+
+    fn charge_evaluation_payload(&mut self, bytes: usize) -> Result<(), Fault> {
+        if bytes == 0 { return Ok(()); }
+        let occupied = self.expression_storage_bytes()
+            .saturating_add(self.root_storage_bytes())
+            .saturating_add(self.evaluation_argument_slots.saturating_mul(size_of::<Value>()));
+        if bytes > self.limits.heap.retained_values.saturating_sub(occupied) {
+            return Err(Fault::new("Evaluation scratch storage limit reached."));
+        }
+        self.evaluation_payload_bytes += bytes;
+        Ok(())
+    }
+
+    fn reserve_evaluation_frame(&mut self, frames: &mut Vec<Frame<'_>>) -> Result<(), Fault> {
+        #[cfg(test)]
+        if self.limits.test_evaluation_frames.is_some() {
+            return reserve(frames, &mut self.evaluation_frame_slots, MAX_EVALUATION_FRAME_SLOTS);
+        }
+        let arguments = self.evaluation_argument_slots.saturating_mul(size_of::<Value>());
+        let other = arguments.saturating_add(self.root_storage_bytes())
+            .saturating_add(self.evaluation_payload_bytes);
+        let remaining = self.limits.heap.retained_values.saturating_sub(other);
+        reserve(frames, &mut self.evaluation_frame_slots, remaining / size_of::<Frame<'_>>())
+    }
+
     fn publish_heap_roots(&mut self, scratch: &Scratch<'_>, env: usize, this: &Value,
         target: Option<&Target>, reference: Option<&Reference>, completed: Option<&Completion>) -> Result<Marker, Fault> {
         let marker = self.transient_marker();
@@ -349,9 +437,7 @@ impl Runtime {
             | ExprKind::This | ExprKind::NewTarget | ExprKind::RegExp(_)
             | ExprKind::Array(_) | ExprKind::Object(_) | ExprKind::TemplateLiteral(..)
             | ExprKind::TemplateObject(_)) {
-            if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
-                return Err(Fault::new("Pending evaluation limit reached (4096)."));
-            }
+            self.check_pending_evaluation()?;
             self.evaluation_frames += 1;
             let marker = self.inhibit_transient_collection_for("immediate-expression");
             let result = self.eval_heap_immediate(program, id, env, this, host);
@@ -406,22 +492,21 @@ impl Runtime {
         env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let baseline = (self.evaluation_frames, self.evaluation_frame_slots,
-                        self.evaluation_argument_slots);
+                        self.evaluation_argument_slots, self.evaluation_payload_bytes);
         let result = self.eval_heap_driver(program, id, resumed, env, this, host);
         // Each driver has dropped only its own scratch. Restore the enclosing
         // driver's reservations on success, catchable errors and fatal exits.
         self.evaluation_frames = baseline.0;
         self.evaluation_frame_slots = baseline.1;
         self.evaluation_argument_slots = baseline.2;
+        self.evaluation_payload_bytes = baseline.3;
         result
     }
 
     #[inline(never)]
     fn eval_heap_function_literal(&mut self, program: &Rc<Program>, template: usize,
         env: usize, this: &Value) -> Result<Value, Fault> {
-        if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Pending evaluation limit reached (4096)."));
-        }
+        self.check_pending_evaluation()?;
         self.evaluation_frames += 1;
         // A standalone literal has no suspended heap state of its own.
         // Publish its actual one frame without introducing driver storage.
@@ -446,9 +531,7 @@ impl Runtime {
     #[inline(never)]
     fn eval_heap_class_literal(&mut self, program: &Rc<Program>, class: usize,
         env: usize, this: &Value, host: &mut dyn Host) -> Result<Value, Fault> {
-        if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Pending evaluation limit reached (4096)."));
-        }
+        self.check_pending_evaluation()?;
         self.evaluation_frames += 1;
         let scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
         let result = match self.publish_heap_roots(&scratch, env, this, None, None, None) {
@@ -499,11 +582,8 @@ impl Runtime {
         request: Request, already_charged: bool,
     ) -> Result<(), Fault> {
         if !already_charged { self.step()?; }
-        if self.evaluation_frames >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Pending evaluation limit reached (4096)."));
-        }
-        reserve(&mut scratch.frames, &mut self.evaluation_frame_slots,
-                MAX_EVALUATION_FRAME_SLOTS)?;
+        self.check_pending_evaluation()?;
+        self.reserve_evaluation_frame(&mut scratch.frames)?;
         let (id, mode) = request.resolve(program);
         scratch.frames.push(Frame {
             id,
@@ -528,6 +608,7 @@ impl Runtime {
             self.start_resumed_expression(program, id, expression, &mut scratch, &mut completed)?;
         }
         while let Some(mut frame) = scratch.frames.pop() {
+            let frame_payload = frame.state.pending_bytes();
             compact(&mut scratch.frames, &mut self.evaluation_frame_slots);
             compact(&mut scratch.arguments, &mut self.evaluation_argument_slots);
             let at = program.exprs[frame.id].at;
@@ -584,20 +665,21 @@ impl Runtime {
                     ready => break ready,
                 };
             };
+            self.evaluation_payload_bytes -= frame_payload;
             match transition {
                 Transition::Child(request, state) => {
+                    self.charge_evaluation_payload(state.pending_bytes())?;
                     frame.state = state;
                     // The popped parent needs a slot again after compaction.
-                    reserve(&mut scratch.frames, &mut self.evaluation_frame_slots,
-                            MAX_EVALUATION_FRAME_SLOTS)?;
+                    self.reserve_evaluation_frame(&mut scratch.frames)?;
                     scratch.frames.push(frame);
                     self.push_evaluation(&mut scratch, program, request, false)
                         .map_err(located)?;
                 }
                 Transition::Resume(state, result) => {
+                    self.charge_evaluation_payload(state.pending_bytes())?;
                     frame.state = state;
-                    reserve(&mut scratch.frames, &mut self.evaluation_frame_slots,
-                            MAX_EVALUATION_FRAME_SLOTS)?;
+                    self.reserve_evaluation_frame(&mut scratch.frames)?;
                     scratch.frames.push(frame);
                     completed = Some(result);
                 }
@@ -606,8 +688,7 @@ impl Runtime {
                     frame.id = next;
                     frame.state = State::Begin(Mode::Value);
                     frame.annotate = true;
-                    reserve(&mut scratch.frames, &mut self.evaluation_frame_slots,
-                            MAX_EVALUATION_FRAME_SLOTS)?;
+                    self.reserve_evaluation_frame(&mut scratch.frames)?;
                     scratch.frames.push(frame);
                 }
                 Transition::Done(result) => {
@@ -666,12 +747,15 @@ impl Runtime {
                 (State::Argument(call), value)
             }
         };
+        self.charge_evaluation_payload(state.pending_bytes())?;
         scratch.frames[0].state = state;
         *completed = Some(Completion::Value(value));
         Ok(())
     }
 
     fn install_resumed_argument_prefix(&mut self, scratch: &mut Scratch<'_>, prefix: Vec<Value>) -> Result<(), Fault> {
+        let payload = prefix.iter().fold(0usize, |bytes, value| bytes.saturating_add(pending_value_bytes(value)));
+        self.charge_evaluation_payload(payload)?;
         let slots = self.evaluation_argument_slots.saturating_add(prefix.capacity());
         if slots > self.argument_scratch_limit()? {
             return Err(Fault::new("Evaluation scratch storage limit reached."));
@@ -1001,6 +1085,7 @@ impl Runtime {
     }
 
     fn push_heap_argument(&mut self, scratch: &mut Scratch<'_>, value: Value) -> Result<(), Fault> {
+        self.charge_evaluation_payload(pending_value_bytes(&value))?;
         let limit = self.argument_scratch_limit()?;
         reserve(&mut scratch.arguments, &mut self.evaluation_argument_slots,
                 limit)?;
@@ -1013,6 +1098,7 @@ impl Runtime {
         &mut self, program: &Rc<Program>, arguments: &[Argument], env: usize, this: &Value, host: &mut dyn Host,
     ) -> Result<Vec<Value>, Fault> {
         let initial_slots = self.evaluation_argument_slots;
+        let initial_payload = self.evaluation_payload_bytes;
         let mut scratch = Scratch { frames: Vec::new(), arguments: Vec::new() };
         let result = (|| {
             for argument in arguments {
@@ -1033,6 +1119,7 @@ impl Runtime {
             Ok(scratch.arguments)
         })();
         self.evaluation_argument_slots = initial_slots;
+        self.evaluation_payload_bytes = initial_payload;
         result
     }
 
@@ -1087,6 +1174,9 @@ impl Runtime {
         this: &Value, host: &mut dyn Host,
     ) -> Result<Transition<'p>, Fault> {
         let result = self.invoke_heap_target(call.target, &scratch.arguments[call.start..], env, this, host);
+        for value in &scratch.arguments[call.start..] {
+            self.evaluation_payload_bytes -= pending_value_bytes(value);
+        }
         scratch.arguments.truncate(call.start);
         let result = Completion::Value(result?);
         Ok(match call.after {

@@ -55,6 +55,10 @@ pub(super) struct Marker {
 pub(super) struct RootMarker(usize);
 
 impl Runtime {
+    pub(super) fn root_storage_bytes(&self) -> usize {
+        self.transient_roots.roots.capacity().saturating_mul(size_of::<Edge>())
+    }
+
     pub(super) fn argument_scratch_limit(&self) -> Result<usize, Fault> {
         #[cfg(test)]
         if let Some(limit) = self.limits.test_call_depth {
@@ -62,8 +66,8 @@ impl Runtime {
                 .map(|limit| limit.max(MAX_EVALUATION_ARGUMENT_SLOTS))
                 .ok_or_else(|| Fault::new("Argument scratch policy arithmetic overflow."));
         }
-        let root_bytes = self.transient_roots.roots.capacity().saturating_mul(size_of::<Edge>());
-        Ok(self.limits.heap.retained_values.saturating_sub(root_bytes) / size_of::<Value>())
+        let other_bytes = self.root_storage_bytes().saturating_add(self.expression_storage_bytes());
+        Ok(self.limits.heap.retained_values.saturating_sub(other_bytes) / size_of::<Value>())
     }
 
     fn root_reference_limit(&self) -> Result<usize, Fault> {
@@ -76,8 +80,9 @@ impl Runtime {
                 .and_then(|n| n.checked_add(4 * MAX_EVALUATION_FRAME_SLOTS + 4 * MAX_EVAL_DEPTH))
                 .ok_or_else(|| Fault::new("Transient root policy arithmetic overflow."));
         }
-        let argument_bytes = self.transient_roots.argument_slots.saturating_mul(size_of::<Value>());
-        Ok(self.limits.heap.retained_values.saturating_sub(argument_bytes) / size_of::<Edge>())
+        let argument_bytes = self.evaluation_argument_slots.saturating_mul(size_of::<Value>());
+        let other_bytes = argument_bytes.saturating_add(self.expression_storage_bytes());
+        Ok(self.limits.heap.retained_values.saturating_sub(other_bytes) / size_of::<Edge>())
     }
 
     pub(super) fn inhibition_diagnostic(&self) -> String {
@@ -93,6 +98,7 @@ impl Runtime {
 
     pub(super) fn restore_root_marker(&mut self, marker: RootMarker) {
         self.transient_roots.roots.truncate(marker.0);
+        self.release_unused_root_storage();
     }
 
     pub(super) fn transient_marker(&self) -> Marker {
@@ -121,6 +127,16 @@ impl Runtime {
         state.inhibited = marker.inhibited;
         if state.inhibited == 0 { state.outer_helper = ""; state.outer_native = None; }
         state.calls = marker.calls;
+        self.release_unused_root_storage();
+    }
+
+    fn release_unused_root_storage(&mut self) {
+        let roots = &mut self.transient_roots.roots;
+        // Large callback snapshots should release unused capacity when their
+        // roots unwind so that a later driver can use the shared byte budget.
+        if roots.capacity() > roots.len().saturating_mul(2).max(256) {
+            roots.shrink_to(roots.len().max(64));
+        }
     }
 
     pub(super) fn finish_transient_inhibition(&mut self, marker: Marker) {
