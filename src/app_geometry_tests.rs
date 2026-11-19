@@ -125,9 +125,46 @@ function measureRect(){var r=document.getElementById('box').getBoundingClientRec
 }
 
 #[test]
+fn domrect_text_inline_union_matches_painted_fragments_and_link_hits() {
+    let fixture = Fixture::new();
+    let app = fixture.open(r#"<html><head><style>
+body { margin: 0 }
+#wrap { width: 105px; margin: 18px 30px; transform: translate(4px, 6px) }
+#link { background: #4c1882; color: white; padding: 2px 7px 4px 3px; border: 2px solid #18364e }
+</style></head><body><div id=wrap><a id=link href='#wrap'>First second third fourth fifth sixth</a></div>
+<p><a id=plain href='#wrap'>Plain inline link</a></p><script>
+function read(id) {
+    var r = document.getElementById(id).getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0 || r.right !== r.x + r.width || r.bottom !== r.y + r.height)
+        throw 'empty or inconsistent inline border box';
+    return [r.x,r.y,r.width,r.height].join(',');
+}
+document.title = read('link') + '|' + read('plain');
+</script></body></html>"#);
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", report(&app));
+    let actual: Vec<Vec<i32>> = app.document.title.split('|')
+        .map(|rect| rect.split(',').map(|value| value.parse().unwrap()).collect())
+        .collect();
+    let fragments: Vec<_> = app.page.items.iter().filter_map(|item| match item {
+        layout::PaintItem::Rect { x, y, width, height, color: 0x4c1882, .. } =>
+            Some((*x, *y, *width, *height)),
+        _ => None,
+    }).collect();
+    assert!(fragments.len() > 1);
+    let left = fragments.iter().map(|r| r.0).min().unwrap();
+    let top = fragments.iter().map(|r| r.1).min().unwrap();
+    let right = fragments.iter().map(|r| r.0 + r.2).max().unwrap();
+    let bottom = fragments.iter().map(|r| r.1 + r.3).max().unwrap();
+    assert_eq!(actual[0], [left, top, right - left, bottom - top]);
+    let plain = &actual[1];
+    assert_eq!(app.page.link_node_at(plain[0] + plain[2] / 2, plain[1] + plain[3] / 2),
+        Some(id(&app, "plain")));
+}
+
+#[test]
 fn domrect_unmeasured_inline_is_explicit_and_layout_flush_limit_still_recovers() {
     let fixture = Fixture::new();
-    let app = fixture.open("<html><body><span id=s>Real inline</span><script>document.getElementById('s').getBoundingClientRect();document.title='fake zero';</script></body></html>");
+    let app = fixture.open("<html><body><span id=s><span>Unmeasured nested fragment</span></span><script>document.getElementById('s').getBoundingClientRect();document.title='fake zero';</script></body></html>");
     assert_eq!(app.scripting.as_ref().unwrap().error_count(), 1);
     assert!(report(&app).contains("unmeasured inline")); assert_ne!(app.document.title, "fake zero");
     let mut app = fixture.open_with_limits(r#"<html><body><div id=box style='width:10px;height:10px'></div><script>

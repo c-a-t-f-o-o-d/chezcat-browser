@@ -133,6 +133,7 @@ impl Engine<'_> {
         &mut self,
         mut budget: Option<&mut css::CssBudget<'_>>,
         fixed_boxes: &[bool],
+        inline_rects: &HashMap<usize, BorderRect>,
     ) -> Result<(), String> {
         let count = self.doc.nodes.len();
         if !self.layout.computed_properties.has_transform_geometry() {
@@ -326,7 +327,7 @@ impl Engine<'_> {
                 layer = node;
             }
             groups[node] = layer;
-            let raw = self.layout.border_rects[node];
+            let raw = self.layout.border_rects[node].or_else(|| inline_rects.get(&node).copied());
             let no_box = raw.is_none()
                 && (!self.layout.offset_unavailable[node]
                     || matches!(
