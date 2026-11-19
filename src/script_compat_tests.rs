@@ -3979,3 +3979,56 @@ if(bad!==4||innerFragment.firstChild!==null||outerFragment.firstChild!==inner||
     let result = page.console_eval(&mut doc, &mut forms, "if(outer.parentNode!==null||innerFragment.firstChild!==null||outerFragment.firstChild!==inner)throw 'cycle changed tree';");
     assert_eq!(result.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn template_deep_clone_copies_materialized_nested_contents_with_real_owners() {
+    let (doc, _, page, result) = page(r#"<html><body><iframe id=early hidden srcdoc="early"></iframe><div id=app></div></body></html>"#, &[r#"
+var frame=document.getElementById('early');
+if(frame.nextElementSibling!==document.getElementById('app')||frame.contentWindow!==null)
+    throw 'parsed iframe topology';
+var outer=document.createElement('template'), inner=document.createElement('template');
+var leaf=document.createElement('div'), original=outer.content, innerOriginal=inner.content;
+outer.id='original'; leaf.id='leaf';
+innerOriginal.appendChild(leaf);
+original.appendChild(inner);
+var shallow=outer.cloneNode(false), copy=outer.cloneNode(true), nested=copy.content.firstChild, cloneLeaf=nested.content.firstChild;
+outer.id='changed';
+if(copy===outer||!(copy instanceof HTMLTemplateElement)||copy.ownerDocument!==document||
+   copy.parentNode!==null||copy.firstChild!==null||copy.id!=='original'||shallow.content.firstChild!==null)
+   throw 'outer template clone';
+if(copy.content===original||copy.content.ownerDocument!==original.ownerDocument||nested===inner||
+   nested.ownerDocument!==inner.ownerDocument||nested.parentNode!==copy.content||
+   nested.content===innerOriginal||cloneLeaf===leaf||cloneLeaf.id!=='leaf'||
+   cloneLeaf.ownerDocument!==leaf.ownerDocument||cloneLeaf.parentNode!==nested.content)
+   throw 'deep inert structure';
+copy.innerHTML='<section id="changed-copy"></section>';
+if(original.firstChild!==inner||innerOriginal.firstChild!==leaf||nested.parentNode!==null||
+   nested.content.firstChild!==cloneLeaf||copy.content.firstChild.id!=='changed-copy')
+   throw 'independent clone and retained references';
+document.title='nested-template-clone-ok';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "nested-template-clone-ok");
+}
+
+#[test]
+fn template_deep_clone_handles_unmaterialized_markup_and_bounded_failure() {
+    let (mut doc, mut forms, mut page, result) = page("<html><body><template id=literal><section><template><span>original</span></template></section></template></body></html>", &[r#"
+var literal=document.getElementById('literal');
+var deep=literal.cloneNode(true), shallow=literal.cloneNode();
+var deepInner=deep.content.firstChild.firstChild;
+if(shallow.content.firstChild!==null||deepInner.content.firstChild.textContent!=='original'||deep.id!=='literal'||
+   deepInner===literal.content.firstChild.firstChild||deepInner.content.ownerDocument!==literal.content.ownerDocument)
+   throw 'unmaterialized template markup';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    let retained = page.state.retained;
+    let limit = page.state.limits.host.extra_nodes;
+    page.state.limits.host.extra_nodes = 0;
+    let result = page.console_eval(&mut doc, &mut forms, "deep.cloneNode(true);");
+    assert_eq!(result.errors, 1);
+    assert_eq!(page.state.retained, retained);
+    page.state.limits.host.extra_nodes = limit;
+    let result = page.console_eval(&mut doc, &mut forms, "if(deepInner.content.firstChild.textContent!=='original'||deep.cloneNode(true).content.firstChild.firstChild.content.firstChild.textContent!=='original')throw 'clone retry';");
+    assert_eq!(result.errors, 0, "{}", page.report());
+}

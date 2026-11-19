@@ -13,7 +13,7 @@ pub(super) fn ordinary_clone_element(name: &str) -> bool {
             | "tr" | "td" | "th" | "hr" | "time")
 }
 
-fn copy_node_kind(kind: &NodeKind) -> NodeKind {
+pub(super) fn copy_node_kind(kind: &NodeKind) -> NodeKind {
     match kind {
         NodeKind::Element { tag, id, href, attrs } => NodeKind::Element {
             tag: tag.clone(), id: id.clone(), href: href.clone(),
@@ -155,7 +155,9 @@ impl Bridge<'_> {
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
-        if self.inert_clone_receiver(object) { return self.clone_inert_tree(object, deep); }
+        if self.template_receiver(object) || self.inert_clone_receiver(object) {
+            return self.clone_inert_tree(object, deep);
+        }
         let root = self.dom_node(object)?;
         let base = self.doc.nodes.len();
         let remaining = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))

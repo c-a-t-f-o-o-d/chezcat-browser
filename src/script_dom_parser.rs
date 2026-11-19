@@ -292,7 +292,7 @@ impl Bridge<'_> {
             entries.push(node(
                 Kind::Parsed {
                     source: ParsedSource::Generated(generated_base + offset),
-                    copy_template_contents: false,
+                    initial_template: None,
                 },
                 parents[local],
                 children,
