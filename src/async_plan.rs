@@ -44,7 +44,7 @@ pub(super) enum Instruction {
         followup_call: Option<ExprId>,
         member_key: Option<ExprId>,
         chain: Option<ExprId>,
-        literal_key: Option<ExprId>,
+        literal: Option<LiteralAwait>,
         negations: usize,
         assignment: Option<ExprId>,
         action: Resume,
@@ -145,9 +145,24 @@ struct AwaitSite {
     followup_call: Option<ExprId>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
-    literal_key: Option<ExprId>,
+    literal: Option<LiteralAwait>,
     negations: usize,
     assignment: Option<ExprId>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct LiteralAwait {
+    pub(super) expression: ExprId,
+    pub(super) member: usize,
+}
+
+impl LiteralAwait {
+    pub(super) fn members(self, program: &Program) -> &[object_literals::Member] {
+        let ExprKind::Object(properties) = &program.exprs[self.expression].kind else {
+            unreachable!("compiled async object literal");
+        };
+        properties
+    }
 }
 
 fn logical_not_operand(program: &Program, mut expression: ExprId) -> (ExprId, usize) {
@@ -166,17 +181,23 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
-    let (expression, literal_key) = match &program.exprs[expression].kind {
-        ExprKind::Object(properties) => {
-            let [object_literals::Member::Property { key, value, kind: object_literals::Kind::Data }] =
-                properties.as_slice()
-            else {
+    let mut site = if let ExprKind::Object(properties) = &program.exprs[expression].kind {
+        properties.iter().enumerate().find_map(|(member, property)| {
+            let object_literals::Member::Property { value, kind: object_literals::Kind::Data, .. } = property else {
                 return None;
             };
-            (*value, Some(*key))
-        }
-        _ => (expression, None),
+            let mut site = await_value(program, *value)?;
+            site.literal = Some(LiteralAwait { expression, member });
+            Some(site)
+        })?
+    } else {
+        await_value(program, expression)?
     };
+    site.assignment = assignment;
+    Some(site)
+}
+
+fn await_value(program: &Program, expression: ExprId) -> Option<AwaitSite> {
     let (expression, negations) = logical_not_operand(program, expression);
     let (expression, chain) = match program.exprs[expression].kind {
         ExprKind::OptionalChain(base, _) => (base, Some(expression)),
@@ -201,7 +222,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
             (await_operand(program, expression)?, None)
         };
     Some(AwaitSite {
-        operand, callee, method, followup_call, member_key, chain, literal_key, negations, assignment,
+        operand, callee, method, followup_call, member_key, chain, literal: None, negations, assignment: None,
     })
 }
 
@@ -396,12 +417,12 @@ fn emit_expression(
             }
             ExpressionPart::Value(expression, action) => {
                 if let Some(AwaitSite {
-                    operand, callee, method, followup_call, member_key, chain, literal_key, negations, assignment,
+                    operand, callee, method, followup_call, member_key, chain, literal, negations, assignment,
                 }) = await_expression(program, expression)
                 {
                     Instruction::Await {
                         statement: id, operand, callee, method, followup_call, member_key,
-                        chain, literal_key, negations, assignment, action,
+                        chain, literal, negations, assignment, action,
                     }
                 } else {
                     Instruction::Evaluate { statement: id, expression, action }

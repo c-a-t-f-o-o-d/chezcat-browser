@@ -7624,6 +7624,19 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let object = self.new_object(None)?;
+        self.eval_object_literal_members(program, object, properties, env, this, host)?;
+        Ok(Value::Object(object))
+    }
+
+    fn eval_object_literal_members(
+        &mut self,
+        program: &Rc<Program>,
+        object: usize,
+        properties: &[object_literals::Member],
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
         for member in properties {
             match member {
                 object_literals::Member::Property { key, value, kind } => {
@@ -7646,7 +7659,7 @@ impl Runtime {
                 }
             }
         }
-        Ok(Value::Object(object))
+        Ok(())
     }
 
     #[cfg(test)]
