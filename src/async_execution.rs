@@ -666,7 +666,7 @@ impl Runtime {
             frame.next += 1;
             let environment = frame.environment()?;
             match instruction {
-                Instruction::Yield { .. } => unreachable!("yield instruction in async function"),
+                Instruction::Yield { .. } | Instruction::YieldReturn { .. } => unreachable!("yield instruction in async function"),
                 Instruction::Statement(statement) => {
                     let control =
                         self.statement(&frame.program, statement, environment, &frame.this, host)?;

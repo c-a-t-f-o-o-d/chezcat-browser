@@ -98,6 +98,43 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_return_yield_uses_the_resumption_value_and_runs_cleanup() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', offered={}, returned={}, reason={}, caught={};
+function* plain(){
+    try{return yield offered;}
+    catch(error){if(error!==reason)throw error;return caught;}
+    finally{trace+='plain|';}
+}
+function* child(){try{yield offered;return returned;}finally{trace+='child|';}}
+function* delegate(){try{return yield* child();}finally{trace+='delegate|';}}
+function* empty(){return yield* [];}
+var ready=plain();
+if(ready.next().value!==offered||trace)throw 'early generator return';
+var done=ready.next(returned);
+if(!done.done||done.value!==returned||trace!=='plain|')throw 'lost next value';
+var interrupted=plain();
+interrupted.next();
+if(interrupted.return(4).value!==4||trace!=='plain|plain|')throw 'outer return';
+var thrown=plain();
+thrown.next();
+if(thrown.throw(reason).value!==caught||trace!=='plain|plain|plain|')throw 'throw or catch';
+trace='';
+var forwarded=delegate();
+if(forwarded.next().value!==offered||trace)throw 'early delegated return';
+var completed=forwarded.next();
+if(!completed.done||completed.value!==returned||trace!=='child|delegate|')throw 'delegated completion';
+var missing=empty().next();
+if(!missing.done||missing.value!==undefined)throw 'empty delegation';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_lexical_for_of_keeps_iterator_and_unwinds_in_order() {
     let mut runtime = Runtime::for_capacity_test();
     let source = r#"
