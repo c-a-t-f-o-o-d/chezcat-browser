@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "script_checkable_value_tests.rs"]
+mod checkable_value_tests;
+
 fn id(doc: &Document, name: &str) -> usize {
     (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some(name)).expect(name)
 }

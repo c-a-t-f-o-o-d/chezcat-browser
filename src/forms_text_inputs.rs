@@ -7,6 +7,7 @@ pub(crate) enum InputPlan {
     Name { node: usize, name: String },
     RadioName { node: usize, name: String, uncheck: Vec<usize> },
     Live { node: usize, value: Option<Editor> },
+    CheckableValue { node: usize, initial: String, value: Editor, caption: String },
     Default(TextDefaultPlan),
     Checked { node: usize, present: bool, synchronize: bool },
 }
@@ -26,6 +27,12 @@ impl InputPlan {
                 let control = forms.controls.get_mut(&node).expect("Prepared text INPUT");
                 if let Some(value) = value { control.value = value; }
                 control.dirty_value = true;
+            }
+            Self::CheckableValue { node, initial, value, caption } => {
+                let control = forms.controls.get_mut(&node).expect("Prepared checkable INPUT");
+                control.initial = initial;
+                control.value = value;
+                control.caption = caption;
             }
             Self::Default(plan) => plan.commit(forms),
             Self::Checked { node, present, synchronize } => {
@@ -109,15 +116,17 @@ pub(super) fn control_payload(control: &Control) -> Result<usize, String> {
 }
 
 impl Forms {
-    pub(super) fn text_payload(&self, changed: Option<(usize, &str, usize)>) -> Result<usize, String> {
+    // Prepared mutations supply both default and live byte lengths. Replacing
+    // an old default must not leave its larger length in the aggregate bound.
+    pub(super) fn text_payload(&self, changed: Option<(usize, &str, usize, usize)>) -> Result<usize, String> {
         if self.limited || self.controls.len() > MAX_CONTROLS {
             return Err("Native form limits already exceeded; no text INPUT was changed.".into());
         }
         let mut bytes = 0usize;
         for (&node, control) in &self.controls {
-            let payload = if let Some((_, name, live)) = changed.filter(|(changed, _, _)| *changed == node) {
+            let payload = if let Some((_, name, initial, live)) = changed.filter(|(changed, _, _, _)| *changed == node) {
                 if name.len() > MAX_QUERY { return Err("A text INPUT name is limited to 8192 bytes.".into()); }
-                name.len().checked_add(control.initial.len().max(live)).ok_or("Text INPUT payload overflow.")?
+                name.len().checked_add(initial.max(live)).ok_or("Text INPUT payload overflow.")?
             } else {
                 if control.name.len() > MAX_QUERY { return Err("A form control name exceeds 8192 bytes.".into()); }
                 control_payload(control)?
@@ -133,7 +142,7 @@ impl Forms {
             .ok_or("Name update requires a native text or checkable INPUT.")?;
         let name = name.unwrap_or("");
         let live = control.value.chars.iter().map(|ch| ch.len_utf8()).sum();
-        self.text_payload(Some((node, name, live)))?;
+        self.text_payload(Some((node, name, control.initial.len(), live)))?;
         if control.kind == Kind::Radio {
             let mut uncheck = Vec::new();
             if control.checked && !name.is_empty() && control.name != name {
@@ -156,9 +165,33 @@ impl Forms {
             units = units.saturating_add(ch.len_utf16()); bytes = bytes.saturating_add(ch.len_utf8());
         }
         if units > MAX_VALUE_UNITS { return Err("A form value is limited to 4096 UTF-16 units.".into()); }
-        self.text_payload(Some((node, &control.name, bytes)))?;
+        self.text_payload(Some((node, &control.name, control.initial.len(), bytes)))?;
         let same = control.value.chars.iter().copied().eq(text.chars().filter(|ch| !matches!(ch, '\r' | '\n')));
         Ok(InputPlan::Live { node, value: if same { None } else { Some(text_editor(text)?) } })
+    }
+
+    /// Radio and checkbox values use default/on mode: both IDL reflections
+    /// update the raw attribute, without changing either dirty flag or checkedness.
+    pub(crate) fn prepare_checkable_value(&self, node: usize, attribute: Option<&str>) -> Result<InputPlan, String> {
+        let control = self.controls.get(&node).filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
+            .ok_or("Default/on value update requires a native radio or checkbox INPUT.")?;
+        let text = attribute.unwrap_or("on");
+        if text.encode_utf16().count() > MAX_VALUE_UNITS {
+            return Err("A checkable INPUT value is limited to 4096 UTF-16 units.".into());
+        }
+        self.text_payload(Some((node, &control.name, text.len(), text.len())))?;
+        let initial = copy_text(text)?;
+        let mut value = Editor::default();
+        value.chars.try_reserve(text.chars().count()).map_err(|_| "Checkable INPUT editor reservation failed.")?;
+        value.chars.extend(text.chars());
+        value.cursor = value.chars.len();
+        value.anchor = value.cursor;
+        let caption_text = attribute.unwrap_or("");
+        let caption_bytes = caption_text.chars().take(256).map(char::len_utf8).sum();
+        let mut caption = String::new();
+        caption.try_reserve(caption_bytes).map_err(|_| "Checkable INPUT caption reservation failed.")?;
+        caption.extend(caption_text.chars().take(256));
+        Ok(InputPlan::CheckableValue { node, initial, value, caption })
     }
 
     pub(crate) fn prepare_created_input(&self, doc: &Document, node: usize,
