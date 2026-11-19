@@ -36,6 +36,11 @@ mod height_variable_tests;
 mod root_selector_tests;
 #[path="css_translate.rs"]
 mod translate;
+#[path="css_easing.rs"]
+mod easing;
+pub(crate) use easing::{normalize as normalize_easing, specified as specified_easing, source_cost as easing_source_cost};
+pub(crate) use easing::valid as inline_easing_value;
+pub(crate) use easing::{priority as easing_priority, trim as easing_trim};
 pub use translate::Transform;
 pub(crate) use translate::{normalize_transform, TransformSyntax};
 pub(crate) use translate::source_cost as transform_source_cost;
@@ -2757,9 +2762,9 @@ fn parse_declarations(source: &str) -> Vec<Declaration> {
 
 /// CSSOM specified order keeps the winning occurrence, including its original
 /// position. Use the renderer's declaration tokenizer and custom-name grammar.
-pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], meter: Option<&mut CssBudget<'_>>) -> Result<Vec<String>, String> {
+pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut meter: Option<&mut CssBudget<'_>>) -> Result<Vec<String>, String> {
     use std::collections::BTreeMap;
-    let declarations = parse_declarations_inner(source, MAX_DECLARATIONS + 1, true, meter)?;
+    let declarations = parse_declarations_inner(source, MAX_DECLARATIONS + 1, true, meter.as_deref_mut())?;
     if declarations.len() > MAX_DECLARATIONS { return Err("Inline CSS declaration limit reached.".into()); }
     let mut winners: BTreeMap<String, (usize, bool)> = BTreeMap::new();
     let mut order = 0;
@@ -2769,6 +2774,9 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], meter: 
         let value = decl.value.to_ascii_lowercase();
         let variable = value.contains("var(");
         let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
+        if name == "animation-timing-function" {
+            if let Some(meter) = meter.as_deref_mut() { meter.work(easing_source_cost(value.len()).0)?; }
+        }
         let expanded: &[&str] = match name {
             "margin" | "padding" => {
                 if !variable && !wide && box_spacing::shorthand(&value, name == "margin").is_none() { continue; }
@@ -2794,6 +2802,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], meter: 
                 return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
             }
             "color" | "background-color" if !inline_color_value(&value) => continue,
+            "animation-timing-function" if !inline_easing_value(&value) => continue,
             "width" | "height" | "min-width" | "min-height" if !variable && !wide && parse_length(&value, true, false).is_none() => continue,
             "max-width" | "max-height" if !variable && !wide && value != "none" && parse_length(&value, false, false).is_none() => continue,
             "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
@@ -2901,10 +2910,10 @@ fn parse_declarations_inner(source:&str,maximum:usize,validate_values:bool,
     let mut declarations = Vec::new();
     for item in declaration_items(&source) {
         if let Some((name, value)) = item.split_once(':') {
-            let raw_name = name.trim();
+            let raw_name = if name.trim().eq_ignore_ascii_case("animation-timing-function") { easing_trim(name) } else { name.trim() };
             if raw_name.len() > 64 { continue; }
             let name = if raw_name.starts_with("--") { raw_name.to_owned() } else { raw_name.to_ascii_lowercase() };
-            let (value, important) = declaration_priority(value);
+            let (value, important) = if name == "animation-timing-function" { easing_priority(value) } else { declaration_priority(value) };
             let custom = name.starts_with("--");
             if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && (!value.is_empty() || custom)
                 && (!custom || custom_properties::custom_name(&name))

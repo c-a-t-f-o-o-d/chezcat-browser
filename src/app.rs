@@ -4509,6 +4509,7 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod inline_easing;
     mod attribute_substrings;
     mod canvas_2d;
     mod canvas_colors;
