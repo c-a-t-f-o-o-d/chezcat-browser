@@ -1,4 +1,4 @@
-//! Generator functions with suspended-start and completed states.
+//! Owned generator activations for plain yield statements.
 //! https://tc39.es/ecma262/#sec-generatorfunction-definitions
 //! https://tc39.es/ecma262/#sec-generator-objects
 use super::function_reachability::Edge;
@@ -12,16 +12,18 @@ pub(super) enum Op {
 }
 
 pub(super) enum State {
-    SuspendedStart(Box<Start>),
+    SuspendedStart(Box<Activation>),
+    SuspendedYield(Box<Activation>),
     Executing,
     Completed,
 }
 
-pub(super) struct Start {
+pub(super) struct Activation {
     program: Rc<Program>,
     template: usize,
     callee: usize,
     environment: usize,
+    next: usize,
     scopes: [Option<usize>; 4],
     this: Value,
     invocation: Option<InvocationContext>,
@@ -29,7 +31,12 @@ pub(super) struct Start {
     native_caller: Option<Option<u32>>,
 }
 
-impl Start {
+enum Progress {
+    Yield(Value),
+    Complete(Value),
+}
+
+impl Activation {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>().saturating_add(self.this.bytes())
     }
@@ -45,18 +52,18 @@ impl Start {
 
 impl State {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(Edge)) {
-        if let Self::SuspendedStart(start) = self {
-            start.reachability_edges(add);
+        if let Self::SuspendedStart(frame) | Self::SuspendedYield(frame) = self {
+            frame.reachability_edges(add);
         }
     }
 
     pub(super) fn reachability_cost(&self) -> usize {
-        if matches!(self, Self::SuspendedStart(_)) { 6 } else { 0 }
+        if matches!(self, Self::SuspendedStart(_) | Self::SuspendedYield(_)) { 6 } else { 0 }
     }
 
     pub(super) fn environment_roots(&self, roots: &mut Vec<usize>) {
-        if let Self::SuspendedStart(start) = self {
-            roots.extend(start.scopes.into_iter().flatten());
+        if let Self::SuspendedStart(frame) | Self::SuspendedYield(frame) = self {
+            roots.extend(frame.scopes.into_iter().flatten());
         }
     }
 }
@@ -173,12 +180,12 @@ impl Runtime {
         let prepared = self.prepare_script_call(program, template, callee, parent, args, this, host, &mut scopes);
         self.finish_transient_inhibition(inhibited);
         let result = prepared.and_then(|environment| {
-            let start = Start {
-                program: Rc::clone(program), template, callee, environment, scopes,
+            let frame = Activation {
+                program: Rc::clone(program), template, callee, environment, next: 0, scopes,
                 this: self.copy_value(this)?,
                 invocation: self.invocation, realm: self.active_realm, native_caller: self.native_access_caller,
             };
-            self.create_suspended_generator(start, host)
+            self.create_suspended_generator(frame, host)
         });
         self.restore_transient_marker(marker);
         if result.is_err() {
@@ -187,8 +194,8 @@ impl Runtime {
         result
     }
 
-    fn create_suspended_generator(&mut self, start: Start, host: &mut dyn Host) -> Result<Value, Fault> {
-        let prototype = self.get_ordinary_property_with_host(Ordinary::Function(start.callee), "prototype", host)?;
+    fn create_suspended_generator(&mut self, frame: Activation, host: &mut dyn Host) -> Result<Value, Fault> {
+        let prototype = self.get_ordinary_property_with_host(Ordinary::Function(frame.callee), "prototype", host)?;
         let prototype = match Ordinary::from_value(&prototype) {
             Some(prototype) => prototype,
             None if matches!(prototype, Value::Host(_)) => {
@@ -196,14 +203,14 @@ impl Runtime {
             }
             None => self.generator_prototype()?,
         };
-        let retained = start.retained_bytes();
+        let retained = frame.retained_bytes();
         if retained > self.limits.heap.retained_values.saturating_sub(self.value_bytes) {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         self.work(retained)?;
         let id = self.new_object(None)?;
         self.objects[id].prototype = Some(prototype);
-        self.objects[id].generator = Some(State::SuspendedStart(Box::new(start)));
+        self.objects[id].generator = Some(State::SuspendedStart(Box::new(frame)));
         self.value_bytes += retained;
         Ok(Value::Object(id))
     }
@@ -225,17 +232,29 @@ impl Runtime {
         match state {
             State::Executing => return Err(Fault::exception("TypeError", "Generator is already executing.")),
             State::Completed => return self.completed_generator(operation, args),
-            State::SuspendedStart(_) => {}
+            State::SuspendedStart(_) | State::SuspendedYield(_) => {}
         }
-        let State::SuspendedStart(start) = std::mem::replace(state, State::Executing) else { unreachable!() };
-        let value = match operation {
-            Op::Next => self.resume_generator_start(&start, host),
-            Op::Return | Op::Throw => self.generator_abrupt_value(operation, args),
+        let (State::SuspendedStart(mut frame) | State::SuspendedYield(mut frame)) =
+            std::mem::replace(state, State::Executing) else { unreachable!() };
+        let progress = match operation {
+            Op::Next => self.resume_generator(&mut frame, host),
+            Op::Return | Op::Throw => self.generator_abrupt_value(operation, args).map(Progress::Complete),
+        };
+        let value = match progress {
+            Ok(Progress::Yield(value)) => match self.generator_result(value, false) {
+                Ok(result) => {
+                    self.objects[id].generator = Some(State::SuspendedYield(frame));
+                    return Ok(result);
+                }
+                Err(error) => Err(error),
+            },
+            Ok(Progress::Complete(value)) => Ok(value),
+            Err(error) => Err(error),
         };
         self.objects[id].generator = Some(State::Completed);
-        self.value_bytes -= start.retained_bytes();
-        self.release_generator_scopes(start.scopes);
-        self.generator_result(value?)
+        self.value_bytes -= frame.retained_bytes();
+        self.release_generator_scopes(frame.scopes);
+        self.generator_result(value?, true)
     }
 
     fn generator_receiver_error() -> Fault {
@@ -247,7 +266,7 @@ impl Runtime {
             Op::Next => Value::Undefined,
             Op::Return | Op::Throw => self.generator_abrupt_value(operation, args)?,
         };
-        self.generator_result(value)
+        self.generator_result(value, true)
     }
 
     fn generator_abrupt_value(&mut self, operation: Op, args: &[Value]) -> Result<Value, Fault> {
@@ -255,55 +274,72 @@ impl Runtime {
         if matches!(operation, Op::Throw) { Err(Fault::thrown(value)) } else { Ok(value) }
     }
 
-    fn generator_result(&mut self, value: Value) -> Result<Value, Fault> {
+    fn generator_result(&mut self, value: Value, done: bool) -> Result<Value, Fault> {
         let result = self.new_object(None)?;
         self.store_property(result, "value".into(), value, Some((true, true, true)))?;
-        self.store_property(result, "done".into(), Value::Bool(true), Some((true, true, true)))?;
+        self.store_property(result, "done".into(), Value::Bool(done), Some((true, true, true)))?;
         Ok(Value::Object(result))
     }
 
     #[inline(never)]
-    fn resume_generator_start(&mut self, start: &Start, host: &mut dyn Host) -> Result<Value, Fault> {
+    fn resume_generator(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
         self.step()?;
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Fault::new("Function call limit reached (32)."));
         }
-        self.with_intrinsic_realm(start.realm, |runtime| {
+        self.with_intrinsic_realm(frame.realm, |runtime| {
             let marker = runtime.root_marker();
             let mut rooted = Ok(());
-            start.reachability_edges(&mut |edge| {
+            frame.reachability_edges(&mut |edge| {
                 if rooted.is_ok() {
                     rooted = runtime.push_transient_root(edge);
                 }
             });
-            let result = rooted.and_then(|()| runtime.run_generator_body(start, host));
+            let result = rooted.and_then(|()| runtime.run_generator_body(frame, host));
             runtime.restore_root_marker(marker);
             result
         })
     }
 
     #[inline(never)]
-    fn run_generator_body(&mut self, start: &Start, host: &mut dyn Host) -> Result<Value, Fault> {
+    fn run_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
         let previous_invocation = self.invocation;
         let previous_native_caller = self.native_access_caller;
         let previous_strict = self.strict;
-        self.invocation = start.invocation;
-        self.native_access_caller = start.native_caller;
-        self.strict = start.program.templates[start.template].strict;
+        self.invocation = frame.invocation;
+        self.native_access_caller = frame.native_caller;
+        self.strict = frame.program.templates[frame.template].strict;
         self.call_depth += 1;
         self.transient_roots.owned_call_depth += 1;
-        let result = self.statements(
-            &start.program, &start.program.templates[start.template].body, start.environment, &start.this, host,
-        );
+        let result = self.drive_generator_body(frame, host);
         self.transient_roots.owned_call_depth -= 1;
         self.call_depth -= 1;
         self.invocation = previous_invocation;
         self.native_access_caller = previous_native_caller;
         self.strict = previous_strict;
-        match result? {
-            Control::Normal(_) => Ok(Value::Undefined),
-            Control::Return(value) => Ok(value),
-            _ => Err(Fault::new("Unexpected loop control outside a loop.")),
+        result
+    }
+
+    fn drive_generator_body(&mut self, frame: &mut Activation, host: &mut dyn Host) -> Result<Progress, Fault> {
+        let body = &frame.program.templates[frame.template].body;
+        while let Some(&statement) = body.get(frame.next) {
+            frame.next += 1;
+            if let StmtKind::Yield(operand) = frame.program.stmts[statement].kind {
+                let value = (|| {
+                    self.step()?;
+                    match operand {
+                        Some(operand) => self.eval(&frame.program, operand, frame.environment, &frame.this, host),
+                        None => Ok(Value::Undefined),
+                    }
+                })().map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))?;
+                return Ok(Progress::Yield(value));
+            }
+            match self.statement(&frame.program, statement, frame.environment, &frame.this, host)? {
+                Control::Normal(_) => {}
+                Control::Return(value) => return Ok(Progress::Complete(value)),
+                _ => return Err(Fault::new("Unexpected loop control outside a loop.")),
+            }
         }
+        Ok(Progress::Complete(Value::Undefined))
     }
 }

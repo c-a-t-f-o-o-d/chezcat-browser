@@ -27,6 +27,83 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_statements_resume_without_replaying_prefixes_or_running_abandoned_bodies() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', reason={}, returned={}, seen;
+function* walk(input){
+    let stored=input+1;
+    trace+='start|';
+    yield stored;
+    trace+='middle|';
+    yield
+    trace+='finish|';
+    return stored+1;
+}
+var iterator=walk(4);
+if(trace!=='')throw 'eager generator body';
+var first=iterator.next('ignored');
+if(first.done!==false||first.value!==5||trace!=='start|')throw 'first yield';
+var second=iterator.next(100);
+if(second.done!==false||second.value!==undefined||trace!=='start|middle|')throw 'bare yield or replay';
+var last=iterator.next();
+if(last.done!==true||last.value!==6||iterator.next().value!==undefined||trace!=='start|middle|finish|')
+    throw 'return from resumed body';
+var stopped=walk(9);
+stopped.next();
+var exit=stopped.return(returned);
+var thrown=walk(10);
+thrown.next();
+try{thrown.throw(reason);}catch(error){seen=error;}
+if(exit.done!==true||exit.value!==returned||stopped.next().value!==undefined||
+    seen!==reason||thrown.next().done!==true||trace!=='start|middle|finish|start|start|')
+    throw 'abrupt exit resumed a paused body';
+function fail(){throw reason;}
+function* failure(){yield fail();}
+var failing=failure();
+seen=null;
+try{failing.next();}catch(error){seen=error;}
+if(seen!==reason||failing.next().done!==true)throw 'failure while evaluating yielded value';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
+fn generator_yield_statements_keep_live_scopes_and_close_on_allocation_failure() {
+    let mut runtime = Runtime::for_capacity_test();
+    let mut host = NoHost::default();
+    assert_eq!(runtime.execute(r#"
+var tail=0;
+function* staged(value){
+    let read=()=>value;
+    yield 1;
+    yield read();
+    yield 3;
+    tail++;
+}
+var paused=staged(35);
+if(paused.next().value!==1)throw 'first suspension';
+var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;
+'ok';
+"#, &mut host).unwrap().to_text(), "ok");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    assert_eq!(runtime.execute("paused.next().value;", &mut host).unwrap().to_number(), 35.0);
+    let object_limit = runtime.limits.heap.objects;
+    runtime.limits.heap.objects = runtime.objects.len();
+    let failure = runtime.execute("paused.next();", &mut host).unwrap_err();
+    assert!(failure.contains("Object identity limit"), "{failure}");
+    runtime.limits.heap.objects = object_limit;
+    runtime.begin_job();
+    assert_eq!(runtime.execute("if(!paused.next().done||tail)throw 'replayed failed yield';'ok';", &mut host)
+        .unwrap().to_text(), "ok");
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_function_start_is_lazy_but_initializes_parameters_at_call_time() {
     let mut runtime = Runtime::for_test();
     let source = r#"
