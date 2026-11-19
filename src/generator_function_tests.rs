@@ -27,6 +27,42 @@ impl Host for NoHost {
 }
 
 #[test]
+fn generator_yield_if_preserves_selected_block_and_evaluates_each_test_once() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', read;
+function test(label,result){trace+=label+'|';return result;}
+function relay(value){trace+='call:'+value+'|';return value;}
+function* item(){yield 4;return 7;}
+function* run(flag){
+    let value=0;
+    try{
+        if(test('primary',flag)){
+            let seen=2, inner=relay(yield* item()), result=seen+inner;
+            read=()=>result;
+            value=result;
+        }else if(test('alternate',true)){
+            value=relay(yield 9);
+        }else{throw 'unselected block';}
+    }finally{trace+='finally|';}
+    return value;
+}
+var yes=run(true);
+if(yes.next().value!==4||trace!=='primary|'||read!==undefined)throw 'selected block prefix';
+if(yes.next().value!==9||read()!==9||trace!=='primary|call:7|finally|')
+    throw 'block binding or repeated test';
+var no=run(false);
+if(no.next().value!==9||!trace.endsWith('primary|alternate|'))throw 'alternate selection';
+if(no.next(10).value!==10||trace!=='primary|call:7|finally|primary|alternate|call:10|finally|')
+    throw 'alternate completion';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_declarators_resume_in_order_without_initializing_the_suffix_early() {
     let mut runtime = Runtime::for_test();
     let source = r#"

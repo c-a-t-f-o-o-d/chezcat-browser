@@ -458,6 +458,10 @@ impl Runtime {
                     self.evaluate_generator_expression(frame, statement, expression, action, host)?;
                     continue;
                 }
+                Instruction::BranchFalse { statement, condition, target } => {
+                    self.evaluate_generator_expression(frame, statement, condition, Resume::BranchFalse(target), host)?;
+                    continue;
+                }
                 Instruction::BranchOnValueFalse(target) => {
                     self.step()?;
                     if !frame.condition.take().expect("compiled generator branch condition") {
@@ -517,6 +521,11 @@ impl Runtime {
         match action {
             Resume::StoreExpressionValue => frame.condition = Some(value.truthy()),
             Resume::Discard => {}
+            Resume::BranchFalse(target) => {
+                if !value.truthy() {
+                    frame.next = target;
+                }
+            }
             _ => unreachable!("compiled generator expression action"),
         }
         Ok(())
