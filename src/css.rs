@@ -321,7 +321,7 @@ pub struct Style {
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
-    /// Computed scalar only. Group opacity painting is not yet implemented.
+    /// Computed scalar. Ordinary HTML paint groups composite after descendants.
     pub opacity: f64,
     pub background: Option<u32>,
     /// Retain currentColor through explicit inheritance; background holds the
