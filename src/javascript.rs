@@ -470,6 +470,7 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
+pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
 pub(crate) const HTML_TEMPLATE_CONTENT_GET: &str = "\0HTMLTemplateElement.get.content";
 pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
 pub(crate) const CREATE_PROCESSING_INSTRUCTION: &str = "\0Document.createProcessingInstruction";
@@ -8916,7 +8917,7 @@ impl Runtime {
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if kind == "NotSupportedError"
-                && matches!(method, CREATE_CDATA_SECTION | "\0Media.load" | "\0Media.pause")
+                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | "\0Media.load" | "\0Media.pause")
                 || kind == "InvalidCharacterError"
                     && matches!(method, CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction")
             {

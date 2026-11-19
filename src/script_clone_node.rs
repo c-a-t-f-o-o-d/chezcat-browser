@@ -1,6 +1,7 @@
 //! Detached copies of ordinary nodes in the main document arena.
 //! https://dom.spec.whatwg.org/#concept-node-clone
 use super::*;
+use script_inert_documents::ImportSource;
 
 pub(super) const CLONE_METHOD: &str = "\0Node.cloneNode";
 
@@ -10,6 +11,23 @@ fn ordinary_clone_element(name: &str) -> bool {
             | "footer" | "address" | "figure" | "figcaption" | "ol" | "ul" | "dl"
             | "table" | "caption" | "col" | "colgroup" | "thead" | "tbody" | "tfoot"
             | "tr" | "td" | "th" | "hr" | "time")
+}
+
+fn copy_node_kind(kind: &NodeKind) -> NodeKind {
+    match kind {
+        NodeKind::Element { tag, id, href, attrs } => NodeKind::Element {
+            tag: tag.clone(), id: id.clone(), href: href.clone(),
+            attrs: attrs.iter().map(|attr| crate::html::Attribute {
+                name: attr.name.copy(), value: attr.value.clone(),
+            }).collect(),
+        },
+        NodeKind::Text(text) => NodeKind::Text(text.clone()),
+        NodeKind::Comment(text) => NodeKind::Comment(text.clone()),
+        NodeKind::ProcessingInstruction { target, data } => NodeKind::ProcessingInstruction {
+            target: target.clone(), data: data.clone(),
+        },
+        NodeKind::DocumentFragment => NodeKind::DocumentFragment,
+    }
 }
 
 struct DetachedCopy {
@@ -33,6 +51,108 @@ impl Bridge<'_> {
         Ok(())
     }
 
+    pub(super) fn validate_import_source(&self, args: &[Value]) -> Result<(), (&'static str, String)> {
+        let Some(Value::Host(source)) = args.first() else {
+            return Err(("TypeError", "importNode requires a genuine Node.".into()));
+        };
+        if *source == DOCUMENT || self.inert_document(*source) || self.active_frame_document(*source) {
+            return Err(("NotSupportedError", "importNode cannot import a Document.".into()));
+        }
+        if self.clone_node_receiver(*source) || self.inert_node_type(*source).is_some() {
+            return Ok(());
+        }
+        Err(("TypeError", "importNode requires a genuine Node.".into()))
+    }
+
+    pub(super) fn import_node(&mut self, args: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
+        let Some(Value::Host(source)) = args.first() else { return Err("importNode requires a Node.".into()); };
+        let deep = if let Some(fields) = fields {
+            !fields.iter().find(|(key, _)| *key == "selfOnly").is_some_and(|(_, value)| value.truthy())
+        } else {
+            args.get(1).is_some_and(|value| matches!(value, Value::Null) || value.truthy())
+        };
+        if !self.inert_clone_receiver(*source) {
+            return self.clone_node(*source, deep);
+        }
+
+        let base = self.doc.nodes.len();
+        let remaining = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))
+            .min(((STYLE_BASE - NODE_BASE) as usize).saturating_sub(base));
+        if remaining == 0 { return Err("DOM appended-node limit reached during import.".into()); }
+        let mut pending = vec![(*source, None, 1usize)];
+        let mut staged = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(&(handle, parent, depth)) = pending.get(staged.len()) {
+            let children = self.inert_children(handle).ok_or("Inert import source is unavailable.")?;
+            let count = if deep { children.len() } else { 0 };
+            if count > remaining - pending.len() {
+                return Err("DOM appended-node limit reached during import.".into());
+            }
+            if count != 0 && depth >= dom_tree::MAX_DOM_DEPTH {
+                return Err("DOM depth limit reached during import.".into());
+            }
+            let attributes = match self.inert_import_source(handle) {
+                Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.len(),
+                _ => 0,
+            };
+            self.state.work(count.saturating_add(attributes).saturating_add(1))?;
+            let source = self.inert_import_source(handle).ok_or("Inert import source is unavailable.")?;
+            let cost = match &source {
+                ImportSource::Parsed { node, .. } => {
+                    let mut metadata = 0usize;
+                    if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
+                        if node.namespace != crate::html::Namespace::Html || !ordinary_clone_element(tag) {
+                            return Err("Import supports ordinary HTML containers and inert data nodes.".into());
+                        }
+                        if attrs.iter().any(|attr| attr.name.namespace.is_some()
+                            || attr.name.qualified.starts_with("on") || attr.name.html_is("is")) {
+                            return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
+                        }
+                        metadata = tag.len().saturating_add(href.as_ref().map_or(0, String::len));
+                    }
+                    node_bytes(node).saturating_add(metadata)
+                }
+                ImportSource::Element(tag) => {
+                    if !ordinary_clone_element(tag) {
+                        return Err("Import supports ordinary HTML containers and inert data nodes.".into());
+                    }
+                    tag.len()
+                }
+                ImportSource::Text(data) => data.len(),
+                ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+                ImportSource::Fragment => 0,
+            };
+            bytes = bytes.checked_add(cost).ok_or("DOM import size overflow.")?;
+            if bytes > self.state.retained_limit.saturating_sub(self.state.retained) {
+                return Err("DOM retained text/attribute growth limit reached during import.".into());
+            }
+            self.state.copies(cost)?;
+            let source = self.inert_import_source(handle).ok_or("Inert import source is unavailable.")?;
+            let (kind, namespace, unsafe_nonce) = match source {
+                ImportSource::Parsed { node, unsafe_nonce } => (copy_node_kind(&node.kind), node.namespace, unsafe_nonce),
+                ImportSource::Element(tag) => (NodeKind::Element {
+                    tag: tag.into(), id: None, href: None, attrs: Vec::new(),
+                }, crate::html::Namespace::Html, false),
+                ImportSource::Text(data) => (NodeKind::Text(data.into()), crate::html::Namespace::None, false),
+                ImportSource::ProcessingInstruction { target, data } => (NodeKind::ProcessingInstruction {
+                    target: target.into(), data: data.into(),
+                }, crate::html::Namespace::None, false),
+                ImportSource::Fragment => (NodeKind::DocumentFragment, crate::html::Namespace::None, false),
+            };
+            let start = base + pending.len();
+            let index = base + staged.len();
+            pending.try_reserve(count).map_err(|_| "Cannot reserve DOM import traversal.")?;
+            staged.try_reserve(1).map_err(|_| "Cannot reserve DOM import nodes.")?;
+            let children = self.inert_children(handle).ok_or("Inert import source is unavailable.")?;
+            pending.extend(children.iter().take(count).map(|&child| (child, Some(index), depth + 1)));
+            let mut children = Vec::new();
+            children.try_reserve_exact(count).map_err(|_| "Cannot reserve DOM import child links.")?;
+            children.extend(start..start + count);
+            staged.push(DetachedCopy { node: Node { kind, namespace, children }, parent, unsafe_nonce });
+        }
+        self.publish_detached_copy(staged, bytes, None)
+    }
+
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
         if self.inert_clone_receiver(object) { return self.clone_inert_tree(object, deep); }
@@ -51,7 +171,6 @@ impl Bridge<'_> {
         let mut textareas = Vec::new();
         let mut radios = Vec::new();
         let mut bytes = 0usize;
-        let mut nonce_count = 0usize;
         while staged.len() < plan.len() {
             let offset = staged.len();
             let (source, parent, depth) = plan[offset];
@@ -94,22 +213,8 @@ impl Bridge<'_> {
                 return Err("DOM retained text/attribute growth limit reached during cloning.".into());
             }
             self.state.copies(size)?;
-            let kind = match &item.kind {
-                NodeKind::Element { tag, id, href, attrs } => NodeKind::Element {
-                    tag: tag.clone(), id: id.clone(), href: href.clone(),
-                    attrs: attrs.iter().map(|attr| crate::html::Attribute {
-                        name: attr.name.copy(), value: attr.value.clone(),
-                    }).collect(),
-                },
-                NodeKind::Text(text) => NodeKind::Text(text.clone()),
-                NodeKind::Comment(text) => NodeKind::Comment(text.clone()),
-                NodeKind::ProcessingInstruction { target, data } => NodeKind::ProcessingInstruction {
-                    target: target.clone(), data: data.clone(),
-                },
-                NodeKind::DocumentFragment => NodeKind::DocumentFragment,
-            };
+            let kind = copy_node_kind(&item.kind);
             let unsafe_nonce = self.doc.nonce_unsafe_nodes.contains(&source);
-            nonce_count += usize::from(unsafe_nonce);
             staged.push(DetachedCopy {
                 node: Node { kind, namespace: item.namespace, children: (first..first + children.len()).collect() },
                 parent,
@@ -138,7 +243,15 @@ impl Bridge<'_> {
         }
         let bytes = bytes.checked_add(form_plan.as_ref().map_or(0, |plan| plan.retained_bytes))
             .ok_or("DOM/native control clone size overflow.")?;
+        self.publish_detached_copy(staged, bytes, form_plan)
+    }
+
+    fn publish_detached_copy(&mut self, staged: Vec<DetachedCopy>, bytes: usize,
+        form_plan: Option<forms::SelectFormPlan>) -> Result<Value, String>
+    {
+        let base = self.doc.nodes.len();
         let count = staged.len();
+        let nonce_count = staged.iter().filter(|copy| copy.unsafe_nonce).count();
         self.doc.nodes.try_reserve(count).map_err(|_| "DOM clone node reservation failed.")?;
         self.doc.nonce_unsafe_nodes.try_reserve(nonce_count).map_err(|_| "DOM clone nonce reservation failed.")?;
         self.state.dom.created.try_reserve(count).map_err(|_| "DOM clone identity reservation failed.")?;

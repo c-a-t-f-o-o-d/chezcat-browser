@@ -880,6 +880,67 @@ document.title='verified-inert-template-clone';
 }
 
 #[test]
+fn document_import_node_copies_checked_template_content_into_the_real_tree() {
+    let (mut doc, mut forms, mut page, outcome) = page(concat!(
+        "<html><head></head><body>",
+        "<template id=ordinary><section id=imported class=payload data-key=kept>",
+        "<a id=import-link href=#destination>Imported link</a></section></template>",
+        "<template id=protected><div>prefix</div><img src=https://unrequested.test/forbidden.png></template>",
+        "<template id=handler><div onclick=\"throw 1\">inert handler</div></template>",
+        "<main id=live></main><p id=destination>Destination</p></body></html>"
+    ), &[r#"
+var T=document.getElementById('ordinary'), input=T.content, inner=input.firstChild, inertOwner=input.ownerDocument;
+var mount=document.getElementById('live'), method=Document.prototype.importNode;
+if(document.importNode!==method||method.name!=='importNode'||method.length!==1||Object.hasOwn(document,'importNode'))
+    throw 'canonical Document import method';
+var empty=method.call(document,input), deep=document.importNode(input,true);
+var errorCount=0, getterCount=0;
+var fromDictionary=document.importNode(input,{get selfOnly(){getterCount++;return false;}});
+var shallowElement=document.importNode(inner,{selfOnly:true});
+if(getterCount!==1||!(empty instanceof DocumentFragment)||empty.ownerDocument!==document||empty.childNodes.length!==0||
+    deep===input||deep.ownerDocument!==document||deep.parentNode!==null||deep.isConnected||
+    deep.firstChild===inner||deep.firstChild.ownerDocument!==document||deep.firstChild.parentNode!==deep||
+    fromDictionary.firstChild===deep.firstChild||fromDictionary.textContent!=='Imported link'||
+    shallowElement.tagName!=='SECTION'||shallowElement.childNodes.length!==0||shallowElement.getAttribute('data-key')!=='kept')
+    throw 'shallow and deep import ownership and identity';
+if(deep.firstChild.getAttribute('class')!=='payload'||deep.firstChild.getAttribute('data-key')!=='kept'||
+    deep.firstChild.firstChild.getAttribute('href')!=='#destination'||document.getElementById('imported')!==null||
+    inner.ownerDocument!==inertOwner||inner.parentNode!==input)throw 'copy preserves raw attributes and source document';
+try { method.call({},input); } catch(e) { if(e instanceof TypeError)errorCount++;else throw e; }
+try { method.call(document,{}); } catch(e) { if(e instanceof TypeError)errorCount++;else throw e; }
+try { method.call(document,inertOwner); } catch(e) { if(e instanceof DOMException&&e.name==='NotSupportedError')errorCount++;else throw e; }
+try { method.call(document,input,{customElementRegistry:{}}); } catch(e) { if(e instanceof TypeError)errorCount++;else throw e; }
+if(errorCount!==4)throw 'real receiver, source and options checks';
+mount.appendChild(deep);
+var visible=mount.firstChild, link=visible.firstChild;
+if(visible!==document.getElementById('imported')||link!==document.getElementById('import-link')||
+    link.nodeName!=='A'||link.textContent!=='Imported link'||!link.isConnected||link.ownerDocument!==document||
+    deep.childNodes.length!==0||input.firstChild!==inner||inner.isConnected)throw 'real live fragment insertion';
+var second=document.importNode(link,true);
+if(second===link||second.isConnected||second.firstChild===link.firstChild||second.ownerDocument!==document)
+    throw 'same-document native import copy';
+document.title='verified-template-import';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-template-import");
+    let count = doc.nodes.len();
+    let commits = page.state.dom_commits;
+    for source in [
+        "document.importNode(document.getElementById('protected').content,true);",
+        "document.importNode(document.getElementById('handler').content,true);",
+    ] {
+        let out = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(out.errors, 1, "{source}: {}", page.report());
+        assert_eq!(doc.nodes.len(), count);
+        assert_eq!(page.state.dom_commits, commits);
+        assert!(!page.has_host_tasks());
+    }
+    let out = page.console_eval(&mut doc, &mut forms,
+        "if (mount.firstChild!==visible||visible.firstChild!==link||input.firstChild!==inner||inner.isConnected) throw 'failed import changed real topology';");
+    assert_eq!(out.errors, 0, "{}", page.report());
+}
+
+#[test]
 fn create_html_document_builds_an_independent_inert_native_tree() {
     let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
 var impl=document.implementation;
