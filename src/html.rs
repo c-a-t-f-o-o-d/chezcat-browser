@@ -177,7 +177,7 @@ impl NodeKind {
 }
 
 pub fn parse(input: &str) -> Document {
-    parse_internal(input, None, false, None).expect("Document parsing retains its bounded prefix behavior.")
+    parse_internal(input, None, false, None, None).expect("Document parsing retains its bounded prefix behavior.")
 }
 
 #[derive(Clone, Copy)]
@@ -193,7 +193,19 @@ pub(crate) fn parse_loaded_document(
     parse_internal(input, None, false, Some(LoadedTree {
         nodes: MAX_LOADED_DOCUMENT_NODES,
         check_cancel,
-    }))
+    }), None)
+}
+
+/// Inert documents reuse the tokenizer with cancellation and strict capacity
+/// admission. Only this caller retains document-level declaration metadata.
+pub(crate) fn parse_inert_html(
+    input: &str, nodes: usize, check_cancel: &dyn Fn() -> Result<(), String>,
+) -> Result<(Document, Option<usize>), String> {
+    let mut doctype = None;
+    let parsed = parse_internal(
+        input, None, false, Some(LoadedTree { nodes, check_cancel }), Some(&mut doctype),
+    )?;
+    Ok((parsed, doctype))
 }
 
 /// Checked fragment subset. The context sets the tokenizer state directly;
@@ -203,7 +215,7 @@ pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Res
     if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
-    parse_internal(input, Some(context), scripting, None)
+    parse_internal(input, Some(context), scripting, None, None)
 }
 
 fn parse_internal(
@@ -211,8 +223,10 @@ fn parse_internal(
     context: Option<&str>,
     scripting: bool,
     loaded: Option<LoadedTree<'_>>,
+    mut inert_doctype: Option<&mut Option<usize>>,
 ) -> Result<Document, String> {
     let checked = context.is_some();
+    let mut saw_inert_doctype = false;
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
     let fail_on_capacity = checked || loaded.is_some();
@@ -296,16 +310,47 @@ fn parse_internal(
         if let Some(comment) = rest.strip_prefix("<!--") {
             svg.root = None;
             if checked { return Err("HTML fragment comment nodes are not implemented.".into()); }
-            position = match comment.find("-->") {
-                Some(end) => position + 4 + end + 3,
-                None => input.len(),
-            };
+            let end = comment.find("-->");
+            if inert_doctype.is_some() {
+                if document.nodes.len() >= node_limit { return Err(node_limit_error()); }
+                let node = document.nodes.len();
+                document.nodes.push(Node {
+                    kind: NodeKind::Comment(comment[..end.unwrap_or(comment.len())].into()),
+                    namespace: Namespace::None, children: Vec::new(),
+                });
+                document.nodes[parent].children.push(node);
+            }
+            position = end.map_or(input.len(), |end| position + 4 + end + 3);
             continue;
         }
         if rest.starts_with("<!") || rest.starts_with("<?") {
             svg.root = None;
             if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
-            position += rest.find('>').map_or(rest.len(), |end| end + 1);
+            let end = rest.find('>');
+            if let Some(doctype) = inert_doctype.as_deref_mut() {
+                if rest.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("<!doctype")) {
+                    let before_root = !saw_inert_doctype && parent == 0 && document.nodes[0].children.iter().all(|&node| {
+                        match &document.nodes[node].kind {
+                            NodeKind::Comment(_) => true,
+                            NodeKind::Text(text) => text.bytes().all(|byte| tag_space(byte, true)),
+                            _ => false,
+                        }
+                    });
+                    saw_inert_doctype = true;
+                    if before_root {
+                        let source = end.and_then(|end| rest.get(9..end)).unwrap_or_default();
+                        if !source.as_bytes().first().is_some_and(|&byte| tag_space(byte, true))
+                            || !source.trim_matches(|ch: char| ch.is_ascii() && tag_space(ch as u8, true)).eq_ignore_ascii_case("html")
+                        {
+                            return Err("Only an ordinary HTML doctype is supported in DOMParser.".into());
+                        }
+                        *doctype = Some(document.nodes.len());
+                    }
+                } else {
+                    return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());
+                }
+            }
+            position += end.map_or(rest.len(), |end| end + 1);
             continue;
         }
 
@@ -1390,10 +1435,10 @@ mod tests {
     #[test]
     fn loaded_document_reports_limits_and_cancellation_instead_of_returning_a_prefix() {
         let loaded = Some(LoadedTree { nodes: 3, check_cancel: &|| Ok(()) });
-        assert_eq!(parse_internal("<br><br>", None, false, loaded).unwrap().nodes.len(), 3);
+        assert_eq!(parse_internal("<br><br>", None, false, loaded, None).unwrap().nodes.len(), 3);
         for source in ["<br><br><br>", "<br><br>tail", "<br><textarea>tail</textarea>"] {
             assert_eq!(
-                parse_internal(source, None, false, loaded).unwrap_err(),
+                parse_internal(source, None, false, loaded, None).unwrap_err(),
                 "HTML document node limit reached (3 nodes)."
             );
         }

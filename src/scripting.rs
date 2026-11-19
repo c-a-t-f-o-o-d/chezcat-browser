@@ -982,6 +982,7 @@ impl Page {
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
         runtime.define_abort_interfaces(WINDOW).expect("fixed abort interfaces");
+        runtime.define_dom_parser_interface(WINDOW, script_inert_documents::parser::PARSE).expect("fixed DOMParser interface");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
         runtime.define_custom_event_interface(WINDOW).expect("fixed CustomEvent interface");
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
@@ -2965,6 +2966,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method == script_inert_documents::parser::PARSE { return &[(0, true), (1, true)]; }
         if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
         if method == CREATE_PROCESSING_INSTRUCTION { return &[(0, true), (1, true)]; }
         if object == WINDOW && method == "ProcessingInstruction" {
@@ -3109,6 +3111,9 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if object == WINDOW && matches!(method, script_inert_documents::parser::CONSTRUCTOR | script_inert_documents::parser::PARSE) {
+            return Some(WINDOW);
+        }
         if self.event_target_interface(object) && crate::javascript::abort_interface::operation(method) {
             return Some(object);
         }
@@ -3206,6 +3211,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method == script_inert_documents::parser::PARSE { return 2; }
         if method == DOCUMENT_IMPORT_NODE { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
@@ -3286,6 +3292,14 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == script_inert_documents::parser::PARSE {
+            return match args.get(1) {
+                Some(Value::String(mime)) if mime == "text/html" => Ok(()),
+                Some(Value::String(mime)) if matches!(mime.as_str(), "text/xml" | "application/xml" | "application/xhtml+xml" | "image/svg+xml") =>
+                    Err(("NotSupportedError", "XML DOMParser parsing is outside the supported subset.".into())),
+                _ => Err(("TypeError", "Invalid DOMParser supported type.".into())),
+            };
+        }
         if method == crate::javascript::abort_interface::SIGNAL_INTERFACE && self.event_target_interface(object) {
             return Err(("TypeError", "Illegal AbortSignal constructor.".into()));
         }
@@ -3723,6 +3737,9 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.clone_node_receiver(receiver); }
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
             return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
+        }
+        if object == WINDOW && method == script_inert_documents::parser::PARSE {
+            return self.inert_parser(receiver);
         }
         if self.event_target_interface(object) && crate::javascript::abort_interface::operation(method) {
             return self.matches_abort_receiver(receiver, method);
@@ -5112,6 +5129,8 @@ impl Host for Bridge<'_> {
             return self.create_processing_instruction(DOCUMENT, args);
         }
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
+        if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
+        if method == script_inert_documents::parser::PARSE && self.inert_parser(object) { return self.parse_inert_document(args); }
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
