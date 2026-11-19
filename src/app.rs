@@ -5821,6 +5821,9 @@ mod scroll_offset_tests;
 #[cfg(test)]
 #[path = "app_computed_position_tests.rs"]
 mod computed_position_tests;
+#[cfg(test)]
+#[path = "app_computed_opacity_tests.rs"]
+mod computed_opacity_tests;
 
 #[cfg(test)]
 #[path="app_element_sibling_tests.rs"]

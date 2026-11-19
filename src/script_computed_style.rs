@@ -170,6 +170,7 @@ pub(super) struct Declaration {
 
 #[derive(Clone, Copy)]
 enum ComputedProperty {
+    Opacity,
     Position,
     Transform,
     Overflow,
@@ -179,6 +180,7 @@ enum ComputedProperty {
 impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
+            "opacity" => Some(Self::Opacity),
             "position" => Some(Self::Position),
             "transform" => Some(Self::Transform),
             "overflow" => Some(Self::Overflow),
@@ -188,7 +190,9 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("position") {
+        if name.eq_ignore_ascii_case("opacity") {
+            Some(Self::Opacity)
+        } else if name.eq_ignore_ascii_case("position") {
             Some(Self::Position)
         } else if name.eq_ignore_ascii_case("transform") {
             Some(Self::Transform)
@@ -331,11 +335,11 @@ impl Bridge<'_> {
         }
         if let Some(property) = ComputedProperty::css_name(name) {
             self.state.work(name.len() + 1)?;
-            return self.computed_keyword_value(node, property);
+            return self.computed_value(node, property);
         }
         if !crate::css::computed_custom_property_name(name) {
             return Err(
-                "Computed readback supports position, overflow, transform, and the admitted custom-property names.".into(),
+                "Computed readback supports opacity, position, overflow, transform, and the admitted custom-property names.".into(),
             );
         }
         self.state.work(
@@ -404,10 +408,10 @@ impl Bridge<'_> {
         let node = self.computed_declaration_node(object)?;
         let property = ComputedProperty::attribute(name)
             .ok_or_else(|| format!("Computed declaration property {name:?} is not implemented."))?;
-        self.computed_keyword_value(node, property)
+        self.computed_value(node, property)
     }
 
-    fn computed_keyword_value(
+    fn computed_value(
         &mut self,
         node: usize,
         property: ComputedProperty,
@@ -430,7 +434,21 @@ impl Bridge<'_> {
                 &mut self.state.host_work,
                 &mut self.state.copy_work,
             )?;
+        if matches!(property, ComputedProperty::Opacity) {
+            let Some(opacity) = snapshot.read_opacity(node)
+                .map_err(|_| "Computed opacity unavailable within the CSS cascade limits.")?
+            else { return Ok(Value::String(String::new())); };
+            self.state.work(8)?;
+            let (bytes, length) = crate::css::serialize_opacity(opacity)
+                .ok_or("Computed opacity is not a finite scalar.")?;
+            self.state.copies(length)?;
+            let mut result = String::new();
+            result.try_reserve_exact(length).map_err(|_| "Computed opacity string reservation failed.")?;
+            result.push_str(std::str::from_utf8(&bytes[..length]).expect("opacity serialization is ASCII"));
+            return Ok(Value::String(result));
+        }
         let (first, second) = match property {
+            ComputedProperty::Opacity => unreachable!("opacity uses number serialization"),
             ComputedProperty::Transform => unreachable!("transform serialization uses actual resolved geometry"),
             ComputedProperty::Position => {
                 let position = snapshot.read_position(node)

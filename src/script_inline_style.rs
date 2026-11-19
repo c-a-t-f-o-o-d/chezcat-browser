@@ -45,6 +45,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "max-width",
     "min-height",
     "min-width",
+    "opacity",
     "order",
     "overflow",
     "padding",
@@ -104,7 +105,7 @@ fn declaration(item: &str) -> Option<(&str, &str)> {
     Some((&item[..end], value))
 }
 
-pub(super) fn winner<'a>(style: &'a str, name: &str) -> Option<(usize, &'a str)> {
+pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Result<Option<(usize, &'a str)>, String> {
     let mut winner = None;
     let mut important = false;
     for (index, item) in crate::css::declaration_items(style).enumerate() {
@@ -122,17 +123,21 @@ pub(super) fn winner<'a>(style: &'a str, name: &str) -> Option<(usize, &'a str)>
             raw
         };
         let (specified, priority) = crate::css::declaration_priority(value);
+        if important && !priority {
+            continue;
+        }
         if matches!(name, "color" | "background-color")
             && !crate::css::inline_color_value(specified)
         {
             continue;
         }
-        if !important || priority {
-            winner = Some((index, raw));
-            important = priority;
+        if name == "opacity" && metered_opacity(specified, state)?.is_none() {
+            continue;
         }
+        winner = Some((index, raw));
+        important = priority;
     }
-    winner
+    Ok(winner)
 }
 
 pub(super) fn replace(
@@ -141,8 +146,9 @@ pub(super) fn replace(
     value: &str,
     priority: &str,
     limit: usize,
+    state: &mut State,
 ) -> Result<Option<String>, String> {
-    let winning = winner(existing, name).map(|(index, _)| index);
+    let winning = winner(existing, name, state)?.map(|(index, _)| index);
     if winning.is_none() && value.is_empty() {
         return Ok(None);
     }
@@ -347,9 +353,10 @@ if(added.indexOf('0')!==-1||empty[0]!=='color')throw 'new index must wait for ne
 
     #[test]
     fn inline_style_enumeration_replacement_keeps_unrelated_raw_comments_and_priorities() {
+        let (_, _, mut page) = fixture();
         let raw =
             "--Ink: one !important; /* punctuation :; */ color /**/ : red;   width:2px!important;";
-        let result = replace(raw, "color", "blue", "", 256).unwrap().unwrap();
+        let result = replace(raw, "color", "blue", "", 256, &mut page.state).unwrap().unwrap();
         assert_eq!(
             result,
             "--Ink: one !important;color:blue;   width:2px!important;"
@@ -358,8 +365,8 @@ if(added.indexOf('0')!==-1||empty[0]!=='color')throw 'new index must wait for ne
             crate::css::inline_declaration_names(&result, PROPERTIES, None).unwrap(),
             ["--Ink", "color", "width"]
         );
-        assert!(replace(raw, "color", "blue", "", 4).is_err());
-        assert!(replace(raw, "--ink", "", "", 256).unwrap().is_none());
+        assert!(replace(raw, "color", "blue", "", 4, &mut page.state).is_err());
+        assert!(replace(raw, "--ink", "", "", 256, &mut page.state).unwrap().is_none());
     }
 
     #[test]
