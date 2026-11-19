@@ -293,6 +293,43 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_classic_loop_jumps_preserve_target_update_and_cleanup() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, finalValue;
+var gate=new Promise(resolve=>release=resolve);
+function mark(label,value){trace+=label+'|';return value;}
+async function run(){
+    let index=0, scope='outer';
+    outer: for(;mark('test:'+index,index<3);index=mark('update:'+index,index+1)){
+        let scope='body';
+        for(;;){
+            try{
+                await gate;
+                if(index===0)continue outer;
+                if(index===1)break outer;
+                throw 'unexpected iteration';
+            }finally{trace+=scope+':'+index+'|';}
+        }
+    }
+    return mark(scope,index);
+}
+run().then(value=>finalValue=value);
+if(trace!=='test:0|'||finalValue!==undefined)throw 'early jump';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release();'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='test:0|body:0|update:0|test:1|body:1|outer|'||finalValue!==1)
+    throw 'wrong jump target, cleanup, or update';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_nested_calls_hold_prefixes_across_computed_waits() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"

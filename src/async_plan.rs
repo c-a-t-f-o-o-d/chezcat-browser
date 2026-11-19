@@ -23,6 +23,8 @@ pub(super) enum Instruction {
     LeaveBlock,
     EnterSwitch { statement: StmtId, leave: usize },
     LeaveSwitch,
+    EnterFor { statement: StmtId, advance: usize, after: usize },
+    LeaveFor,
     EnterForOf { statement: StmtId, after: usize },
     NextForOf(StmtId),
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
@@ -631,6 +633,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::If(_, _, None) => 1,
                         StmtKind::For(None, condition, advance, _) => {
                             1 + usize::from(condition.is_some()) + usize::from(advance.is_some())
+                                + 2 * usize::from(!generator)
                         }
                         StmtKind::ForOf(..) => 4,
                         StmtKind::Try(_, catch, finally) => {
@@ -711,10 +714,13 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         return Err(Fault::new(message)
             .at(&program.source, template.source_start));
     }
-    // Switch breaks and iterator loop jumps have their own exits.
+    // Split async switches and supported loops have their own exits.
     // Other split ancestors still need explicit subtree unwinding.
     for (id, target, switch_break) in jumps {
-        if split.contains(&target) && !switch_break && (generator || lexical_for_of(program, target).is_none()) {
+        let async_loop = !generator && (
+            matches!(program.stmts[target].kind, StmtKind::For(None, _, _, _)) || lexical_for_of(program, target).is_some()
+        );
+        if split.contains(&target) && !switch_break && !async_loop {
             let message = if generator { "A jump to a statement split by yield is not implemented." }
                 else { "A jump to a statement split by await is not implemented." };
             return Err(Fault::new(message)
@@ -731,7 +737,7 @@ enum Emit {
     FinishBranch(Range<usize>),
     FinishJump(usize),
     FinishSwitch(usize),
-    FinishFor { statement: StmtId, start: usize, test: bool, advance: Option<ExprId> },
+    FinishFor { statement: StmtId, entry: Option<usize>, start: usize, test: bool, advance: Option<ExprId> },
     FinishForOf(usize),
     FinishTry { handler: usize, catch: Option<StmtId>, finally: Option<StmtId> },
     FinishCatch(usize),
@@ -802,16 +808,21 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 push(&mut code, Instruction::LeaveSwitch)?;
                 continue;
             }
-            Emit::FinishFor { statement, start, test, advance } => {
+            Emit::FinishFor { statement, entry, start, test, advance } => {
+                let advance_at = code.len();
                 if let Some(expression) = advance {
                     push(&mut code, Instruction::Evaluate {
                         statement, expression, action: Resume::Discard,
                     })?;
                 }
                 push(&mut code, Instruction::Jump(start))?;
+                let leave = code.len();
+                if let Some(entry) = entry {
+                    code[entry] = Instruction::EnterFor { statement, advance: advance_at, after: leave + 1 };
+                    push(&mut code, Instruction::LeaveFor)?;
+                }
                 if test {
-                    let destination = code.len();
-                    set_branch_target(&mut code[start..start + 1], destination);
+                    set_branch_target(&mut code[start..start + 1], leave);
                 }
                 continue;
             }
@@ -895,6 +906,13 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
                 StmtKind::For(None, condition, advance, body) => {
+                    let entry = if generator {
+                        None
+                    } else {
+                        let entry = code.len();
+                        push(&mut code, Instruction::EnterFor { statement: id, advance: 0, after: 0 })?;
+                        Some(entry)
+                    };
                     let start = code.len();
                     if let Some(condition) = condition {
                         push(&mut code, Instruction::BranchFalse {
@@ -902,7 +920,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                         })?;
                     }
                     push(&mut pending, Emit::FinishFor {
-                        statement: id, start, test: condition.is_some(), advance: *advance,
+                        statement: id, entry, start, test: condition.is_some(), advance: *advance,
                     })?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
@@ -1051,9 +1069,6 @@ mod tests {
         let source = "async function go(p){exit:{try{await p;}catch(e){break exit;}}}";
         let error = parse(source).err().expect("jump to split ancestor was accepted");
         assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
-        let error = parse("async function go(p){for(;;){await p;continue;}}")
-            .err().expect("jump to a split loop was accepted");
-        assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
     }
 
     #[test]
@@ -1084,8 +1099,8 @@ mod tests {
             ("async function f(p){return use(await p).value > use(await p);}", 4),
             ("async function f(p){return ((use(await p)??base)?.item??fallback).done;}", 7),
             ("async function f(p){try{}finally{await p;}}", 7),
-            ("async function f(p){for(;test();advance()){await p;}}", 6),
-            ("async function f(p){for(;;)return await p;}", 2),
+            ("async function f(p){for(;test();advance()){await p;}}", 8),
+            ("async function f(p){for(;;)return await p;}", 4),
             ("async function f(p){for(let value of p){await value;}}", 7),
             ("async function f(p){for(let value of p){await value;if(value)continue;break;}}", 9),
             ("async function f(p){switch(0){case 0:case 1:await p;break;default:done();}}", 8),

@@ -10,6 +10,7 @@ enum ExitScope {
     Try(TryScope),
     ForOf(Box<ForOfScope>),
     Switch { statement: StmtId, after: usize, environments: usize },
+    ClassicFor { statement: StmtId, advance: usize, after: usize, environments: usize },
 }
 
 struct ForOfScope {
@@ -737,6 +738,20 @@ impl Runtime {
                     self.unwind_await_environments(frame, environments);
                     Ok(Progress::Continue)
                 }
+                Instruction::EnterFor { statement, advance, after } => {
+                    self.reserve_await_exit_scope(frame)?;
+                    frame.exit_scopes.push(ExitScope::ClassicFor {
+                        statement, advance, after, environments: frame.environments.len(),
+                    });
+                    Ok(Progress::Continue)
+                }
+                Instruction::LeaveFor => {
+                    let Some(ExitScope::ClassicFor { environments, .. }) = frame.exit_scopes.pop() else {
+                        return Err(Fault::new("Invalid async for exit."));
+                    };
+                    self.unwind_await_environments(frame, environments);
+                    Ok(Progress::Continue)
+                }
                 Instruction::EnterForOf { statement, after } => {
                     self.enter_await_for_of(frame, statement, after, environment, host)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
@@ -1422,6 +1437,21 @@ impl Runtime {
                         return Ok(Progress::Continue);
                     }
                     continue;
+                }
+                ExitScope::ClassicFor { statement, advance, after, environments } => {
+                    self.unwind_await_environments(frame, environments);
+                    match completion {
+                        Ok(Control::Break(target, _)) if target == statement => {
+                            frame.next = after;
+                            return Ok(Progress::Continue);
+                        }
+                        Ok(Control::Continue(target, _)) if target == statement => {
+                            frame.next = advance;
+                            frame.exit_scopes.push(ExitScope::ClassicFor { statement, advance, after, environments });
+                            return Ok(Progress::Continue);
+                        }
+                        _ => continue,
+                    }
                 }
                 ExitScope::ForOf(mut iterator) => {
                     self.unwind_await_environments(frame, iterator.environments);
