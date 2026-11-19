@@ -7272,6 +7272,15 @@ impl Runtime {
     #[inline(never)]
     fn catch_statement(&mut self, program: &Rc<Program>, binding: Option<binding_patterns::Id>,
         body: StmtId, error: &mut Fault, env: usize, this: &Value, host: &mut dyn Host) -> Result<Control, Fault> {
+        let scope = self.enter_catch_scope(program, binding, error, env, this, host)?;
+        let result = self.statement(program, body, scope, this, host);
+        self.release_environment(scope);
+        result
+    }
+
+    #[inline(never)]
+    fn enter_catch_scope(&mut self, program: &Rc<Program>, binding: Option<binding_patterns::Id>,
+        error: &mut Fault, env: usize, this: &Value, host: &mut dyn Host) -> Result<usize, Fault> {
         self.record_caught_error(error, "catch");
         let exception = error.exception.take().expect("catchable exception");
         let value = match *exception {
@@ -7292,11 +7301,14 @@ impl Runtime {
                 }
                 self.initialize_pattern(program, pattern, value, binding_patterns::Mode::Initialize(catch_env), catch_env, this, host)?;
             }
-            self.statement(program, body, catch_env, this, host)
+            Ok(())
         })();
         self.restore_transient_marker(marker);
-        self.release_environment(catch_env);
-        result
+        if let Err(error) = result {
+            self.release_environment(catch_env);
+            return Err(error);
+        }
+        Ok(catch_env)
     }
 
     #[inline(never)]

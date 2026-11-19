@@ -9,6 +9,7 @@ use super::*;
 struct TryScope {
     statement: StmtId,
     after: usize,
+    catch_entry: Option<usize>,
     environments: usize,
 }
 
@@ -480,21 +481,7 @@ impl Runtime {
                     })
                 }
                 Instruction::EnterBlock(statement) => {
-                    if frame.environments.len() >= MAX_EVAL_DEPTH {
-                        return Err(Fault::new("Async lexical nesting limit reached (128)."));
-                    }
-                    if frame.environments.len() == frame.environments.capacity() {
-                        self.await_storage(
-                            frame
-                                .retained_bytes()
-                                .saturating_add(std::mem::size_of::<usize>()),
-                            (frame.environments.len() + 1)
-                                .saturating_mul(std::mem::size_of::<usize>()),
-                        )?;
-                        frame.environments.try_reserve_exact(1).map_err(|_| {
-                            Fault::new("Unable to allocate bounded async lexical stack.")
-                        })?;
-                    }
+                    self.reserve_await_environment(frame)?;
                     let StmtKind::Block(body) = &frame.program.stmts[statement].kind else {
                         return Err(Fault::new("Invalid async block instruction."));
                     };
@@ -537,7 +524,7 @@ impl Runtime {
                     frame.next = target;
                     Ok(Progress::Continue)
                 }
-                Instruction::PushTry { statement, after } => {
+                Instruction::PushTry { statement, after, catch_entry } => {
                     if frame.try_scopes.len() >= MAX_EVAL_DEPTH {
                         return Err(Fault::new("Async try nesting limit reached (128)."));
                     }
@@ -556,6 +543,7 @@ impl Runtime {
                     frame.try_scopes.push(TryScope {
                         statement,
                         after,
+                        catch_entry,
                         environments: frame.environments.len(),
                     });
                     Ok(Progress::Continue)
@@ -565,6 +553,7 @@ impl Runtime {
                         .try_scopes
                         .pop()
                         .ok_or_else(|| Fault::new("Invalid async try exit."))?;
+                    frame.next = scope.after;
                     let completion = self.finish_try_statement(
                         &frame.program, scope.statement, Ok(Control::Normal(None)),
                         environment, &frame.this, host,
@@ -746,6 +735,22 @@ impl Runtime {
         }
     }
 
+    fn reserve_await_environment(&mut self, frame: &mut Activation) -> Result<(), Fault> {
+        if frame.environments.len() >= MAX_EVAL_DEPTH {
+            return Err(Fault::new("Async lexical nesting limit reached (128)."));
+        }
+        if frame.environments.len() == frame.environments.capacity() {
+            self.await_storage(
+                frame.retained_bytes().saturating_add(std::mem::size_of::<usize>()),
+                (frame.environments.len() + 1).saturating_mul(std::mem::size_of::<usize>()),
+            )?;
+            frame.environments.try_reserve_exact(1).map_err(|_| {
+                Fault::new("Unable to allocate bounded async lexical stack.")
+            })?;
+        }
+        Ok(())
+    }
+
     fn unwind_await_environments(&mut self, frame: &mut Activation, depth: usize) {
         while frame.environments.len() > depth {
             let scope = frame.environments.pop().expect("owned lexical environment");
@@ -780,8 +785,22 @@ impl Runtime {
             };
             self.unwind_await_environments(frame, scope.environments);
             let marker = self.publish_await_activation(frame)?;
+            let catch_entry = scope.catch_entry.filter(|_| completion.is_err());
             completion = (|| {
                 self.push_completion_roots(&completion)?;
+                if let Some(entry) = catch_entry {
+                    let StmtKind::Try(_, Some((binding, _)), None) = frame.program.stmts[scope.statement].kind else {
+                        unreachable!("compiled catch needs a try without its own finally");
+                    };
+                    let Err(error) = &mut completion else { unreachable!("compiled catch needs an exception") };
+                    self.reserve_await_environment(frame)?;
+                    let environment = self.enter_catch_scope(
+                        &frame.program, binding, error, frame.environment()?, &frame.this, host,
+                    )?;
+                    frame.environments.push(environment);
+                    frame.next = entry;
+                    return Ok(Control::Normal(None));
+                }
                 self.finish_try_statement(
                     &frame.program, scope.statement, completion,
                     frame.environment()?, &frame.this, host,
@@ -789,7 +808,9 @@ impl Runtime {
             })();
             self.restore_root_marker(marker);
             if matches!(completion, Ok(Control::Normal(_))) {
-                frame.next = scope.after;
+                if catch_entry.is_none() {
+                    frame.next = scope.after;
+                }
                 break;
             }
         }
@@ -823,6 +844,7 @@ mod tests {
             try_scopes: vec![TryScope {
                 statement: 0,
                 after: 2,
+                catch_entry: None,
                 environments: 1,
             }],
             branch_input: Some(Value::Function(21)),

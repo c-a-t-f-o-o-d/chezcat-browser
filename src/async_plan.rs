@@ -21,7 +21,7 @@ pub(super) enum Instruction {
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
     BranchOnValueFalse(usize),
     Jump(usize),
-    PushTry { statement: StmtId, after: usize },
+    PushTry { statement: StmtId, after: usize, catch_entry: Option<usize> },
     FinishTry,
     Logical { statement: StmtId, operator: &'static str, target: usize, action: Resume },
     Await {
@@ -272,7 +272,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::Block(body) => body.len() + 1,
                         StmtKind::If(_, _, Some(_)) => 3,
                         StmtKind::If(_, _, None) => 1,
-                        StmtKind::Try(_, _, _) => 2,
+                        StmtKind::Try(_, catch, _) => {
+                            2 + 2 * usize::from(catch.is_some_and(|(_, body)| split.contains(&body)))
+                        }
                         _ => unreachable!(),
                     };
                 }
@@ -316,7 +318,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
             StmtKind::Try(body, catch, finally) => {
                 if let Some(finally) = finally { child(*finally, false)?; }
-                if let Some((_, catch)) = catch { child(*catch, false)?; }
+                if let Some((_, catch)) = catch {
+                    child(*catch, children_eligible && finally.is_none())?;
+                }
                 child(*body, children_eligible)?;
             }
             StmtKind::While(_, body) | StmtKind::DoWhile(body, _) => child(*body, false)?,
@@ -353,7 +357,8 @@ enum Emit {
     Else { branch: Range<usize>, alternative: StmtId },
     FinishBranch(Range<usize>),
     FinishJump(usize),
-    FinishTry(usize),
+    FinishTry { handler: usize, catch: Option<StmtId> },
+    FinishCatch(usize),
 }
 
 fn set_branch_target(code: &mut [Instruction], destination: usize) {
@@ -405,8 +410,21 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                 code[jump] = Instruction::Jump(code.len());
                 continue;
             }
-            Emit::FinishTry(handler) => {
+            Emit::FinishTry { handler, catch } => {
                 push(&mut code, Instruction::FinishTry)?;
+                let end = code.len();
+                let Instruction::PushTry { after, catch_entry, .. } = &mut code[handler] else { unreachable!() };
+                if let Some(catch) = catch {
+                    *catch_entry = Some(end);
+                    push(&mut pending, Emit::FinishCatch(handler))?;
+                    push(&mut pending, Emit::Statement(catch))?;
+                } else {
+                    *after = end;
+                }
+                continue;
+            }
+            Emit::FinishCatch(handler) => {
+                push(&mut code, Instruction::LeaveBlock)?;
                 let end = code.len();
                 let Instruction::PushTry { after, .. } = &mut code[handler] else { unreachable!() };
                 *after = end;
@@ -451,10 +469,11 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     push(&mut pending, next)?;
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
-                StmtKind::Try(body, _, _) => {
+                StmtKind::Try(body, catch, _) => {
                     let handler = code.len();
-                    push(&mut code, Instruction::PushTry { statement: id, after: 0 })?;
-                    push(&mut pending, Emit::FinishTry(handler))?;
+                    let catch = catch.map(|(_, body)| body).filter(|body| split.contains(body));
+                    push(&mut code, Instruction::PushTry { statement: id, after: 0, catch_entry: None })?;
+                    push(&mut pending, Emit::FinishTry { handler, catch })?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
                 _ => unreachable!(),
@@ -513,7 +532,7 @@ mod tests {
             "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
             "while(false){await p;}",
-            "try{}catch(e){await p;}",
+            "try{}catch(e){await p;}finally{}",
             "try{}finally{await p;}",
             "await (await p);",
         ] {
@@ -552,6 +571,7 @@ mod tests {
             ("async function f(p){return yes() && use(await p) && after();}", 5),
             ("async function f(p){return choose() ? await p : other();}", 5),
             ("async function f(p){return choose() ? one() : make(await p)(1);}", 5),
+            ("async function f(p){try{throw 1;}catch(e){await p;}}", 7),
             ("async function f(p){let value; value=use(await p);}", 2),
             ("async function f(p){receiver.field=use(await p);}", 1),
             ("async function f(p){let value=receiver.method(use(await p));}", 1),

@@ -32,6 +32,62 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_catch_body_retains_bindings_and_unwinds_through_outer_finally() {
+    let mut runtime = Runtime::for_capacity_test();
+    succeeds(&mut runtime, r#"
+var trace='', tag={}, fault={code:5}, replacement={}, finish, reject, kept, recovered=0, normal=0, escaped=0;
+var continuation=new Promise(function(resolve){finish=resolve;});
+var failing=new Promise(function(resolve,fail){reject=fail;});
+async function use(start,next,label){
+    let code='outer';
+    try {
+        try { await start;trace+='normal:'+label+'|'; }
+        catch({code,note=tag}) {
+            trace+='caught:'+label+'|';
+            let check=()=>note;
+            if(label==='a')kept=check;
+            let result=await next;
+            if(check()!==tag||note!==tag)throw 'catch environment';
+            trace+='resumed:'+label+'|';
+            return code+result;
+        }
+        return 3;
+    } finally {
+        if(code!=='outer')throw 'catch scope escaped';
+        trace+='finally:'+label+'|';
+    }
+}
+use(Promise.reject(fault),continuation,'a').then(value=>recovered=value);
+use(Promise.reject(fault),failing,'b').catch(error=>{if(error===replacement)escaped++;});
+use(Promise.resolve(0),continuation,'c').then(value=>normal=value);
+if(trace!==''||recovered||normal||escaped)throw 'catch before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='caught:a|caught:b|normal:c|finally:c|'||kept()!==tag||normal!==3||recovered||escaped)throw 'catch entry or normal branch';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;'ok';");
+    assert!(runtime.function_arena.retired > 0);
+    runtime.begin_job();
+    succeeds(&mut runtime, "finish(4);reject(replacement);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='caught:a|caught:b|normal:c|finally:c|resumed:a|finally:a|finally:b|'||recovered!==9||escaped!==1||kept()!==tag)throw 'catch scope or outward rejection';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, r#"
+var scope='outer', fallthrough;
+async function fallsThrough(){
+    try {throw 1;}
+    catch(scope){await Promise.resolve(0);if(scope!==1)throw 'lost catch parameter';}
+    fallthrough=scope;
+}
+fallsThrough();
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(fallthrough!=='outer')throw 'catch scope was not released';'ok';");
+}
+
+#[test]
 fn await_execution_property_assignment_keeps_receiver_and_key_until_the_write() {
     let mut runtime = Runtime::for_capacity_test();
     succeeds(&mut runtime, r#"
@@ -954,7 +1010,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "return await p+1;",
         "let first=await p,second=1+await p;",
         "while(false){await p;}",
-        "try{}catch(reason){await p;}",
+        "try{}catch(reason){await p;}finally{}",
         "try{}finally{await p;}",
         "var values=[await p];",
         "var value={entry:await p};",
