@@ -1245,7 +1245,7 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
-                    || crate::javascript::valid_custom_element_name(tag))
+                    || crate::html::valid_custom_element_name(tag))
                 && !attrs.iter().any(|attr| attr.name.namespace.is_some()
                     || attr.name.qualified.starts_with("on")
                     // STYLE uses the same native stylesheet admission even if

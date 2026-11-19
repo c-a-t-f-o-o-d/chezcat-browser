@@ -13,22 +13,22 @@ pub(super) fn flow_context(name: &str) -> bool {
     matches!(name, "html" | "body" | "main" | "article" | "section" | "aside" | "nav" |
         "header" | "footer" | "figure" | "figcaption" | "div" | "span" | "p" |
         "a" | "button" | "label" | "ul" | "ol" | "li")
+        || super::valid_custom_element_name(name)
 }
 
-pub(super) fn basic_element(name: &str) -> bool {
-    matches!(name, "svg" | "g" | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
+pub(super) fn shape_element(name: &str) -> bool {
+    matches!(name, "svg" | "defs" | "g" | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
 }
 
 pub(super) fn supported_tag(tag: &Tag) -> bool {
-    basic_element(&tag.name) && supported_attributes(tag)
-}
-
-pub(super) fn template_element(name: &str) -> bool {
-    basic_element(name) || name == "defs"
+    // A balanced SVG shape belongs to the SVG namespace even when an
+    // attribute has no rendering support. Do not use the fragment transfer
+    // allowlist as evidence about the initial document's namespace.
+    tag.clean_syntax && shape_element(&tag.name)
 }
 
 pub(super) fn supported_template_tag(tag: &Tag) -> bool {
-    template_element(&tag.name) && !tag.duplicate_attributes && supported_attributes(tag)
+    shape_element(&tag.name) && !tag.duplicate_attributes && supported_attributes(tag)
 }
 
 fn supported_attributes(tag: &Tag) -> bool {
@@ -50,6 +50,15 @@ pub(super) fn publish(nodes: &mut [Node]) {
         if let NodeKind::Element { attrs, .. } = &mut node.kind {
             node.namespace = Namespace::Svg;
             for attr in attrs {
+                // The shape subset supports these adjusted, case-sensitive
+                // attribute names without implementing their graphics APIs.
+                let adjusted = match attr.name.qualified.as_str() {
+                    "viewbox" => Some("viewBox"),
+                    "preserveaspectratio" => Some("preserveAspectRatio"),
+                    "pathlength" => Some("pathLength"),
+                    _ => None,
+                };
+                if let Some(name) = adjusted { attr.name.qualified = name.into(); }
                 if attr.name.html_is("xmlns") {
                     attr.name.namespace = Some(AttributeNamespace {
                         uri: "http://www.w3.org/2000/xmlns/".into(), prefix: None, local: "xmlns".into(),
@@ -91,7 +100,7 @@ mod tests {
     #[test]
     fn svg_namespace_uncertain_content_cannot_publish_an_earlier_valid_prefix() {
         for bad in ["<foreignObject></foreignObject>", "<use></use>", "<script></script>", "<math></math>",
-            "<circle onclick='observed()'></circle>", "<rect fill='url(#paint)'/>", "<g><circle></g>",
+            "<g><circle></g>",
             "<g id='a'id='b'></g>", "<g//>", "<g></g/>", "</missing>", "<!--comment-->", "<![CDATA[x]]>"] {
             let doc = parse(&format!("<body><svg id=root><circle id='first'/>{bad}</svg><p id=next></p></body>"));
             assert_eq!(node(&doc, "root").namespace, Namespace::UnknownForeign, "{bad}");

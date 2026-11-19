@@ -261,6 +261,17 @@ impl Bridge<'_> {
             && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }))
     }
 
+    fn element_naming_error(&self, node: usize) -> String {
+        let parent = self.state.tree.parents[node];
+        let grandparent = parent.and_then(|index| self.state.tree.parents[index]);
+        let name = |index: Option<usize>| index.filter(|&index| index != 0)
+            .map_or("none", |index| prefix(tag(self.doc, index), 48));
+        format!(
+            "Element naming requires known namespace provenance. Receiver tag={}, namespace=unknown parser context, owner=main document, parent={}, grandparent={}.",
+            name(Some(node)), name(parent), name(grandparent)
+        )
+    }
+
     fn html_tab_index(&mut self, node: usize) -> Result<i32, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("tabIndex requires an HTML Element.".into()); };
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
@@ -639,7 +650,7 @@ impl Bridge<'_> {
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             if matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) && self.doc.nodes[node].namespace.element_uri().is_none() {
-                return Err("Element naming requires known namespace provenance.".into());
+                return Err(self.element_naming_error(node));
             }
             return Ok(Some(matches!(self.doc.nodes[node].kind,NodeKind::Element {..})));
         }
@@ -734,7 +745,7 @@ impl Bridge<'_> {
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) {return Ok(Some(Value::Undefined));}
-            let uri = self.doc.nodes[node].namespace.element_uri().ok_or("Element naming requires known namespace provenance.")?;
+            let uri = self.doc.nodes[node].namespace.element_uri().ok_or_else(|| self.element_naming_error(node))?;
             return match property {
                 "prefix"=>Ok(Some(Value::Null)),
                 "namespaceURI"=>self.string(uri).map(Some),
