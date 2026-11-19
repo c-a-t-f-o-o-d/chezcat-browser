@@ -156,7 +156,7 @@ impl Bridge<'_> {
         if self.inert_factory(object, name).is_some() { return true; }
         let Some(node) = self.state.inert_documents.node(object) else { return false; };
         if matches!(name, "ownerDocument" | "parentNode" | "parentElement" | "firstChild" | "lastChild"
-            | "previousSibling" | "nextSibling" | "isConnected" | "nodeValue" | "baseURI" | "childNodes")
+            | "previousSibling" | "nextSibling" | "isConnected" | "nodeValue" | "baseURI")
         {
             return true;
         }
