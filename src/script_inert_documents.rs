@@ -31,7 +31,7 @@ enum Kind {
     Document(DocumentNodes),
     TemplateDocument { implementation: u32 },
     Fragment,
-    Parsed(usize),
+    Parsed { source: usize, copy_template_contents: bool },
     Doctype,
     Element(String),
     Text(String),
@@ -79,7 +79,7 @@ impl Bridge<'_> {
         Some(match self.state.inert_documents.node(object)?.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => 9,
             Kind::Fragment => 11,
-            Kind::Parsed(source) => match self.doc.nodes.get(source)?.kind {
+            Kind::Parsed { source, .. } => match self.doc.nodes.get(source)?.kind {
                 NodeKind::Element { .. } => 1,
                 NodeKind::Text(_) => 3,
                 NodeKind::Comment(_) => 8,
@@ -100,7 +100,7 @@ impl Bridge<'_> {
         Some(match &self.state.inert_documents.node(object)?.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => "Document",
             Kind::Fragment => "DocumentFragment",
-            Kind::Parsed(source) => {
+            Kind::Parsed { source, .. } => {
                 let node = self.doc.nodes.get(*source)?;
                 match &node.kind {
                     NodeKind::Element { tag, .. } => match node.namespace {
@@ -145,7 +145,7 @@ impl Bridge<'_> {
             Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "localName" | "tagName" | "namespaceURI" | "prefix"),
             Kind::Fragment => false,
-            Kind::Parsed(source) => match self.doc.nodes[source].kind {
+            Kind::Parsed { source, .. } => match self.doc.nodes[source].kind {
                 NodeKind::Element { .. } => matches!(name, "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
                 NodeKind::Text(_) | NodeKind::Comment(_) => matches!(name, "data" | "length"),
                 NodeKind::ProcessingInstruction { .. } => matches!(name, "data" | "length"),
@@ -173,7 +173,9 @@ impl Bridge<'_> {
         let node = self.state.inert_documents.node(object)?;
         match &node.kind {
             Kind::Element(tag) if tag == "template" => Some((node.owner, None)),
-            Kind::Parsed(source) if self.parsed_template(*source) => Some((node.owner, Some(*source))),
+            Kind::Parsed { source, copy_template_contents } if self.parsed_template(*source) => {
+                Some((node.owner, copy_template_contents.then_some(*source)))
+            }
             _ => None,
         }
     }
@@ -232,7 +234,9 @@ impl Bridge<'_> {
             payload = payload.saturating_add(child_handles.capacity().saturating_mul(std::mem::size_of::<u32>()));
             staged.try_reserve(1).map_err(|_| "Cannot reserve parsed template nodes.")?;
             staged.push(Entry::Node(InertNode {
-                kind: if index == 0 { Kind::Fragment } else { Kind::Parsed(source.unwrap()) },
+                kind: if index == 0 { Kind::Fragment } else {
+                    Kind::Parsed { source: source.unwrap(), copy_template_contents: true }
+                },
                 owner, parent, children: child_handles,
             }));
             index += 1;
@@ -248,6 +252,65 @@ impl Bridge<'_> {
         if existing_owner.is_none() { arena.template_documents.insert(document, owner); }
         arena.template_contents.insert(object, fragment);
         Ok(Value::Host(fragment))
+    }
+
+    pub(super) fn inert_clone_receiver(&self, object: u32) -> bool {
+        self.state.inert_documents.node(object).is_some_and(|node| matches!(node.kind,
+            Kind::Fragment | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
+                | Kind::ProcessingInstruction { .. }))
+    }
+
+    pub(super) fn clone_inert_tree(&mut self, object: u32, deep: bool) -> Result<Value, String> {
+        let arena = &self.state.inert_documents;
+        let owner = arena.node(object).ok_or("Inert clone source is unavailable.")?.owner;
+        let remaining = self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len());
+        if remaining == 0 { return Err("Inert DOM identity limit reached during cloning.".into()); }
+        let first = FIRST_ENTRY + arena.entries.len() as u32;
+        let mut pending = vec![(object, None)];
+        let mut staged = Vec::new();
+        let mut payload = 0usize;
+        while let Some(&(source, parent)) = pending.get(staged.len()) {
+            let node = self.state.inert_documents.node(source)
+                .filter(|node| node.owner == owner).ok_or("Inert clone source ownership changed.")?;
+            let child_count = if deep { node.children.len() } else { 0 };
+            if child_count > remaining - pending.len() {
+                return Err("Inert DOM identity limit reached during cloning.".into());
+            }
+            let string_bytes = match &node.kind {
+                Kind::Element(name) | Kind::Text(name) => name.len(),
+                Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+                _ => 0,
+            };
+            self.state.work(child_count.saturating_add(1))?;
+            self.state.copies(string_bytes)?;
+            pending.try_reserve(child_count).map_err(|_| "Cannot reserve inert clone traversal.")?;
+            staged.try_reserve(1).map_err(|_| "Cannot reserve inert clone nodes.")?;
+            let node = self.state.inert_documents.node(source).ok_or("Inert clone source is unavailable.")?;
+            let handle = first + staged.len() as u32;
+            let child_start = first + pending.len() as u32;
+            pending.extend(node.children.iter().take(child_count).map(|&child| (child, Some(handle))));
+            let mut children = Vec::new();
+            children.try_reserve_exact(child_count).map_err(|_| "Cannot reserve inert clone children.")?;
+            children.extend(child_start..child_start + child_count as u32);
+            let kind = match &node.kind {
+                Kind::Fragment => Kind::Fragment,
+                Kind::Parsed { source, copy_template_contents } =>
+                    Kind::Parsed { source: *source, copy_template_contents: deep && *copy_template_contents },
+                Kind::Element(name) => Kind::Element(name.clone()),
+                Kind::Text(data) => Kind::Text(data.clone()),
+                Kind::ProcessingInstruction { target, data } =>
+                    Kind::ProcessingInstruction { target: target.clone(), data: data.clone() },
+                Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype =>
+                    return Err("Cloning this inert document node is unavailable.".into()),
+            };
+            payload = payload.saturating_add(string_bytes)
+                .saturating_add(children.capacity().saturating_mul(std::mem::size_of::<u32>()));
+            staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
+        }
+        let committed = self.reserve_inert_entries(staged.len(), payload)?;
+        debug_assert_eq!(committed, first);
+        self.state.inert_documents.entries.extend(staged);
+        Ok(Value::Host(first))
     }
 
     fn reserve_inert_entries(&mut self, count: usize, payload: usize) -> Result<u32, String> {
@@ -359,7 +422,7 @@ impl Bridge<'_> {
     fn inert_text_value(&self, object: u32) -> Option<&str> {
         match &self.state.inert_documents.node(object)?.kind {
             Kind::Text(value) => Some(value),
-            Kind::Parsed(source) => match &self.doc.nodes.get(*source)?.kind {
+            Kind::Parsed { source, .. } => match &self.doc.nodes.get(*source)?.kind {
                 NodeKind::Text(value) => Some(value),
                 _ => None,
             },
@@ -393,7 +456,7 @@ impl Bridge<'_> {
         if self.inert_implementation(object) { return Ok(Value::Undefined); }
         if property == "childNodes" { return self.create_inert_child_list(object); }
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
-        if let Kind::Parsed(source) = node.kind {
+        if let Kind::Parsed { source, .. } = node.kind {
             let parsed = &self.doc.nodes[source];
             if let Some(data) = parsed.kind.character_data() {
                 match property {
@@ -477,7 +540,7 @@ impl Bridge<'_> {
             "nodeName" => match &node.kind {
                 Kind::Document(_) | Kind::TemplateDocument { .. } => string("#document"),
                 Kind::Fragment => string("#document-fragment"),
-                Kind::Parsed(source) => match &self.doc.nodes[*source].kind {
+                Kind::Parsed { source, .. } => match &self.doc.nodes[*source].kind {
                     NodeKind::Element { tag, .. } => string(tag),
                     NodeKind::Text(_) => string("#text"),
                     NodeKind::Comment(_) => string("#comment"),
@@ -489,7 +552,7 @@ impl Bridge<'_> {
                 Kind::Text(_) => string("#text"),
                 Kind::ProcessingInstruction { .. } => unreachable!("processing instruction name was handled above"),
             },
-            "textContent" if matches!(node.kind, Kind::Fragment | Kind::Parsed(_) | Kind::Element(_) | Kind::Text(_)) => return self.inert_text_content(object),
+            "textContent" if matches!(node.kind, Kind::Fragment | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)) => return self.inert_text_content(object),
             "data" | "nodeValue" if matches!(node.kind, Kind::Text(_)) => return self.inert_text_content(object),
             "textContent" | "nodeValue" => Value::Null,
             "length" if matches!(node.kind, Kind::Text(_)) => {

@@ -825,6 +825,61 @@ document.title = 'verified-native-template-content';
 }
 
 #[test]
+fn template_content_clone_preserves_fresh_inert_topology_and_nested_payloads() {
+    let (mut doc, mut forms, mut page, outcome) = page(concat!(
+        "<html><head></head><body>",
+        "<template id=fixture><div id=hidden><b>Token</b></div><template><em>Nested</em></template></template>",
+        "<p id=visible>Visible</p></body></html>"
+    ), &[r#"
+var template=document.getElementById('fixture'), input=template.content, owner=input.ownerDocument;
+var original=input.firstChild, nested=input.lastChild, clone=Node.prototype.cloneNode;
+var empty=input.cloneNode(), copied=input.cloneNode(true);
+if(empty===input||empty===copied||!(empty instanceof DocumentFragment)||empty.ownerDocument!==owner||
+    empty.firstChild!==null||empty.childNodes.length!==0||copied===input||copied.ownerDocument!==owner||
+    copied.isConnected||copied.parentNode!==null||copied.childNodes.length!==2||
+    copied.firstChild===original||copied.firstChild.ownerDocument!==owner||
+    copied.firstChild.parentNode!==copied||copied.firstChild.firstChild===original.firstChild||
+    copied.firstChild.id!=='hidden'||copied.firstChild.textContent!=='Token'||
+    copied.lastChild===nested||copied.firstChild.nextSibling!==copied.lastChild)
+    throw 'actual detached clone topology and owners';
+var copiedNested=copied.lastChild, shallow=clone.call(nested,false), deep=clone.call(nested,true);
+if(!(copiedNested instanceof HTMLTemplateElement)||copiedNested.childNodes.length!==0||
+    copiedNested.content===nested.content||copiedNested.content.ownerDocument!==owner||
+    copiedNested.content.firstChild===nested.content.firstChild||copiedNested.content.textContent!=='Nested'||
+    shallow.content.childNodes.length!==0||deep.content.textContent!=='Nested'||
+    deep.content.firstChild===nested.content.firstChild||shallow.content.ownerDocument!==owner||
+    shallow.cloneNode(true).content.childNodes.length!==0)throw 'shallow and deep nested template contents';
+var detachedOriginal=owner.createTextNode('Independent');
+var detachedCopy=detachedOriginal.cloneNode(true);
+if(detachedCopy===detachedOriginal||detachedCopy.data!=='Independent'||detachedCopy.ownerDocument!==owner||
+    document.getElementById('hidden')!==null||document.getElementById('visible').textContent!=='Visible')
+    throw 'factory-created inert leaf and unaffected visible document';
+var rejected=false;
+try { clone.call({}); } catch(e) { if(e instanceof TypeError) rejected=true; else throw e; }
+if(!rejected)throw 'clone receiver branding';
+document.title='verified-inert-template-clone';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-inert-template-clone");
+    let retained = page.state.retained;
+    let limit = page.state.limits.host.extra_nodes;
+    page.state.limits.host.extra_nodes = 0;
+    let failure = page.console_eval(&mut doc, &mut forms, "input.cloneNode(true);");
+    assert_eq!(failure.errors, 1);
+    assert!(page.report().contains("Inert DOM identity limit reached during cloning"));
+    assert_eq!(page.state.retained, retained);
+    page.state.limits.host.extra_nodes = limit;
+    let commits = page.state.dom_commits;
+    let denied = page.console_eval(&mut doc, &mut forms, "document.body.appendChild(copied);");
+    assert_eq!(denied.errors, 1);
+    assert_eq!(page.state.dom_commits, commits);
+    let recovered = page.console_eval(&mut doc, &mut forms,
+        "var retry=input.cloneNode(true);if (retry===copied||retry.firstChild===copied.firstChild||copied.parentNode!==null||input.firstChild!==original) throw 'failed clone or adoption changed identities';");
+    assert_eq!(recovered.errors, 0, "{}", page.report());
+    assert!(!page.has_host_tasks());
+}
+
+#[test]
 fn create_html_document_builds_an_independent_inert_native_tree() {
     let (doc, _, page, outcome) = page("<html><head><title>Main</title></head><body></body></html>", &[r#"
 var impl=document.implementation;
