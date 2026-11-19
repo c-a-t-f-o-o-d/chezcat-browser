@@ -71,10 +71,18 @@ struct InertNode {
     children: Vec<u32>,
 }
 
+struct Promotion {
+    index: usize,
+    parent: usize,
+    node: Node,
+    unsafe_nonce: bool,
+}
+
 enum Entry {
     Implementation,
     Parser,
     Node(InertNode),
+    ParkedNode,
 }
 
 impl Arena {
@@ -87,7 +95,7 @@ impl Arena {
         if handle < FIRST_ENTRY { return self.adopted.get(&handle); }
         match self.entry(handle)? {
             Entry::Node(node) => Some(node),
-            Entry::Implementation | Entry::Parser => None,
+            Entry::Implementation | Entry::Parser | Entry::ParkedNode => None,
         }
     }
 
@@ -95,7 +103,7 @@ impl Arena {
         if handle < FIRST_ENTRY { return self.adopted.get_mut(&handle); }
         match self.entries.get_mut((handle - FIRST_ENTRY) as usize)? {
             Entry::Node(node) => Some(node),
-            Entry::Implementation | Entry::Parser => None,
+            Entry::Implementation | Entry::Parser | Entry::ParkedNode => None,
         }
     }
 }
@@ -236,12 +244,162 @@ impl Bridge<'_> {
         Ok(Value::String(attrs[index].value.clone()))
     }
 
-    pub(super) fn empty_inert_fragment(&self, object: u32) -> Option<Option<u32>> {
+    pub(super) fn checked_inert_fragment(&self, object: u32) -> Option<Option<u32>> {
         let node = self.state.inert_documents.node(object)?;
         match node.kind {
-            Kind::Fragment { template } if node.parent.is_none() && node.children.is_empty() => Some(template),
+            Kind::Fragment { template } if node.parent.is_none()
+                && node.children.iter().all(|&child| self.parked_template_source(child).is_some()) => Some(template),
             _ => None,
         }
+    }
+
+    fn parked_template_source(&self, handle: u32) -> Option<(&InertNode, &GeneratedNode, usize)> {
+        let index = node_index(handle)?;
+        let arena = &self.state.inert_documents;
+        let node = arena.adopted.get(&handle)?;
+        let Kind::Parsed { source: ParsedSource::Generated(source), .. } = node.kind else { return None; };
+        Some((node, arena.generated.get(source)?, index))
+    }
+
+    /// Promote the measured safe HTML subset from template markup. The
+    /// destination tree only sees the existing identities after all checks.
+    pub(super) fn splice_checked_inert_fragment(
+        &mut self, parent: usize, fragment: u32, reference: Option<usize>,
+    ) -> Result<Value, String> {
+        let children = self.inert_children(fragment).ok_or("Inert fragment is unavailable.")?;
+        let count = children.len();
+        if count == 0 { return Ok(Value::Host(fragment)); }
+        self.state.work(count)?;
+        self.mutation_ancestors(parent)?;
+        if self.doc.nodes[parent].namespace != crate::html::Namespace::Html
+            && !self.fragment_receiver(node_handle(parent))
+            || matches!(tag(self.doc, parent), "script" | "link")
+        {
+            return Err("Inert fragment insertion requires an ordinary HTML or fragment destination.".into());
+        }
+        let mut depth = 0;
+        let mut ancestor = Some(parent);
+        while let Some(node) = ancestor {
+            self.state.work(1)?;
+            depth += 1;
+            ancestor = self.state.tree.parents[node];
+        }
+        let children = self.inert_children(fragment).ok_or("Inert fragment is unavailable.")?;
+        let mut roots = Vec::new();
+        let mut pending = Vec::new();
+        roots.try_reserve_exact(count).map_err(|_| "Cannot reserve promoted fragment roots.")?;
+        pending.try_reserve(count).map_err(|_| "Cannot reserve promoted fragment traversal.")?;
+        for &handle in children {
+            roots.push(node_index(handle).ok_or("Inert fragment root has no reserved document slot.")?);
+            pending.push((handle, parent, depth + 1));
+        }
+        let mut plan = Vec::new();
+        let mut indices = Vec::new();
+        let mut stylesheet = None;
+        let mut retained = 0usize;
+        while let Some((handle, parent, depth)) = pending.pop() {
+            if depth > dom_tree::MAX_DOM_DEPTH { return Err("Inert fragment insertion exceeds DOM depth.".into()); }
+            self.state.work(1)?;
+            let (_, source, index) = self.parked_template_source(handle)
+                .ok_or("Inert fragment contains unsupported active markup.")?;
+            let raw = Rc::clone(&source.node);
+            let unsafe_nonce = source.unsafe_nonce;
+            let mut bytes = node_bytes(&raw);
+            if let NodeKind::Element { tag, href, attrs, id } = &raw.kind {
+                if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
+                    self.state.work(self.forms.controls.len())?;
+                    if self.forms.controls.keys().any(|&control| self.doc.attr(control, "form") == Some(id)) {
+                        return Err("Inert fragment cannot change explicit native form associations.".into());
+                    }
+                }
+                self.state.work(attrs.len())?;
+                if let Some(attr) = attrs.iter().find(|attr| attr.name.html_is("style")) {
+                    validate_style(&attr.value, self.state.limits.host.string_bytes)?;
+                }
+                if tag == "style" && stylesheet.replace(index).is_some() {
+                    return Err("Inert fragment insertion admits one inline stylesheet per splice.".into());
+                }
+                bytes = bytes.saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
+            }
+            let (inert, _, _) = self.parked_template_source(handle).unwrap();
+            let children = inert.children.len();
+            bytes = bytes.saturating_add(children.saturating_mul(size_of::<usize>()));
+            self.state.work(children)?;
+            self.state.copies(bytes)?;
+            retained = retained.saturating_add(bytes);
+            let (inert, _, _) = self.parked_template_source(handle).unwrap();
+            let mut node_children = Vec::new();
+            node_children.try_reserve_exact(children).map_err(|_| "Cannot reserve promoted subtree children.")?;
+            pending.try_reserve(children).map_err(|_| "Cannot reserve promoted subtree traversal.")?;
+            for &child in &inert.children {
+                let slot = node_index(child).ok_or("Inert fragment contains unsupported active markup.")?;
+                node_children.push(slot);
+                pending.push((child, index, depth + 1));
+            }
+            let node = Node {
+                namespace: raw.namespace,
+                kind: script_clone_node::copy_node_kind(&raw.kind),
+                children: node_children,
+            };
+            plan.try_reserve(1).map_err(|_| "Cannot reserve inert promotion plan.")?;
+            indices.try_reserve(1).map_err(|_| "Cannot reserve inert promotion identities.")?;
+            plan.push(Promotion { index, parent, node, unsafe_nonce });
+            indices.push(index);
+        }
+        self.state.work(self.doc.nodes[parent].children.len())?;
+        let position = reference.and_then(|reference| self.doc.nodes[parent].children.iter().position(|&node| node == reference))
+            .unwrap_or(self.doc.nodes[parent].children.len());
+        self.doc.nodes[parent].children.try_reserve(count).map_err(|_| "Cannot reserve fragment destination children.")?;
+        self.doc.nonce_unsafe_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve fragment nonce provenance.")?;
+        self.state.dom.created.try_reserve(plan.len()).map_err(|_| "Cannot reserve promoted node identities.")?;
+        self.state.detached_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve detached promotion identities.")?;
+        let child_lists = plan.iter().filter(|item|
+            self.state.dom.inert_child_lists.contains_key(&node_handle(item.index))).count();
+        self.state.dom.child_lists.try_reserve(child_lists).map_err(|_| "Cannot reserve promoted child list identities.")?;
+        retained = retained.saturating_add(child_lists.saturating_mul(size_of::<usize>() - size_of::<u32>()));
+        let connected = self.state.dom.connected[parent];
+        // Populate checked slots for native CSS and caption preflight while the
+        // inert routing still owns them. No renderer or script observes these
+        // slots until the destination's children are committed.
+        for item in &mut plan {
+            std::mem::swap(&mut self.doc.nodes[item.index], &mut item.node);
+            if item.unsafe_nonce { self.doc.nonce_unsafe_nodes.insert(item.index); }
+        }
+        let checked = (|| {
+            self.validate_button_children(parent, &indices)?;
+            let inline = stylesheet.map(|node| self.prepare_inline_sheet(node, connected)).transpose()?;
+            self.state.replace_bytes(0, retained)?;
+            Ok::<_, String>(inline)
+        })();
+        let inline = match checked {
+            Ok(inline) => inline,
+            Err(error) => {
+                for item in &mut plan {
+                    std::mem::swap(&mut self.doc.nodes[item.index], &mut item.node);
+                    if item.unsafe_nonce { self.doc.nonce_unsafe_nodes.remove(&item.index); }
+                }
+                return Err(error);
+            }
+        };
+        self.state.inert_documents.node_mut(fragment).unwrap().children.clear();
+        self.doc.nodes[parent].children.splice(position..position, roots);
+        for item in plan {
+            let handle = node_handle(item.index);
+            self.state.inert_documents.adopted.remove(&handle);
+            if let Some(list) = self.state.dom.inert_child_lists.remove(&handle) {
+                self.state.node_lists[queries::node_list_index(list).unwrap()] = queries::NodeList::Children(item.index);
+                self.state.dom.child_lists.insert(item.index, list);
+            }
+            self.state.dom.created.insert(item.index);
+            self.state.tree.parents[item.index] = Some(item.parent);
+            self.state.dom.connected[item.index] = connected;
+            if !connected { self.state.detached_nodes.insert(item.index); }
+        }
+        if let (Some(node), Some(inline)) = (stylesheet, inline) { self.commit_inline_sheet(node, inline); }
+        self.state.dom_committed();
+        self.state.dirty = true;
+        if connected { self.state.layout_changed(); }
+        Ok(Value::Host(fragment))
     }
 
     fn parsed_source(&self, source: ParsedSource) -> Option<(&Node, bool)> {
@@ -527,10 +685,32 @@ impl Bridge<'_> {
         }
         let first = FIRST_ENTRY + arena.entries.len() as u32;
         let generated_base = arena.generated.len();
+        // Leave immutable raw sources in the inert arena. A separate reserved
+        // document slot keeps the Node identity stable across owner changes.
+        let base = self.doc.nodes.len();
+        let can_park = count <= self.state.node_limit
+            .saturating_sub(base.saturating_add(self.state.blank_frame_nodes))
+            .min(((STYLE_BASE - NODE_BASE) as usize).saturating_sub(base));
+        let mut handles = Vec::new();
+        handles.try_reserve_exact(count + 1).map_err(|_| "Cannot reserve template node links.")?;
+        handles.push(fragment);
+        let mut parked = 0;
+        for (offset, node) in parsed.nodes.iter().skip(1).enumerate() {
+            let handle = if can_park && template_node_can_park(node) {
+                let handle = node_handle(base + parked);
+                parked += 1;
+                handle
+            } else {
+                first + offset as u32
+            };
+            handles.push(handle);
+        }
         let mut entries = Vec::new();
         let mut generated = Vec::new();
+        let mut parked_nodes = Vec::new();
         entries.try_reserve_exact(count).map_err(|_| "Cannot reserve template replacement identities.")?;
         generated.try_reserve_exact(count).map_err(|_| "Cannot reserve parsed template replacement nodes.")?;
+        parked_nodes.try_reserve_exact(parked).map_err(|_| "Cannot reserve parked template identities.")?;
         let mut parents = Vec::new();
         parents.try_reserve_exact(parsed.nodes.len()).map_err(|_| "Cannot reserve template parent links.")?;
         parents.resize(parsed.nodes.len(), None);
@@ -538,12 +718,12 @@ impl Bridge<'_> {
         let children_for = |items: &[usize]| -> Result<Vec<u32>, String> {
             let mut children = Vec::new();
             children.try_reserve_exact(items.len()).map_err(|_| "Cannot reserve template child links.")?;
-            children.extend(items.iter().map(|&child| first + child as u32 - 1));
+            children.extend(items.iter().map(|&child| handles[child]));
             Ok(children)
         };
         for (local, node) in parsed.nodes.iter().enumerate() {
             self.state.work(node.children.len().saturating_add(1))?;
-            let parent = Some(if local == 0 { fragment } else { first + local as u32 - 1 });
+            let parent = Some(handles[local]);
             for &child in &node.children { parents[child] = parent; }
             if local == 0 { continue; }
             payload = payload.saturating_add(node_bytes(node));
@@ -562,16 +742,29 @@ impl Bridge<'_> {
             let children = children_for(&node.children)?;
             payload = payload.saturating_add(children.capacity().saturating_mul(std::mem::size_of::<u32>()));
             node.children = Vec::new();
-            entries.push(Entry::Node(InertNode {
+            let inert = InertNode {
                 kind: Kind::Parsed {
                     source: ParsedSource::Generated(generated_base + offset),
                     initial_template: None,
                 },
                 owner, parent: parents[local], children,
-            }));
+            };
+            let handle = handles[local];
+            if handle < FIRST_ENTRY {
+                parked_nodes.push((handle, inert));
+                entries.push(Entry::ParkedNode);
+            } else {
+                entries.push(Entry::Node(inert));
+            }
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
+        payload = payload.saturating_add(parked.saturating_mul(size_of::<Node>() + size_of::<(u32, InertNode)>()));
         self.state.inert_documents.generated.try_reserve(count).map_err(|_| "Cannot reserve inert template source storage.")?;
+        self.state.inert_documents.adopted.try_reserve(parked).map_err(|_| "Cannot reserve parked template nodes.")?;
+        self.doc.nodes.try_reserve(parked).map_err(|_| "Cannot reserve future template document slots.")?;
+        self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
+        self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
+        self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
         let committed = self.reserve_inert_entries(entries.len(), payload)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
@@ -582,6 +775,17 @@ impl Bridge<'_> {
         }
         arena.generated.extend(generated);
         arena.entries.extend(entries);
+        arena.adopted.extend(parked_nodes);
+        for _ in 0..parked {
+            self.doc.nodes.push(Node {
+                namespace: crate::html::Namespace::None,
+                kind: NodeKind::DocumentFragment,
+                children: Vec::new(),
+            });
+            self.state.tree.parents.push(None);
+            self.state.tree.active.push(false);
+            self.state.dom.connected.push(false);
+        }
         Ok(())
     }
 
@@ -1029,5 +1233,22 @@ impl Bridge<'_> {
             "namespaceURI" | "prefix" => Value::Null,
             _ => Value::Undefined,
         })
+    }
+}
+
+fn template_node_can_park(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Text(_) | NodeKind::Comment(_) => true,
+        NodeKind::Element { tag, attrs, .. } => {
+            node.namespace == crate::html::Namespace::Html
+                && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
+                    || crate::javascript::valid_custom_element_name(tag))
+                && !attrs.iter().any(|attr| attr.name.namespace.is_some()
+                    || attr.name.qualified.starts_with("on")
+                    // STYLE uses the same native stylesheet admission even if
+                    // its parsed markup carries an ordinary `is` attribute.
+                    || tag != "style" && attr.name.html_is("is"))
+        }
+        _ => false,
     }
 }

@@ -3919,6 +3919,95 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
 }
 
 #[test]
+fn template_fragment_promotes_original_nodes_and_checks_stylesheet_policy() {
+    for blocked in [false, true] {
+        let html = "<html><head><title>Original</title></head><body><iframe hidden></iframe><main id=app>Fixture</main></body></html>";
+        let source = r#"
+var template=document.createElement('template');
+template.innerHTML='<theme-scope id="scope"><style is="fixture-sheet">#app{opacity:0.5}</style></theme-scope>';
+var donor=template.content, theme=donor.firstChild, style=theme.firstChild, text=style.firstChild;
+var owner=donor.ownerDocument, marker={}, head=document.head, anchor=head.lastChild;
+var roots=donor.childNodes, nested=theme.childNodes, styleChildren=style.childNodes;
+var observer=new MutationObserver(function(){throw 'records should have been taken';});
+observer.observe(head,{childList:true});
+theme.fixtureMarker=marker;
+if(theme.isConnected||style.isConnected||document.getElementById('scope')!==null)
+    throw 'inert stylesheet attached';
+if(head.insertBefore(donor,anchor)!==donor||theme!==document.getElementById('scope')||
+   theme.fixtureMarker!==marker||theme.parentNode!==head||theme.nextSibling!==anchor||
+   theme.firstChild!==style||style.firstChild!==text||!style.isConnected||style.getAttribute('is')!=='fixture-sheet'||
+   theme.ownerDocument!==document||style.ownerDocument!==document||text.ownerDocument!==document)
+    throw 'real transferred nodes';
+if(donor.ownerDocument!==owner||template.content!==donor||donor.firstChild!==null||
+   roots!==donor.childNodes||roots.length!==0||nested!==theme.childNodes||nested[0]!==style||
+   styleChildren!==style.childNodes||styleChildren[0]!==text)
+    throw 'live collection or donor changed';
+var records=observer.takeRecords(), record=records[0];
+if(records.length!==1||record.target!==head||record.addedNodes[0]!==theme||record.nextSibling!==anchor)
+    throw 'native mutation record';
+observer.disconnect();
+document.title='stylesheet nodes promoted';
+"#;
+        let (mut doc, mut forms, mut page, _) = page(html, &[]);
+        if blocked { page.state.dynamic.policy.add_header("style-src 'none'"); }
+        let result = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!(doc.title, "stylesheet nodes promoted");
+        assert_eq!(page.state.stylesheets.source_bytes > 0, !blocked);
+        assert_eq!(page.report().contains("Content Security Policy blocked an inline style element"), blocked);
+    }
+}
+
+#[test]
+fn template_fragment_promotion_rejects_nested_active_resources_atomically() {
+    let (mut doc, mut forms, mut page, initial) = page("<html><head><title>Fixture</title></head><body><main></main></body></html>", &[r#"
+var holder=document.createElement('template');
+holder.innerHTML='<section><style>main{opacity:0.5}</style><iframe src="/private"></iframe></section>';
+var content=holder.content, root=content.firstChild, sheet=root.firstChild, frame=root.lastChild;
+var owner=content.ownerDocument, first=document.head.firstChild;
+"#]);
+    assert_eq!(initial.errors, 0, "{}", page.report());
+    let failed = page.console_eval(&mut doc, &mut forms, "document.head.appendChild(content);");
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    let verified = page.console_eval(&mut doc, &mut forms, r#"
+if(document.head.firstChild!==first||document.head.lastChild!==first||content.firstChild!==root||
+   root.firstChild!==sheet||root.lastChild!==frame||root.ownerDocument!==owner||
+   sheet.isConnected||frame.getAttribute('src')!=='/private'||document.querySelector('section')!==null)
+    throw 'blocked mutation leaked';
+"#);
+    assert_eq!(verified.errors, 0, "{}", page.report());
+    assert_eq!(page.state.stylesheets.source_bytes, 0);
+}
+
+#[test]
+fn generated_inert_elements_keep_author_state_and_detach_without_leaking() {
+    let (doc, _, page, result) = page("<html><head></head><body><main id=app></main></body></html>", &[r#"
+var template=document.createElement('template');
+template.innerHTML='<theme-scope id="private-theme"><style>main{color:purple}</style></theme-scope>';
+var content=template.content, theme=content.firstChild, style=theme.firstChild, text=style.firstChild;
+var owner=content.ownerDocument, marker={};
+theme.testMarker=marker;style.testMarker=theme;
+if(theme.testMarker!==marker||style.testMarker!==theme||theme.getAttribute('id')!=='private-theme'||
+   theme.ownerDocument!==owner||style.ownerDocument!==owner||text.ownerDocument!==owner||
+   theme.isConnected||style.isConnected||text.data!=='main{color:purple}'||
+   document.getElementById('private-theme')!==null||document.querySelector('theme-scope')!==null)
+    throw 'private identities and actual markup';
+var copy=content.cloneNode(true).firstChild;
+if(copy===theme||copy.testMarker!==undefined||copy.firstChild===style||
+   copy.getAttribute('id')!=='private-theme'||copy.ownerDocument!==owner)
+    throw 'independent inert clone';
+template.innerHTML='<div id="new-inert"></div>';
+if(theme.parentNode!==null||theme.firstChild!==style||style.firstChild!==text||
+   theme.testMarker!==marker||theme.ownerDocument!==owner||content.firstChild===theme||
+   content.firstChild.ownerDocument!==owner||document.querySelector('#new-inert')!==null)
+    throw 'detached inert subtree';
+document.title='inert author state verified';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "inert author state verified");
+}
+
+#[test]
 fn inert_elements_get_attribute_from_real_markup_without_active_attachment() {
     let (doc, _, page, result) = page(
         "<html><body><iframe hidden></iframe><main id=app></main></body></html>",

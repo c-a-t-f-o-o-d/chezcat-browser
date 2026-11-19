@@ -22,6 +22,28 @@ impl Bridge<'_> {
             return Ok(Vec::new());
         };
         let Some(Value::Host(handle)) = args.first() else { return Ok(Vec::new()); };
+        if matches!(method, "appendChild" | "insertBefore") && self.checked_inert_fragment(*handle).is_some() {
+            let children = self.inert_children(*handle).unwrap();
+            if children.is_empty() { return Ok(Vec::new()); }
+            let count = children.len();
+            self.state.work(count.saturating_add(self.doc.nodes[parent].children.len()))?;
+            self.state.copies(count.saturating_mul(2 * std::mem::size_of::<u32>()))?;
+            let added = self.inert_children(*handle).unwrap().to_vec();
+            let siblings = &self.doc.nodes[parent].children;
+            let position = if let ("insertBefore", Some(Value::Host(reference))) = (method, args.get(1)) {
+                let Some(index) = node_index(*reference).and_then(|node| siblings.iter().position(|&child| child == node))
+                    else { return Ok(Vec::new()); };
+                index
+            } else {
+                siblings.len()
+            };
+            let previous = position.checked_sub(1).map(|index| node_handle(siblings[index]));
+            let next = siblings.get(position).copied().map(node_handle);
+            return Ok(vec![
+                NativeChildListChange { target: *handle, added: Vec::new(), removed: added.clone(), previous: None, next: None },
+                NativeChildListChange { target: receiver, added, removed: Vec::new(), previous, next },
+            ]);
+        }
         let Some(source) = node_index(*handle).filter(|&node| self.dom_accessible(node)) else {
             return Ok(Vec::new());
         };
