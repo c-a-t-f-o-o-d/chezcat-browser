@@ -528,6 +528,11 @@ pub trait Host {
         Err("Enumerating this native host object is not implemented.".into())
     }
     fn inherited_keys(&mut self, object:u32) -> Result<Vec<String>,String> { self.own_keys(object) }
+    /// A for-in snapshot can outlive a mutation. Most native families expose
+    /// only enumerable own data; others can recheck an inherited member here.
+    fn enumeration_member(&mut self, object: u32, name: &str) -> Result<bool, String> {
+        self.own_data(object, name).map(|slot| slot.is_some())
+    }
 
     /// Implemented native Window own names and their enumerable attributes.
     /// ES bindings and ordinary expandos are supplied by the active realm.
@@ -7216,7 +7221,7 @@ impl Runtime {
                             if !self.own_enumerable(owner, &name)? {
                                 continue;
                             }
-                        } else if host.own_data(*handle, &name).map_err(Fault::new)?.is_none() {
+                        } else if !host.enumeration_member(*handle, &name).map_err(Fault::new)? {
                             continue;
                         }
                     }
