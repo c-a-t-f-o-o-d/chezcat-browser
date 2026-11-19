@@ -1,6 +1,128 @@
 {
   "schema": 1,
   "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
+  "source_baseline": {
+    "scope": "Latest source-bound workflow results for the integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",
+    "integrated_source": "60895467068d87ed49a045751b20e47309a0ab58",
+    "previous_tag": "v0.81.0-alpha.3",
+    "previous_tag_source": "57cc1d53db3860012b229530d8b7695e3f007f63",
+    "verified_publication": {
+      "tag": "v0.82.0-alpha.1",
+      "tag_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+      "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1",
+      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193",
+      "downloaded_and_verified": ["ChezCat-windows-x64.zip", "ChezCat-source.zip", "publication.json", "SHA256SUMS"],
+      "packaged_executable_sha256": "73784aa0c64166888b95c3859d0b8a3cdb555149934b5df09bd58f6e505aebfe",
+      "packaged_runtime_checks": "Startup, original App journey, version, wire User-Agent and About identity passed."
+    },
+    "combined_app_recheck": {
+      "measured_source": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
+      "executable_sha256": "b843f2624082d27f35cd4b3b9f6a7c0234b87c865794afbe1b8ddd273fa89910",
+      "vue_3_5_45": {
+        "viewport": [
+          1280,
+          800
+        ],
+        "completed_actions": 17,
+        "fault_free_stages": 5,
+        "result": "Mounted component, trusted text edit and two clicks, next-tick and timer update, retained final state and independent editor."
+      },
+      "jquery_4_0_0": {
+        "viewport": [
+          1280,
+          800
+        ],
+        "result": "Initialization, trusted input and timer update passed."
+      },
+      "bootstrap_5_3_9_popper_2_11_8": {
+        "viewports": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "result": "Responsive cards and trusted dropdown open, Amber choice and close passed at both widths."
+      },
+      "vue_2_7_16_foundation_6_9_0": {
+        "viewports": [
+          [
+            1280,
+            800
+          ],
+          [
+            640,
+            800
+          ]
+        ],
+        "result": "Mount, initial render, trusted input and two clicks, asynchronous update and responsive panel layout passed at both widths."
+      },
+      "bootstrap_action_stack": {
+        "viewport_width": 640,
+        "result": "Two 160 by 40 links in one implicit column. A trusted click changed the gap from 8 to 16 pixels. The second link received its trusted click."
+      }
+    },
+    "legacy_w2": {
+      "measured_source": "7608f4c5b2cbe093b236a409afeb11f753366b11",
+      "integrated_via_pr": 115,
+      "executable_sha256": "804abb7fd895580467329497dde862a0d9a1758c8f88a79884de0608b7de1ec0",
+      "viewport": [
+        1280,
+        800
+      ],
+      "first_failure": {
+        "script": "jquery-1.12.4.js",
+        "line": 4743,
+        "column": 4,
+        "operation": "DIV.setAttribute for the raw onfocusin attribute"
+      },
+      "stages": {
+        "load": "passed",
+        "initial_render": "passed",
+        "initialization": "failed",
+        "dropdown_and_form_input": "blocked",
+        "async": "blocked"
+      }
+    },
+    "react_18_3_1": {
+      "measured_source": "2f9fa8dfd69a454e74d1b0051fd875718b82434f",
+      "integrated_via_pr": 114,
+      "executable_sha256": "b5dc57721b14e9131b7fb9742082e1d8a87707bbdd36b33de1d479736b77237a",
+      "viewport": [
+        1280,
+        800
+      ],
+      "runtime_exports": true,
+      "iframe_instance_check_passed": true,
+      "mounted": false,
+      "first_failure": {
+        "script": "react-dom.production.min.js",
+        "stage": "scheduled callback",
+        "line": 58,
+        "column": 228,
+        "operation": "Read contentEditable on the active element"
+      },
+      "controls": "The independent trusted native editor, literal color change and retained neighbor passed."
+    },
+    "development_build_rechecks": {
+      "vue_3_5_45": {
+        "measured_source": "45f949117b4aadbe609578880a4414ff3c778d2f",
+        "executable_sha256": "0366e2c61d6ae87962e455612848f04bbc4776bf0ff1d1c0c4b803f755aa0411",
+        "completed_actions": 17,
+        "fault_free_stages": 5,
+        "result": "Mounted, edited through trusted input, completed both clicks and the next-tick and timer updates, and retained the independent editor."
+      },
+      "tagged_source": {
+        "measured_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+        "build_kind": "development",
+        "legacy_w2_first_failure": {"script": "jquery-1.12.4.js", "line": 4743, "column": 4, "operation": "DIV.setAttribute for the raw onfocusin attribute during initialization"},
+        "react_18_3_1_first_failure": {"script": "react-dom.production.min.js", "line": 58, "column": 228, "operation": "Read activeElement.contentEditable before component mount"}
+      }
+    }
+  },
   "reference": {
     "language": "ECMAScript 2025, edition 16",
     "language_url": "https://262.ecma-international.org/16.0/",
@@ -9,6 +131,7 @@
     "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
   },
   "active_pack": {
+    "record_scope": "Historical Node root prerequisite and its original build. Current application stages are in source_baseline.",
     "id": "node-root",
     "contract_id": "CP8",
     "status": "Original prerequisite committed and independently reviewed; focused/App validation passed, full candidate/public integration pending",
@@ -1209,6 +1332,7 @@
       "sources": [
         "src/javascript.rs",
         "src/expression_parser.rs",
+        "src/identifier_names.rs",
         "tools/check_javascript.py"
       ]
     },
@@ -1293,6 +1417,7 @@
       "status": "Partial",
       "sources": [
         "src/css.rs",
+        "src/css_attribute_substrings.rs",
         "src/css_media.rs",
         "src/layout.rs",
         "src/layout_scroll.rs",
@@ -1346,7 +1471,7 @@
     {
       "name": "jQuery",
       "role": "browser runtime",
-      "status": "Partial; selected legacy and modern workflows blocked",
+      "status": "The pinned 4.0.0 input and timer workflow passes. Legacy 1.12.4 initialization remains blocked.",
       "measured_versions": [
         "1.12.4",
         "4.0.0"
@@ -1359,7 +1484,7 @@
     {
       "name": "React",
       "role": "browser UI runtime",
-      "status": "ReactDOM initialization blocked on the measured browser app",
+      "status": "The runtimes export, and the scheduled ReactDOM callback stops before mounting the component.",
       "measured_versions": ["18.3.1"],
       "measurement": {
         "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
@@ -1389,7 +1514,8 @@
     {
       "name": "Vue",
       "role": "browser UI runtime",
-      "status": "Partial"
+      "status": "Pinned 2.7.16 and 3.5.45 reactive application workflows passed on 067ac5e.",
+      "measured_versions": ["2.7.16", "3.5.45"]
     },
     {
       "name": "Svelte",
@@ -1409,7 +1535,7 @@
     {
       "name": "Bootstrap",
       "role": "compiled CSS plus browser JS",
-      "status": "Partial; selected CSS renders while JavaScript workflows remain blocked",
+      "status": "The pinned 5.3.9 dropdown passes at two widths. The 3.4.1 app remains blocked during legacy jQuery initialization.",
       "measured_versions": [
         "3.4.1",
         "5.3.9"
@@ -1684,11 +1810,15 @@
     "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
     "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved.",
     "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
-    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal."
+    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal.",
+    "textarea_clone_source": "f26eeecbd66af187fbd7f830d37731fd3ff897d2",
+    "textarea_clone_result": "W2 installed and cloned the textarea fragment, read its default and stopped at the fresh input radio type assignment at 4501:2. An independent App edited deep and shallow clones and reset their distinct defaults while preserving the source and neighboring editor.",
+    "created_radio_source": "bfc6b267b15e833ec9cbc17541e0a805cf93a787",
+    "created_radio_result": "W2 created and appended a checked radio and stopped on its container's deep clone at 4509:23. The original native App passed grouping while detached and connected, trusted selection in both directions and form reset."
   },
   "next": [
-    "Advance the measured legacy jQuery initialization and recheck its trusted input and timer stages.",
-    "Retain class/object-prototype and modern Vue/React prerequisites as separate queued work; preserve source-bound App DOM/pixel/trusted-input and responsive rechecks"
+    "Recheck legacy jQuery initialization at its raw attribute write. Retain the trusted dropdown, form and timer stage checks.",
+    "Measure HTML contentEditable reflection for the scheduled ReactDOM callback and preserve the pinned Vue, jQuery and Bootstrap App controls."
   ],
   "selected_standard_controls": {
     "suite": "Selected Test262 slice mode runs",
@@ -1797,7 +1927,14 @@
     "viewport_widths": [640, 1280],
     "result": "At 25 and 75 percent the entire 240 by 16 pixel meter matches the literal control. The trusted click grows the fill from 60 to 180 pixels.",
     "caption_comparison_source": "9494eb489ad0af86a2f1d5b1204710f8f80bee87",
-    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths."
+    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths.",
+    "caption_fix_source": "5298918c6f98df3cc871c6ca1e1def381815f77d",
+    "caption_fix_result": "At both widths the automatic caption occupies one 105 by 24 pixel line. Both 220 by 64 pixel crops match the explicit twin. The constrained control still wraps.",
+    "action_stack_on_caption_source": "At 640 pixels, the d-grid links remain side by side after gap-2 changes to gap-3. The literal and flex stacks match pixel for pixel with 8 and 16 pixel vertical gaps.",
+    "implicit_grid_source": "e11acce392d6b8c8e0deec56e8b08a7639d312f2",
+    "implicit_grid_integrated_recheck": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
+    "implicit_grid_result": "The two 160 by 40 action links and their 8 and 16 pixel row gaps match both control crops. A trusted click reaches the second link.",
+    "inline_alignment_on_grid_source": "A fixed 64 pixel link in a 192 pixel column stays at the start for center and end alignment. The initial paint matches the reported geometry, and the trusted click reaches the link at its painted location."
   },
   "completed_capability_packs": [
     {
@@ -1827,5 +1964,80 @@
         "Broader accessibility"
       ]
     }
-  ]
+  ],
+  "signed_out_home_observation": {
+    "build": "0.82.0-alpha.1+dev.137.g1aeef14cea53",
+    "source": "1aeef14cea5383b0bb8c894720b99a50ec05b836",
+    "main_script_decoded_bytes": 10883200,
+    "scripts_attempted": 43,
+    "scripts_completed": 40,
+    "visible_result": "Two horizontal lines and three gray placeholders. Site header and search box absent.",
+    "first_reported_failures": ["Main application UTF-16 surrogate escape", "Detached STYLE textContent assignment", "Computed opacity CSS work limit"]
+  },
+  "original_script_and_interface_probes": {
+    "scope": "Original offline App probes. Measurements retain their feature-source identities.",
+    "baseline_source": "f2e1823266a7c08c89bce7293572d801da62053c",
+    "integrated_main": "83385ca",
+    "integrated_pull_requests": [
+      121,
+      122
+    ],
+    "document": {
+      "source": "1ff9c51ae45c89da314d7c11a16d35ad4f950d07",
+      "executable_sha256": "9d19345c293b257141fed7e9bd32fc3944f0d0f29c4292c9868cd82ccdc50f56",
+      "app_feature_stages_passed": 6,
+      "independent_controls_passed": 7,
+      "result": "Main/child Document constructors and Node prototype chains, per-realm HTMLDocument alias, borrowed documentElement getter and wrong-receiver checks pass. Native/literal pixels remain unchanged."
+    },
+    "compressed_scripts": {
+      "source": "e66b0ad1ca26b0b8afe43e71fb18f4f5d974bde4",
+      "executable_sha256": "6f52e3acbd608d39fc35c52febd9aec19852a218fb901b2d9a3bd462ea4d0569",
+      "per_script_cap_bytes": 16777216,
+      "visible_effect_source_bytes": 8388609,
+      "retained_decoder_refusal_source_bytes": 16777217,
+      "result": "The previously refused 8 MiB + 1 byte gzip script is admitted, compiles and paints its marker. The 16 MiB + 1 byte source remains refused. Native controls and continuation pass.",
+      "script_policy_cases_passed": 27,
+      "script_policy_case_scope": "27 total policy cases include two exact 16 MiB cases covering parser and dynamic TLS loading."
+    },
+    "canvas_dimensions": {
+      "pull_request": 123,
+      "measured_feature_source": "3e7366a4e0c6478fc03727fa1bd2f6ecf01abd56",
+      "executable_sha256": "6fee16c358b531c21e978c3c8e7194b8ba18c42f518dd6c1567a3eb09a47aacd",
+      "app_feature_stages_passed": 5,
+      "independent_controls_passed": 7,
+      "result": "Default/parsed dimensions, IDL and Attr changes, detached ownership and saved accessors pass with retained native/literal pixels.",
+      "next_fault": "getContext('2d') at 17:86. 2D drawing remains unproved."
+    },
+    "canvas_rectangles": {
+      "pull_request": 125,
+      "measured_feature_source": "f53ab3ec6a7a0ce767602c25107740eb3f9321cc",
+      "integrated_main": "ca845b42cc5a9c781ca54125c49bd8109b285d03",
+      "executable_sha256": "f4a8aef4ce1b5b01ad62a01444d07d905073b149ecfd982055f7dbe11d3013a6",
+      "app_feature_stages_passed": 5,
+      "independent_controls_passed": 9,
+      "result": "The 80 by 48 App paints black rectangles, clears pixels, resets on same-width assignment and repaints with the saved context. Separate App controls check object-fit none and scale-down."
+    },
+    "animation_midpoints": {
+      "measured_source": "a965b2b572c467aa729f77f2ca155a8b9449896a",
+      "integrated_main_with_same_tree": "e2dabcf90f66573c4f0176ca9dad51cbfed4cfa0",
+      "executable_sha256": "be95782022addb0faac72f32b257278136fa843e2f78a2d0f81cb5fbc25d55c6",
+      "reference_version": "web-animations-js 2.3.2",
+      "color": "At 500 ms all 576 animated pixels match the literal #6080a0 swatch. All five sampled stages pass.",
+      "next_lite_opacity": "At 0, 500 and 1000 ms the 3456-pixel tile paints #ffffff, #808080 and #010101. The edited input, overlap and exterior pixels pass."
+    },
+    "canvas_solid_colors": {
+      "pull_request": 126,
+      "measured_feature_source": "124686ee77f4a972a288aa46178cc2553e009dfe",
+      "integrated_main": "9610bafc7e6fc0cabfbc03d5fa69b2f46a9523ec",
+      "executable_sha256": "3f779abac578c6d4faa33dbc3b43fac537685823080feb88655fdd3aca13b393",
+      "app_feature_stages_passed": 3,
+      "result": "The original App paints the expected opaque and translucent swatches and resets to black. The alpha blend over #204080 reads #704040 on screen.",
+      "next_fault": "A separate original App paints and preserves its edited field, then stops at undefined getImageData at 28:18."
+    },
+    "unverified": [
+      "Live signed-out shell",
+      "Search",
+      "Playback"
+    ]
+  }
 }

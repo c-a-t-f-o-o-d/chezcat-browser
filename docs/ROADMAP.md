@@ -2,9 +2,9 @@
 
 # 🐱 ChezCat Browser — Development Roadmap
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.2&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Development focus](https://img.shields.io/static/v1?label=Focus&message=Web%20compatibility&color=6d28d9)](#active--upcoming-milestones)
-[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
+[![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 
 *Delivering repeatable web page improvements through shared, spec-aligned browser capabilities.*
 
@@ -18,22 +18,23 @@
 
 **Public source moves frequently. Named releases move only on owner request.**
 Milestone IDs below describe work, not reserved versions, deadlines, or promises
-of complete framework support. No date or version is assigned to the next release.
+of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
-| **Published prerelease** | [0.81.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2), source `36adf20`, released November 17, 2026 (UTC) | Explicit owner request; immutable tag and assets |
-| **Public `main`** | Integrated development source; PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29), [#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30), and [#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) add behavior beyond alpha.2 | Coherent PRs after applicable integration checks |
+| **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
+| **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
+| **Public `main`** | Through `9610baf`, includes the compressed-script allowance, Document interface, canvas dimensions, transparent 2D rectangles and solid fill colors beyond alpha.1 | Coherent PRs after applicable integration checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
 ```mermaid
 flowchart LR
-    BASE["Published alpha.2"] --> DOM["DOM / string foundation<br/>Merged: PR 29"]
-    DOM --> URL["Anchor URL reflection<br/>Merged: PR 30"]
-    URL --> INPUT["INPUT fragments: merged PR 32<br/>Events: next compatibility work"]
-    URL --> CSS["CSS variables + colors<br/>Active visual work"]
-    INPUT --> APPS["Useful framework workflows"]
+    BASE["Published 0.82.0-alpha.1"] --> DOM["DOM and resource loading"]
+    DOM --> URL["Shared browser capabilities"]
+    URL --> INPUT["Compressed scripts, Document and canvas rectangles"]
+    URL --> CSS["CSS variables and implicit grid rows"]
+    INPUT --> APPS["Signed-out video search and playback goal<br/>Existing framework checks"]
     CSS --> APPS
     APPS --> ISO["Sandboxed content processes<br/>Later readiness gate"]
     APPS --> GPU["Measured GPU acceleration<br/>Later readiness gate"]
@@ -56,7 +57,11 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-Snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
+The next milestone is a usable signed-out video homepage. On clean dev137 (`1aeef14`), the main script decoded and entered the engine, but the site header and search box stayed missing. Current work follows the surrogate-escape failure, detached STYLE text assignment and CSS work limit on an opacity read. Search results, watch navigation and playback each need a live check. [Measured homepage and offline animation results](COMPATIBILITY.md)
+
+Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
+
+Earlier snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 DOM-06 includes measurements on `3456e67`, `5c89eea` and `5c22afd`. These changes
 are included in the combined `main` recheck on `25654fa`.
 The later selector candidate `02cd0f8` is integrated in `main` at `991cba3`.
@@ -85,9 +90,9 @@ workloads, without framework-specific substitutes.
 | :--- | :--- | :--- | :--- |
 | ✅&nbsp;Merged | <code>DOM&#8209;01</code> | **String concat, hidden-input state, and genuine Node roots** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29) integrated the finite contracts. This is not whole-framework compatibility. |
 | ✅&nbsp;Merged | <code>DOM&#8209;02</code> | **Anchor HTTP(S) URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30) integrated scoped live URL values. Wider URL semantics remain bounded by the contract. |
-| ✅&nbsp;Merged | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) integrated real editing/reset, dirty/default values, neighboring controls, ownership, atomic refusals, and focus retirement. Its pinned modern jQuery fixture passes startup; full interaction remains blocked. |
-| ◻️&nbsp;Next | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | Reproduce the trusted-input failure reported by PR #32; implement normal property lookup without weakening branded access. Recheck the unchanged modern jQuery input/timer workflow. |
-| ◻️&nbsp;Next | <code>DOM&#8209;05</code> | **DocumentFragment and subsequent legacy DOM boundaries** | Reduce the next failure reported by PR #32, then verify fragment insertion, tree identity, form state, and rollback. Preserve the unchanged legacy workload and any next blocker. |
+| ✅&nbsp;Merged | <code>DOM&#8209;03</code> | **Native text INPUT fragments and retained editor state** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32) integrated real editing/reset, dirty/default values, neighboring controls, ownership, atomic refusals, and focus retirement. Its pinned modern jQuery fixture passed startup on that source. PR #34 later cleared the interaction boundary. |
+| ✅&nbsp;Merged | <code>DOM&#8209;04</code> | **Native Event own-property behavior** | PR #34 clears the trusted-input failure reported by PR #32. The unchanged jQuery 4.0.0 input and timer workflow passes on `067ac5e`. |
+| ◻️&nbsp;Continuing | <code>DOM&#8209;05</code> | **DocumentFragment and native form controls** | Legacy jQuery creates and appends its checked radio on `bfc6b26`. That build stopped at 4509:23. PR #115 adds native radio cloning. On `7608f4c` the next W2 failure is the `onfocusin` attribute write at 4743:4. [Radio inputs](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/113) |
 | ✅&nbsp;Merged | <code>DOM&#8209;06</code> | **Element selectors, siblings, Slottable and NodeList iteration** | Bootstrap initializes at 1280/640. [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) clears its dropdown selector boundary on measured `02cd0f8`, integrated at `991cba3`. [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) adds guarded Element/Text `assignedSlot` reads for ordinary trees. Measured `a6a2619` then reaches `node.toString()` at 1736:9. Shadow DOM remains unsupported. |
 | ✅&nbsp;Merged | <code>DOM&#8209;07</code> | **Ordinary DOM object stringification** | [PR #64](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64)'s BUTTON/UL slice advanced `a82267e` to computed overflow. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68) extends HTML-container interfaces. On `13d7dae` at 1280/640, the menu visibly opens and its trusted amber-choice callback runs. The menu stays open. The first microtask fault is computed `position` at 1990:5. |
 | ✅&nbsp;Merged | <code>DOM&#8209;08</code> | **Genuine Node containment** | [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) adds inclusive physical Node ancestry with Attr and receiver/origin distinctions. Integrated `ec7db2f` completes the pinned Bootstrap open/choice/close workflow at 1280/640. |
@@ -99,8 +104,8 @@ only their initial HTML paint or absence of script errors.
 
 | State | ID | Deliverable & scope | Completion evidence |
 | :--- | :--- | :--- | :--- |
-| 🟡&nbsp;Under&nbsp;review | <code>CSS&#8209;01</code> | **Inherited custom properties in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31) reports a real App reduction changing from 80×30 to 104×46, matching an opaque literal control's pixels, hits, and reflow. Hosted verification still gates integration; no full Bootstrap styling claim. |
-| ◻️&nbsp;Investigate | <code>CSS&#8209;02</code> | **Alpha colors, including `rgba()`** | Establish the current parser/compositing boundary with an original reduction. Verify computed values, alpha composition, clipping, and painted output against a reference; do not assume every spelling is absent or supported. |
+| ✅&nbsp;Merged | <code>CSS&#8209;01</code> | **Inherited custom properties in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31) reports a real App reduction changing from 80×30 to 104×46, matching an opaque literal control's pixels, hits, and reflow. The measured scope covers the original opaque literal control. |
+| ✅&nbsp;Merged slice | <code>CSS&#8209;02</code> | **Alpha colors, including `rgba()`** | PR #85 integrates translucent uniform rounded borders. On `8ebf051`, 144 exterior corner samples are white and the straight edges retain their original pixels at both widths. |
 | ◻️&nbsp;Ongoing | <code>CSS&#8209;03</code> | **Image, font, sizing, and input-layout defects** | Rank reproducible visible failures by shared impact; keep real dimensions, resource outcomes, paint, and hit testing consistent. Select the next finite scope from evidence. |
 | ✅&nbsp;Merged | <code>CSS&#8209;04</code> | **Native button padding** | [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54) integrates padding for button, submit and reset controls in `main` at `25654fa`. The loaded Bootstrap toggle measures 191×41 px at both widths on that main build. |
 | ✅&nbsp;Merged | <code>CSS&#8209;05</code> | **Live computed custom-property reads** | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrates at `5c21400`. Measured feature build `63a2259` passes 2,657 normal tests and 25 journeys locally and in CI. The unchanged Bootstrap sample advances to Popper's `node.toString()` boundary on its first trusted click at both widths. |
@@ -153,11 +158,9 @@ Neither depends on supporting every website first.
 
 ## Delivery — Frequent Source, Verified Builds
 
-**Keep the current CI approach.** The development agent reviews failures and fixes
-the affected work through the existing local, PR, and hosted checks. The proposed
-asynchronous handoff is deferred; no workflow, branch-protection, or promotion
-change is enabled by this documentation. Development source continues to advance
-independently of owner-requested releases.
+Development PRs use focused checks. Trusted pushes run source privacy and
+configuration checks. The agent owns failure diagnosis and repair. Full regression,
+offline journeys and package verification belong to owner-requested releases.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
@@ -178,8 +181,8 @@ under verification; do not claim failed delivery succeeded. See
 > [!NOTE]
 > **One practical development cycle:** reproduce a concrete failure, implement
 > the shared fix, run focused affected and security-negative checks, inspect the
-> changed workflow, then commit and submit it through the applicable PR/CI gates.
-> Full regression belongs at integration boundaries—not after every small edit.
+> changed workflow, then submit and merge one PR. Start the next change from
+> updated main.
 
 Public feature branches should receive coherent, reviewable progress frequently.
 A named release is not required for a commit, PR, CI run, or development build.

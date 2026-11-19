@@ -67,7 +67,7 @@ Windows runtime bundle.
 | :--- | :--- | :--- |
 | **Ordinary edits** | Focused affected tests and relevant security negatives | Proves the changed behavior, not a complete integration pass |
 | **Native suite** | `python tools/capture_tests.py --toolchain 1.99.1` | Normal Windows test results for the actual source/configuration |
-| **Integration** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
+| **Owner-requested release verification** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
 | **Physical devices / public sites** | Separate explicitly scoped checks | Not inferred from routine offline verification |
 | **Named release** | [Release procedure](RELEASING.md) | Only for an explicit owner-requested publication |
 
@@ -143,14 +143,20 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-About shows the development build identity and source state. The verified clean
-integrated build at `4d72251915d6f2c9e74c38721ddc7fd3f2f63d5f` displays
+Published `0.82.0-alpha.1` identifies tagged source
+`f2e1823266a7c08c89bce7293572d801da62053c`. Its downloaded package, PE, HTTP User-Agent,
+CLI and About identities passed the [release checks](RELEASING.md#published-baseline).
+
+About shows the development build identity and source state. As a historical
+example, the verified clean integrated build at
+`4d72251915d6f2c9e74c38721ddc7fd3f2f63d5f` displays
 `0.81.0-alpha.2+dev.55.g4d72251915d6`. The number comes from verified public main
 history and the suffix identifies the source commit. A feature head outside that
 history, a dirty checkout or unavailable history uses `+dev.g<commit>` when the
 revision is known and `+dev.unknown` otherwise. Declared tagged builds display the
 base version and identify the declared tag with publication unverified. About
-shows clean, dirty or unknown source state separately.
+shows clean, dirty or unknown source state separately. That embedded label is not
+rewritten by later download verification.
 
 <details>
 <summary><strong>📦 Packaging boundaries and private-review exports</strong></summary>

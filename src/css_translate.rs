@@ -250,7 +250,7 @@ fn arguments(source: &str) -> Result<Arguments<'_>, TransformSyntax> {
 
 // Arithmetic grammar remains unsupported; admit only a balanced known math
 // function boundary, never an arbitrary nested function as a length/number.
-fn math_value(source: &str) -> Result<(), TransformSyntax> {
+pub(super) fn math_value(source: &str) -> Result<(), TransformSyntax> {
     let (name, body, rest) = function(source)?;
     if !trim(rest).is_empty()
         || trim(body).is_empty()

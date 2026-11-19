@@ -16,8 +16,8 @@ impl Engine<'_> {
                 continue;
             };
             let origin_y = b.y.saturating_add(b.border[0]);
-            let flow = b.flex.as_ref().map_or(b.natural_height, |group| {
-                group
+            let flow = match &b.formatting {
+                Some(FormattingContext::Flex(group)) => group
                     .items
                     .iter()
                     .map(|item| {
@@ -31,8 +31,10 @@ impl Engine<'_> {
                             .saturating_add(margin[2].max(0))
                     })
                     .max()
-                    .unwrap_or(0)
-            });
+                    .unwrap_or(0),
+                Some(FormattingContext::Grid(group)) => group.track_end,
+                None => b.natural_height,
+            };
             let natural = b
                 .height
                 .max(flow)

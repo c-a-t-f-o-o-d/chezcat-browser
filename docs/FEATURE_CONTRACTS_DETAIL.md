@@ -529,6 +529,21 @@ at 640x800 they retain their original stacking. Vue execution is separate; the
 latest unchanged W3 first-root failure is recorded under CP6. No reactive
 interaction or full-framework pass is claimed.
 
+Attribute selectors share one parser and matcher across CSS and supported DOM
+queries, `matches` and `closest`. In addition to presence, exact and token matching,
+support dash-prefix, starts-with, ends-with and contains operations. The three
+substring operations never match an empty operand; dash-prefix retains its exact
+or immediately-followed-by-hyphen rule. Preserve quoted punctuation literally,
+existing HTML attribute case defaults and ASCII-only `i`/`s` flags. Unsupported
+selector-string escapes and namespaces still reject the whole selector list.
+Retain the512-byte per-selector,16-member list and existing query/result limits.
+Contains uses a selector-bounded prefix table and a linear borrowed scan; query
+string work is debited before inspection, including inside negation. No DOM
+attribute copy, lowercased attribute allocation or unmetered quadratic search is
+introduced. Original local trusted App coverage binds inert script metadata and
+ordinary Element queries to actual CSS marker pixels and retained native input.
+See [attribute matching](https://www.w3.org/TR/selectors-4/#attribute-substrings).
+
 Finite em media lengths use the same browser-owned initial16CSSpx font basis as
 default Style initialization. Author html/body fonts do not change that basis;
 the real CSS viewport lifecycle supplies resize and zoom conditions. Preserve

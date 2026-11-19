@@ -14,6 +14,9 @@ pub(crate) use scroll_offsets::Axis;
 
 #[path = "script_geometry_offset_coordinates.rs"]
 mod offset_coordinates;
+#[cfg(test)]
+#[path="script_geometry_stylesheet_cache_tests.rs"]
+mod stylesheet_cache_tests;
 
 fn live_checked(forms: &Forms, node: usize) -> Option<bool> {
     forms.controls.get(&node)
@@ -34,9 +37,11 @@ pub struct Geometry {
     fonts: Book,
     boxes: Option<Vec<Option<ClientBox>>>,
     computed_properties: Option<crate::css::ComputedProperties>,
+    stylesheet_cache: Option<crate::css::StylesheetCache>,
     scroll_heights:Vec<Option<i32>>,
     viewport_scroll_height:i32,
     viewport_scroll_unavailable:bool,
+    incomplete_grid_nodes: Vec<bool>,
     rects: Vec<Option<layout::BorderRect>>,
     visual_rects: Vec<Option<layout::VisualBorderRect>>,
     visual_unavailable: Vec<bool>,
@@ -68,9 +73,11 @@ impl Geometry {
             fonts: fonts.clone(),
             boxes: None,
             computed_properties: None,
+            stylesheet_cache: None,
             scroll_heights:Vec::new(),
             viewport_scroll_height:0,
             viewport_scroll_unavailable:false,
+            incomplete_grid_nodes: Vec::new(),
             rects: Vec::new(),
             visual_rects: Vec::new(),
             visual_unavailable: Vec::new(),
@@ -163,10 +170,12 @@ impl Geometry {
         self.update_scroll_range(layout.height);
         self.boxes = Some(layout.client_boxes.clone());
         self.computed_properties = Some(layout.computed_properties.clone());
+        self.stylesheet_cache = layout.stylesheet_cache.clone();
         self.scroll_heights=layout.scroll_heights.clone();
         self.viewport_scroll_height=layout.viewport_scroll_height;
         self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
         self.offset_unavailable = layout.offset_unavailable.clone();
+        self.incomplete_grid_nodes.clone_from(&layout.incomplete_grid_nodes);
         self.offset_parents.clone_from(&layout.offset_parents);
         self.rects = layout.border_rects.clone();
         self.visual_rects.clone_from(&layout.visual_border_rects);
@@ -188,7 +197,7 @@ impl Geometry {
             budget.work(layout::offset_parent_work(doc))?;
             budget.copies(layout::offset_parent_storage(doc.nodes.len()))?;
             let checked = |node| live_checked(forms, node);
-            let layout = layout::build_viewport_with_fonts_budgeted(
+            let layout = layout::build_viewport_with_fonts_budgeted_cached(
                 doc,
                 self.width,
                 self.height,
@@ -198,15 +207,18 @@ impl Geometry {
                 Some(&checked),
                 &self.fonts,
                 &mut budget,
+                self.stylesheet_cache.as_ref(),
             )?;
             self.remaining -= 1;
             self.update_scroll_range(layout.height);
             self.boxes = Some(layout.client_boxes);
             self.computed_properties = Some(layout.computed_properties);
+            self.stylesheet_cache = layout.stylesheet_cache;
             self.scroll_heights=layout.scroll_heights;
             self.viewport_scroll_height=layout.viewport_scroll_height;
             self.viewport_scroll_unavailable=layout.viewport_scroll_unavailable;
             self.offset_unavailable = layout.offset_unavailable;
+            self.incomplete_grid_nodes = layout.incomplete_grid_nodes;
             self.offset_parents = layout.offset_parents;
             self.rects = layout.border_rects;
             self.visual_rects = layout.visual_border_rects;
@@ -231,10 +243,11 @@ impl Geometry {
             let environment = layout::viewport_style_environment(doc, self.width, self.height, self.zoom);
             let checked = |node| live_checked(forms, node);
             let mut budget = crate::css::CssBudget::new(host_work, copy_work);
-            let cascade = crate::css::compute_with_environment_and_properties_budgeted(
-                doc, &self.styles, Some(&checked), Some(environment), &mut budget,
+            let cascade = crate::css::compute_with_environment_and_properties_budgeted_cached(
+                doc, &self.styles, Some(&checked), Some(environment), &mut budget, self.stylesheet_cache.as_ref(),
             )?;
             self.computed_properties = Some(cascade.computed_properties);
+            self.stylesheet_cache = cascade.stylesheet_cache;
         }
         *host_work = host_work.checked_sub(1).ok_or("DOM work limit reached during computed style lookup.")?;
         Ok(self.computed_properties.as_ref().expect("computed cascade was installed"))
@@ -332,6 +345,9 @@ impl Geometry {
             return Ok((f64::from(pixels)/f64::from(self.zoom)).round());
         }
 
+        if self.incomplete_grid_nodes.get(node) == Some(&true) {
+            return Err(format!("Client and offset dimensions require completed grid tracks. Receiver node={node}."));
+        }
         let client = self
             .boxes
             .as_ref()

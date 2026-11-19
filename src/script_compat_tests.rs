@@ -107,9 +107,19 @@ var thrown=false;try{detachedStyle.type={toString:function(){throw 17;}};}catch(
 document.title='detached-style-type-ok';
 "#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"detached-style-type-ok");assert!(!page.has_host_tasks());assert!(page.take_dynamic_stylesheets().is_empty());
     let style=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let nodes=doc.nodes.len();let commits=page.state.dom_commits;
-    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.textContent='body{display:none}';","detachedStyle.innerHTML='body{display:none}';"]{
-        let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,commits);assert!(doc.nodes[style].children.is_empty());assert!(!page.has_host_tasks());
-    }
+    let failed = page.console_eval(&mut doc, &mut forms, "detachedStyle.innerHTML='body{display:none}';");
+    assert_eq!(failed.errors, 1, "{}", page.report());
+    assert_eq!(doc.nodes.len(), nodes);
+    assert_eq!(page.state.dom_commits, commits);
+    assert!(doc.nodes[style].children.is_empty());
+    assert!(!page.has_host_tasks());
+    let text = page.console_eval(&mut doc, &mut forms, "detachedStyle.textContent='body{display:none}';if(detachedStyle.isConnected||detachedStyle.firstChild.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'detached style text or type';");
+    assert_eq!(text.errors, 0, "{}", page.report());
+    assert_eq!(doc.nodes.len(), nodes + 1);
+    assert_eq!(doc.nodes[style].children.len(), 1);
+    let connected = page.console_eval(&mut doc, &mut forms, "var text=detachedStyle.firstChild; document.body.appendChild(detachedStyle); if(!detachedStyle.isConnected||text!==detachedStyle.firstChild||text.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'connected style text or type';");
+    assert_eq!(connected.errors, 0, "{}", page.report());
+    assert!(!page.has_host_tasks());
 }
 
 #[test]
@@ -387,10 +397,9 @@ var log='';Promise.resolve().then(function(){try{p.replaceChild(orphan,orphan);}
 
 #[test]
 fn replace_child_rejects_unsupported_native_subtrees_before_editing_either_parent() {
-    // Whole text INPUTs and owned checkboxes have checked native move paths. Radio subtrees
-    // retain an unsupported-native witness for the same atomicity assertions.
-    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field type=radio value=original></section>"),
-        ("<span id=old><input id=field type=radio value=original></span>","<section id=incoming>new</section>")] {
+    // A submit INPUT has an editable value and remains outside the supported native move cases.
+    for (old,new) in [("<span id=old>old</span>","<section id=incoming><input id=field type=submit value=original></section>"),
+        ("<span id=old><input id=field type=submit value=original></span>","<section id=incoming>new</section>")] {
         let html=format!("<div id=p>{old}</div><div id=q>{new}</div>");
         let (mut doc,mut forms,mut page,outcome)=page(&html,&["document.getElementById('field').value='edited';"]);
         assert_eq!(outcome.errors,0,"{}",page.report());
@@ -1001,9 +1010,9 @@ word.setAttribute('data-words','left\tready\nlast\fend\rtrail');if(!word.matches
 
 #[test]
 fn unavailable_animation_feature_reads_are_absent_without_advertising_or_running_animation() {
-    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><svg id=foreign></svg></body></html>",&[r#"
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><unlisted id=opaque></unlisted><svg id=foreign></svg></body></html>",&[r#"
 var d=document.getElementById('d'),created=document.createElement('span'),video=document.getElementById('video'),calls=0;
-for(var element of [document.documentElement,document.body,d,created,video]){
+for(var element of [document.documentElement,document.body,d,created,video,document.getElementById('custom')]){
  if(element.animate!==undefined||typeof element.animate!=='undefined'||'animate' in element)throw 'absent animation';
  if(element.animate)calls++;
  var caught=false;try{element.animate([]);}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'missing method call';
@@ -1017,7 +1026,7 @@ document.title='animation-absence-ok';
         let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert_eq!(doc.nodes.len(),nodes);assert!(!page.has_host_tasks());
     }
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    for id in ["foreign","custom"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
+    for id in ["foreign","opaque"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
 }
 
 #[test]
@@ -1885,7 +1894,7 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    for (node, name) in [(nodes[0], "value"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
+    for (node, name) in [(nodes[0], "type"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
         let value = bridge.call(node_handle(node), "getAttributeNode", &[Value::String(name.into())]).unwrap();
         let Value::Host(handle) = value else { panic!("expected real Attr") };
         let original = bridge.doc.attr(node, name).unwrap().to_owned();
@@ -1897,6 +1906,15 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
         assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner, Some(node));
     }
     assert!(bridge.call(node_handle(nodes[3]), "getAttributeNode", &[Value::String("title".into())]).is_err());
+    let input = node_handle(nodes[0]);
+    let Value::Host(value) = bridge.call(input, "getAttributeNode", &[Value::String("value".into())]).unwrap() else { panic!("missing checkable value Attr") };
+    bridge.set(value, "value", Value::String("changed".into())).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[0], "value"), Some("changed"));
+    assert_eq!(bridge.forms.controls[&nodes[0]].value.text(), "changed");
+    bridge.call(input, "removeAttributeNode", &[Value::Host(value)]).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[0], "value"), None);
+    assert_eq!(bridge.forms.controls[&nodes[0]].value.text(), "on");
+    assert_eq!(bridge.state.attributes[script_attr::index(value).unwrap()].owner, None);
 }
 
 #[test]

@@ -15,6 +15,68 @@
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
+## 0.82.0-alpha.1
+
+Shared JavaScript, DOM, native-control and rendering improvements since
+`v0.81.0-alpha.3`. Measurements below retain their actual source revisions.
+
+- Add bounded WeakMap and WeakSet, receiver-aware Reflect.get/Reflect.set, and
+  ordinary-object Proxy reads, writes, membership, prototype and forwarded
+  own-property queries. Canonical DOM interface inheritance and SVG identity,
+  ordinary label properties and absent-attribute removal enable selected Vue
+  workflows. On [`f0dc9ef`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/f0dc9ef0bf797dc8746bf87212e8768d0bab8c87),
+  the Vue 3.5.45 app mounts, accepts an edited name and two clicks, and completes
+  its next-tick/timer update without recorded faults. Vue 2.7.16 passes input,
+  asynchronous updates and responsive layout at 640/1280 px on
+  [`1561f4d`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1561f4dbb3c03139a2723a2e2b2db214b3c348e1).
+- Add async functions and arrows returning genuine Promises, with bounded
+  `await` suspension and resumption through the Promise job queue. On
+  [`c669dd9`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/c669dd9b3618913419e621d6cac3961e31d04db8),
+  both original pages paint pending, fulfilled and caught states, retain a
+  rejection reason through a later handler, and each exercise one intentional
+  unhandled rejection. Await positions and control-flow forms remain finite.
+- Add native checkbox and textarea fragments, fresh checkbox/radio type
+  assignment, defaultChecked reflection and native input interface accessors.
+  Textarea and radio clones copy live values/checkedness and dirty flags, with
+  defaults from their copied markup and groups following actual tree/form
+  ownership. Tree changes and Reset retain neighboring edits and reject
+  unsupported batches atomically.
+- Add bounded ordinary Node cloning and read-only Element.outerHTML
+  serialization, inert attribute-less LINK and explicitly empty TABLE fragments,
+  EventListener objects with live handleEvent lookup, and genuine embedding-realm
+  HTMLIFrameElement identity. Frame activation and resource mutation retain
+  their existing checks.
+- Improve CSS root-variable themes, equal circular background corners, uniform
+  solid rounded borders, single-layer background-color clipping, calculated
+  margin/padding products, and variable line-height and height. At
+  [`59ed086`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/59ed0864bfbf5c1a9c7d45cada668d2f62400629),
+  the pinned Bootstrap cards have a real 24 px wide-screen gutter while the
+  trusted dropdown and narrow-screen stacking continue to pass.
+- Match absolute-caption intrinsic width to actual collapsed-text advances.
+  On integrated [`ae148c0`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ae148c0263c10b2d5f3840ff5952348e17254a2e),
+  the automatic caption stays on one line and the Bootstrap progress meter
+  matches its 240×16 literal control at 25% and 75%, including pixels, at both
+  640 and 1280 px.
+- Add a real implicit single-column grid with auto rows, item stretching,
+  row gaps and shared paint/hit geometry. On
+  [`e11acce`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e11acce392d6b8c8e0deec56e8b08a7639d312f2),
+  Bootstrap's action stack matches its literal control's two 160×40 rows and
+  pixels. A trusted click changes the gap from 8 to 16 px and the moved link
+  remains clickable. Authored track templates and general grid placement remain
+  outside this slice.
+
+On `7608f4c`, legacy jQuery 1.12.4 reaches an attribute write on a detached
+element at line 4743. On `2f9fa8d`, the React 18.3.1 runtime exports load and
+ReactDOM reaches a `contentEditable` read on the active element at line 58,
+before the component mounts. Wider Proxy
+operations, await forms, CSS transforms, rounded descendant clipping and native
+control styling retain their documented limits. See [compatibility](docs/COMPATIBILITY.md)
+and [capabilities](docs/CAPABILITIES.md) for source-scoped results and boundaries.
+
+Delivery uses runtime/source ZIPs, `publication.json` and `SHA256SUMS` to identify
+the final release source and bytes. Publication and downloaded-asset verification
+remain separate from these source notes.
+
 ## 0.81.0-alpha.3
 
 A consolidated source catch-up since alpha.2, including the shared browser

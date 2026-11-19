@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import tempfile
 import time
@@ -28,6 +29,7 @@ NEXT_JOB = "\n//---NEXT JOB---\n"
 
 PROBE = r'''
 #![allow(dead_code)]
+// Additional probe crate modules
 #[path = JAVASCRIPT_SOURCE]
 mod javascript;
 use javascript::{Host, Runtime, Value};
@@ -42,8 +44,13 @@ fn representation(value: &Value) -> String {
         Value::Number(value) if value.is_nan() => "number:NaN".into(),
         Value::Number(value) => format!("number:{:016x}", value.to_bits()),
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        #[cfg(chezcat_string_units)]
+        Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
         Value::Symbol(_) => "symbol".into(), Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(), Value::Host(id) => format!("host:{id}"),
+        #[cfg(not(chezcat_string_units))]
+        #[allow(unreachable_patterns)]
+        _ => panic!("This legacy probe cannot encode an unknown JavaScript value"),
     }
 }
 impl Host for Recorder {
@@ -60,7 +67,10 @@ impl Host for Recorder {
 fn main() {
     let mut source = String::new(); io::stdin().read_to_string(&mut source).unwrap();
     let mut runtime = Runtime::with_limits(javascript::limits::Limits {
-        heap: javascript::limits::REGRESSION_HEAP,
+        heap: javascript::limits::HeapLimits {
+            objects: 4096, properties: 16_384, object_properties: 4096,
+            array_length: 8192, retained_values: 2 * 1024 * 1024,
+        },
         steps: 250_000, copy_bytes: 8 * 1024 * 1024,
         regexp_work: 2_000_000, job_seconds: 1,
         ..javascript::limits::BROWSER
@@ -97,7 +107,11 @@ function repr(value) {
     if(value===undefined)return 'undefined'; if(value===null)return 'null';
     if(typeof value==='boolean')return 'boolean:'+value;
     if(typeof value==='number') { if(Number.isNaN(value))return 'number:NaN'; const b=Buffer.alloc(8);b.writeDoubleBE(value);return 'number:'+b.toString('hex'); }
-    if(typeof value==='string')return 'string:'+Buffer.from(value).toString('hex');
+    if (typeof value === 'string') {
+        const utf8 = Buffer.from(value, 'utf8');
+        if (utf8.toString('utf8') === value) return 'string:' + utf8.toString('hex');
+        return 'string-units:' + Buffer.from(value, 'utf16le').swap16().toString('hex');
+    }
     if(typeof value==='symbol')return 'symbol'; if(typeof value==='function')return 'function';
     if(value===globalThis.test)return 'host:1'; return typeof value;
 }
@@ -133,9 +147,11 @@ def source_manifest(root):
 def compile_probe(source_root, directory, rustc="rustc"):
     path = directory / "promise-probe.rs"
     executable = directory / ("promise-probe.exe" if os.name == "nt" else "promise-probe")
-    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))), encoding="utf-8")
+    write_probe = runpy.run_path(str(Path(__file__).with_name("javascript_probe_source.py")))["write_probe"]
+    flags = write_probe(PROBE, source_root, path)
     available = "pub fn microtask_checkpoint(" in (source_root / "src/promises.rs").read_text(encoding="utf-8") if (source_root / "src/promises.rs").is_file() else False
-    flags = ["--cfg", "chezcat_microtasks"] if available else []
+    if available:
+        flags.extend(["--cfg", "chezcat_microtasks"])
     subprocess.run([rustc, "--edition=2021", "-O", *flags, str(path), "-o", str(executable)],
                    capture_output=True, text=True, timeout=120, check=True)
     return executable, available

@@ -15,8 +15,11 @@ struct Snapshot {
     positions: Vec<Option<Position>>,
     transforms: Vec<Option<Transform>>,
     has_transform_geometry: bool,
+    canvas_foregrounds: HashMap<usize, u32>,
+    opacities: HashMap<usize, Option<f64>>,
 }
 impl ComputedProperties {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         variables: Vec<custom_properties::Variables>,
         eligible: Vec<bool>,
@@ -25,6 +28,8 @@ impl ComputedProperties {
         positions: Vec<Option<Position>>,
         transforms: Vec<Option<Transform>>,
         has_transform_geometry: bool,
+        canvas_foregrounds: HashMap<usize, u32>,
+        opacities: HashMap<usize, Option<f64>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -34,6 +39,8 @@ impl ComputedProperties {
             positions,
             transforms,
             has_transform_geometry,
+            canvas_foregrounds,
+            opacities,
         }))
     }
     pub(crate) fn read(
@@ -112,6 +119,18 @@ impl ComputedProperties {
     pub(crate) fn has_transform_geometry(&self) -> bool {
         self.0.has_transform_geometry
     }
+    pub(crate) fn canvas_foreground(&self, node: usize) -> Result<Option<u32>, ComputedStyleUnavailable> {
+        if !self.0.complete { return Err(ComputedStyleUnavailable); }
+        Ok(self.0.canvas_foregrounds.get(&node).copied())
+    }
+    pub(crate) fn read_opacity(&self, node: usize) -> Result<Option<f64>, ComputedStyleUnavailable> {
+        let eligible = self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible { return Ok(None); }
+        if !self.0.complete { return Err(ComputedStyleUnavailable); }
+        self.0.opacities.get(&node).copied().unwrap_or(Some(1.0))
+            .map(Some).ok_or(ComputedStyleUnavailable)
+    }
+    pub(crate) fn has_opacity_paint(&self) -> bool { !self.0.opacities.is_empty() }
     #[cfg(test)]
     pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
 }
@@ -119,6 +138,7 @@ impl ComputedProperties {
 pub(crate) struct CascadeOutput {
     pub styles: Vec<Style>,
     pub computed_properties: ComputedProperties,
+    pub stylesheet_cache: Option<StylesheetCache>,
 }
 
 /// Borrow the current script job counters, including on an unsuccessful read.
@@ -127,6 +147,19 @@ pub(crate) struct CssBudget<'a> {
     copy_work: &'a mut usize,
 }
 impl<'a> CssBudget<'a> {
+    pub(super) fn opacity(&mut self, first: bool) -> Result<(), String> {
+        // Sparse hash buckets/control bytes, including the first allocation.
+        let entries = if first { 6 } else { 3 };
+        self.work(1)?;
+        self.copies(entries * std::mem::size_of::<(usize, Option<f64>)>())
+    }
+    pub(super) fn canvas_foreground(&mut self, first: bool) -> Result<(), String> {
+        // Include sparse hash buckets, their control bytes, and initial capacity.
+        let entries = if first { 6 } else { 3 };
+        self.work(1)?;
+        self.copies(entries * std::mem::size_of::<(usize, u32)>())
+    }
+
     pub(crate) fn new(host_work: &'a mut usize, copy_work: &'a mut usize) -> Self {
         Self {
             host_work,
@@ -157,8 +190,12 @@ impl<'a> CssBudget<'a> {
             }
         }
     }
-    pub(super) fn remaining_work(&self) -> usize {
+    pub(crate) fn remaining_work(&self) -> usize {
         *self.host_work
+    }
+
+    pub(crate) fn remaining_copies(&self) -> usize {
+        *self.copy_work
     }
 
     // Parsing is finite: selectors have at most 16 alternatives / 12 parts,
@@ -169,7 +206,7 @@ impl<'a> CssBudget<'a> {
     // covers both admission and parse passes, token validation and their Vec /
     // String storage; selector matching and variable expansion are charged
     // separately below. Refused complete sources pay for inspection too.
-    pub(super) fn source(&mut self, bytes: usize) -> Result<(), String> {
+    pub(crate) fn source(&mut self, bytes: usize) -> Result<(), String> {
         self.work(bytes.max(1).div_ceil(64).saturating_mul(512))?;
         self.copies(bytes.saturating_mul(64))
     }
@@ -178,6 +215,10 @@ impl<'a> CssBudget<'a> {
         doc: &Document,
         external: &HashMap<usize, String>,
     ) -> Result<(), String> {
+        self.document_structure(doc)?;
+        self.document_sources(doc, external)
+    }
+    pub(super) fn document_structure(&mut self, doc: &Document) -> Result<(), String> {
         self.work(doc.nodes.len().saturating_mul(12))?;
         self.copies(doc.nodes.len().saturating_mul(
             std::mem::size_of::<Style>()
@@ -187,7 +228,7 @@ impl<'a> CssBudget<'a> {
         ))?;
         for node in &doc.nodes {
             self.work(node.children.len())?;
-            if let NodeKind::Element { tag, attrs, .. } = &node.kind {
+            if let NodeKind::Element { attrs, .. } = &node.kind {
                 self.work(attrs.len())?;
                 for attr in attrs {
                     self.work(
@@ -198,6 +239,13 @@ impl<'a> CssBudget<'a> {
                             .div_ceil(64),
                     )?;
                 }
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn document_sources(&mut self, doc: &Document, external: &HashMap<usize, String>) -> Result<(), String> {
+        for node in &doc.nodes {
+            if let NodeKind::Element { tag, .. } = &node.kind {
                 if tag == "style" {
                     for &child in &node.children {
                         if let Some(crate::html::Node {

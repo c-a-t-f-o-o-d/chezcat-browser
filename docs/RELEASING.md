@@ -20,15 +20,12 @@
 | Activity | Normal path | Release required? |
 | :--- | :--- | :--- |
 | **Source development** | Short-lived `feat/`, `fix/`, `docs/`, or `security/` branch, coherent commits, PR and existing checks | No |
-| **Integrated source** | Tested `main`; inspect the actual commit/check result | No |
+| **Integrated source** | Changes merged into `main` after focused development checks | No |
 | **Development artifacts / dev channel** | Proposed roadmap work; not assumed operational | No |
 | **Named release** | Owner request → final source → immutable tag → exact delivery gates | Yes: explicit authorization |
 
-Keep the current CI approach. The agent investigates failed checks and fixes
-related mistakes; routine failure triage is not transferred to the maintainer.
-Safe independent work may continue without mutating inputs under verification.
-The asynchronous handoff redesign is deferred. Do not weaken branch rules or
-required checks as a documentation change.
+Keep one product PR open at a time. The agent investigates failed checks and
+fixes the affected work. After a merge, start the next PR from updated main.
 
 [Routine verification](#contribution-and-routine-verification) · [Tagged delivery](#exact-tagged-delivery)
 · [Payloads](#payloads-and-identity) · [Failures](#when-a-check-fails)
@@ -55,10 +52,15 @@ are different states. Report only the state actually reached.
 
 | Snapshot | Recorded outcome |
 | :--- | :--- |
+| **[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** | Published from `f2e1823266a7c08c89bce7293572d801da62053c`. All four downloads matched their public digests. Both archives and the release notes passed verification. The extracted browser started and completed the App input journey. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **[v0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** | Published from `57cc1d5`; runtime/source ZIPs, `publication.json` and `SHA256SUMS` all downloaded and verified, including extracted runtime checks |
 | **v0.81.0-alpha.2** | Published from `36adf20`, with runtime/source ZIPs, `publication.json`, `SHA256SUMS`, and downloaded/extracted verification |
 | **v0.81.0-alpha.1** | Immutable validation candidate; runtime documentation-link failure stopped publication. Tag retained, no release assets published |
 | **Earlier published releases** | Keep their original source, assets, licensing and valid grants unchanged |
+
+Independent checks of the downloaded alpha.1 runtime also verified PE identity,
+the actual on-wire HTTP User-Agent, CLI help, and displayed About information
+with its captured Copy payload. Earlier release rows retain their original identities.
 
 The [alpha.2 release](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
 was a one-time catch-up for finite B2 and integrated prerequisites. Its completed
@@ -66,14 +68,17 @@ delivery does not authorize another release or retroactively include newer sourc
 
 ## Contribution and routine verification
 
-Use focused affected and security-negative checks while editing. Before integration,
-pass the existing `tools/verify_offline.py` gate: normal Windows tests, optimized
-build, PE/resources/version/import checks, identity/packaging controls and required
-local App/input journeys. Preserve normal failures and serial diagnostics separately.
+For a development PR, compile where relevant and run the affected reproduction or
+focused tests, including a negative check for a changed security or resource
+boundary. Reuse applicable results for unchanged code. An owner-requested release
+runs `tools/verify_offline.py` for the normal Windows suite, optimized build,
+PE/resources/version/import checks, identity/packaging controls and local App/input
+journeys. Preserve normal failures and serial diagnostics separately.
 Routine browser verification is offline. Public sites, physical desktop and audio
 devices require separate scoped evidence.
 
-Trusted maintainer branch/main pushes use the existing hosted Windows workflow.
+Trusted maintainer branch and main pushes check committed snapshot paths and
+private receipts, package version configuration and public summary privacy.
 The separate external-evaluation workflow does not fetch or execute substantive
 submissions: external intake remains reports-only until its permission/record
 controls are operationally verified.
@@ -95,7 +100,7 @@ No secret-bearing privileged `pull_request_target` checkout or personal desktop
 runner evaluates public submissions. External evaluation has no shared source
 cache or downstream release promotion. CodeQL eligibility for CSAPUL is not assumed.
 
-Maintainer CI/release execution uses the named affirmative acceptance step:
+Before executing the browser, the maintainer release job runs
 `python tools/accept_license.py --accept-license <approved-full-license-sha256>
 --license-scope personal`, with `CHEZCAT_LICENSE_RECEIPT_DIR` pointing to an external
 runner-temporary directory. This records only the owner's scoped authorization,

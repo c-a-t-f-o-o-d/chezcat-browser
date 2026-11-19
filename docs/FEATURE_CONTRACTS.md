@@ -34,6 +34,8 @@ that a past candidate awaited validation is not a claim that its integration is
 still pending today. Likewise, a past pass is not proof of a later implementation.
 Use current source-linked evidence for status; preserve the lasting requirements.
 
+At the `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
+
 ## Contract directory
 
 Legacy section anchors below remain available for incoming documentation links.

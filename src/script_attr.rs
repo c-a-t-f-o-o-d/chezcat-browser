@@ -352,7 +352,7 @@ impl Bridge<'_> {
         if self.hidden_input_attribute(node,&name,&value)? {return Ok(());}
         let media_source=key=="src"&&self.media_element_receiver(node_handle(node));
         let media_controls=key=="controls"&&self.media_interface_receiver(node_handle(node));
-        let style_type=key=="type"&&self.style_type_receiver(node_handle(node));
+        let style_metadata=matches!(key,"type"|"media")&&self.created_html_style(node);
         if self.stylesheet_attribute_change(node, key, value.as_deref())? { return Ok(()); }
         if self.dom_script(node) && matches!(key, "src" | "type" | "charset" | "nonce" | "integrity" | "crossorigin" | "referrerpolicy" | "fetchpriority" | "async" | "defer" | "nomodule") {
             let queue = key == "src" && self.state.dom.connected[node];
@@ -372,16 +372,18 @@ impl Bridge<'_> {
         let anchor_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
             && tag(self.doc, node) == "a" && matches!(key, "href" | "download");
         let input_attribute = matches!(key,"name"|"value") && (self.native_text_input(node) || self.fresh_text_input(node))
-            || key == "name" && self.owned_native_checkbox(node)
+            || matches!(key,"name"|"value") && (self.owned_native_checkbox(node) || self.owned_native_radio(node))
             || key == "checked" && self.input_receiver(node_handle(node));
         let button_attribute = matches!(key,"name"|"value"|"type") && (self.native_button(node) || self.fresh_button(node));
         let content_editable = key == "contenteditable" && self.content_editable_receiver(node_handle(node));
+        let canvas_attribute = matches!(key, "width" | "height") && crate::html_canvas::element(self.doc, node);
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
-            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable && !media_source && !media_controls && !style_type {
+            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {

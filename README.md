@@ -9,13 +9,13 @@
 *From network bytes to page pixels—networking, JavaScript, DOM, layout,
 rendering, and selected media decoding.*
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.81.0-alpha.3&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
 [![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
-[![Main verification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
+[![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 [![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
 
-**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
+**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
 
 </div>
 
@@ -60,7 +60,7 @@ These are **implemented slices, not complete standards support**. The
 
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| **A fixed downloadable snapshot** | [📦 0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
@@ -69,26 +69,35 @@ These are **implemented slices, not complete standards support**. The
 > unchanged. Named releases are created only on explicit owner request; ordinary
 > commits, PRs, CI runs, and development builds do not require a release.
 
+**`0.82.0-alpha.1` is available for download.** All four published files match
+their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da62053c`.
+[Download and runtime checks](docs/RELEASING.md#published-baseline)
+
 Commit-identified development downloads and a possible `dev` channel remain
-roadmap items, not advertised delivery options. The CI badge reports workflow
-status—not how well every website works.
+roadmap items, not advertised delivery options. The CI badge reports source
+privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
 
-*Snapshot: November 17, 2026 · public source through `e97dc85`.*
+*Snapshot: November 18, 2026 · published `0.82.0-alpha.1`, source `f2e1823`.*
 
 | State | Improvement | Evidence and boundary |
 | :--- | :--- | :--- |
 | ✅ **Merged** | **Shared string and DOM primitives** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): `String.prototype.concat`, hidden-input state, and genuine `Node.getRootNode()` behavior. |
 | ✅ **Merged** | **Anchor URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live HTTP(S) URL values used by ordinary page code. |
 | ✅ **Merged** | **Text-input fragments without lost edits** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native input creation, retained edited/default values, Reset behavior, and focus retirement. |
-| 🟡 **Under review** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements; integration remains gated by verification. |
+| ✅ **Merged** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements. |
+| ✅ **Merged** | **Async functions and arrows** | Original pages verify ordering, rejection handling, native input and visible updates as `await` resumes through the Promise job queue. |
+| ✅ **Merged** | **Weak collections and Proxy for ordinary objects** | Bounded WeakMap/WeakSet identity, selected non-callable Proxy traps, and receiver-aware Reflect.get/set retain explicit realm, allocation and native-access limits. |
+| ✅ **Merged** | **Native forms and DOM identity** | Created checkboxes/radios, checkbox/TEXTAREA fragments, independent TEXTAREA/radio clones, ordinary tree cloning and bounded SVG/iframe interface identity. |
+| ✅ **Merged** | **More shared CSS layout and paint** | Line-height/height variables, calculated physical box spacing, circular corners, background clipping and a bounded single-column implicit grid. |
 
-The pinned **jQuery 4.0.0 fixture now passes startup** in the PR #32 evidence;
-trusted input still encounters a native Event-property gap. Legacy jQuery reaches
-a separate `DocumentFragment` boundary. **Startup progress is not complete
-framework compatibility.** Linked PRs and compatibility records carry the precise
-scope and newer results.
+The recorded **jQuery 4.0.0** app passes startup, trusted input and a timer update.
+Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
+updates. The pinned Bootstrap 5.3.9 dropdown passes trusted open, choice and close
+at 640 and 1280 px. Legacy jQuery stops during attribute detection, and ReactDOM
+stops before the component mounts. The scorecard identifies the build and last
+successful interaction for each app. [Compatibility records](docs/COMPATIBILITY.md)
 
 ### Next: useful pages, then measured speed and stronger isolation
 
@@ -140,22 +149,22 @@ external TLS engine or a guarantee that every HTTPS site will connect. See
 <details>
 <summary><strong>🧩 JavaScript, DOM, events, and rendering</strong></summary>
 
-Finite shared primitives include live Document/Node child lists, genuine Comment
-leaves, text replacement, native array-like apply, generic string concatenation,
-and genuine roots for supported connected/detached trees. Conventional select
-fragments and supported hidden/text-input operations preserve native form state.
-Text input fragments retain edited/default values; unsupported input kinds and
-ownership cases still reject without publishing partial state.
+Finite shared primitives include live Document/Node child lists, genuine roots,
+ordinary tree cloning and outerHTML. Supported hidden/text-input operations,
+created checkboxes/radios and checkbox/TEXTAREA fragments preserve native form
+state. TEXTAREA and radio clones retain independent live/default state. Unsupported
+control, resource and ownership cases still reject without partial publication.
 
-Static noncomputed object-literal prototype setters are supported; wider
-prototype behavior and class semantics remain incomplete. Shadow DOM, arbitrary
-input-type transitions, modules, and broader host APIs remain gaps.
-Event/UIEvent/CustomEvent and finite MouseEvent interfaces preserve branded state;
-broader synthetic dispatch and keyboard/pointer behavior remain limited.
+Finite base/derived classes, supported async-function/arrow await forms, weak
+collections and ordinary-object Proxy/Reflect operations are implemented. Their
+syntax, traps and host coverage remain bounded. Shadow DOM, arbitrary input-type
+transitions, modules and broader host APIs remain gaps. Event/UIEvent/CustomEvent
+and finite MouseEvent interfaces preserve branded state. Listener objects resolve
+`handleEvent` at delivery. Broader event and keyboard/pointer behavior remains limited.
 
-The renderer is software-based. Responsive layout improvements are finite, and
-passing a layout fixture does not establish full framework styling. Google Search,
-Images, and Maps are not fully supported. Consult the
+The software renderer supports calculated spacing, custom properties, rounded boxes
+and implicit single-column grids. Support for Google Search, Images, and Maps
+remains partial. See the
 [capability matrix](docs/CAPABILITIES.md) and [compatibility results](docs/COMPATIBILITY.md).
 
 </details>
@@ -213,18 +222,17 @@ tools, not application runtime dependencies.
 <details>
 <summary><strong>🧪 Verification and development checks</strong></summary>
 
-Use focused affected tests while editing. The complete integration check is:
+For ordinary PRs, compile where relevant and run the small reproduction or tests
+that exercise the change. Include a targeted negative check for a changed security
+or resource boundary. The complete offline verifier runs for an owner-requested release.
 
 ```powershell
 python tools/verify_offline.py
 ```
 
-Existing local and hosted integration gates remain in place. The development
-agent investigates failed checks and fixes the affected work; failures are not
-silently ignored or passed back to the maintainer by default. No new asynchronous
-handoff or branch-promotion system is enabled by this documentation.
-
-Routine CI uses local fixtures. Physical desktop, audio-device, and public-site
+Routine hosted checks inspect snapshot privacy, package configuration and public
+summary handling. The development agent investigates failures and fixes the
+affected work. Physical desktop, audio-device, and public-site
 observations are separate evidence. See [building and testing](docs/BUILDING.md)
 and the [release procedure](docs/RELEASING.md).
 
@@ -245,9 +253,8 @@ and the [release procedure](docs/RELEASING.md).
 
 ## Development and reporting
 
-Development uses coherent public commits and PRs without waiting for a release.
-A completed PR is a checkpoint, not the end of the development queue. Keep the
-current verification-and-repair workflow; broader CI handoff changes are deferred.
+Development uses one open product PR at a time. Merge each coherent change after
+its focused checks, then start the next change from updated main.
 
 For bug reports and contributions, read [CONTRIBUTING.md](CONTRIBUTING.md). For
 security concerns, follow [SECURITY.md](SECURITY.md).

@@ -55,6 +55,8 @@ pub use platform_continuation::{PlatformCompletion, PlatformRequest};
 pub(crate) mod anchor;
 #[path = "app_images.rs"]
 mod image_jobs;
+#[path = "app_responsive_images.rs"]
+mod responsive_images;
 #[path = "app_backgrounds.rs"]
 mod backgrounds;
 #[path = "app_textarea.rs"]
@@ -213,6 +215,7 @@ pub struct App {
     home_location: Location,
     raw: String,
     styles: HashMap<usize, String>,
+    stylesheet_cache: Option<crate::css::StylesheetCache>,
     style_bases: HashMap<usize, Location>,
     backgrounds: HashMap<usize, std::sync::Arc<Bitmap>>,
     background_requests: HashMap<usize, backgrounds::Request>,
@@ -223,6 +226,7 @@ pub struct App {
     fonts: crate::fonts::Book,
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
     image_densities: HashMap<usize, f64>,
+    responsive_images: responsive_images::State,
     animations: HashMap<usize, animation::Playback>,
     media: Option<media_ui::Player>,
     media_worker: Option<crate::media::Worker>,
@@ -346,6 +350,7 @@ impl App {
             home_location: location.clone(),
             raw: START.to_owned(),
             styles: HashMap::new(),
+            stylesheet_cache: None,
             style_bases: HashMap::new(),
             backgrounds: HashMap::new(),
             background_requests: HashMap::new(),
@@ -356,6 +361,7 @@ impl App {
             fonts: crate::fonts::Book::empty(),
             images: HashMap::new(),
             image_densities: HashMap::new(),
+            responsive_images: responsive_images::State::default(),
             animations: HashMap::new(),
             media: None,
             media_worker: None,
@@ -582,6 +588,7 @@ impl App {
         crate::css::MediaEnvironment::desktop_viewport(self.width,self.viewport_height(),self.zoom)
     }
     fn load_options(&self) -> loader::LoadOptions {
+        let image_environment = self.image_selection_environment();
         loader::LoadOptions {
             media_limits: self.media_limits,
             audio_limits: self.audio_limits,
@@ -592,13 +599,9 @@ impl App {
             blocking: std::sync::Arc::new(crate::blocking::Policy::new(
                 &self.profile.data().settings.blocking,
             )),
-            viewport_width: ((self.width - 12).max(1) as f32 / self.zoom)
-                .round()
-                .max(1.0) as u32,
-            viewport_height: (self.viewport_height().max(1) as f32 / self.zoom)
-                .round()
-                .max(1.0) as u32,
-            density_milli: (self.zoom * 1000.0).round().max(1.0) as u32,
+            viewport_width: image_environment.viewport_width as u32,
+            viewport_height: image_environment.viewport_height as u32,
+            density_milli: (image_environment.density * 1000.0).round() as u32,
             media_environment: Some(self.css_media_environment()),
             cookie_origin: self.location.url.clone(),
             cookie_same_site: None,
@@ -621,6 +624,7 @@ impl App {
             || self.dynamic_pending != 0
             || self.pending_stylesheets != 0
             || !self.pending_images.is_empty()
+            || self.responsive_images.pending()
             || !self.pending_backgrounds.is_empty()
             || self
                 .scripting
@@ -765,7 +769,7 @@ impl App {
         }
     }
     pub fn network_needs_tick(&self) -> bool {
-        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty() || !self.pending_backgrounds.is_empty())
+        (self.pending.is_some() || self.dynamic_pending != 0 || self.pending_stylesheets != 0 || !self.pending_images.is_empty() || self.responsive_images.pending() || !self.pending_backgrounds.is_empty())
             && self.inspector.network_visible()
     }
     pub fn poll_load(&mut self) -> bool {
@@ -775,6 +779,7 @@ impl App {
     fn poll_load_once(&mut self) -> bool {
         let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
+        let responsive_changed = self.process_responsive_images() | self.poll_responsive_image_events();
         let script_changed = self.poll_dynamic_scripts()
             | self.process_script_requests()
             | self.poll_dynamic_stylesheets()
@@ -783,7 +788,7 @@ impl App {
             | self.process_image_requests();
         let script_changed = script_changed | self.resume_background_loading();
         let revision = self.network.revision();
-        let mut changed = pause_changed | script_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
+        let mut changed = pause_changed | script_changed | responsive_changed | self.process_media_selection() | self.poll_embedded_video() | self.poll_media() | self.poll_audio() | self.poll_media_sync() | self.poll_downloads()
             || revision != self.last_network_revision
             || self.network_needs_tick();
         changed |= self.flush_embedded_video();
@@ -796,7 +801,7 @@ impl App {
         if changed && self.view == View::Resources {
             self.refresh_resource_view();
         }
-        changed
+        changed | self.process_responsive_images()
     }
 
     // Shared delivery path: handoff completion retains the ordinary resource,
@@ -1571,6 +1576,7 @@ impl App {
         self.base_location = loaded.base;
         self.base_is_document_url = loaded.base_is_document_url;
         self.document = loaded.document;
+        self.stylesheet_cache = None;
         // The viewport may have changed since loading began. Startup scripts
         // can synchronously request styles before the first reflow.
         self.document.media_environment = Some(self.css_media_environment());
@@ -1587,6 +1593,12 @@ impl App {
         self.fonts.extend(&loaded.fonts);
         self.images = loaded.images;
         self.image_densities = loaded.image_densities;
+        self.responsive_images = responsive_images::State::new(
+            loaded.responsive_images,
+            loaded.image_environment,
+            &loaded.image_sources,
+            &self.image_densities,
+        );
         self.animations.clear();
         self.install_animations(loaded.animations);
         self.events = loaded.events;
@@ -1709,7 +1721,7 @@ impl App {
                     .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
                     .map(|control| control.checked)
             };
-            layout::build_viewport_with_fonts(
+            layout::build_viewport_with_fonts_cached(
                 &self.document,
                 self.width - 12,
                 self.viewport_height(),
@@ -1718,8 +1730,10 @@ impl App {
                 &sizes,
                 Some(&checked),
                 &self.fonts,
+                self.stylesheet_cache.as_ref(),
             )
         };
+        if self.alternate.is_none() { self.stylesheet_cache = self.page.stylesheet_cache.clone(); }
         self.sync_background_images();
         self.sync_media_controls();
         self.observe_layout();
@@ -1757,6 +1771,7 @@ impl App {
             self.chrome.hover = None;
             self.chrome.pressed = None;
             self.reflow();
+            self.process_responsive_images();
         }
         self.set_scroll(self.scroll.clamp(0, self.max_scroll()));
         self.sync_editors();
@@ -1769,6 +1784,7 @@ impl App {
         let fraction = self.scroll as f32 / self.page.height.max(1) as f32;
         self.zoom = zoom.clamp(0.5, 3.0);
         self.reflow();
+        self.process_responsive_images();
         self.set_scroll(((fraction * self.page.height as f32) as i32).clamp(0, self.max_scroll()));
         self.sync_editors();
     }
@@ -1913,6 +1929,7 @@ impl App {
             self.script_activity(),
         );
         for error in crate::css::stylesheet_diagnostics(&self.document,&self.styles) {report.push_str(&format!("CSS: {error}\n"));}
+        report.push_str(&self.opacity_paint_report());
         report.push_str(&self.stage_report());
         report.push_str(&self.media_report());
         report.push_str(&self.audio_report());
@@ -1944,7 +1961,7 @@ impl App {
                     escape(self.last_failed_navigation.as_deref().unwrap_or("None")),
                     escape(&self.location.display()),
                     escape(&self.location.root.as_ref().map(|p| p.display().to_string()).or_else(|| self.location.url.as_ref().map(|u| format!("{}://{}", if u.secure { "https" } else { "http" }, u.host_header()))).unwrap_or_else(|| "bundled".to_owned())),
-                    escape(&self.events.join("\n\n")),
+                    escape(&format!("{}\n{}", self.events.join("\n\n"), self.opacity_paint_report())),
                     escape(&scripting),
                 )))
             },
@@ -2168,6 +2185,7 @@ impl App {
                     c.kind == Kind::Radio
                         && c.checked
                         && c.owner == owner
+                        && c.group_root == control.group_root
                         && c.name == control.name
                         && (!control.name.is_empty() || **id == node)
                 })
@@ -2185,7 +2203,7 @@ impl App {
             match kind {
                 Kind::Checkbox => self.forms.controls.get_mut(&node).unwrap().checked = old_checked,
                 Kind::Radio => {
-                    if let Some(previous) = previous_radio {
+                    if let Some(previous) = previous_radio.filter(|&previous|self.forms.same_radio_group(previous,node)) {
                         // Restore this group's former selection. Script changes
                         // to unrelated controls are not part of default rollback.
                         self.forms.check_radio(previous);
@@ -2231,7 +2249,7 @@ impl App {
                     if self.script_event(owner, "reset", true) {
                         return;
                     }
-                    self.forms.reset(owner);
+                    if let Err(error)=self.forms.reset_in_document(&self.document,owner) {self.error(error);return;}
                     self.invalidate_script_geometry();
                     self.reflow();
                     self.sync_editors();
@@ -3703,9 +3721,29 @@ impl App {
     }
 }
 
+#[path = "app_opacity.rs"]
+mod opacity_paint;
+
 impl App {
     pub fn draw(&self) -> Canvas {
         let mut canvas = Canvas::new(self.width as usize, self.height as usize);
+        let top = self.content_top();
+        let bottom = self.content_bottom();
+        let viewport = crate::paint::ClipRect::new(0, top, self.width, bottom - top);
+        // Refuse document paint atomically before any authored pixels, while
+        // preserving the independently allocated browser/inspector surface.
+        let preflight = if self.page.opacity_unavailable { Err(()) }
+        else if self.page.opacity_groups.is_empty() { Ok(None) }
+        else {
+            self.opacity_paint_bounds(viewport).ok_or(()).and_then(|(regions, work)| {
+                crate::paint::OpacityPainter::new(
+                    &canvas, &self.page.opacity_groups, &regions, viewport, self.page.items.len(), work,
+                ).map(Some).ok_or(())
+            })
+        };
+        let paint_refused = preflight.is_err();
+        self.page.opacity_draw_refused.set(paint_refused);
+        let mut opacity = preflight.unwrap_or(None);
         canvas.fill_rect(
             0,
             0,
@@ -3713,10 +3751,12 @@ impl App {
             self.height,
             self.page_background_color(0xffffff),
         );
-        let top = self.content_top();
-        let bottom = self.content_bottom();
         for (item_index, item) in self.page.items.iter().enumerate() {
-            let viewport = crate::paint::ClipRect::new(0, top, self.width, bottom - top);
+            if paint_refused { break; }
+            if let Some(painter) = &mut opacity {
+                painter.advance(&mut canvas, item_index);
+                if painter.hidden() { continue; }
+            }
             let clip = self.page.paint_clip(item_index).map_or(viewport, |clip| {
                 viewport.intersect(clip.translate_y(top - self.scroll))
             });
@@ -3788,6 +3828,14 @@ impl App {
                 } => {
                     let y = y + top - self.scroll;
                     if y >= bottom || y.saturating_add(height) <= top {
+                        continue;
+                    }
+                    if crate::html_canvas::element(&self.document, node) {
+                        if self.view == View::Page {
+                            if let Some(bitmap) = self.scripting.as_ref().and_then(|page| page.canvas_bitmap(node)) {
+                                canvas.fitted_image(crate::paint::ClipRect::new(x, y, width, height), bitmap, presentation);
+                            }
+                        }
                         continue;
                     }
                     if self.view == View::Page {
@@ -3895,13 +3943,20 @@ impl App {
                 }
             }
         }
+        if let Some(painter) = &mut opacity { painter.finish(&mut canvas); }
         canvas.set_clip(None);
-        if self.max_scroll() > 0 {
+        if !paint_refused && self.max_scroll() > 0 {
             let (y, thumb, track) = self.scrollbar();
             canvas.fill_rect(self.width - 12, top, 12, track, ui::SURFACE);
             ui::rounded_rect(&mut canvas, (self.width - 9, y, 6, thumb), 3.0, ui::MUTED);
         }
-        self.draw_select_popup(&mut canvas);
+        if !paint_refused { self.draw_select_popup(&mut canvas); }
+        else {
+            canvas.set_clip(Some(viewport));
+            canvas.text(16, top + 16, "Page painting unavailable.", 1, ui::ERROR);
+            canvas.text(16, top + 34, "Rendering work or memory limit. Ctrl+I shows details.", 1, ui::INK);
+            canvas.set_clip(None);
+        }
         if self.inspector.mode == inspector::Mode::Docked {
             self.draw_inspector(&mut canvas);
         }
@@ -3917,7 +3972,7 @@ impl App {
             bottom,
             self.width,
             FOOT_HEIGHT,
-            if self.failed {
+            if self.failed || paint_refused {
                 ui::ERROR
             } else if profile_warning || history_warning {
                 ui::CREAM
@@ -3925,7 +3980,9 @@ impl App {
                 ui::NAVY
             },
         );
-        let status = if profile_warning {
+        let status = if paint_refused {
+            "Page painting unavailable. Ctrl+I shows limits."
+        } else if profile_warning {
             "Preferences unavailable; Ctrl+, for details."
         } else if history_warning {
             "History needs attention; Ctrl+H for details."
@@ -4489,11 +4546,21 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod autonomous_element_identity;
+    mod inline_easing;
+    mod attribute_substrings;
+    mod canvas_2d;
+    mod canvas_colors;
+    mod canvas_readback;
+    mod inline_style_keys;
+
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    mod responsive_picture;
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
@@ -5793,6 +5860,15 @@ mod scroll_offset_tests;
 #[cfg(test)]
 #[path = "app_computed_position_tests.rs"]
 mod computed_position_tests;
+#[cfg(test)]
+#[path = "app_computed_opacity_tests.rs"]
+mod computed_opacity_tests;
+#[cfg(test)]
+#[path = "app_opacity_paint_tests.rs"]
+mod opacity_paint_tests;
+#[cfg(test)]
+#[path="app_stylesheet_cache_tests.rs"]
+mod stylesheet_cache_tests;
 
 #[cfg(test)]
 #[path="app_element_sibling_tests.rs"]

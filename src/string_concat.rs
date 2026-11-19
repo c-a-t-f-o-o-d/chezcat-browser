@@ -12,6 +12,12 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         let mut output = String::new();
         self.append_string(&mut output, receiver)?;
+        self.string_primitive_concat(Value::String(output), args, host)
+    }
+
+    pub(super) fn string_primitive_concat(
+        &mut self, mut output: Value, args: &[Value], host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
         for argument in args {
             // Keep each conversion live and ordered: callbacks can replace a
             // later hook, reenter concat, or throw. Existing conversion paths
@@ -19,10 +25,27 @@ impl Runtime {
             let argument = self.copy_value(argument)?;
             let primitive = self.primitive_with_hint(argument, true, host)?;
             self.work_as(primitive.bytes(), WorkKind::ConversionOutput)?;
-            let text = primitive.script_text()?;
-            self.append_string(&mut output, &text)?;
+            if let Value::String(ref mut text) = output {
+                if !matches!(primitive, Value::StringUnits(_)) {
+                    self.append_string(text, &primitive.script_text()?)?;
+                    continue;
+                }
+                output = Value::StringUnits(self.string_units_for_value(&output)?);
+            }
+            let Value::StringUnits(ref mut units) = output else { unreachable!() };
+            let more = self.string_units_for_value(&primitive)?;
+            if units.len().saturating_add(more.len()) > self.limits.capacity.string_bytes {
+                return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
+            }
+            self.work_as(more.len().saturating_mul(2), WorkKind::ConcatenationScratch)?;
+            units.try_reserve(more.len()).map_err(|_| Fault::new("String storage allocation failed."))?;
+            units.extend(more);
         }
-        self.checked_value(Value::String(output))
+        if let Value::StringUnits(units) = output {
+            self.work_as(units.len().saturating_mul(2), WorkKind::ConversionOutput)?;
+            output = super::string_units::canonical(units, self.limits.capacity.string_bytes)?;
+        }
+        self.checked_value(output)
     }
 }
 
@@ -197,8 +220,8 @@ String.prototype.concat=concat;if('a'.concat('b')!=='ab')throw 'restore';
         assert!(error.message.contains("Execution step limit"), "{}", error.message);
         runtime.begin_job();
         assert_eq!(runtime.execute("'é'.concat('😀','Z');", &mut host).unwrap().to_text(), "é😀Z");
-        let error = runtime.execute(r#"'\ud800'.concat('x');"#, &mut host).unwrap_err();
-        assert!(error.contains("surrogate"), "{error}");
+        let value = runtime.execute(r#"'\ud800'.concat('x');"#, &mut host).unwrap();
+        assert!(matches!(value, Value::StringUnits(units) if units == [0xd800, 120]));
         runtime.begin_job();
         assert_eq!(runtime.execute("'ok'.concat('again');", &mut host).unwrap().to_text(), "okagain");
     }

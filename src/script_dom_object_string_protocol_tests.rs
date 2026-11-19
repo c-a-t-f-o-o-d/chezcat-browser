@@ -84,6 +84,163 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
 }
 
 #[test]
+fn autonomous_element_identity_uses_the_html_and_dom_name_rules() {
+    use crate::javascript::valid_custom_element_name;
+    for name in ["a-", "data-panel", "x-α", "note-🙂", "x-@", "x-=", "x-:", "x-\u{b}"] {
+        assert!(valid_custom_element_name(name), "{name:?}");
+    }
+    for name in [
+        "", "x", "-x", "1-name", "α-name", "X-name", "x-Name", "x-\0", "x-/",
+        "x->", "x- ", "x-\t", "x-\n", "x-\r", "x-\u{c}",
+        "annotation-xml", "color-profile", "font-face", "font-face-src", "font-face-uri",
+        "font-face-format", "font-face-name", "missing-glyph",
+    ] {
+        assert!(!valid_custom_element_name(name), "{name:?}");
+    }
+}
+
+#[test]
+fn autonomous_element_identity_preserves_namespace_owner_and_native_guards() {
+    let (mut doc, mut forms, mut page) = fixture_with(concat!(
+        "<notice-line id='custom'></notice-line><font-face id='reserved'></font-face>",
+        "<svg><notice-line id='foreign'/></svg><template><notice-line id='hidden'></notice-line></template>",
+    ));
+    for name in ["reserved", "foreign", "hidden"] {
+        let handle = node_handle(id(&doc, name));
+        let bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+        assert_eq!(bridge.concrete_html_interface(handle), None, "{name}");
+        assert!(!bridge.element_expando_receiver(handle), "{name}");
+    }
+    run(&mut doc, &mut forms, &mut page, r#"
+var notice=document.getElementById('custom'), C=HTMLElement, proto=C.prototype;
+var label=Symbol('notice');
+Object.defineProperty(notice,'entry',{value:3,configurable:true});
+notice[label]=notice;
+if(notice.entry!==3||notice[label]!==notice||!delete notice.entry||Object.hasOwn(notice,'entry'))
+    throw 'ordinary own data';
+var normalized=document.createElement('Notice-Line');
+if(normalized.localName!=='notice-line'||Object.getPrototypeOf(normalized)!==proto||
+   stringify.call(notice)!=='[object HTMLElement]')throw 'normalized factory or interface tag';
+class Unregistered extends HTMLElement {}
+for(var construct of [function(){new C();},function(){new Unregistered();}]){
+    var rejected=false;try{construct();}catch(e){if(e.name!=='TypeError')throw e;rejected=true;}
+    if(!rejected)throw 'unregistered construction';
+}
+var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);
+var w=f.contentWindow, read=w.Function('value','return value.constructor;');
+if(read(notice)!==C||w.HTMLElement===C||notice instanceof w.HTMLElement||
+   Object.getPrototypeOf(w.document.body)!==w.HTMLBodyElement.prototype)
+    throw 'genuine owner prototype';
+"#);
+    for source in [
+        "Object.getPrototypeOf(document.createElementNS('http://www.w3.org/1999/xhtml','notice-Line'));",
+        "Object.setPrototypeOf(notice,{});",
+        "Object.defineProperty(notice,'ownerDocument',{value:null});",
+    ] {
+        assert_eq!(page.console_eval(&mut doc, &mut forms, source).errors, 1, "{source}");
+    }
+    page.set_location(&location("https://other-dom-string.test/changed"));
+    assert_eq!(page.console_eval(&mut doc, &mut forms, "read(notice);").errors, 1);
+    assert!(page.report().contains("same-origin"), "{}", page.report());
+    page.set_location(&location("https://dom-string.test/path/page"));
+    run(&mut doc, &mut forms, &mut page,
+        "if(read(notice)!==C||notice[label]!==notice||notice.ownerDocument!==document)throw 'restored owner and state';");
+}
+
+#[test]
+fn document_interface_script_uses_the_owner_realm_constructor_and_node_prototype() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var C=Document,P=C.prototype;
+if(C!==window.Document||C.length!==0||C.name!=='Document'||Object.getPrototypeOf(C)!==Node||
+   Object.getPrototypeOf(P)!==Node.prototype||P.constructor!==C)throw 'Document interface chain';
+if(!(document instanceof C)||!(document instanceof Node)||button instanceof C||
+   !P.isPrototypeOf(document)||document.body.ownerDocument!==document)throw 'Document instance identity';
+var d=Object.getOwnPropertyDescriptor(P,Symbol.toStringTag);
+if(d.value!=='Document'||d.enumerable||d.writable||!d.configurable)throw 'Document class tag';
+var seen=null;Object.defineProperty(P,'reportOwner',{configurable:true,get:function(){seen=this;return 29;}});
+if(document.reportOwner!==29||seen!==document||Object.hasOwn(document,'reportOwner'))throw 'Document ordinary inherited lookup';
+delete P.reportOwner;
+"#);
+}
+
+#[test]
+fn document_interface_global_alias_and_branded_getter_use_the_real_tree() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let before = doc.nodes.len();
+    let commits = page.state.dom_commits;
+    run(&mut doc,&mut forms,&mut page,r#"
+var C=Document,P=C.prototype,html=document.documentElement;
+for(var name of ['Document','HTMLDocument']){
+    var g=Object.getOwnPropertyDescriptor(window,name);
+    if(g.value!==C||g.enumerable||!g.configurable||!g.writable)throw 'interface Window descriptor';
+}
+if(document.constructor!==C||Object.getPrototypeOf(document)!==P||stringify.call(document)!=='[object Document]')
+    throw 'original Document identity';
+var field=Object.getOwnPropertyDescriptor(P,'documentElement'),get=field.get;
+if(get.name!=='get documentElement'||get.length!==0||field.set!==undefined||!field.enumerable||!field.configurable||
+   get.call(document)!==html||html.ownerDocument!==document||Object.hasOwn(document,'documentElement'))
+    throw 'Document root getter';
+for(var invalid of [button,P,{},null]){
+    var denied=false;try{get.call(invalid);}catch(e){denied=e instanceof TypeError;}if(!denied)throw 'getter brand';
+}
+window.Document=Node;
+if(HTMLDocument!==C||document.constructor!==C||!(document instanceof C))throw 'interface alias or saved constructor';
+window.Document=C;
+var receiver=null;
+Object.defineProperty(P,'documentElement',{configurable:true,get:function(){receiver=this;return 47;}});
+if(document.documentElement!==47||receiver!==document||get.call(document)!==html)throw 'live prototype versus saved native getter';
+Object.defineProperty(P,'documentElement',field);
+var ordinaryCall=false,allocation=false;
+try{C();}catch(e){ordinaryCall=e instanceof TypeError;}
+try{new C();}catch(e){allocation=e.name==='NotSupportedError';}
+if(!ordinaryCall||!allocation||document.documentElement!==html)throw 'independent allocation boundary';
+"#);
+    assert_eq!(doc.nodes.len(),before);
+    assert_eq!(page.state.dom_commits,commits);
+}
+
+#[test]
+fn document_interface_blank_child_realms_revalidate_saved_objects_and_getters() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);
+var w=f.contentWindow,child=f.contentDocument,C=w.Document,P=C.prototype,root=child.documentElement;
+var get=Object.getOwnPropertyDescriptor(Document.prototype,'documentElement').get;
+var childGet=Object.getOwnPropertyDescriptor(P,'documentElement').get;
+if(C===Document||C!==w.HTMLDocument||child.constructor!==C||Object.getPrototypeOf(C)!==w.Node||
+   Object.getPrototypeOf(P)!==w.Node.prototype||Object.getPrototypeOf(child)!==P||
+   !(child instanceof C)||child instanceof Document||document instanceof C||stringify.call(child)!=='[object Document]')
+    throw 'child document realm';
+if(get.call(child)!==root||childGet.call(document)!==document.documentElement||child.defaultView!==w)
+    throw 'borrowed root getter';
+var hits=0;Object.defineProperty(P,'whichDocument',{configurable:true,get:function(){hits++;return this;}});
+if(child.whichDocument!==child||document.whichDocument!==undefined||hits!==1)throw 'child prototype receiver';
+var local=w.Function('return Document===HTMLDocument && document.documentElement.ownerDocument===document;');
+if(!local())throw 'child script interface';
+"#);
+    page.set_location(&location("https://other-dom-string.test/changed"));
+    for source in ["child.whichDocument;", "child instanceof C;", "get.call(child);", "childGet.call(document);"] {
+        page.clear_console();
+        let out=page.console_eval(&mut doc,&mut forms,source);
+        assert_eq!(out.errors,1,"{source}\n{}",page.report());
+        assert!(page.report().contains("same-origin"),"{source}\n{}",page.report());
+    }
+    run(&mut doc,&mut forms,&mut page,"if(!local()||hits!==1)throw 'owner-local recovery';");
+    page.set_location(&location("https://dom-string.test/path/page"));
+    run(&mut doc,&mut forms,&mut page,r#"
+if(child.whichDocument!==child||hits!==2)throw 'same-origin recovery';
+document.body.removeChild(f);
+if(f.contentDocument!==null||!w.closed)throw 'original frame detached';
+document.body.appendChild(f);
+if(f.contentDocument===child||f.contentWindow.Document===C||f.contentDocument instanceof C)throw 'new browsing context';
+"#);
+    let out=page.console_eval(&mut doc,&mut forms,"get.call(child);");
+    assert_eq!(out.errors,1,"{}",page.report());
+    kept(&doc,&forms,&mut page);
+}
+
+#[test]
 fn iframe_interface_parsed_and_created_elements_share_an_ordinary_canonical_prototype() {
     let (mut doc, mut forms, mut page) = fixture_with(
         "<iframe id=parsed hidden>fallback</iframe><template><iframe id=inactive></iframe></template>",

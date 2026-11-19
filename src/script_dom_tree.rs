@@ -299,12 +299,12 @@ impl Bridge<'_> {
                 || self.state.detached_nodes.contains(&node)
                 || self.state.detached_images.contains(&node)
                 || self.state.dom.created.contains(&node) { return true; }
-        // A script raw-text child is a retained Text node, not executable
-        // markup. Exposing that identity never marks its subtree query-active
-        // or changes the guarded script insertion/content mutation policies.
+        // A raw-text child retains its Text identity when the sheet or script
+        // connects. Its containing resource still owns all content mutations.
         if matches!(self.doc.nodes[node].kind, NodeKind::Text(_))
             && self.state.dom.connected.get(node)==Some(&true)
-            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent| tag(self.doc,parent)=="script") {
+            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
+                tag(self.doc,parent)=="script" || self.created_html_style(parent)) {
             return true;
         }
         if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }
@@ -339,13 +339,14 @@ impl Bridge<'_> {
         tag(self.doc, node) == "link" && self.state.dom.created.contains(&node)
     }
 
-    /// Created, detached STYLE metadata only. Parsed/admitted styles and
-    /// stylesheet insertion/content retain their existing separate guards.
-    pub(super) fn style_type_receiver(&self,object:u32)->bool {
-        node_index(object).is_some_and(|node|self.state.dom.created.contains(&node)
-            && self.state.dom.connected.get(node)==Some(&false)
-            && self.doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html
-                && matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")))
+    pub(super) fn created_html_style(&self, node: usize) -> bool {
+        self.state.dom.created.contains(&node) && self.doc.nodes.get(node).is_some_and(|entry|
+            entry.namespace == crate::html::Namespace::Html
+                && matches!(&entry.kind, NodeKind::Element { tag, .. } if tag == "style"))
+    }
+
+    pub(super) fn style_text_attribute(&self, object: u32, property: &str) -> bool {
+        matches!(property, "type" | "media") && node_index(object).is_some_and(|node|self.created_html_style(node))
     }
 
     pub(super) fn dom_script(&self, node: usize) -> bool {
@@ -534,7 +535,7 @@ impl Bridge<'_> {
         };
         let node = self.dom_node(node_handle(node))?;
         if self.anchor_url_property(node, property) { return Ok(Some(true)); }
-        if property=="type"&&self.style_type_receiver(object){return Ok(Some(true));}
+        if self.style_text_attribute(object, property) { return Ok(Some(true)); }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if property=="href"&&tag(self.doc,node)=="link"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
         if matches!(property,"dir"|"lang"|"align"|"useMap") {
@@ -626,9 +627,9 @@ impl Bridge<'_> {
         }
         let node = self.dom_node(object)?;
         if self.anchor_url_property(node, property) { return self.anchor_url_get(node, property).map(Some); }
-        if property=="type"&&self.style_type_receiver(object){
-            let raw=self.doc.attr(node,"type").unwrap_or("");
-            if raw.len()>self.state.limits.host.string_bytes{return Err("Style type result exceeds the configured string allowance.".into());}
+        if self.style_text_attribute(object, property) {
+            let raw=self.doc.attr(node,property).unwrap_or("");
+            if raw.len()>self.state.limits.host.string_bytes{return Err("Style attribute exceeds the configured string allowance.".into());}
             self.state.copies(raw.len())?;return Ok(Some(Value::String(raw.to_owned())));
         }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return self.image_source(node).map(Some);}
@@ -776,9 +777,10 @@ impl Bridge<'_> {
             let nonce = self.doc.attr(node, "nonce").unwrap_or("").to_owned();
             return self.string(&nonce).map(Some);
         }
-        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent") {
+        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent")
+            || self.created_html_style(node) && property == "textContent" {
             return self
-                .dom_script_text(node)
+                .raw_child_text(node)
                 .map(|text| Some(Value::String(text)));
         }
         if self.dom_script(node) {
@@ -879,6 +881,10 @@ impl Bridge<'_> {
     /// Only innerHTML opts in to traversal of an old bare LINK. Its separate
     /// precommit stylesheet-state check must pass before children are replaced.
     pub(super) fn mutation_subtree_for_fragment(&mut self, root: usize, bare_links: bool) -> Result<(Vec<usize>, usize), String> {
+        self.checked_mutation_subtree(root, bare_links, false)
+    }
+
+    fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
         let mut depth = 0;
@@ -898,7 +904,7 @@ impl Bridge<'_> {
                 && !matches!(name, "select" | "option" | "optgroup") {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
-            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.owned_native_checkbox(node) && !self.owned_native_textarea(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
+            if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.owned_native_checkbox(node) && !self.owned_native_radio(node) && !self.owned_native_textarea(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
                 || matches!(
                     name,
                     "html"
@@ -907,7 +913,6 @@ impl Bridge<'_> {
                         | "form"
                         | "fieldset"
                         | "legend"
-                        | "style"
                         | "title"
                         | "object"
                         | "embed"
@@ -916,6 +921,7 @@ impl Bridge<'_> {
                         | "template"
                         | "video" | "audio" | "source"
                 )
+                || name == "style" && !(direct_style && root == node && self.created_html_style(node))
                 || matches!(name, "option" | "optgroup") && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
@@ -1135,12 +1141,27 @@ impl Bridge<'_> {
         if let Some(old_parent) = old_parent {
             self.mutation_ancestors(old_parent)?;
         }
-        let (descendants, depth) = self.mutation_subtree(child).map_err(|error| format!(
+        let direct_style = self.created_html_style(child);
+        if direct_style {
+            // Other entry points separately validate fragment splices, native
+            // resources and namespaces. Never admit one through this path.
+            let mut current = Some(parent);
+            while let Some(node) = current.filter(|&n| n != 0) {
+                self.state.work(1)?;
+                let name = tag(self.doc, node);
+                if self.doc.nodes[node].namespace != crate::html::Namespace::Html
+                    || crate::html::is_void(name) || inert_dom_tag(name, self.doc.scripting_enabled) {
+                    return Err("Inline stylesheet connection requires an ordinary HTML parent.".into());
+                }
+                current = self.state.tree.parents[node];
+            }
+        }
+        let (descendants, depth) = self.checked_mutation_subtree(child, false, direct_style).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
             prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
         self.validate_button_children(parent,&descendants)?;
         self.state.work(descendants.len().saturating_mul(2))?;
-        if descendants.iter().any(|&node| self.fresh_text_input(node) || self.owned_native_checkbox(node) || self.owned_native_textarea(node) || self.fresh_button(node) || self.native_button(node))
+        if descendants.iter().any(|&node| self.fresh_text_input(node) || self.owned_native_checkbox(node) || self.owned_native_radio(node) || self.owned_native_textarea(node) || self.fresh_button(node) || self.native_button(node))
             && descendants.iter().any(|&node| matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("New native INPUT admission with script, stylesheet or frame subtrees is not implemented; no tree was changed.".into());
         }
@@ -1162,6 +1183,7 @@ impl Bridge<'_> {
         )?;
         let was_connected = self.state.dom.connected[child];
         let connected = method != "removeChild" && self.state.dom.connected[parent];
+        let sheet = if direct_style { Some(self.prepare_inline_sheet(child, connected)?) } else { None };
         let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
@@ -1198,6 +1220,7 @@ impl Bridge<'_> {
             }
         }
         form_plan.commit(self.forms);
+        if let Some(sheet) = sheet { self.commit_inline_sheet(child, sheet); }
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();
@@ -1223,15 +1246,16 @@ impl Bridge<'_> {
         Ok(Value::Host(node_handle(child)))
     }
 
-    fn dom_script_text(&mut self, node: usize) -> Result<String, String> {
+    fn raw_child_text(&mut self, node: usize) -> Result<String, String> {
         let mut text = String::new();
         for &child in &self.doc.nodes[node].children {
             self.state.work(1)?;
             if let NodeKind::Text(value) = &self.doc.nodes[child].kind {
                 if text.len().saturating_add(value.len()) > self.state.limits.host.string_bytes {
-                    return Err("Script text exceeds 32 KiB.".into());
+                    return Err("Raw element text exceeds the configured string allowance.".into());
                 }
                 self.state.copies(value.len())?;
+                text.try_reserve(value.len()).map_err(|_| "Raw element text reservation failed.")?;
                 text.push_str(value);
             }
         }

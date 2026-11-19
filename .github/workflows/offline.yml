@@ -1,4 +1,4 @@
-name: Offline Windows verification
+name: Source privacy and configuration
 on:
   push:
     branches: [main, 'feat/**', 'fix/**', 'docs/**', 'security/**']
@@ -6,41 +6,28 @@ on:
 permissions:
   contents: read
 jobs:
-  windows:
+  source-checks:
     if: github.repository == 'c-a-t-f-o-o-d/chezcat-browser' && github.actor == 'c-a-t-f-o-o-d'
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 5
     steps:
-      - name: Select external license receipt location
-        shell: pwsh
-        run: |
-          $chezcatReceiptDir = Join-Path $env:RUNNER_TEMP 'chezcat-license'
-          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value "CHEZCAT_LICENSE_RECEIPT_DIR=$chezcatReceiptDir"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.14.8'
-      - name: Install pinned Rust
-        run: rustup toolchain install 1.99.1 --profile minimal --component clippy --no-self-update
-      - name: Explicit owner-authorized license acceptance for maintainer execution
-        # This owner-only workflow records the maintainer's instructed execution;
-        # it never stands in for external contributor assent or a signature.
-        run: python tools/accept_license.py --accept-license 34003a38eeb1db77472c307e23b5a5540c7625c50d9f0ea0dc7bacf6e5b9b749 --license-scope personal
+      - name: Check snapshot paths, private receipts and package version
+        shell: python
+        run: |
+          import sys
+          sys.path.insert(0, 'tools')
+          import check_publication as publication
+          from check_windows_pe import package_version
+
+          paths = publication.git('ls-tree', '-rz', '--name-only', 'HEAD').decode('utf-8').split('\0')
+          publication.check_tree(path for path in paths if path)
+          publication.check_receipts('HEAD')
+          print('Package version:', package_version()[0])
       - name: Public summary safety controls
         run: python tools/check_public_ci_summary.py
-      - name: Normal tests, release, PE and local journeys
-        run: python tools/verify_offline.py
-      - name: Prepare public-safe verification summary
-        if: always()
-        run: python tools/public_ci_summary.py --print
-      - name: Save public-safe summary
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: offline-verification
-          path: results/verification/public-summary.json
-          if-no-files-found: ignore
-          retention-days: 7

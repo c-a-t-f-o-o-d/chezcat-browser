@@ -906,6 +906,22 @@ fn api_exports_are_permanent_deduplicated_roots_without_payload_or_work_copies()
 }
 
 #[test]
+fn image_data_reachability_follows_retained_view_and_its_backing_buffer() {
+    let mut runtime = Runtime::for_test();
+    let image = runtime.new_rgba_image_data(1, 1, |_| Ok(())).unwrap();
+    let Value::Object(wrapper) = image else { panic!("ImageData wrapper") };
+    let Some(super::binary_data::Data::ImageData(data)) = &runtime.objects[wrapper].binary else { panic!("ImageData record") };
+    let view = data.view;
+    let buffer = runtime.typed_view(view).unwrap().buffer;
+    for roots in [&[][..], std::slice::from_ref(&image)] {
+        let graph = runtime.mark_persistent_functions(roots, false).unwrap();
+        for id in [wrapper, view, buffer] {
+            assert_eq!(graph.objects[id], !roots.is_empty());
+        }
+    }
+}
+
+#[test]
 fn reachability_snapshot_rejects_unregistered_transient_state_and_invalid_roots() {
     let mut runtime = Runtime::new();
     runtime.call_depth = 1;
@@ -946,7 +962,7 @@ fn host_validation_dictionary_and_failed_hoist_exports_remain_roots() {
         fn validate_call(&self, _: u32, _: &str, args: &[Value]) -> Result<(), (&'static str, String)> {
             if matches!(self.mode, "call" | "object") { self.held.borrow_mut().push(args[0].clone()); Err(("TypeError", "retained rejected argument".into())) } else { Ok(()) }
         }
-        fn dictionary_argument(&self, _: u32, _: &str) -> Option<(usize, &'static [&'static str])> { (self.mode == "dictionary").then_some((0, &["callback"])) }
+        fn dictionary_argument(&self, _: u32, _: &str, _: &[Value]) -> Option<(usize, &'static [&'static str])> { (self.mode == "dictionary").then_some((0, &["callback"])) }
         fn call_with_dictionary(&mut self, _: u32, _: &str, _: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
             self.held.borrow_mut().push(fields.unwrap()[0].1.clone()); Ok(Value::Undefined)
         }
