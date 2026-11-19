@@ -50,7 +50,11 @@ fn utf16_regexp_raw_and_scalar_compilation_keep_sources_costs_and_invalid_gramma
     let mut empty = 0;
     assert!(matches!(Regex::compile_units(&[0xd842],"",&mut empty),Err(Error::Limit(_))));
     assert_eq!(empty,0);
-    assert!(matches!(Regex::compile_units(&vec![0xd842;1366],"",&mut 100_000),Err(Error::Limit(_))));
+    let over = vec![0xd842; MAX_PATTERN / 3 + 1];
+    assert!(matches!(
+        Regex::compile_units(&over, "", &mut 100_000),
+        Err(Error::Limit(PATTERN_LIMIT))
+    ));
 }
 
 #[test]
