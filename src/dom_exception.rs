@@ -105,7 +105,7 @@ impl Runtime {
     }
     pub(super) fn dom_exception_construct(&mut self,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
         self.step()?;
-        if self.call_depth>=MAX_CALL_DEPTH {return Err(Fault::new("DOMException conversion call limit reached (32)."));}
+        self.check_native_call_stack("DOMException conversion call")?;
         self.call_depth+=1;
         let result=(|| {
             // Web IDL defaults apply to missing/undefined values. Conversion is

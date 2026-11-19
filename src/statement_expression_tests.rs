@@ -24,7 +24,8 @@ fn original_selected_if_branch_native_pressure_on_one_mib_stack() {
                 let result = runtime.execute(&source, &mut NoHost);
                 if disabled && braced && depth >= 17 {
                     let error = result.unwrap_err();
-                    assert!(error.contains("Parser nesting limit reached (64)"), "{error}");
+                    assert!(error.contains("Parser nesting limit")
+                        || error.contains("Native stack headroom exhausted"), "{error}");
                     println!("Original selected-if baseline: braced={braced}; calls={depth}; {error}");
                 } else {
                     assert_eq!(result.unwrap().to_number(), 42.0);
@@ -77,7 +78,8 @@ fn statement_expression_original_shallow_dynamic_parse_fits_one_mib() {
         assert_eq!((runtime.eval_depth, runtime.call_depth, runtime.evaluation_frames), (0, 0, 0));
         runtime.begin_job();
         let error = runtime.execute("descend(40);", &mut NoHost).unwrap_err();
-        assert!(error.contains("Function call limit") || error.contains("Evaluation nesting limit"), "{error}");
+        assert!(error.contains("Native stack headroom exhausted")
+            || error.contains("Function call limit") || error.contains("Evaluation nesting limit"), "{error}");
         assert_eq!((runtime.eval_depth, runtime.call_depth, runtime.evaluation_frames), (0, 0, 0));
         runtime.begin_job();
         assert_eq!(runtime.execute("descend(1);", &mut NoHost).unwrap().to_number(), 42.0);

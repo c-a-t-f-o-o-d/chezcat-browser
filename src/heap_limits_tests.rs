@@ -32,7 +32,7 @@ fn heap_profile_defaults_and_resets_are_explicit() {
     runtime.begin_job();
     assert_eq!(runtime.limits.heap, limits::BROWSER_HEAP);
     assert_eq!((runtime.objects.len(), runtime.properties, runtime.value_bytes), counts);
-    assert_eq!((MAX_PARSE_DEPTH, MAX_EVAL_DEPTH, MAX_CALL_DEPTH), (64, 128, 32));
+    assert_eq!(runtime.limits.test_call_depth, None);
 }
 
 #[test]

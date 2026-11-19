@@ -3,7 +3,7 @@
 //! conversion capability check before any symbol or ordinary property read.
 //! https://tc39.es/ecma262/multipage/abstract-operations.html#sec-toprimitive
 
-use super::{Fault, Host, Ordinary, Runtime, Value, MAX_CALL_DEPTH};
+use super::{Fault, Host, Ordinary, Runtime, Value};
 
 #[derive(Clone, Copy)]
 pub(super) enum Hint {
@@ -382,9 +382,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Option<Value>, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Object conversion call limit reached (32)."));
-        }
+        self.check_native_call_stack("Object conversion call")?;
         let marker = self.inhibit_transient_collection();
         self.call_depth += 1;
         let result = (|| {
@@ -427,9 +425,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         // Native methods can themselves convert values (for example Error's
         // name). Count the ordinary path too, including cycles with no hook.
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Object conversion call limit reached (32)."));
-        }
+        self.check_native_call_stack("Object conversion call")?;
         let marker = self.inhibit_transient_collection();
         self.call_depth += 1;
         let result = self.primitive_methods(value, string_hint, host);

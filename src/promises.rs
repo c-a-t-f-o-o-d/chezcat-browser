@@ -6,7 +6,7 @@
 
 use super::{
     Accessors, Builtin, Declaration, Exception, Fault, Function, Host, Ordinary, Runtime,
-    Value, MAX_CALL_DEPTH,
+    Value,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -577,9 +577,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = (|| {
             let executor = args.first().unwrap_or(&Value::Undefined);
@@ -1207,9 +1205,7 @@ impl Runtime {
         receiver: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = (|| {
             let value = args.first().unwrap_or(&Value::Undefined);
@@ -1301,9 +1297,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = (|| {
             let value = args.first().unwrap_or(&Value::Undefined);

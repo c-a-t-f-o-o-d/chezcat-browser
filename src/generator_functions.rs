@@ -388,9 +388,7 @@ impl Runtime {
         &mut self, frame: &mut Activation, operation: Op, input: &Value, host: &mut dyn Host,
     ) -> Result<Progress, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.with_intrinsic_realm(frame.realm, |runtime| runtime.run_generator_body(frame, operation, input, host))
     }
 

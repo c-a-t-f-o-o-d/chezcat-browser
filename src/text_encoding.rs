@@ -4,7 +4,7 @@
 
 use super::{
     binary_data::Kind as BinaryKind, Builtin, Declaration, Fault, Host, NativeGetter, Ordinary,
-    Runtime, Value, MAX_CALL_DEPTH,
+    Runtime, Value,
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -304,9 +304,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = (|| {
             self.ensure_global_intrinsics("TextEncoder")?;
@@ -359,9 +357,7 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         self.call_depth += 1;
         let result = self.text_encoding_inner(operation, args, this, host);
         self.call_depth -= 1;

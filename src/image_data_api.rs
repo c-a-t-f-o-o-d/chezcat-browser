@@ -205,9 +205,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("ImageData conversion call limit reached."));
-        }
+        self.check_native_call_stack("ImageData conversion call")?;
         self.call_depth += 1;
         let result = self.image_data_construct_inner(args, host);
         self.call_depth -= 1;

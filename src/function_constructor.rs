@@ -8,7 +8,6 @@
 use super::{MAX_PROGRAMS, MAX_RETAINED_AST, MAX_RETAINED_SOURCE, MAX_STRING_BYTES};
 use super::{
     ExprKind, Fault, FunctionKind, Host, Parser, Program, Runtime, StmtKind, Value,
-    MAX_CALL_DEPTH,
 };
 use std::rc::Rc;
 
@@ -29,9 +28,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("Function call limit reached (32)."));
-        }
+        self.check_native_call_stack("Function call")?;
         if args.len() > self.limits.capacity.arguments {
             return Err(Fault::new(format!("Call argument limit reached ({}).", self.limits.capacity.arguments)));
         }

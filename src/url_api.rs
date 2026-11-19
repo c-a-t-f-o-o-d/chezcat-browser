@@ -6,7 +6,6 @@
 
 use super::{
     Accessors, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, Value,
-    MAX_CALL_DEPTH,
 };
 use std::net::Ipv6Addr;
 
@@ -1075,9 +1074,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("URL callback call limit reached (32)."));
-        }
+        self.check_native_call_stack("URL callback call")?;
         self.call_depth += 1;
         let result = (|| match kind {
             Kind::Url => {
@@ -1514,9 +1511,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Fault::new("URL callback call limit reached (32)."));
-        }
+        self.check_native_call_stack("URL callback call")?;
         self.call_depth += 1;
         let result = (|| match op {
             Op::Constructor(_) => Err(Fault::exception(

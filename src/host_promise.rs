@@ -48,7 +48,7 @@ impl Runtime {
                 }
             }
             self.validate_native_access(object,host)?;
-            if self.call_depth>=MAX_CALL_DEPTH {return Err(Fault::new("Function call limit reached (32)."));}
+            self.check_native_call_stack("Function call")?;
             let (promise,value)=self.new_native_promise()?;
             match host.validate_promise_operation(object,method) {
                 Ok(())=>{},
