@@ -226,6 +226,44 @@ impl FontSpec {
 }
 
 impl Shape {
+    /// Conservative actual ink, including synthetic bold/italic and the
+    /// existing bitmap fallback if a later glyph cache access is unavailable.
+    /// Called only by opacity paint preflight after admitting glyph visits.
+    pub(crate) fn paint_bounds(&self) -> crate::paint::ClipRect {
+        use crate::paint::ClipRect;
+        let mut bounds = ClipRect::new(0, 0, self.width(), self.height());
+        let mut include = |rect: ClipRect| {
+            if rect.left < rect.right && rect.top < rect.bottom {
+                bounds.left = bounds.left.min(rect.left);
+                bounds.top = bounds.top.min(rect.top);
+                bounds.right = bounds.right.max(rect.right);
+                bounds.bottom = bounds.bottom.max(rect.bottom);
+            }
+        };
+        for glyph in &self.glyphs {
+            let origin = glyph.x.round() as i32;
+            if let Some(face) = &glyph.face {
+                if let Ok(bitmap) = face.glyph(glyph.id, self.size) {
+                    let slant = |row: i32| if glyph.italic {
+                        (-row as f32 * 0.2).round() as i32
+                    } else { 0 };
+                    let first = slant(bitmap.top);
+                    let last = slant(bitmap.top.saturating_add(bitmap.height.saturating_sub(1) as i32));
+                    include(ClipRect::new(
+                        origin.saturating_add(bitmap.left).saturating_add(first.min(last)),
+                        self.ascent.saturating_add(bitmap.top),
+                        (bitmap.width as i32).saturating_add(first.abs_diff(last) as i32).saturating_add(i32::from(glyph.bold)),
+                        bitmap.height as i32,
+                    ));
+                }
+            }
+            include(ClipRect::new(origin, self.ascent - GLYPH_HEIGHT * self.scale,
+                (crate::paint::GLYPH_WIDTH + if glyph.italic { 2 } else { 0 }) * self.scale + i32::from(glyph.bold),
+                GLYPH_HEIGHT * self.scale));
+        }
+        bounds
+    }
+
     pub fn width(&self) -> i32 {
         self.positions.last().copied().unwrap_or(0)
     }

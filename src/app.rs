@@ -1924,6 +1924,7 @@ impl App {
             self.script_activity(),
         );
         for error in crate::css::stylesheet_diagnostics(&self.document,&self.styles) {report.push_str(&format!("CSS: {error}\n"));}
+        report.push_str(&self.opacity_paint_report());
         report.push_str(&self.stage_report());
         report.push_str(&self.media_report());
         report.push_str(&self.audio_report());
@@ -1955,7 +1956,7 @@ impl App {
                     escape(self.last_failed_navigation.as_deref().unwrap_or("None")),
                     escape(&self.location.display()),
                     escape(&self.location.root.as_ref().map(|p| p.display().to_string()).or_else(|| self.location.url.as_ref().map(|u| format!("{}://{}", if u.secure { "https" } else { "http" }, u.host_header()))).unwrap_or_else(|| "bundled".to_owned())),
-                    escape(&self.events.join("\n\n")),
+                    escape(&format!("{}\n{}", self.events.join("\n\n"), self.opacity_paint_report())),
                     escape(&scripting),
                 )))
             },
@@ -3715,9 +3716,29 @@ impl App {
     }
 }
 
+#[path = "app_opacity.rs"]
+mod opacity_paint;
+
 impl App {
     pub fn draw(&self) -> Canvas {
         let mut canvas = Canvas::new(self.width as usize, self.height as usize);
+        let top = self.content_top();
+        let bottom = self.content_bottom();
+        let viewport = crate::paint::ClipRect::new(0, top, self.width, bottom - top);
+        // Refuse document paint atomically before any authored pixels, while
+        // preserving the independently allocated browser/inspector surface.
+        let preflight = if self.page.opacity_unavailable { Err(()) }
+        else if self.page.opacity_groups.is_empty() { Ok(None) }
+        else {
+            self.opacity_paint_bounds(viewport).ok_or(()).and_then(|(regions, work)| {
+                crate::paint::OpacityPainter::new(
+                    &canvas, &self.page.opacity_groups, &regions, viewport, self.page.items.len(), work,
+                ).map(Some).ok_or(())
+            })
+        };
+        let paint_refused = preflight.is_err();
+        self.page.opacity_draw_refused.set(paint_refused);
+        let mut opacity = preflight.unwrap_or(None);
         canvas.fill_rect(
             0,
             0,
@@ -3725,10 +3746,12 @@ impl App {
             self.height,
             self.page_background_color(0xffffff),
         );
-        let top = self.content_top();
-        let bottom = self.content_bottom();
         for (item_index, item) in self.page.items.iter().enumerate() {
-            let viewport = crate::paint::ClipRect::new(0, top, self.width, bottom - top);
+            if paint_refused { break; }
+            if let Some(painter) = &mut opacity {
+                painter.advance(&mut canvas, item_index);
+                if painter.hidden() { continue; }
+            }
             let clip = self.page.paint_clip(item_index).map_or(viewport, |clip| {
                 viewport.intersect(clip.translate_y(top - self.scroll))
             });
@@ -3915,13 +3938,20 @@ impl App {
                 }
             }
         }
+        if let Some(painter) = &mut opacity { painter.finish(&mut canvas); }
         canvas.set_clip(None);
-        if self.max_scroll() > 0 {
+        if !paint_refused && self.max_scroll() > 0 {
             let (y, thumb, track) = self.scrollbar();
             canvas.fill_rect(self.width - 12, top, 12, track, ui::SURFACE);
             ui::rounded_rect(&mut canvas, (self.width - 9, y, 6, thumb), 3.0, ui::MUTED);
         }
-        self.draw_select_popup(&mut canvas);
+        if !paint_refused { self.draw_select_popup(&mut canvas); }
+        else {
+            canvas.set_clip(Some(viewport));
+            canvas.text(16, top + 16, "Page painting unavailable.", 1, ui::ERROR);
+            canvas.text(16, top + 34, "Rendering work or memory limit. Ctrl+I shows details.", 1, ui::INK);
+            canvas.set_clip(None);
+        }
         if self.inspector.mode == inspector::Mode::Docked {
             self.draw_inspector(&mut canvas);
         }
@@ -3937,7 +3967,7 @@ impl App {
             bottom,
             self.width,
             FOOT_HEIGHT,
-            if self.failed {
+            if self.failed || paint_refused {
                 ui::ERROR
             } else if profile_warning || history_warning {
                 ui::CREAM
@@ -3945,7 +3975,9 @@ impl App {
                 ui::NAVY
             },
         );
-        let status = if profile_warning {
+        let status = if paint_refused {
+            "Page painting unavailable. Ctrl+I shows limits."
+        } else if profile_warning {
             "Preferences unavailable; Ctrl+, for details."
         } else if history_warning {
             "History needs attention; Ctrl+H for details."
@@ -5824,6 +5856,9 @@ mod computed_position_tests;
 #[cfg(test)]
 #[path = "app_computed_opacity_tests.rs"]
 mod computed_opacity_tests;
+#[cfg(test)]
+#[path = "app_opacity_paint_tests.rs"]
+mod opacity_paint_tests;
 
 #[cfg(test)]
 #[path="app_element_sibling_tests.rs"]
