@@ -98,6 +98,48 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_yield_classic_for_resumes_iteration_and_unwinds_cleanup() {
+    let mut runtime = Runtime::for_test();
+    let source = r#"
+var trace='', readers=[];
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('call:'+value,value);}
+function* each(value){yield value;return value+10;}
+function* loop(){
+    let index=0;
+    try{
+        for(;mark('test:'+index,index<2);index=mark('update:'+index,index+1)){
+            let value=relay(yield* each(index));
+            readers.push(()=>value);
+        }
+        return index;
+    }finally{trace+='finally|';}
+}
+var active=loop();
+if(active.next().value!==0||trace!=='test:0|')throw 'loop prefix';
+if(active.next().value!==1||trace!=='test:0|call:10|update:0|test:1|')throw 'first iteration';
+var done=active.next();
+if(!done.done||done.value!==2||readers[0]()!==10||readers[1]()!==11||
+    !trace.endsWith('call:11|update:1|test:2|finally|'))throw 'iteration scopes or exit';
+trace='';
+var stopped=loop();
+stopped.next();
+if(stopped.return(9).value!==9||trace!=='test:0|finally|')throw 'early return ran update';
+function* open(){
+    try{for(;;){let value=relay(yield 4);return value;}}
+    finally{trace+='open-finally|';}
+}
+var infinite=open();
+if(infinite.next().value!==4||infinite.next(7).value!==7||
+    !trace.endsWith('call:7|open-finally|'))throw 'loop without condition';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_conditional_initializer_selects_one_branch_and_keeps_tdz() {
     let mut runtime = Runtime::for_test();
     let source = r#"
