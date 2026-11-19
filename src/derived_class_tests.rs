@@ -182,7 +182,7 @@ if(instance.value!==43||Object.getPrototypeOf(FromNullPrototype.prototype)!==nul
 
 #[test]
 fn derived_class_native_and_host_bases_remain_refused_without_native_operations() {
-    for base in ["Array","Object","Error","Promise","NativeBase","HostObject"] {
+    for base in ["Array","Object","AggregateError","Promise","NativeBase","HostObject"] {
         let mut runtime=Runtime::for_test();let mut host=NoHost::default();
         runtime.define_host_constructor("NativeBase",71,"nativeBase").unwrap();
         runtime.define_global("HostObject",Value::Host(73)).unwrap();
@@ -424,6 +424,39 @@ if(!(set instanceof Set)||set.size!==1||!set.has(2)||!(wm instanceof WeakMap)||
    wm.get(item)!==3||!(ws instanceof WeakSet)||!ws.has(item))throw 'collection brands';
 try{Map.prototype.get.call(wm,item);throw 'borrowed wrong brand';}
 catch(e){if(e.name!=='TypeError')throw e;}
+'ok';
+"#);
+}
+
+#[test]
+fn derived_class_native_errors_keep_the_brand_prototype_and_own_message() {
+    succeeds(r#"
+var effects='', marker={};
+class Failed extends Error {
+    constructor(value) {
+        super(value);
+        if(new.target!==Specific)throw 'wrong native new target';
+        this.code=41;
+    }
+    get message(){effects+='read|';return 'inherited';}
+    set message(value){effects+='write|';throw marker;}
+}
+class Specific extends Failed {}
+var error=new Specific({toString:function(){effects+='coerce|';return 'details';}});
+var descriptor=Object.getOwnPropertyDescriptor(error,'message');
+if(effects!=='coerce|'||descriptor.value!=='details'||descriptor.enumerable||
+   !descriptor.configurable||!descriptor.writable||error.code!==41||
+   Object.getPrototypeOf(error)!==Specific.prototype||!(error instanceof Error)||
+   Object.prototype.toString.call(error)!=='[object Error]'||
+   Error.prototype.toString.call(error)!=='Error: details')throw 'native error instance';
+try{throw error;}catch(e){if(e!==error)throw 'thrown identity';}
+class Typed extends TypeError {}
+var typed=new Typed(), direct=Error('direct');
+if(!(typed instanceof TypeError)||!(typed instanceof Error)||Object.hasOwn(typed,'message')||
+   typed.name!=='TypeError'||direct.message!=='direct'||!(direct instanceof Error))
+    throw 'typed and direct errors';
+try{new Specific({toString:function(){throw marker;}});throw 'expected conversion fault';}
+catch(e){if(e!==marker)throw e;}
 'ok';
 "#);
 }
