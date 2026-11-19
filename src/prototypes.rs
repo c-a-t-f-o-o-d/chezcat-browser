@@ -1588,7 +1588,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         let first = args.first().unwrap_or(&Value::Undefined);
         let boxed;
-        let first = if matches!(first, Value::String(_))
+        let first = if first.is_string()
             && matches!(method, "keys" | "getOwnPropertyDescriptor" | "assign")
         {
             let value = self.copy_value(first)?;
@@ -1641,7 +1641,7 @@ impl Runtime {
             "getPrototypeOf" => {
                 let prototype = match first {
                     Value::Host(handle)=>Some(self.native_instance_prototype(*handle,host)?),
-                    Value::String(_) => self.string_prototype.map(Ordinary::Object),
+                    Value::String(_) | Value::StringUnits(_) => self.string_prototype.map(Ordinary::Object),
                     Value::Number(_) => self.number_prototype.map(Ordinary::Object),
                     Value::Bool(_) => self.boolean_prototype.map(Ordinary::Object),
                     Value::Symbol(_) => self.symbol_prototype.map(Ordinary::Object),
@@ -1797,7 +1797,7 @@ impl Runtime {
                 }
                 for source in args.get(1..).unwrap_or(&[]) {
                     let boxed_source;
-                    let source = if matches!(source, Value::String(_)) {
+                    let source = if source.is_string() {
                         let value = self.copy_value(source)?;
                         boxed_source = self.box_primitive(value)?;
                         &boxed_source
@@ -1919,7 +1919,7 @@ impl Runtime {
             return Ok(());
         }
         let boxed_descriptors;
-        let descriptors = if matches!(descriptors, Value::String(_)) {
+        let descriptors = if descriptors.is_string() {
             let value = self.copy_value(descriptors)?;
             boxed_descriptors = self.box_primitive(value)?;
             &boxed_descriptors
@@ -2049,7 +2049,7 @@ impl Runtime {
                 Value::Null => "Null",
                 Value::Bool(_) => "Boolean",
                 Value::Number(_) => "Number",
-                Value::String(_) => "String",
+                Value::String(_) | Value::StringUnits(_) => "String",
                 Value::Symbol(_) => "Symbol",
                 Value::Function(_) => "Function",
                 Value::Object(id) => {
@@ -2169,10 +2169,10 @@ impl Runtime {
             } else {
                 self.owns_property(id, &key)?
             }
-        } else if let Value::String(text) = this {
-            self.work(text.len())?;
+        } else if this.is_string() {
+            self.work(this.bytes())?;
             let index = super::property_index(&key)
-                .is_some_and(|index| index < text.encode_utf16().count());
+                .is_some_and(|index| this.string_length().is_some_and(|length| index < length));
             index || method != "propertyIsEnumerable" && key == "length"
         } else if let Value::Host(handle) = this {
             self.host_owned(handle, &key, method == "propertyIsEnumerable", host)?
@@ -2314,7 +2314,7 @@ impl Runtime {
                     this
                 };
                 let receiver = match this {
-                    Value::String(_) => this,
+                    Value::String(_) | Value::StringUnits(_) => this,
                     Value::Null | Value::Undefined => {
                         return Err(Fault::exception(
                             "TypeError",
@@ -2331,7 +2331,7 @@ impl Runtime {
                     value => {
                         let value = self.primitive_with_hint(value, true, host)?;
                         self.work(value.bytes())?;
-                        Value::String(value.script_text()?)
+                        if value.is_string() { value } else { Value::String(value.script_text()?) }
                     }
                 };
                 self.call_member(receiver, method, args, host)

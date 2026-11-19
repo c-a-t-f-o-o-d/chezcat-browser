@@ -451,17 +451,30 @@ fn interface(value: Option<&Value>) -> Option<Interface> {
     else { None }
 }
 
-fn custom_bytes(value: &Value) -> usize { if let Value::String(text) = value {text.len()} else {0} }
+fn custom_bytes(value: Option<&Value>) -> Result<usize, &'static str> {
+    // Shared primitive payload accounting. A valid Vec<u16> cannot have more
+    // than usize::MAX / 2 live units; saturation also exceeds the finite cap.
+    Ok(value.map_or(0, Value::bytes))
+}
+
 fn copy_custom_value(value: &Value) -> Result<Value, String> {
-    if let Value::String(text) = value {
-        let mut copied = String::new();
-        copied.try_reserve(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
-        copied.push_str(text);
-        Ok(Value::String(copied))
-    } else {
+    match value {
+        Value::String(text) => {
+            let mut copied = String::new();
+            copied.try_reserve(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
+            copied.push_str(text);
+            Ok(Value::String(copied))
+        }
+        Value::StringUnits(units) => {
+            let mut copied = Vec::new();
+            copied.try_reserve_exact(units.len()).map_err(|_| "Could not reserve CustomEvent detail code units.")?;
+            copied.extend_from_slice(units);
+            Ok(Value::StringUnits(copied))
+        }
         // Object/function/native/symbol values retain their genuine identities;
         // Runtime already pins exported host arguments until document teardown.
-        Ok(value.clone())
+        Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) |
+        Value::Symbol(_) | Value::Function(_) | Value::Object(_) | Value::Host(_) => Ok(value.clone()),
     }
 }
 
@@ -563,7 +576,7 @@ impl Bridge<'_> {
         if source.len()>self.state.limits.host.event_type_bytes||source.len()>self.state.limits.host.string_bytes {
             return Err("Event type exceeds the host event-type/string allowance.".into());
         }
-        let detail_bytes=custom.map_or(0,custom_bytes);
+        let detail_bytes=custom_bytes(custom)?;
         if detail_bytes>self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
         let bytes=source.len().checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
         self.state.copies(bytes)?;
@@ -592,7 +605,7 @@ impl Bridge<'_> {
     pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
         let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
         if event.handle!=handle||event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
-        let bytes=event.name.len().checked_add(event.custom.as_ref().map_or(0,custom_bytes))
+        let bytes=event.name.len().checked_add(custom_bytes(event.custom.as_ref())?)
             .ok_or("Event rollback retained text overflow.")?;
         let retained=self.state.retained.checked_sub(bytes).ok_or("Event rollback retention mismatch.")?;
         self.state.created_events.pop();
@@ -694,7 +707,7 @@ impl Bridge<'_> {
                 return Ok(Value::String(self.state.created_events[id].name.clone()));
             }
             if name == "detail" && self.state.created_events[id].custom.is_some() {
-                let bytes = custom_bytes(self.state.created_events[id].custom.as_ref().unwrap());
+                let bytes = custom_bytes(self.state.created_events[id].custom.as_ref())?;
                 if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
                 self.state.copies(bytes)?;
                 return copy_custom_value(self.state.created_events[id].custom.as_ref().unwrap());
@@ -850,9 +863,9 @@ impl Bridge<'_> {
                     let custom = if method == "initCustomEvent" {
                         let default_detail = Value::Null;
                         let detail = args.get(3).filter(|value| !matches!(value, Value::Undefined)).unwrap_or(&default_detail);
-                        let bytes = custom_bytes(detail);
+                        let bytes = custom_bytes(Some(detail))?;
                         if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
-                        let old = self.state.created_events[id].name.len().checked_add(custom_bytes(self.state.created_events[id].custom.as_ref().unwrap()))
+                        let old = self.state.created_events[id].name.len().checked_add(custom_bytes(self.state.created_events[id].custom.as_ref())?)
                             .ok_or("CustomEvent retained text size overflow.")?;
                         let new = name.len().checked_add(bytes).ok_or("CustomEvent retained text size overflow.")?;
                         self.state.copies(new)?;

@@ -54,6 +54,7 @@ fn representation(value: &Value) -> String {
         Value::Number(value) if value.is_nan() => "number:NaN".into(),
         Value::Number(value) => format!("number:{:016x}", value.to_bits()),
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
         Value::Symbol(_) => "symbol".into(),
         Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(),
@@ -171,7 +172,11 @@ function repr(value) {
         const bytes = Buffer.alloc(8); bytes.writeDoubleBE(value);
         return 'number:' + bytes.toString('hex');
     }
-    if (typeof value === 'string') return 'string:' + Buffer.from(value).toString('hex');
+    if (typeof value === 'string') {
+        const utf8 = Buffer.from(value, 'utf8');
+        if (utf8.toString('utf8') === value) return 'string:' + utf8.toString('hex');
+        return 'string-units:' + Buffer.from(value, 'utf16le').swap16().toString('hex');
+    }
     if (typeof value === 'symbol') return 'symbol';
     if (typeof value === 'function') return 'function';
     if (value === test) return 'host:1';
@@ -241,6 +246,8 @@ CASES = [
     ('asi-var', 'let x=2\nlet y=3\ntest.record(x+y)'),
     ('basic-escapes', 'test.record("a\\nb\\tc\\r\\\"d");test.record("\\u00e9");'),
     ('unicode-pair', 'test.record("\\uD83D\\uDE00");test.record("😀".length);'),
+    ('regex-lone-surrogate-result', 'test.record(/./.exec("😀")[0]);'),
+    ('unicode-unit-observations', r'test.record("\ud891");test.record("\ud892");test.record("\ude23");test.record("a\ud891b");test.record("\ufffd");test.record("\ud891\ude23");'),
     ('string-length', 'test.record("abc".length);test.record("café😀".length);'),
     ('string-search', 'test.record("a😀bc😀".indexOf("b"));test.record("a😀bc😀".indexOf("😀",2));test.record("abc".includes("bc"));'),
     ('string-prefix-suffix', 'test.record("abc".startsWith("b",1));test.record("abc".endsWith("b",2));test.record("abc".endsWith(""));'),
@@ -756,7 +763,6 @@ NEGATIVE.extend([
     ('regex-dynamic-compile-work-cannot-catch-atomic', "try{RegExp('(?:(?:(?:){1000}){1000}){1000}');}catch(e){test.record(1);}finally{test.record(2);}"),
     ('regex-bytecode-limit-atomic', 'test.record(1);let r=/(?:abcdefghijklmnop){1000}/;'),
     ('regex-work-limit-cannot-catch-atomic', 'try{/(a+)+$/.test("'+'a'*80+'!");}catch(e){test.record("caught");}finally{test.record("finally");}'),
-    ('regex-lone-surrogate-result', 'test.record(/./.exec("😀")[0]);'),
     ('regex-non-ascii-ignorecase-unsupported-atomic', 'test.record(1);let r=/é/i;'),
 ])
 

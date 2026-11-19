@@ -42,6 +42,8 @@ fn representation(value: &Value) -> String {
         Value::Number(value) if value.is_nan() => "number:NaN".into(),
         Value::Number(value) => format!("number:{:016x}", value.to_bits()),
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
+        #[cfg(chezcat_string_units)]
+        Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
         Value::Symbol(_) => "symbol".into(), Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(), Value::Host(id) => format!("host:{id}"),
     }
@@ -97,7 +99,11 @@ function repr(value) {
     if(value===undefined)return 'undefined'; if(value===null)return 'null';
     if(typeof value==='boolean')return 'boolean:'+value;
     if(typeof value==='number') { if(Number.isNaN(value))return 'number:NaN'; const b=Buffer.alloc(8);b.writeDoubleBE(value);return 'number:'+b.toString('hex'); }
-    if(typeof value==='string')return 'string:'+Buffer.from(value).toString('hex');
+    if (typeof value === 'string') {
+        const utf8 = Buffer.from(value, 'utf8');
+        if (utf8.toString('utf8') === value) return 'string:' + utf8.toString('hex');
+        return 'string-units:' + Buffer.from(value, 'utf16le').swap16().toString('hex');
+    }
     if(typeof value==='symbol')return 'symbol'; if(typeof value==='function')return 'function';
     if(value===globalThis.test)return 'host:1'; return typeof value;
 }
@@ -133,9 +139,13 @@ def source_manifest(root):
 def compile_probe(source_root, directory, rustc="rustc"):
     path = directory / "promise-probe.rs"
     executable = directory / ("promise-probe.exe" if os.name == "nt" else "promise-probe")
-    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))), encoding="utf-8")
+    javascript = source_root / "src/javascript.rs"
+    path.write_text(PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(javascript))), encoding="utf-8")
     available = "pub fn microtask_checkpoint(" in (source_root / "src/promises.rs").read_text(encoding="utf-8") if (source_root / "src/promises.rs").is_file() else False
     flags = ["--cfg", "chezcat_microtasks"] if available else []
+    value_definition = javascript.read_text(encoding="utf-8").partition("pub enum Value {")[2].partition("\n}")[0]
+    if "StringUnits(Vec<u16>)" in value_definition:
+        flags.extend(["--cfg", "chezcat_string_units"])
     subprocess.run([rustc, "--edition=2021", "-O", *flags, str(path), "-o", str(executable)],
                    capture_output=True, text=True, timeout=120, check=True)
     return executable, available

@@ -551,3 +551,88 @@ Object.defineProperty(window,'setTimeout',{value:saved,writable:true,enumerable:
     assert!(page.report().contains("Lexical binding conflicts with global property"));
     assert!(page.state.timers.is_empty());
 }
+
+#[test]
+fn timer_utf16_arguments_keep_callback_and_value_identities_and_release_on_fire_and_cancel() {
+    let (mut doc,mut forms,mut page,start)=page(&[r#"
+var raw='\udb60Z',token={},marker=Symbol('original timer'),called=0;
+function receive(unit,text,object,symbol,number,boolean){
+ if(this!==window||unit!==raw||unit.length!==2||unit.charCodeAt(0)!==0xdb60||unit.charCodeAt(1)!==90||
+    text!=='plain'||object!==token||symbol!==marker||number!==17||boolean!==true)throw 'genuine timer arguments';
+ called++;document.title='timer argument identities preserved';
+}
+var first=setTimeout(receive,0,raw,'plain',token,marker,17,true);
+"#]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let expected=6*std::mem::size_of::<Value>()+4+5;
+    assert_eq!(page.state.timer_bytes,expected);
+    assert_eq!(page.state.timers.len(),1);
+    assert_eq!(page.state.timers[0].bytes,expected);
+    let callback=execute(&mut page,&mut doc,&mut forms,"receive;").unwrap();
+    assert!(matches!((&page.state.timers[0].callback,&callback),(Value::Function(a),Value::Function(b)) if a==b));
+    assert!(matches!(page.state.timers[0].arguments.first(),Some(Value::StringUnits(units)) if units==&[0xdb60,90]));
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"timer argument identities preserved");
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"called;").unwrap().to_number(),1.0);
+    execute(&mut page,&mut doc,&mut forms,"var cancelId=setTimeout(receive,10000,raw,'plain',token,marker,17,true);").unwrap();
+    assert_eq!(page.state.timer_bytes,expected);
+    execute(&mut page,&mut doc,&mut forms,"clearTimeout(cancelId);").unwrap();
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);
+    assert_eq!(page.state.timer_callbacks,1);
+}
+
+#[test]
+fn timer_utf16_arguments_native_payload_and_copy_boundaries_are_exact_and_atomic() {
+    let (mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let arguments=[callback.clone(),Value::Number(0.0),Value::StringUnits(vec![0xd800,0xd800,0xd800]),Value::String("ok".into())];
+    let expected=2*std::mem::size_of::<Value>()+6+2;
+    page.state.limits.host.timer_bytes=expected-1;
+    page.state.copy_work=expected;
+    let next=page.state.next_timer;
+    assert_eq!(page.state.set_timeout(&arguments).unwrap_err(),"Timer argument memory limit reached (256 KiB per document).");
+    assert_eq!(page.state.copy_work,expected);
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);assert_eq!(page.state.next_timer,next);
+    page.state.limits.host.timer_bytes=expected;
+    page.state.copy_work=expected-1;
+    let error=page.state.set_timeout(&arguments).unwrap_err();
+    assert_eq!(error,format!("DOM string work limit reached ({} MiB per job).",page.state.limits.copy_bytes/(1024*1024)));
+    assert_eq!(page.state.copy_work,0);
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);assert_eq!(page.state.next_timer,next);
+    page.state.copy_work=expected;
+    let id=page.state.set_timeout(&arguments).unwrap();
+    assert_eq!(page.state.copy_work,0);assert_eq!(page.state.timer_bytes,expected);
+    assert_eq!(page.state.timers[0].bytes,expected);
+    assert!(matches!(page.state.timers[0].arguments.first(),Some(Value::StringUnits(units)) if units==&[0xd800;3]));
+    page.state.clear_timeout(&[id]).unwrap();
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);assert_eq!(page.state.copy_work,0);
+    // The same exact native allowance also admits ordinary scalar payloads.
+    let normal=[callback,Value::Number(0.0),Value::String("plain".into()),Value::String("xyz".into())];
+    page.state.copy_work=expected;
+    let id=page.state.set_timeout(&normal).unwrap();
+    assert_eq!(page.state.copy_work,0);assert_eq!(page.state.timer_bytes,expected);
+    page.state.clear_timeout(&[id]).unwrap();
+    assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);
+}
+
+#[test]
+fn timer_utf16_arguments_public_quota_refusal_preserves_an_existing_native_callback() {
+    let (mut doc,mut forms,mut page,start)=page(&[r#"
+var count=0;
+function callback(value){if(value!=='safe')throw 'unchanged ordinary payload';count++;document.title='existing callback survived';}
+var original=setTimeout(callback,0,'safe');
+"#]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let kept=page.state.timer_bytes;let next=page.state.next_timer;
+    page.state.limits.host.timer_bytes=kept+std::mem::size_of::<Value>()+2;
+    let error=execute(&mut page,&mut doc,&mut forms,r#"setTimeout(callback,0,'\ud800xx');"#).unwrap_err();
+    assert!(error.contains("Timer argument memory limit reached (256 KiB per document)."),"{error}");
+    assert_eq!(page.state.timers.len(),1);assert_eq!(page.state.timer_bytes,kept);assert_eq!(page.state.next_timer,next);
+    assert!(matches!(page.state.timers[0].arguments.as_slice(),[Value::String(text)] if text=="safe"));
+    assert_eq!(doc.title,"waiting");
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"existing callback survived");assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"count;").unwrap().to_number(),1.0);
+}
