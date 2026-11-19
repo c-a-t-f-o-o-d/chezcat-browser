@@ -1389,8 +1389,12 @@ fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundarie
     let outcome=page.console_eval(&mut doc,&mut forms,"if(p.id!=='p'||p.customProbe!==1)throw 'recovery';");
     assert_eq!(outcome.errors,0,"{}",page.report());
     let inert=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("inert")).unwrap();
-    let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    assert!(bridge.expando_owner(node_handle(inert)).is_none());
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let frame=node_handle(inert);
+    assert_eq!(bridge.expando_owner(frame),Some(WINDOW));
+    assert!(matches!(bridge.get(frame,"contentWindow"),Ok(Value::Null)));
+    assert!(matches!(bridge.get(frame,"contentDocument"),Ok(Value::Null)));
+    assert!(bridge.state.blank_frames.is_empty());
 }
 
 #[test]
