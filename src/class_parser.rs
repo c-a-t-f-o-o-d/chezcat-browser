@@ -34,7 +34,7 @@ impl Parser {
         self.need("class")?;
         self.class_node_capacity(0)?;
         let name = if declaration || !(self.is("{") || self.is("extends")) {
-            if let TokenKind::Word(name) = &self.token().kind {
+            if let TokenKind::Word(name) | TokenKind::EscapedWord(name) = &self.token().kind {
                 if name.len() > self.capacity.property_bytes {
                     return Err(self.unsupported("Class-name limit reached."));
                 }
@@ -163,7 +163,7 @@ impl Parser {
 
     fn class_literal_key(&mut self) -> Result<String, Fault> {
         let name = match &self.token().kind {
-            TokenKind::Word(name) | TokenKind::String(name) => {
+            TokenKind::Word(name) | TokenKind::EscapedWord(name) | TokenKind::String(name) => {
                 if name.len() > self.capacity.property_bytes {
                     return Err(self.unsupported("Class property-name limit reached."));
                 }

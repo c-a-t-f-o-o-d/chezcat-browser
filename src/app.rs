@@ -4509,15 +4509,18 @@ mod select_tests;
 
 #[cfg(test)]
 mod tests {
+    mod attribute_substrings;
     mod canvas_2d;
     mod canvas_colors;
-    mod responsive_picture;
+    mod canvas_readback;
 
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+
+    mod responsive_picture;
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
