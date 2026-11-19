@@ -41,6 +41,7 @@ pub(super) enum Instruction {
     Comparison { statement: StmtId, operator: &'static str, action: Resume },
     ReadAccess { statement: StmtId, expression: ExprId, action: Resume },
     CapturePlainCall { statement: StmtId, site: ArgumentAwait },
+    CaptureOptionalPlainCall { statement: StmtId, site: ArgumentAwait, skip: usize, action: Resume },
     InvokePlainCall { statement: StmtId, action: Resume },
     AwaitComputed { statement: StmtId, action: Resume },
     Await {
@@ -309,13 +310,20 @@ fn bare_argument_operand(program: &Program, argument: ExprId) -> Option<(ExprId,
     }
 }
 
-fn bare_call_arguments(program: &Program, expression: ExprId) -> Option<&[Argument]> {
-    let ExprKind::Call(callee, arguments) = &program.exprs[expression].kind else { return None; };
-    matches!(program.exprs[*callee].kind, ExprKind::Name(_)).then_some(arguments.as_slice())
+pub(super) fn plain_call_parts(program: &Program, expression: ExprId) -> Option<(ExprId, &[Argument], bool)> {
+    let (callee, arguments, optional) = match &program.exprs[expression].kind {
+        ExprKind::Call(callee, arguments) => (*callee, arguments.as_slice(), false),
+        ExprKind::OptionalChain(callee, steps) => {
+            let [optional_chaining::Step::Call { args, optional: true }] = steps.as_slice() else { return None; };
+            (*callee, args.as_slice(), true)
+        }
+        _ => return None,
+    };
+    matches!(program.exprs[callee].kind, ExprKind::Name(_)).then_some((callee, arguments, optional))
 }
 
-fn await_in_bare_arguments(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
-    let Some(arguments) = bare_call_arguments(program, expression) else { return Ok(None); };
+fn await_in_plain_arguments(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
+    let Some((_, arguments, _)) = plain_call_parts(program, expression) else { return Ok(None); };
     let mut pending = Vec::new();
     for (index, argument) in arguments.iter().enumerate().filter(|(_, argument)| !argument.spread) {
         let mut candidate = argument.expression;
@@ -323,7 +331,7 @@ fn await_in_bare_arguments(program: &Program, expression: ExprId) -> Result<Opti
             if matches!(program.exprs[candidate].kind, ExprKind::Unary("await", _)) {
                 return Ok(Some((ArgumentAwait { call: expression, index }, argument.expression)));
             }
-            if let Some(arguments) = bare_call_arguments(program, candidate) {
+            if let Some((_, arguments, _)) = plain_call_parts(program, candidate) {
                 for argument in arguments.iter().rev().filter(|argument| !argument.spread) {
                     push(&mut pending, argument.expression)?;
                 }
@@ -336,11 +344,11 @@ fn await_in_bare_arguments(program: &Program, expression: ExprId) -> Result<Opti
 }
 
 fn resumable_await_operand(program: &Program, expression: ExprId) -> Result<bool, Fault> {
-    Ok(await_expression(program, expression).is_some() || await_in_bare_arguments(program, expression)?.is_some())
+    Ok(await_expression(program, expression).is_some() || await_in_plain_arguments(program, expression)?.is_some())
 }
 
 fn nested_bare_call(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
-    if bare_call_arguments(program, expression).is_none() {
+    if !matches!(plain_call_parts(program, expression), Some((_, _, false))) {
         return Ok(None);
     }
     if let Some(site) = await_expression(program, expression) {
@@ -348,13 +356,15 @@ fn nested_bare_call(program: &Program, expression: ExprId) -> Result<Option<(Arg
             return Ok(None);
         }
     }
-    await_in_bare_arguments(program, expression)
+    await_in_plain_arguments(program, expression)
 }
 
 enum ExpressionPart {
     Value(ExprId, Resume),
     AwaitComputed(Resume),
     CapturePlainCall(ArgumentAwait),
+    CaptureOptionalPlainCall(ArgumentAwait, Resume),
+    OptionalPlainCallEnd,
     InvokePlainCall(Resume),
     CaptureComparison,
     Comparison(&'static str, Resume),
@@ -447,7 +457,10 @@ fn visit_expression(
                 }
                 ExprKind::Assign("=", target, right)
                     if !generator && matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..))
-                        && (is_composed_expression(&program.exprs[right].kind) || nested_bare_call(program, right)?.is_some()) =>
+                        && (is_composed_expression(&program.exprs[right].kind)
+                            || nested_bare_call(program, right)?.is_some()
+                            || (matches!(program.exprs[right].kind, ExprKind::OptionalChain(..))
+                                && await_in_plain_arguments(program, right)?.is_some())) =>
                 {
                     // These right-hand shapes combine expression results; direct
                     // literal naming and other ordinary assignments stay in eval.
@@ -461,6 +474,14 @@ fn visit_expression(
                         push(&mut pending, ExpressionPart::InvokePlainCall(action))?;
                         push(&mut pending, ExpressionPart::Value(argument, Resume::StoreExpressionValue))?;
                         part = ExpressionPart::CapturePlainCall(site);
+                    }
+                }
+                ExprKind::OptionalChain(..) if !generator => {
+                    if let Some((site, argument)) = await_in_plain_arguments(program, expression)? {
+                        push(&mut pending, ExpressionPart::OptionalPlainCallEnd)?;
+                        push(&mut pending, ExpressionPart::InvokePlainCall(action))?;
+                        push(&mut pending, ExpressionPart::Value(argument, Resume::StoreExpressionValue))?;
+                        part = ExpressionPart::CaptureOptionalPlainCall(site, action);
                     }
                 }
                 _ => {}
@@ -491,12 +512,13 @@ fn expression_size(
                 });
             }
             ExpressionPart::CaptureComparison | ExpressionPart::Comparison(..) | ExpressionPart::ReadAccess(..)
-            | ExpressionPart::CapturePlainCall(_) | ExpressionPart::InvokePlainCall(_)
+            | ExpressionPart::CapturePlainCall(_) | ExpressionPart::CaptureOptionalPlainCall(..)
+            | ExpressionPart::InvokePlainCall(_)
             | ExpressionPart::BeginLogicalNot(_) | ExpressionPart::FinishLogicalNot(..)
             | ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
             | ExpressionPart::ConditionalElse | ExpressionPart::CaptureAssignment(_)
             | ExpressionPart::WriteAssignment(_) => instructions += 1,
-            ExpressionPart::LogicalEnd | ExpressionPart::ConditionalEnd => {}
+            ExpressionPart::LogicalEnd | ExpressionPart::ConditionalEnd | ExpressionPart::OptionalPlainCallEnd => {}
         }
         Ok(())
     })?;
@@ -536,6 +558,17 @@ fn emit_expression(
         let instruction = match part {
             ExpressionPart::AwaitComputed(action) => Instruction::AwaitComputed { statement: id, action },
             ExpressionPart::CapturePlainCall(site) => Instruction::CapturePlainCall { statement: id, site },
+            ExpressionPart::CaptureOptionalPlainCall(site, action) => {
+                push(&mut branches, code.len())?;
+                Instruction::CaptureOptionalPlainCall { statement: id, site, skip: 0, action }
+            }
+            ExpressionPart::OptionalPlainCallEnd => {
+                let capture = branches.pop().expect("optional call test");
+                let end = code.len();
+                let Instruction::CaptureOptionalPlainCall { skip, .. } = &mut code[capture] else { unreachable!() };
+                *skip = end;
+                return Ok(());
+            }
             ExpressionPart::InvokePlainCall(action) => Instruction::InvokePlainCall { statement: id, action },
             ExpressionPart::Value(expression, action) if generator => {
                 if let Some(call) = generator_expression_yield(program, expression, action) {
@@ -757,6 +790,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
             | Instruction::AwaitComputed { action: Resume::BranchFalse(target), .. }
             | Instruction::InvokePlainCall { action: Resume::BranchFalse(target), .. }
+            | Instruction::CaptureOptionalPlainCall { action: Resume::BranchFalse(target), .. }
             | Instruction::Logical { action: Resume::BranchFalse(target), .. }
             | Instruction::FinishLogicalNot { action: Resume::BranchFalse(target), .. }
             | Instruction::Comparison { action: Resume::BranchFalse(target), .. }

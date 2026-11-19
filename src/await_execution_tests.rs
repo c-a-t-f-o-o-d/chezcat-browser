@@ -293,6 +293,47 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_optional_bare_call_skips_only_nullish_callees() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, result, nullDone=false, bad=false, branch, token={};
+var gate=new Promise(resolve=>release=resolve);
+function mark(label,value){trace+=label+'|';return value;}
+function relay(value){return mark('relay',value);}
+function dispatch(first,second,third){
+    'use strict';
+    if(this!==undefined||first!==1||second!==token||third!==3)throw 'optional call arguments';
+    return mark('call',second);
+}
+async function run(fn){
+    return fn?.(mark('prefix',1),relay(await gate),mark('suffix',3));
+}
+async function tryInvalid(){
+    var fn=0;
+    try{return fn?.(await Promise.resolve(9),mark('invalid-suffix',0));}
+    catch(error){if(error.name!=='TypeError')throw error;bad=true;}
+}
+async function check(fn){if(fn?.(await gate))return 'yes';return 'no';}
+run(dispatch).then(value=>result=value);
+run(null).then(value=>{if(value!==undefined)throw 'short circuit value';nullDone=true;});
+check(undefined).then(value=>branch=value);
+tryInvalid();
+if(trace!=='prefix|'||result||nullDone||bad||branch)throw 'optional call prefix';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='prefix|invalid-suffix|'||!nullDone||!bad||branch!=='no'||result)
+    throw 'short circuit or callability';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='prefix|invalid-suffix|relay|suffix|call|'||result!==token)throw 'resumed optional call';'ok';");
+}
+
+#[test]
 fn await_execution_classic_loop_initializer_keeps_per_iteration_bindings() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

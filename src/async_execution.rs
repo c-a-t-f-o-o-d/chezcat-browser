@@ -699,10 +699,22 @@ impl Runtime {
                 }
                 Instruction::CapturePlainCall { statement, site } => {
                     let result = (|| {
-                        self.reserve_await_plain_call(frame)?;
-                        let call = self.prepare_await_argument_call(frame, site, frame.retained_bytes(), host)?;
+                        let call = self.prepare_await_argument_call(frame, site, None, host)?
+                            .expect("compiled non-optional async call");
                         frame.plain_calls.push(call);
                         Ok(Progress::Continue)
+                    })();
+                    result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
+                }
+                Instruction::CaptureOptionalPlainCall { statement, site, skip, action } => {
+                    let result = (|| {
+                        if let Some(call) = self.prepare_await_argument_call(frame, site, None, host)? {
+                            frame.plain_calls.push(call);
+                            Ok(Progress::Continue)
+                        } else {
+                            frame.next = skip;
+                            self.await_resume_action(frame, action, Value::Undefined, host)
+                        }
                     })();
                     result.map_err(|error: Fault| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
@@ -939,7 +951,8 @@ impl Runtime {
                             None
                         };
                         let argument_call = if let Some(site) = argument_call {
-                            let prepared = self.prepare_await_argument_call(frame, site, retained, host)?;
+                            let prepared = self.prepare_await_argument_call(frame, site, Some(retained), host)?
+                                .expect("compiled non-optional async argument");
                             retained = retained.saturating_add(prepared.retained_bytes());
                             Some(prepared)
                         } else {
@@ -1035,23 +1048,36 @@ impl Runtime {
 
     #[inline(never)]
     fn prepare_await_argument_call(
-        &mut self, frame: &Activation, site: ArgumentAwait, retained: usize, host: &mut dyn Host,
-    ) -> Result<Box<PreparedPlainArguments>, Fault> {
+        &mut self, frame: &mut Activation, site: ArgumentAwait, retained: Option<usize>, host: &mut dyn Host,
+    ) -> Result<Option<Box<PreparedPlainArguments>>, Fault> {
         self.step()?;
-        let ExprKind::Call(callee, arguments) = &frame.program.exprs[site.call].kind else {
-            unreachable!("compiled async argument call");
-        };
+        let (callee, _, optional) = async_plan::plain_call_parts(&frame.program, site.call)
+            .expect("compiled async argument call");
         let environment = frame.environment()?;
-        let function = self.eval(&frame.program, *callee, environment, &frame.this, host)?;
+        let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
+        if optional {
+            self.step()?;
+            if matches!(function, Value::Null | Value::Undefined) {
+                return Ok(None);
+            }
+        }
         self.push_transient_value(&function)?;
-        let direct_eval = matches!(&frame.program.exprs[*callee].kind, ExprKind::Name(name) if name == "eval");
+        let retained = if let Some(retained) = retained {
+            retained
+        } else {
+            self.reserve_await_plain_call(frame)?;
+            frame.retained_bytes()
+        };
+        let (_, arguments, _) = async_plan::plain_call_parts(&frame.program, site.call)
+            .expect("compiled async argument call");
+        let direct_eval = !optional && matches!(&frame.program.exprs[callee].kind, ExprKind::Name(name) if name == "eval");
         let prefix = self.eval_await_argument_prefix(
             &frame.program, &arguments[..site.index], environment, &frame.this, host,
         )?;
         let prepared = PreparedPlainArguments { call: site.call, index: site.index, function, direct_eval, prefix };
         let bytes = prepared.retained_bytes();
         self.await_storage(retained.saturating_add(bytes), bytes)?;
-        Ok(Box::new(prepared))
+        Ok(Some(Box::new(prepared)))
     }
 
     #[inline(never)]
