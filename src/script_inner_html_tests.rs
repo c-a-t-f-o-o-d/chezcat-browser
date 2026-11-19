@@ -111,7 +111,13 @@ fn inner_html_context_and_parser_limits_do_not_commit_a_prefix() {
     assert!(matches!(&data.nodes[data.nodes[1].children[0]].kind, NodeKind::Text(text) if text == "X"));
     assert!(matches!(&data.nodes[data.nodes[3].children[0]].kind, NodeKind::Text(text) if text == "Y"));
     assert_eq!(data.nodes[0].children.len(), 4);
-    for context in ["table", "tr", "select", "template", "svg"] { assert!(crate::html::parse_fragment("<b>x</b>", context, true).is_err()); }
+    let template = crate::html::parse_fragment("<b>x</b>", "template", true).unwrap();
+    assert_eq!(template.nodes[0].children, [1]);
+    assert!(matches!(&template.nodes[1].kind, NodeKind::Element { tag, .. } if tag == "b"));
+    assert!(matches!(&template.nodes[template.nodes[1].children[0]].kind, NodeKind::Text(text) if text == "x"));
+    for context in ["table", "tr", "select", "svg"] {
+        assert!(crate::html::parse_fragment("<b>x</b>", context, true).is_err(), "{context}");
+    }
     for source in ["<!--comment-->","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><p>x</b>y","<p><b>x<div>y","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
     }
