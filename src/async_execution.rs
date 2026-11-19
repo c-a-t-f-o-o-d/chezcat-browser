@@ -1,16 +1,53 @@
 //! Owned await activations for the parser's finite statement plan. A resumed
-//! instruction never evaluates the prefix again. Synchronous subtrees, catch
-//! and finally bodies use the ordinary evaluator and its native access checks.
+//! instruction never evaluates the prefix again. Synchronous subtrees use
+//! the ordinary evaluator and its native access checks.
 use super::async_plan::{Instruction, Resume};
 use super::function_reachability::Edge;
 use super::*;
 
-#[derive(Clone, Copy)]
 struct TryScope {
     statement: StmtId,
     after: usize,
-    catch_entry: Option<usize>,
     environments: usize,
+    phase: TryPhase,
+}
+
+enum TryPhase {
+    Body { catch_entry: Option<usize>, finally_entry: Option<usize> },
+    Finally(Option<Box<FinallyCompletion>>),
+}
+
+enum FinallyCompletion {
+    Return(Value),
+    Throw(Fault),
+}
+
+impl FinallyCompletion {
+    fn value(&self) -> Option<&Value> {
+        match self {
+            Self::Return(value) => Some(value),
+            Self::Throw(fault) => match fault.exception.as_deref() {
+                Some(Exception::Value(value)) => Some(value),
+                _ => None,
+            },
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let mut bytes = std::mem::size_of::<Self>()
+            .saturating_add(self.value().map_or(0, Value::bytes));
+        if let Self::Throw(fault) = self {
+            bytes = bytes.saturating_add(fault.message.len());
+            if fault.exception.is_some() {
+                bytes = bytes.saturating_add(std::mem::size_of::<Exception>());
+            }
+            if let Some(location) = &fault.location {
+                bytes = bytes.saturating_add(std::mem::size_of::<FaultLocation>())
+                    .saturating_add(location.context.len());
+            }
+        }
+        bytes
+    }
 }
 
 struct PendingAwait {
@@ -118,6 +155,9 @@ impl Activation {
                     .capacity()
                     .saturating_mul(std::mem::size_of::<TryScope>()),
             )
+            .saturating_add(self.finally_completions().fold(0usize, |bytes, completion| {
+                bytes.saturating_add(completion.retained_bytes())
+            }))
     }
 
     pub(super) fn reachability_cost(&self) -> usize {
@@ -155,6 +195,11 @@ impl Activation {
         }
         for reference in self.assignment_references() {
             Edge::reference(reference, add);
+        }
+        for completion in self.finally_completions() {
+            if let Some(value) = completion.value() {
+                Edge::value(value, add);
+            }
         }
         if let Some(context) = self.invocation {
             add(Edge::Environment(context.environment));
@@ -205,6 +250,13 @@ impl Activation {
 
     fn assignment_references(&self) -> impl Iterator<Item = &Reference> {
         self.assignments.iter().chain(self.pending_assignment())
+    }
+
+    fn finally_completions(&self) -> impl Iterator<Item = &FinallyCompletion> {
+        self.try_scopes.iter().filter_map(|scope| match &scope.phase {
+            TryPhase::Finally(completion) => completion.as_deref(),
+            TryPhase::Body { .. } => None,
+        })
     }
 }
 
@@ -608,7 +660,7 @@ impl Runtime {
                     frame.next = target;
                     Ok(Progress::Continue)
                 }
-                Instruction::PushTry { statement, after, catch_entry } => {
+                Instruction::PushTry { statement, after, catch_entry, finally_entry } => {
                     if frame.try_scopes.len() >= MAX_EVAL_DEPTH {
                         return Err(Fault::new("Async try nesting limit reached (128)."));
                     }
@@ -627,23 +679,13 @@ impl Runtime {
                     frame.try_scopes.push(TryScope {
                         statement,
                         after,
-                        catch_entry,
                         environments: frame.environments.len(),
+                        phase: TryPhase::Body { catch_entry, finally_entry },
                     });
                     Ok(Progress::Continue)
                 }
-                Instruction::FinishTry => {
-                    let scope = frame
-                        .try_scopes
-                        .pop()
-                        .ok_or_else(|| Fault::new("Invalid async try exit."))?;
-                    frame.next = scope.after;
-                    let completion = self.finish_try_statement(
-                        &frame.program, scope.statement, Ok(Control::Normal(None)),
-                        environment, &frame.this, host,
-                    )?;
-                    Self::await_control(completion)
-                }
+                Instruction::FinishTry => self.finish_await_try_body(frame, environment, host),
+                Instruction::FinishFinally => Self::finish_await_finally(frame),
                 Instruction::Logical { statement, operator, target, action } => {
                     let result = (|| {
                         let value = frame.take_expression_value()?;
@@ -876,6 +918,67 @@ impl Runtime {
         }
     }
 
+    #[inline(never)]
+    fn finish_await_try_body(
+        &mut self, frame: &mut Activation, environment: usize, host: &mut dyn Host,
+    ) -> Result<Progress, Fault> {
+        let scope = frame.try_scopes.pop().ok_or_else(|| Fault::new("Invalid async try exit."))?;
+        let TryPhase::Body { finally_entry, .. } = scope.phase else {
+            return Err(Fault::new("Invalid async try body exit."));
+        };
+        if let Some(entry) = finally_entry {
+            return self.begin_await_finally(frame, scope, entry, Ok(Control::Normal(None)));
+        }
+        frame.next = scope.after;
+        let completion = self.finish_try_statement(
+            &frame.program, scope.statement, Ok(Control::Normal(None)),
+            environment, &frame.this, host,
+        )?;
+        Self::await_control(completion)
+    }
+
+    #[inline(never)]
+    fn begin_await_finally(
+        &mut self,
+        frame: &mut Activation,
+        mut scope: TryScope,
+        entry: usize,
+        completion: Result<Control, Fault>,
+    ) -> Result<Progress, Fault> {
+        let pending = match completion {
+            Ok(Control::Normal(_)) => None,
+            Ok(Control::Return(value)) => Some(FinallyCompletion::Return(value)),
+            Err(error) => Some(FinallyCompletion::Throw(error)),
+            Ok(other) => return Self::await_control(other),
+        };
+        let pending = if let Some(pending) = pending {
+            let bytes = pending.retained_bytes();
+            self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
+            Some(Box::new(pending))
+        } else {
+            None
+        };
+        scope.phase = TryPhase::Finally(pending);
+        // The scope just popped for this try owns the same stack slot.
+        frame.try_scopes.push(scope);
+        frame.next = entry;
+        Ok(Progress::Continue)
+    }
+
+    #[inline(never)]
+    fn finish_await_finally(frame: &mut Activation) -> Result<Progress, Fault> {
+        let scope = frame.try_scopes.pop().ok_or_else(|| Fault::new("Invalid async finally exit."))?;
+        let TryPhase::Finally(completion) = scope.phase else {
+            return Err(Fault::new("Invalid async finally body exit."));
+        };
+        frame.next = scope.after;
+        match completion.map(|completion| *completion) {
+            None => Ok(Progress::Continue),
+            Some(FinallyCompletion::Return(value)) => Ok(Progress::Return(value)),
+            Some(FinallyCompletion::Throw(error)) => Err(error),
+        }
+    }
+
     fn reserve_await_environment(&mut self, frame: &mut Activation) -> Result<(), Fault> {
         if frame.environments.len() >= MAX_EVAL_DEPTH {
             return Err(Fault::new("Async lexical nesting limit reached (128)."));
@@ -925,8 +1028,15 @@ impl Runtime {
                 break;
             };
             self.unwind_await_environments(frame, scope.environments);
+            let TryPhase::Body { catch_entry, finally_entry } = scope.phase else {
+                // An abrupt result from finally replaces its saved completion.
+                continue;
+            };
+            if let Some(entry) = finally_entry {
+                return self.begin_await_finally(frame, scope, entry, completion);
+            }
             let marker = self.publish_await_activation(frame)?;
-            let catch_entry = scope.catch_entry.filter(|_| completion.is_err());
+            let catch_entry = catch_entry.filter(|_| completion.is_err());
             completion = (|| {
                 self.push_completion_roots(&completion)?;
                 if let Some(entry) = catch_entry {
@@ -985,8 +1095,8 @@ mod tests {
             try_scopes: vec![TryScope {
                 statement: 0,
                 after: 2,
-                catch_entry: None,
                 environments: 1,
+                phase: TryPhase::Finally(Some(Box::new(FinallyCompletion::Return(Value::Function(28))))),
             }],
             expression_value: Some(Value::Function(21)),
             assignments: vec![Reference::ComputedProperty(Value::Object(25), Value::Function(26))],
@@ -1013,7 +1123,7 @@ mod tests {
         };
         let mut edges = Vec::new();
         frame.reachability_edges(&mut |edge| edges.push(edge));
-        for function in [11, 13, 17, 19, 20, 21, 26] {
+        for function in [11, 13, 17, 19, 20, 21, 26, 28] {
             assert!(edges
                 .iter()
                 .any(|edge| matches!(edge, Edge::Function(id) if *id == function)));
@@ -1038,6 +1148,7 @@ mod tests {
                 + "target".len()
                 + std::mem::size_of::<PendingMethod>() + "invoke".len()
                 + std::mem::size_of::<PendingLiteral>() + "entry".len()
+                + std::mem::size_of::<FinallyCompletion>()
                 + frame.assignments.capacity() * std::mem::size_of::<Reference>()
                 + frame.environments.capacity() * std::mem::size_of::<usize>()
                 + frame.try_scopes.capacity() * std::mem::size_of::<TryScope>()
