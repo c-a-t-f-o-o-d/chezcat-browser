@@ -197,7 +197,12 @@ fn checkbox_fragment_later_unsupported_child_context_and_resource_failures_are_a
         assert_eq!(Snapshot::capture(&doc, &forms, &page), before, "{source}");
         no_resources(&mut page);
     }
-    for source in ["document.getElementById('inert').innerHTML='<input type=checkbox>';", "check.innerHTML='<input type=checkbox>';", "document.getElementById('foreign').innerHTML='<input type=checkbox>';", "check.type='radio';"] {
+    for source in [
+        "document.getElementById('inert').innerHTML='<input type=checkbox><select><input type=checkbox></select>';",
+        "check.innerHTML='<input type=checkbox>';",
+        "document.getElementById('foreign').innerHTML='<input type=checkbox>';",
+        "check.type='radio';",
+    ] {
         let result = page.console_eval(&mut doc, &mut forms, source);
         assert_eq!(result.errors, 1, "{source}: {}", page.report());
         assert_eq!(Snapshot::capture(&doc, &forms, &page), before, "{source}");
