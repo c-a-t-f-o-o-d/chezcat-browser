@@ -579,9 +579,13 @@ struct AttributeSelector {
     value: Option<String>,
     operator: AttributeOperator,
     ascii_insensitive: bool,
+    substring_prefix: Vec<usize>,
 }
 #[derive(Clone,Copy,Debug)]
-enum AttributeOperator {Exact,Token}
+enum AttributeOperator {Exact,Token,Dash,Prefix,Suffix,Substring}
+
+#[path="css_attribute_substrings.rs"]
+mod attribute_substrings;
 
 #[derive(Clone, Copy, Debug)]
 enum Relation {
@@ -2314,11 +2318,20 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
             value: None,
             operator:AttributeOperator::Exact,
             ascii_insensitive,
+            substring_prefix: Vec::new(),
         });
     }
-    // Presence, exact equality and whitespace-token equality. Other operators
-    // and namespaces reject rather than matching a broader set.
-    let operator=if bytes.get(*position)==Some(&b'~') {*position+=1;AttributeOperator::Token}else{AttributeOperator::Exact};
+    // An operator is contiguous. Namespace syntax and malformed operators must
+    // still reject the entire selector, rather than broaden an attribute test.
+    let operator = match bytes.get(*position) {
+        Some(b'~') => AttributeOperator::Token,
+        Some(b'|') => AttributeOperator::Dash,
+        Some(b'^') => AttributeOperator::Prefix,
+        Some(b'$') => AttributeOperator::Suffix,
+        Some(b'*') => AttributeOperator::Substring,
+        _ => AttributeOperator::Exact,
+    };
+    if !matches!(operator, AttributeOperator::Exact) { *position += 1; }
     if bytes.get(*position) != Some(&b'=') {
         return None;
     }
@@ -2367,11 +2380,17 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
         return None;
     }
     *position += 1;
+    let substring_prefix = if matches!(operator, AttributeOperator::Substring) {
+        attribute_substrings::prefix_table(&value, ascii_insensitive)?
+    } else {
+        Vec::new()
+    };
     Some(AttributeSelector {
         name,
         value: Some(value),
         operator,
         ascii_insensitive,
+        substring_prefix,
     })
 }
 
@@ -2607,6 +2626,7 @@ fn matches_selector(
                             && !expected.as_bytes().iter().any(u8::is_ascii_whitespace)
                             && actual.split_ascii_whitespace().any(|token|if attribute.ascii_insensitive {token.eq_ignore_ascii_case(expected)}else{token==expected})
                     }
+                    _ => attribute_substrings::matches(attribute, actual, expected, context, budget),
                 };
                 if !matches {
                     return false;
@@ -4679,10 +4699,10 @@ mod tests {
             "[type~=]",
             "[type~ =checkbox]",
             "[type~==checkbox]",
-            "[type|=checkbox]",
-            "[type^=check]",
-            "[type$=box]",
-            "[type*=check]",
+            "[type| =checkbox]",
+            "[type^==check]",
+            "[type$=]",
+            "[type**=check]",
             "[ns|type]",
             "[*|type]",
             "[type=]",
@@ -4885,3 +4905,7 @@ mod position_tests;
 #[cfg(test)]
 #[path="css_translate_tests.rs"]
 mod translate_tests;
+
+#[cfg(test)]
+#[path="css_attribute_substring_tests.rs"]
+mod attribute_substring_tests;
