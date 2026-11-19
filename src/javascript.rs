@@ -3964,6 +3964,7 @@ pub struct Runtime {
     object_assigned_closures: std::collections::BTreeSet<usize>,
     scope_assigned_closures: std::collections::BTreeSet<usize>,
     transient_roots: transient_roots::State,
+    json_scratch_bytes: usize,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     deferred_global_orders: BTreeMap<&'static str, usize>,
     host_globals: HashSet<String>,
@@ -4116,6 +4117,7 @@ impl Runtime {
             object_assigned_closures: std::collections::BTreeSet::new(),
             scope_assigned_closures: std::collections::BTreeSet::new(),
             transient_roots: transient_roots::State::default(),
+            json_scratch_bytes: 0,
             global_attributes: BTreeMap::new(),
             deferred_global_orders: BTreeMap::new(),
             host_globals: HashSet::new(),
@@ -12196,20 +12198,16 @@ caught;
     }
 
     #[test]
-    fn switch_and_json_stringify_nesting_stop_on_a_one_mib_stack() {
+    fn switch_nesting_stops_on_a_one_mib_stack() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
-            for source in [
-                format!("{};{}", "switch(1){case 1:".repeat(1000), "}".repeat(1000)),
-                "var a=[],b=a;for(var i=0;i<1000;i++){var c=[];b.push(c);b=c;}function f(n){if(n===0)return JSON.stringify(a);return f(n-1);}f(10);".into(),
-            ] {
-                let (mut runtime, mut host) = test_runtime();
-                let error = runtime.execute(&source, &mut host).unwrap_err();
-                assert!(error.contains("limit"), "{error}");
-                assert_eq!(runtime.eval_depth, 0);
-                assert_eq!(runtime.call_depth, 0);
-                runtime.begin_job();
-                assert_eq!(runtime.execute("JSON.stringify(JSON.parse('[1,true]'));", &mut host).unwrap().to_text(), "[1,true]");
-            }
+            let source = format!("{};{}", "switch(1){case 1:".repeat(1000), "}".repeat(1000));
+            let (mut runtime, mut host) = test_runtime();
+            let error = runtime.execute(&source, &mut host).unwrap_err();
+            assert!(error.contains("limit"), "{error}");
+            assert_eq!(runtime.eval_depth, 0);
+            assert_eq!(runtime.call_depth, 0);
+            runtime.begin_job();
+            assert_eq!(runtime.execute("JSON.stringify(JSON.parse('[1,true]'));", &mut host).unwrap().to_text(), "[1,true]");
         }).unwrap().join().unwrap();
     }
 
@@ -12225,6 +12223,31 @@ caught;
                 &mut host,
             ).unwrap();
             assert_eq!(result.to_text(), "17");
+            assert_eq!(runtime.eval_depth, 0);
+            assert_eq!(runtime.call_depth, 0);
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn json_callbacks_use_heap_frames_on_a_one_mib_stack() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let (mut runtime, mut host) = test_runtime();
+            let payload = format!("{}17{}", "[{\"child\":".repeat(192), "}]".repeat(192));
+            runtime.define_global("payload", Value::String(payload)).unwrap();
+            let value = runtime.execute(r#"
+                var revived=0,written=0;
+                var value=JSON.parse(payload,function(key,value,context){
+                    revived++;
+                    if(value===17 && (context.source!=='17' || JSON.parse('[7]')[0]!==7)) throw 'leaf';
+                    return value;
+                });
+                var result=JSON.stringify(value,function(key,value){written++;return value;});
+                var node=value;
+                for(var i=0;i<192;i++)node=node[0].child;
+                result===payload && node===17 && revived===385 && written===385;
+            "#, &mut host).unwrap();
+            assert_eq!(value.to_text(), "true");
+            assert_eq!(runtime.json_scratch_bytes, 0);
             assert_eq!(runtime.eval_depth, 0);
             assert_eq!(runtime.call_depth, 0);
         }).unwrap().join().unwrap();
