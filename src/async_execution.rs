@@ -742,7 +742,7 @@ impl Runtime {
                     self.capture_await_comparison(frame)
                         .map_err(|error| error.at(&frame.program.source, frame.program.stmts[statement].at))
                 }
-                Instruction::StrictComparison { statement, operator, action } => {
+                Instruction::Comparison { statement, operator, action } => {
                     let result = (|| {
                         let right = frame.take_expression_value()?;
                         let left = frame.comparison_operands.pop()

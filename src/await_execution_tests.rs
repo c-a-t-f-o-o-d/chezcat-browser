@@ -32,6 +32,47 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_relational_comparison_waits_for_both_operands_before_conversion() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var release, finish, reject, trace='', numberOrder, stringOrder, rejected, reason={};
+var leftGate=new Promise(function(resolve){release=resolve;});
+var rightGate=new Promise(function(resolve){finish=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+var value={get reading(){
+    trace+='reading|';
+    return {valueOf(){trace+='convert-left|';return 6;}};
+}};
+function relay(result){trace+='left|';return result;}
+function right(result){trace+='right|';return {valueOf(){trace+='convert-right|';return result;}};}
+async function order(){return relay(await leftGate).reading>right(await rightGate);}
+async function lexical(){return (await Promise.resolve('07'))<'1';}
+async function stop(){
+    try{return value.reading>=right(await failed);}
+    catch(error){rejected=error;}
+}
+order().then(result=>numberOrder=result);
+lexical().then(result=>stringOrder=result);
+stop();
+if(trace!=='reading|'||numberOrder!==undefined||stringOrder!==undefined||rejected!==undefined)
+    throw 'comparison prefix';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(value);reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(stringOrder!==true||rejected!==reason||numberOrder!==undefined||trace!=='reading|left|reading|')throw 'conversion before right operand';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "finish(5);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(numberOrder!==true||trace!=='reading|left|reading|right|convert-left|convert-right|')
+    throw 'relational conversion order or result';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_strict_comparisons_retain_left_values_through_later_suspension() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
