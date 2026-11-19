@@ -197,6 +197,10 @@ impl Bridge<'_> {
         !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
 
+    pub(super) fn text_content_receiver(&self, object: u32) -> bool {
+        self.node_identity_receiver(object) || self.frame_contains_node(object).is_some()
+    }
+
     pub(super) fn document_node_get(&mut self,property:&str)->Result<Option<Value>,String> {
         if !document_node_property(property) {return Ok(None);}
         Ok(Some(match property {

@@ -1,7 +1,8 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
+use super::{Accessors, Fault, Function, Host, Ordinary, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -96,6 +97,8 @@ impl Runtime {
                             self.store_property(object,key.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;
                         }
                     }
+                    self.define_node_attribute(prototype, window, "textContent",
+                        NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
                     for (key, getter, setter) in [

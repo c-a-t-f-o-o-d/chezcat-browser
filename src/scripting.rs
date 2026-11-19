@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
-use crate::javascript::{Host, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET};
+use crate::javascript::{Host, Runtime, Value, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -2553,6 +2554,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         property == "style" && self.element_expando_receiver(object)
+            || property == "textContent" && self.text_content_receiver(object)
             || self.content_editable_member(object, property)
             || self.element_sibling_member(object, property)
             || self.document_inherited_property(object,property)
@@ -2732,6 +2734,7 @@ impl Host for Bridge<'_> {
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
+            || property == "textContent" && self.text_content_receiver(object)
             || self.content_editable_attribute(object, property)
             || self.html_offset_attribute(object, property)
             || script_element_properties::ordinary_interface_member(property)
@@ -2763,6 +2766,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
         if matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
@@ -2789,6 +2793,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
             return self.canvas_receiver(object).then_some(name);
@@ -2956,7 +2961,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
-        if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return Some(object);}
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName"|NODE_TEXT_CONTENT_GET|NODE_TEXT_CONTENT_SET) {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
@@ -3088,6 +3093,15 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
+            if !self.text_content_receiver(object) {
+                return Err(("TypeError", "The textContent accessor requires a Node.".into()));
+            }
+            if method == NODE_TEXT_CONTENT_SET && self.is_frame_handle(object) {
+                return Err(("NotSupportedError", "Blank child native writes are not implemented.".into()));
+            }
+            return Ok(());
+        }
         if script_content_editable::accessor(method) {return self.validate_content_editable(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             if !self.html_element_receiver(object) {
@@ -3482,6 +3496,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
+        }
+        if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
+            return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return self.node_identity_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0Event.")||matches!(method,"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")) {
@@ -4542,6 +4559,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if object == DOCUMENT && property == "textContent" {return Ok(());}
         if self.content_editable_attribute(object,property) {return self.content_editable_set(object,&value);}
         if self.canvas_context_receiver(object) {
             return Err(format!("Setting native Canvas 2D property {property:?} is not implemented."));
@@ -4806,6 +4824,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method == NODE_TEXT_CONTENT_GET {
+            return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
+        }
         if method == script_content_editable::GET {return self.content_editable_get(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             self.state.work(1)?;
