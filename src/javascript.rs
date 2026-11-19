@@ -2369,9 +2369,24 @@ impl Parser {
     }
     fn enter(&mut self) -> Result<(), Fault> {
         self.depth += 1;
-        if self.depth > MAX_PARSE_DEPTH {
-            Err(self.unsupported("Parser nesting limit reached (64)."))
-        } else {
+        #[cfg(test)]
+        if let Some(limit) = self.capacity.test_native_parser_depth {
+            return if self.depth > limit {
+                Err(self.unsupported(format!("Parser nesting limit reached ({limit}).")))
+            } else {
+                Ok(())
+            };
+        }
+        #[cfg(windows)]
+        {
+            native_call_stack::check_windows_stack("parser entry")
+                .map_err(|fault| fault.at(&self.program.source, self.at()))
+        }
+        #[cfg(not(windows))]
+        {
+            if self.depth > MAX_PARSE_DEPTH {
+                return Err(self.unsupported(format!("Parser nesting limit reached on an unmeasured native stack ({MAX_PARSE_DEPTH}).")));
+            }
             Ok(())
         }
     }
@@ -4773,7 +4788,8 @@ impl Runtime {
         let program = Rc::new(Parser::parse_invocation_context(source, &mut self.regexp_work,
             strict, self.eval_depth, self.limits.capacity, self.limits.heap, Some(self.job_deadline), new_target_allowed,
             super_property_allowed, super_call_allowed).map_err(|mut fault| {
-            if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
+            if self.eval_depth != 0 && (fault.message.contains("Parser nesting limit")
+                || fault.message.contains("Native stack headroom exhausted during parser entry")) {
                 fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",
                     self.eval_depth, self.call_depth, self.evaluation_frames));
                 fault.message.push_str(&format!(" {}.", self.inhibition_diagnostic()));
@@ -11107,6 +11123,44 @@ strictFailure;
             assert!(error.contains("Expected an expression"), "{error}");
             assert!(host.records.is_empty());
             assert!(runtime.programs.is_empty());
+        }).unwrap().join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn browser_native_parser_accepts_finite_recursive_syntax_during_eval() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let mut runtime = Runtime::new();
+            let mut host = TestHost { eval_permission: Some(true), ..TestHost::default() };
+            let source = format!(
+                "function uncalled(){{{}return {}17{};{}}}typeof uncalled;",
+                "{".repeat(140), "[".repeat(160), "]".repeat(160), "}".repeat(140),
+            );
+            runtime.define_global("source", Value::String(source)).unwrap();
+            let result = runtime.execute("eval(source);", &mut host).unwrap();
+            assert_eq!(result.to_text(), "function");
+            assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+        }).unwrap().join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn browser_native_parser_stops_at_measured_headroom_on_a_one_mib_stack() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            for source in [
+                format!("{}1;{}", "{".repeat(12_000), "}".repeat(12_000)),
+                format!("{}17{};", "[".repeat(12_000), "]".repeat(12_000)),
+                format!("{}17{};", "({a:".repeat(12_000), "})".repeat(12_000)),
+            ] {
+                let mut runtime = Runtime::new();
+                let mut host = TestHost::default();
+                let fault = runtime.execute(&source, &mut host).unwrap_err();
+                assert!(fault.contains("Native stack headroom exhausted during parser entry"), "{fault}");
+                assert!(runtime.programs.is_empty());
+                runtime.begin_job();
+                assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
+                assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+            }
         }).unwrap().join().unwrap();
     }
 

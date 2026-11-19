@@ -12,6 +12,8 @@ impl Host for NoHost {
 #[test]
 fn original_selected_if_branch_native_pressure_on_one_mib_stack() {
     std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+        let mut unoptimized_pressure = false;
+        let mut completions = [0, 0];
         for braced in [false, true] {
             for depth in [16, 17, 18, 20] {
               for disabled in [true, false] {
@@ -22,13 +24,18 @@ fn original_selected_if_branch_native_pressure_on_one_mib_stack() {
                 let branch = if braced { "{return descend(n-1);}" } else { "return descend(n-1);" };
                 let source = format!("function descend(n){{if(n>0){branch}return eval(code);}}descend({depth});");
                 let result = runtime.execute(&source, &mut NoHost);
-                if disabled && braced && depth >= 17 {
-                    let error = result.unwrap_err();
-                    assert!(error.contains("Parser nesting limit")
-                        || error.contains("Native stack headroom exhausted"), "{error}");
-                    println!("Original selected-if baseline: braced={braced}; calls={depth}; {error}");
-                } else {
-                    assert_eq!(result.unwrap().to_number(), 42.0);
+                match result {
+                    Ok(value) => {
+                        assert_eq!(value.to_number(), 42.0);
+                        completions[usize::from(!disabled)] += 1;
+                    }
+                    Err(error) => {
+                        let measured = error.contains("Native stack headroom exhausted");
+                        let fallback = !cfg!(windows) && error.contains("Parser nesting limit");
+                        assert!((disabled || depth > 16) && (measured || fallback),
+                            "braced={braced}; calls={depth}; optimized={}: {error}", !disabled);
+                        unoptimized_pressure |= disabled;
+                    }
                 }
                 assert_eq!((runtime.eval_depth, runtime.call_depth, runtime.evaluation_frames), (0, 0, 0));
                 runtime.begin_job();
@@ -36,6 +43,8 @@ fn original_selected_if_branch_native_pressure_on_one_mib_stack() {
               }
             }
         }
+        assert!(unoptimized_pressure, "the unoptimized path must reach the measured guard");
+        assert!(completions[1] >= completions[0], "unoptimized and optimized: {completions:?}");
     }).unwrap().join().unwrap();
 }
 
