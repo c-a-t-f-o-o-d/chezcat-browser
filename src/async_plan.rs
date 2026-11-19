@@ -30,6 +30,8 @@ pub(super) enum Instruction {
     FinishTry,
     FinishFinally,
     Logical { statement: StmtId, operator: &'static str, target: usize, action: Resume },
+    BeginLogicalNot(usize),
+    FinishLogicalNot { statement: StmtId, negations: usize, action: Resume },
     CaptureComparison(StmtId),
     Comparison { statement: StmtId, operator: &'static str, action: Resume },
     ReadAccess { statement: StmtId, expression: ExprId, action: Resume },
@@ -90,6 +92,15 @@ struct AwaitSite {
     assignment: Option<ExprId>,
 }
 
+fn logical_not_operand(program: &Program, mut expression: ExprId) -> (ExprId, usize) {
+    let mut negations = 0;
+    while let ExprKind::Unary("!", operand) = program.exprs[expression].kind {
+        negations += 1;
+        expression = operand;
+    }
+    (expression, negations)
+}
+
 fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> {
     let (expression, assignment) = match program.exprs[expression].kind {
         ExprKind::Assign("=", left, right) if matches!(program.exprs[left].kind, ExprKind::Name(_) | ExprKind::Member(..)) => {
@@ -97,7 +108,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
-    let (mut expression, literal_key) = match &program.exprs[expression].kind {
+    let (expression, literal_key) = match &program.exprs[expression].kind {
         ExprKind::Object(properties) => {
             let [object_literals::Member::Property { key, value, kind: object_literals::Kind::Data }] =
                 properties.as_slice()
@@ -108,11 +119,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
-    let mut negations = 0;
-    while let ExprKind::Unary("!", operand) = program.exprs[expression].kind {
-        negations += 1;
-        expression = operand;
-    }
+    let (expression, negations) = logical_not_operand(program, expression);
     let (expression, chain) = match program.exprs[expression].kind {
         ExprKind::OptionalChain(base, _) => (base, Some(expression)),
         _ => (expression, None),
@@ -168,6 +175,8 @@ enum ExpressionPart {
     ReadAccess(ExprId, Resume),
     LogicalTest(&'static str, Resume),
     LogicalEnd,
+    BeginLogicalNot(usize),
+    FinishLogicalNot(usize, Resume),
     ConditionalTest,
     ConditionalElse,
     ConditionalEnd,
@@ -223,6 +232,14 @@ fn visit_expression(
                     part = ExpressionPart::Value(test, Resume::StoreExpressionValue);
                     continue;
                 }
+                ExprKind::Unary("!", _) => {
+                    let (operand, negations) = logical_not_operand(program, expression);
+                    if is_composed_expression(&program.exprs[operand].kind) {
+                        push(&mut pending, ExpressionPart::FinishLogicalNot(negations, action))?;
+                        push(&mut pending, ExpressionPart::Value(operand, Resume::StoreExpressionValue))?;
+                        part = ExpressionPart::BeginLogicalNot(negations);
+                    }
+                }
                 ExprKind::Member(receiver, _) | ExprKind::OptionalChain(receiver, _)
                     if is_composed_expression(&program.exprs[receiver].kind) =>
                 {
@@ -259,6 +276,7 @@ fn expression_size(program: &Program, expression: ExprId) -> Result<(usize, usiz
                 sites += usize::from(await_expression(program, expression).is_some());
             }
             ExpressionPart::CaptureComparison | ExpressionPart::Comparison(..) | ExpressionPart::ReadAccess(..)
+            | ExpressionPart::BeginLogicalNot(_) | ExpressionPart::FinishLogicalNot(..)
             | ExpressionPart::LogicalTest(_, _) | ExpressionPart::ConditionalTest
             | ExpressionPart::ConditionalElse | ExpressionPart::CaptureAssignment(_)
             | ExpressionPart::WriteAssignment(_) => instructions += 1,
@@ -323,6 +341,10 @@ fn emit_expression(
                 let Instruction::Logical { target, .. } = &mut code[test] else { unreachable!() };
                 *target = end;
                 return Ok(());
+            }
+            ExpressionPart::BeginLogicalNot(negations) => Instruction::BeginLogicalNot(negations),
+            ExpressionPart::FinishLogicalNot(negations, action) => {
+                Instruction::FinishLogicalNot { statement: id, negations, action }
             }
             ExpressionPart::ConditionalTest => {
                 push(&mut branches, code.len())?;
@@ -490,6 +512,7 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
             Instruction::BranchFalse { target, .. }
             | Instruction::Await { action: Resume::BranchFalse(target), .. }
             | Instruction::Logical { action: Resume::BranchFalse(target), .. }
+            | Instruction::FinishLogicalNot { action: Resume::BranchFalse(target), .. }
             | Instruction::Comparison { action: Resume::BranchFalse(target), .. }
             | Instruction::ReadAccess { action: Resume::BranchFalse(target), .. }
             | Instruction::WriteAssignment { action: Resume::BranchFalse(target), .. }
@@ -813,6 +836,7 @@ mod tests {
             ("async function f(p){let a,b=await p,c=4;}", 3),
             ("async function f(p){return {entry:use(await p)};}", 1),
             ("async function f(p){if(!use(await p)){done();}}", 2),
+            ("async function f(p){if(!(allowed()&&use(await p)||other())){done();}}", 8),
             ("async function f(p){if(use(await p)!==flag){done();}}", 5),
             ("async function f(p){return use(await p)===(original!==use(await p));}", 7),
             ("async function f(p){return use(await p).value > use(await p);}", 4),

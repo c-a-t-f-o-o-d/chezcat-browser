@@ -32,6 +32,50 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_negated_logical_expression_keeps_short_circuit_and_branch_order() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var release, reject, trace='', selected, skipped, doubled, caught, reason={};
+var gate=new Promise(function(resolve){release=resolve;});
+var failed=new Promise(function(resolve,fail){reject=fail;});
+function input(label,promise){trace+='operand:'+label+'|';return promise;}
+function mark(value){trace+='mark|';return value;}
+function fallback(label){trace+='fallback:'+label+'|';return 0;}
+async function choose(enabled,promise,label){
+    try{
+        if(!(enabled&&mark(await input(label,promise))||fallback(label))){
+            trace+='yes:'+label+'|';
+            return 'yes';
+        }
+        trace+='no:'+label+'|';
+        return 'no';
+    }catch(error){caught=error;}
+    finally{trace+='finally:'+label+'|';}
+}
+async function twice(){return !!(true&&mark(await gate));}
+choose(true,gate,'go').then(value=>selected=value);
+choose(false,gate,'skip').then(value=>skipped=value);
+choose(true,failed,'reject');
+twice().then(value=>doubled=value);
+if(trace!=='operand:go|fallback:skip|yes:skip|finally:skip|operand:reject|'||
+    selected!==undefined||skipped!==undefined||doubled!==undefined||caught!==undefined)
+    throw 'condition prefix or inactive operand';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(skipped!=='yes'||selected!==undefined||doubled!==undefined)throw 'premature branch';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release({});reject(reason);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(selected!=='no'||doubled!==true||caught!==reason||
+    trace!=='operand:go|fallback:skip|yes:skip|finally:skip|operand:reject|mark|no:go|finally:go|mark|finally:reject|')
+    throw 'negation, branch or rejection';
+'ok';
+"#);
+}
+
+#[test]
 fn await_execution_relational_comparison_waits_for_both_operands_before_conversion() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
