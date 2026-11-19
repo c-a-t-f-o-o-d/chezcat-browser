@@ -432,6 +432,7 @@ pub(super) struct CreatedEvent {
     pub(super) phase: u8,
     pub(super) dispatching: bool,
     pub(super) initialized: bool,
+    pub(super) trusted: bool,
     pub(super) passive: bool,
     timestamp: f64,
     ui: Option<UiData>,
@@ -595,7 +596,7 @@ impl Bridge<'_> {
         let timestamp=self.event_timestamp(owner,Instant::now())?;
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
-            target:None,current:None,phase:0,dispatching:false,initialized:true,passive:false,
+            target:None,current:None,phase:0,dispatching:false,initialized:true,trusted:false,passive:false,
             timestamp,ui,mouse,custom};
         self.state.created_events.push(event);
         self.state.retained=retained;
@@ -724,7 +725,7 @@ impl Bridge<'_> {
                 "cancelBubble" => Value::Bool(event.stopped),
                 "eventPhase" => Value::Number(f64::from(event.phase)),
                 "timeStamp" => Value::Number(event.timestamp),
-                "isTrusted" => Value::Bool(false),
+                "isTrusted" => Value::Bool(event.trusted),
                 "composed" => Value::Bool(event.composed),
                 name if constant(name).is_some() => Value::Number(f64::from(constant(name).unwrap())),
                 "view" if event.ui.is_some() => native(event.ui.as_ref().unwrap().view),
@@ -816,7 +817,7 @@ impl Bridge<'_> {
         let handle = self.state.next_event;
         let event = CreatedEvent { owner:WINDOW,composed:false,handle, name: String::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
-            target:None,current:None,phase:0,dispatching:false,initialized:false,passive:false,
+            target:None,current:None,phase:0,dispatching:false,initialized:false,trusted:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
             ui: matches!(interface,Interface::Ui|Interface::Mouse).then(UiData::default),
             mouse: matches!(interface,Interface::Mouse).then(MouseData::default),
@@ -882,6 +883,7 @@ impl Bridge<'_> {
                     let event = &mut self.state.created_events[id];
                     event.name = name;
                     event.initialized = true;
+                    event.trusted = false;
                     event.bubbles = args.get(1).is_some_and(Value::truthy);
                     event.cancelable = args.get(2).is_some_and(Value::truthy);
                     event.prevented = false; event.stopped = false; event.immediate = false;

@@ -47,6 +47,8 @@ mod function_allocation;
 mod function_arena;
 #[path = "number_radix.rs"]
 mod number_radix;
+#[path = "abort_interface.rs"]
+pub(crate) mod abort_interface;
 #[path = "bigint.rs"]
 mod bigint;
 #[path = "number_to_fixed.rs"]
@@ -557,6 +559,12 @@ pub trait Host {
     fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
     fn finish_native_promise_effect(&mut self) {}
     fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
+    fn begin_abort_dispatch(&mut self, _controller: u32, _reason: Value) -> Result<usize, String> {
+        Err("Abort dispatch is not authorized by this host.".into())
+    }
+    fn new_aborted_signal(&mut self, _owner: u32, _reason: Value) -> Result<u32, String> {
+        Err("AbortSignal creation is not authorized by this host.".into())
+    }
     fn prepare_event_dispatch(&mut self)->Result<(),String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
     fn begin_event_dispatch(&mut self,_object:u32,_args:&[Value])->Result<usize,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
     fn next_event_callback(&mut self,_token:usize)->Result<Option<EventCallback>,String> {Err("Synchronous event dispatch is not authorized by this host.".into())}
@@ -8918,6 +8926,24 @@ impl Runtime {
         self.inherits_from(object, prototype, host).map(Value::Bool)
     }
 
+    #[inline(never)]
+    fn dispatch_native_event(&mut self, token: usize, host: &mut dyn Host) -> Result<bool, Fault> {
+        let result = (|| {
+            loop {
+                self.step()?;
+                let Some(callback) = host.next_event_callback(token).map_err(Fault::new)? else { return Ok(()); };
+                // This is nested within the author's current job and realm.
+                match self.call_event_listener(callback.callback, &[Value::Host(callback.event)], Value::Host(callback.target), host) {
+                    Ok(value) => host.event_callback_result(token, matches!(value, Value::Bool(false))),
+                    Err(fault) if fault.exception.is_some() => host.event_callback_error(token, &fault.display()),
+                    Err(fault) => return Err(fault),
+                }
+            }
+        })();
+        let accepted = host.finish_event_dispatch(token);
+        result.map(|()| accepted)
+    }
+
     fn call_host(
         &mut self,
         object: u32,
@@ -9025,21 +9051,10 @@ impl Runtime {
         }
         if host.synchronous_event_dispatch(object,method) {
             let token=host.begin_event_dispatch(object,args).map_err(Fault::new)?;
-            let result=(|| {
-                loop {
-                    self.step()?;
-                    let Some(callback)=host.next_event_callback(token).map_err(Fault::new)? else {return Ok(());};
-                    // This is nested in the caller's JavaScript stack. Do not
-                    // use invoke(), begin a fresh job or drain microtasks here.
-                    match self.call_event_listener(callback.callback,&[Value::Host(callback.event)],Value::Host(callback.target),host) {
-                        Ok(value)=>host.event_callback_result(token,matches!(value,Value::Bool(false))),
-                        Err(fault) if fault.exception.is_some()=>host.event_callback_error(token,&fault.display()),
-                        Err(fault)=>return Err(fault),
-                    }
-                }
-            })();
-            let accepted=host.finish_event_dispatch(token);
-            return result.map(|()|Value::Bool(accepted));
+            return self.dispatch_native_event(token, host).map(Value::Bool);
+        }
+        if let Some(result) = self.abort_native_operation(object, method, args, host) {
+            return result;
         }
         if method == "getBoundingClientRect" {
             if let Some(ancestry) = host.instance_ancestry(object) {

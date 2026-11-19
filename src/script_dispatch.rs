@@ -1,5 +1,5 @@
-//! Synchronous, untrusted Event/UIEvent delivery through the current JS job.
-//! No activation, native input, network access or microtask checkpoint is added.
+//! Synchronous Event/UIEvent delivery through the current JavaScript job.
+//! Author dispatch is untrusted and neither path confers input activation.
 use super::*;
 
 pub(super) struct Dispatch {
@@ -285,7 +285,7 @@ impl Bridge<'_> {
     }
     pub(super) fn create_standalone_target(&mut self,owner:u32)->Result<Value,String> {
         self.state.work(1)?;
-        if self.state.standalone_targets.len()>=self.state.limits.host.event_targets {return Err("Standalone EventTarget limit reached.".into());}
+        if self.state.standalone_targets.len().saturating_add(self.state.abort_signals.len())>=self.state.limits.host.event_targets {return Err("Standalone EventTarget limit reached.".into());}
         let index=u32::try_from(self.state.standalone_targets.len()).map_err(|_|"EventTarget identity overflow.")?;
         let handle=0x9000_0000u32.checked_add(index).filter(|id|*id<0xc000_0000).ok_or("EventTarget identity overflow.")?;
         let bytes=std::mem::size_of::<u32>();
@@ -296,7 +296,7 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {
-        self.standalone_target_owner(object).is_some() || object==WINDOW || !self.is_frame_handle(object) && self.namespace_receiver(object)
+        self.standalone_target_owner(object).is_some() || self.abort_signal_owner(object).is_some() || object==WINDOW || !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
     pub(super) fn validate_dispatch(
         &self,
@@ -378,7 +378,8 @@ impl Bridge<'_> {
             if name != "load" {
                 path.push(WINDOW);
             }
-        } else if object != WINDOW && self.standalone_target_owner(object).is_none() && !self.attr_receiver(object) {
+        } else if object != WINDOW && self.standalone_target_owner(object).is_none() && self.abort_signal_owner(object).is_none()
+            && !self.attr_receiver(object) {
             let node = node_index(object).ok_or("Event target is not a genuine DOM node.")?;
             let mut parent = self.state.tree.parents[node];
             while let Some(node) = parent {
@@ -429,6 +430,7 @@ impl Bridge<'_> {
         });
         let event = &mut self.state.created_events[id];
         event.dispatching = true;
+        event.trusted = false;
         event.target = Some(object);
         event.current = None;
         event.phase = 0;
