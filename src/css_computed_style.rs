@@ -16,6 +16,7 @@ struct Snapshot {
     transforms: Vec<Option<Transform>>,
     has_transform_geometry: bool,
     canvas_foregrounds: HashMap<usize, u32>,
+    opacities: HashMap<usize, Option<f64>>,
 }
 impl ComputedProperties {
     #[allow(clippy::too_many_arguments)]
@@ -28,6 +29,7 @@ impl ComputedProperties {
         transforms: Vec<Option<Transform>>,
         has_transform_geometry: bool,
         canvas_foregrounds: HashMap<usize, u32>,
+        opacities: HashMap<usize, Option<f64>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -38,6 +40,7 @@ impl ComputedProperties {
             transforms,
             has_transform_geometry,
             canvas_foregrounds,
+            opacities,
         }))
     }
     pub(crate) fn read(
@@ -120,6 +123,13 @@ impl ComputedProperties {
         if !self.0.complete { return Err(ComputedStyleUnavailable); }
         Ok(self.0.canvas_foregrounds.get(&node).copied())
     }
+    pub(crate) fn read_opacity(&self, node: usize) -> Result<Option<f64>, ComputedStyleUnavailable> {
+        let eligible = self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible { return Ok(None); }
+        if !self.0.complete { return Err(ComputedStyleUnavailable); }
+        self.0.opacities.get(&node).copied().unwrap_or(Some(1.0))
+            .map(Some).ok_or(ComputedStyleUnavailable)
+    }
     #[cfg(test)]
     pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
 }
@@ -135,6 +145,12 @@ pub(crate) struct CssBudget<'a> {
     copy_work: &'a mut usize,
 }
 impl<'a> CssBudget<'a> {
+    pub(super) fn opacity(&mut self, first: bool) -> Result<(), String> {
+        // Sparse hash buckets/control bytes, including the first allocation.
+        let entries = if first { 6 } else { 3 };
+        self.work(1)?;
+        self.copies(entries * std::mem::size_of::<(usize, Option<f64>)>())
+    }
     pub(super) fn canvas_foreground(&mut self, first: bool) -> Result<(), String> {
         // Include sparse hash buckets, their control bytes, and initial capacity.
         let entries = if first { 6 } else { 3 };

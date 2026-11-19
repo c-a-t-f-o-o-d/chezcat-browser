@@ -2430,6 +2430,13 @@ impl Bridge<'_> {
             let value = script_transform::specified(style, self.state)?;
             return self.string(&value);
         }
+        if name == "opacity" {
+            let value = match inline_opacity(style, self.state)? {
+                Some(value) => value.serialize()?,
+                None => String::new(),
+            };
+            return self.string(&value);
+        }
         let value = crate::css::declaration_items(style)
             .filter_map(|item| item.split_once(':'))
             .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
@@ -2449,18 +2456,24 @@ impl Bridge<'_> {
     ) -> Result<(), String> {
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
         let specified;
-        let value = if name == "transform" && !value.is_empty() {
+        let checked = matches!(name, "transform" | "opacity");
+        let value = if checked && !value.is_empty() {
             if value.trim().is_empty() || !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
                 return Ok(());
             }
-            specified = match script_transform::normalize(value, self.state)? {
-                Ok(value) => value,
-                Err(crate::css::TransformSyntax::Invalid) => return Ok(()),
-                Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
+            specified = if name == "opacity" {
+                let Some(parsed) = metered_opacity(value, self.state)? else { return Ok(()); };
+                parsed.serialize()?
+            } else {
+                match script_transform::normalize(value, self.state)? {
+                    Ok(value) => value,
+                    Err(crate::css::TransformSyntax::Invalid) => return Ok(()),
+                    Err(crate::css::TransformSyntax::Unsupported) => return Err("This transform exceeds the supported translation grammar.".into()),
+                }
             };
             specified.as_str()
         } else {value};
-        let priority = if name == "transform" && value.is_empty() {""} else {priority};
+        let priority = if checked && value.is_empty() {""} else {priority};
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -2472,6 +2485,9 @@ impl Bridge<'_> {
         if name == "transform" && value.is_empty()
             && matches!(script_transform::declaration(existing, self.state)?, script_transform::Declaration::Absent)
         {
+            return Ok(());
+        }
+        if name == "opacity" && value.is_empty() && inline_opacity(existing, self.state)?.is_none() {
             return Ok(());
         }
         let mut style = String::new();
@@ -2704,7 +2720,7 @@ impl Host for Bridge<'_> {
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property,"transform"|"opacity") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -2937,7 +2953,7 @@ impl Host for Bridge<'_> {
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
         property == "value" && self.input_accessor_member(object, property)
-            || property == "transform" && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property,"transform"|"opacity") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && self.attr_element_receiver(object)
@@ -5184,7 +5200,29 @@ fn prefix(text: &str, maximum: usize) -> &str {
 }
 fn css_declaration_name(name: &str) -> Result<String, String> {
     if name.eq_ignore_ascii_case("transform") {return Ok("transform".into());}
+    if name.eq_ignore_ascii_case("opacity") {return Ok("opacity".into());}
     css_name(name)
+}
+fn metered_opacity<'a>(value: &'a str, state: &mut State) -> Result<Option<crate::css::SpecifiedOpacity<'a>>, String> {
+    let (work, copies) = crate::css::transform_source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)?;
+    Ok(crate::css::specified_opacity(value))
+}
+fn inline_opacity<'a>(style: &'a str, state: &mut State) -> Result<Option<crate::css::SpecifiedOpacity<'a>>, String> {
+    let mut winner = None;
+    let mut important = false;
+    for item in crate::css::declaration_items(style) {
+        let Some((name, raw)) = item.split_once(':') else {continue};
+        if !name.trim().eq_ignore_ascii_case("opacity") {continue;}
+        let (value, priority) = crate::css::declaration_priority(raw);
+        if important && !priority {continue;}
+        if let Some(parsed) = metered_opacity(value, state)? {
+            winner = Some(parsed);
+            important = priority;
+        }
+    }
+    Ok(winner)
 }
 fn css_name(name: &str) -> Result<String, String> {
     if name.len() > 64 {
@@ -5203,6 +5241,7 @@ fn css_name(name: &str) -> Result<String, String> {
         css.as_str(),
         "display"
             | "transform"
+            | "opacity"
             | "overflow"
             | "position"
             | "inset"
@@ -5329,7 +5368,7 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         let name = css_declaration_name(name.trim())?;
         // Priority is separate grammar. Keep the ordinary value guard on
         // everything before a genuine trailing priority marker.
-        let value = if name == "transform" { crate::css::declaration_priority(value).0 } else { value.trim() };
+        let value = if matches!(name.as_str(), "transform" | "opacity") { crate::css::declaration_priority(value).0 } else { value.trim() };
         validate_css_value(&name, value, string_limit)?;
     }
     if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }
@@ -5371,6 +5410,9 @@ mod script_computed_overflow_tests;
 #[cfg(test)]
 #[path = "script_computed_position_tests.rs"]
 mod script_computed_position_tests;
+#[cfg(test)]
+#[path = "script_computed_opacity_tests.rs"]
+mod script_computed_opacity_tests;
 
 #[cfg(test)]
 #[path = "script_selector_negation_tests.rs"]
