@@ -32,6 +32,36 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_optional_chain_keeps_receivers_and_skips_nullish_suffixes() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, result=0, skipped=0, reason={}, rejected=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var holder={base:5,get method(){
+    trace+='getter|';
+    return function(input){if(this!==holder)throw 'receiver';trace+='call|';return {value:this.base+input};};
+}};
+function relay(input){if(input!==4)throw 'awaited argument';trace+='relay|';return holder;}
+function key(){trace+='key|';return 'method';}
+function argument(){trace+='argument|';return 2;}
+async function work(){return relay(await gate)?.method(argument()).value;}
+async function optional(source){return (await source)?.[key()]?.(argument()).value;}
+work().then(function(value){result=value;});
+optional(Promise.resolve(null)).then(function(value){if(value===undefined)skipped++;});
+optional(Promise.resolve({})).then(function(value){if(value===undefined)skipped++;});
+optional(Promise.reject(reason)).catch(function(error){if(error===reason)rejected++;});
+if(trace!==''||result||skipped||rejected)throw 'chain before suspension';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='key|'||skipped!==2||rejected!==1||result)throw 'nullish or rejected suffix';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(4);if(trace!=='key|')throw 'synchronous chain';'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='key|relay|getter|argument|call|'||result!==7)throw 'chain order or receiver';'ok';");
+}
+
+#[test]
 fn await_execution_name_assignment_writes_after_fulfillment_and_skips_rejection() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

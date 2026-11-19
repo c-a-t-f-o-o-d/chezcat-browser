@@ -27,6 +27,7 @@ pub(super) enum Instruction {
         operand: ExprId,
         callee: Option<ExprId>,
         member_key: Option<ExprId>,
+        chain: Option<ExprId>,
         assignment: Option<ExprId>,
         action: Resume,
     },
@@ -55,6 +56,7 @@ struct AwaitSite {
     callee: Option<ExprId>,
     guard: Option<(ExprId, &'static str)>,
     member_key: Option<ExprId>,
+    chain: Option<ExprId>,
     assignment: Option<ExprId>,
 }
 
@@ -71,6 +73,10 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         }
         _ => (expression, None),
     };
+    let (expression, chain) = match program.exprs[expression].kind {
+        ExprKind::OptionalChain(base, _) => (base, Some(expression)),
+        _ => (expression, None),
+    };
     let (expression, member_key) = match program.exprs[expression].kind {
         ExprKind::Member(receiver, key) => (receiver, Some(key)),
         _ => (expression, None),
@@ -83,7 +89,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         _ => (expression, None),
     };
     let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some(AwaitSite { operand, callee, guard, member_key, assignment })
+    Some(AwaitSite { operand, callee, guard, member_key, chain, assignment })
 }
 
 fn visit_sequence(
@@ -140,14 +146,14 @@ fn emit_expression(
 ) -> Result<(), Fault> {
     visit_sequence(program, expression, |expression, last| {
         let action = if last { action } else { Resume::Discard };
-        let instruction = if let Some(AwaitSite { operand, callee, guard, member_key, assignment }) =
+        let instruction = if let Some(AwaitSite { operand, callee, guard, member_key, chain, assignment }) =
             await_expression(program, expression)
         {
             if let Some((left, operator)) = guard {
                 // A successful short circuit skips this site's next instruction.
                 push(code, Instruction::GuardAwait { statement: id, left, operator, action })?;
             }
-            Instruction::Await { statement: id, operand, callee, member_key, assignment, action }
+            Instruction::Await { statement: id, operand, callee, member_key, chain, assignment, action }
         } else {
             Instruction::Evaluate { statement: id, expression, action }
         };
@@ -413,6 +419,8 @@ mod tests {
             "value += await p;",
             "value = flag && await p;",
             "return (await p)[await p];",
+            "return (await p)?.[await p];",
+            "return (await p)?.method(await p);",
             "return use(...await p);",
             "return (use(), 1 + await p);",
             "return (await p) && use(await p);",

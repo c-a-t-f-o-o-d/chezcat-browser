@@ -17,6 +17,7 @@ struct PendingAwait {
     action: Resume,
     call: Option<PendingCall>,
     member_key: Option<ExprId>,
+    chain: Option<ExprId>,
     assignment: Option<Reference>,
 }
 
@@ -326,7 +327,7 @@ impl Runtime {
         let result = (|| {
             if let Some((value, reject)) = resumed {
                 self.push_transient_value(&value)?;
-                let PendingAwait { statement, action, call, member_key, assignment } = frame
+                let PendingAwait { statement, action, call, member_key, chain, assignment } = frame
                     .pending
                     .take()
                     .ok_or_else(|| Fault::new("Async activation has no pending await."))?;
@@ -349,6 +350,15 @@ impl Runtime {
                             )?;
                             self.push_transient_value(&key)?;
                             let result = self.read_reference(&Reference::ComputedProperty(value, key), host)?;
+                            self.push_transient_value(&result)?;
+                            result
+                        } else {
+                            value
+                        };
+                        let value = if let Some(chain) = chain {
+                            let result = self.eval_resumed_chain(
+                                &frame.program, chain, value, frame.environment()?, &frame.this, host,
+                            )?;
                             self.push_transient_value(&result)?;
                             result
                         } else {
@@ -514,6 +524,7 @@ impl Runtime {
                     operand,
                     callee,
                     member_key,
+                    chain,
                     assignment,
                     action,
                 } => {
@@ -538,6 +549,9 @@ impl Runtime {
                         if member_key.is_some() {
                             self.step()?; // Ordinary member reference construction.
                         }
+                        if chain.is_some() {
+                            self.step()?; // Optional-chain reference construction.
+                        }
                         let call = if let Some(callee) = callee {
                             let function = self.eval(&frame.program, callee, environment, &frame.this, host)?;
                             self.push_transient_value(&function)?;
@@ -556,7 +570,7 @@ impl Runtime {
                             self.eval(&frame.program, operand, environment, &frame.this, host)?;
                         self.push_transient_value(&value)?;
                         let promise = self.promise_for_await(value, host)?;
-                        frame.pending = Some(PendingAwait { statement, action, call, member_key, assignment });
+                        frame.pending = Some(PendingAwait { statement, action, call, member_key, chain, assignment });
                         Ok(Progress::Suspend(promise))
                     })();
                     result.map_err(|error: Fault| {
@@ -696,6 +710,7 @@ mod tests {
                 action: Resume::Discard,
                 call: Some(PendingCall { function: Value::Function(17), direct_eval: false }),
                 member_key: None,
+                chain: None,
                 assignment: Some(Reference::Binding(18, "target".into())),
             }),
         };

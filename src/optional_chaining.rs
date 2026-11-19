@@ -209,6 +209,39 @@ if(count!==10)throw 'early errors';'ok';
     }
 
     #[test]
+    fn optional_chain_after_await_keeps_native_call_and_denial_rules() {
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("native", Value::Host(1)).unwrap();
+        runtime.define_global("opaque", Value::Host(2)).unwrap();
+        let mut host = NoHost::default();
+        runtime.execute(r#"
+var observed=0;
+function getNative(){return native;}
+async function run(){return getNative(await Promise.resolve(1))?.run(7);}
+run().then(value=>observed=value);
+"#, &mut host).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+        assert_eq!(runtime.execute("observed;", &mut host).unwrap().to_text(), "7");
+        assert_eq!((host.calls, host.reads), (1, 0));
+        runtime.begin_job();
+        runtime.execute(r#"
+var continued=false;
+function getOpaque(){return opaque;}
+async function denied(){
+    try { return getOpaque(await Promise.resolve(1))?.run?.(); }
+    catch(e){continued=true;}finally{continued=true;}
+}
+denied();
+"#, &mut host).unwrap();
+        let error = runtime.microtask_checkpoint(&mut host).unwrap_err();
+        assert!(error.contains("native property is denied"), "{error}");
+        assert_eq!((host.calls, host.reads), (1, 1));
+        runtime.begin_job();
+        assert_eq!(runtime.execute("continued;", &mut host).unwrap().to_text(), "false");
+        assert!(runtime.transient_registration_is_empty());
+    }
+
+    #[test]
     fn optional_chain_steps_are_bounded_counted_and_do_not_reset_execution() {
         let source = format!("null{}", "?.x".repeat(MAX_EXPRESSION_FRAMES));
         let mut runtime = Runtime::for_test();
