@@ -297,7 +297,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
             templates: Vec::new(), classes: Vec::new(), class_members: 0, patterns: Vec::new(), body: Vec::new(), chain_steps: 0, resumption_plan_nodes: 0,
         },
         tokens, token_storage_bytes: 0, compilation_deadline: None, deferred_bodies: Vec::new(),
-        current: 0, depth: 0, expression_frames: enclosing, argument_entries: 0,
+        current: 0, depth: 0, expression_frames: enclosing, expression_storage_bytes: 0, argument_entries: 0,
         if_branches: 0, strict: false, loops: Vec::new(), breakables: Vec::new(),
         labels: Vec::new(), allow_in: false, functions: 0, await_count: None, yield_count: None, new_target_allowed: false,
         super_property_allowed: false, super_call_allowed: false,
@@ -323,6 +323,38 @@ fn continuation_cleanup_releases_only_owned_slots_and_restores_in_context() {
     assert!(parser.assignment_expression().err().unwrap().message.contains("argument storage limit"));
     assert_eq!(parser.expression_frames, 7);
     assert_eq!(parser.argument_entries, MAX_AST);
+}
+
+#[test]
+fn browser_parser_accepts_large_heap_expressions_on_one_mib_stack() {
+    small_stack(|| {
+        let mut runtime = Runtime::new();
+        let mut host = Recorder::default();
+        let groups = format!("{}7{};", "(".repeat(16_000), ")".repeat(16_000));
+        assert_eq!(runtime.execute(&groups, &mut host).unwrap().to_text(), "7");
+        runtime.begin_job();
+        let chain = format!(
+            "var node={{}};node.self=node;(node?.self{}===node)&&(null?.self{}===undefined);",
+            ".self".repeat(8_000), ".self".repeat(8_000),
+        );
+        assert_eq!(runtime.execute(&chain, &mut host).unwrap().to_text(), "true");
+        runtime.begin_job();
+        let template = format!("function count(){{return arguments.length;}}count`{}`;", "${1}".repeat(5_000));
+        assert_eq!(runtime.execute(&template, &mut host).unwrap().to_text(), "5001");
+    });
+}
+
+#[test]
+fn browser_parser_continuations_share_compilation_storage_and_restore_the_caller() {
+    let mut parser = scratch_parser("(7)", 9);
+    parser.capacity.test_expression_frames = None;
+    parser.expression_storage_bytes = 1024;
+    parser.capacity.compilation_bytes = parser.compilation_bytes();
+    let error = parser.assignment_expression().unwrap_err();
+    assert!(error.message.contains("Script compilation storage limit"));
+    assert_eq!(parser.expression_frames, 9);
+    assert_eq!(parser.expression_storage_bytes, 1024);
+    assert!(!parser.allow_in);
 }
 
 #[test]

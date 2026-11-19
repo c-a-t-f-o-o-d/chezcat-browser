@@ -7,8 +7,10 @@
 use super::MAX_STRING_BYTES;
 use super::{
     primitive_conversion::Hint, Argument, ExprId, ExprKind, Fault, Host, Parser, Program, Runtime,
-    TokenKind, Value, MAX_EXPRESSION_FRAMES,
+    TokenKind, Value,
 };
+#[cfg(test)]
+use super::MAX_EXPRESSION_FRAMES;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -157,11 +159,15 @@ impl Parser {
         substitutions: bool,
     ) -> Result<ExprKind, Fault> {
         self.current += 1;
+        self.charge_expression_text(head.capacity())?;
         let mut spans = Vec::new();
         if substitutions {
             loop {
-                if spans.len() >= MAX_EXPRESSION_FRAMES {
-                    return Err(self.unsupported("Template substitution limit reached (4096)."));
+                #[cfg(test)]
+                if let Some(limit) = self.capacity.test_expression_frames {
+                    if spans.len() >= limit {
+                        return Err(self.unsupported(format!("Template substitution limit reached ({limit}).")));
+                    }
                 }
                 let expression = self.expression_with_in()?;
                 let TokenKind::Template(text, part @ (Part::Middle | Part::Tail)) =
@@ -170,7 +176,10 @@ impl Parser {
                     return Err(self.error("Expected the closing template substitution brace."));
                 };
                 let tail = matches!(part, Part::Tail);
-                spans.push((expression, text.clone()));
+                let text = text.clone();
+                self.charge_expression_text(text.capacity())?;
+                self.reserve_expression_record(&mut spans, None)?;
+                spans.push((expression, text));
                 self.current += 1;
                 if tail {
                     break;
@@ -196,14 +205,19 @@ impl Parser {
             // A token begins at the backtick or substitution's closing brace,
             // and includes the trailing backtick or opening ${ delimiter.
             let raw = token.at() + 1..token.end() - if tail { 1 } else { 2 };
-            chunks.try_reserve(1).map_err(|_| Fault::new("Template chunk allocation failed."))?;
-            chunks.push(TaggedChunk { cooked: cooked.clone(), raw });
+            let cooked = cooked.clone();
+            self.charge_expression_text(cooked.capacity())?;
+            self.reserve_expression_record(&mut chunks, None)?;
+            chunks.push(TaggedChunk { cooked, raw });
             self.current += 1;
             if tail {
                 break;
             }
-            if arguments.len() > MAX_EXPRESSION_FRAMES {
-                return Err(self.unsupported("Template substitution limit reached (4096)."));
+            #[cfg(test)]
+            if let Some(limit) = self.capacity.test_expression_frames {
+                if arguments.len() > limit {
+                    return Err(self.unsupported(format!("Template substitution limit reached ({limit}).")));
+                }
             }
             let expression = self.expression_with_in()?;
             self.append_argument(&mut arguments, Argument { expression, spread: false })?;

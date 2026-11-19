@@ -273,8 +273,9 @@ const MAX_TOKENS: usize = 131_072;
 #[cfg(test)]
 const MAX_AST: usize = 131_072;
 const MAX_PARSE_DEPTH: usize = 64;
-// Expressions suspend groups/calls/keys/operators in one shared heap quota.
-// Genuinely recursive compound syntax retains the independent native depth guard.
+// Explicit count boundary for parser regression tests. Production charges
+// allocated continuation storage and retains the separate native depth guard.
+#[cfg(test)]
 const MAX_EXPRESSION_FRAMES: usize = 4096;
 // Flat else-if dispatchers do not consume native parser/evaluator frames.
 // Pending branches across nested statements still share a finite allowance.
@@ -2093,6 +2094,7 @@ struct Parser {
     current: usize,
     depth: usize,
     expression_frames: usize,
+    expression_storage_bytes: usize,
     argument_entries: usize,
     if_branches: usize,
     strict: bool,
@@ -2169,6 +2171,7 @@ impl Parser {
             // for live evaluator frames instead of granting a fresh parse stack.
             depth: active_depth,
             expression_frames: 0,
+            expression_storage_bytes: 0,
             argument_entries: 0,
             if_branches: 0,
             strict,
@@ -2385,6 +2388,7 @@ impl Parser {
     fn compilation_bytes(&self) -> usize {
         self.token_storage_bytes.saturating_add(self.program.compilation_ast_bytes())
             .saturating_add(self.deferred_bodies.capacity().saturating_mul(size_of::<DeferredBody>()))
+            .saturating_add(self.expression_storage_bytes)
     }
 
     fn check_compilation_progress(&self) -> Result<(), Fault> {
