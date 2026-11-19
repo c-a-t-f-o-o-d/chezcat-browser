@@ -98,6 +98,61 @@ if(broken.next().value!==1||broken.next(reason).value!==undefined||caught!==reas
 }
 
 #[test]
+fn generator_yield_lexical_for_of_keeps_iterator_and_unwinds_in_order() {
+    let mut runtime = Runtime::for_capacity_test();
+    let source = r#"
+var trace='', iterator, readers=[], fault={};
+function make(fail){
+    return {[Symbol.iterator](){
+        var index=0;
+        iterator={
+            next(){
+                trace+='next|';
+                if(fail&&index===1)throw fault;
+                if(index===2)return {done:true};
+                return {done:false,value:++index};
+            },
+            return(){trace+='close|';return {};}
+        };
+        return iterator;
+    }};
+}
+function pass(value){return value;}
+function* feed(fail){
+    try{
+        for(let value of make(fail)){
+            const read=()=>value;
+            readers.push(read);
+            try{pass(yield read());}
+            finally{trace+='inner:'+read()+'|';}
+        }
+    }finally{trace+='outer|';}
+}
+var full=feed(false);
+if(full.next().value!==1||trace!=='next|')throw 'initial step';
+iterator.next=function(){throw 'next was read again';};
+iterator=null;
+var trash={};for(var i=0;i<900;i++)trash.fn=function(){return i;};trash=null;
+if(full.next().value!==2||!full.next().done||readers[0]()!==1||readers[1]()!==2||
+    trace!=='next|inner:1|next|inner:2|next|outer|')throw 'iterator or lexical order';
+trace='';
+var early=feed(false);
+if(early.next().value!==1||early.return(9).value!==9||
+    trace!=='next|inner:1|close|outer|')throw 'abrupt cleanup order';
+trace='';
+var broken=feed(true), caught=false;
+broken.next();
+try{broken.next();}catch(error){if(error!==fault)throw error;caught=true;}
+if(!caught||!broken.next().done||trace!=='next|inner:1|next|outer|')throw 'step failure closed iterator';
+'ok';
+"#;
+    assert_eq!(runtime.execute(source, &mut NoHost::default()).unwrap().to_text(), "ok");
+    assert!(runtime.function_arena.retired > 0);
+    assert_eq!((runtime.call_depth, runtime.eval_depth), (0, 0));
+    assert!(runtime.transient_registration_is_empty());
+}
+
+#[test]
 fn generator_yield_classic_for_resumes_iteration_and_unwinds_cleanup() {
     let mut runtime = Runtime::for_test();
     let source = r#"
