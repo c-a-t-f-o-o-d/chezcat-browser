@@ -329,6 +329,9 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::Block(body) => body.len() + 1,
                         StmtKind::If(_, _, Some(_)) => 3,
                         StmtKind::If(_, _, None) => 1,
+                        StmtKind::For(None, condition, advance, _) => {
+                            1 + usize::from(condition.is_some()) + usize::from(advance.is_some())
+                        }
                         StmtKind::Try(_, catch, finally) => {
                             2 + 2 * usize::from(catch.is_some_and(|(_, body)| split.contains(&body)))
                                 + 2 * usize::from(finally.is_some_and(|body| split.contains(&body)))
@@ -352,7 +355,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             }
         }
         let children_eligible = eligible && matches!(kind,
-            StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _));
+            StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _)
+            | StmtKind::For(None, _, _, _));
         if children_eligible {
             let before = sites;
             let mut condition_extra = 0;
@@ -384,7 +388,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             StmtKind::While(_, body) | StmtKind::DoWhile(body, _) => child(*body, false)?,
             StmtKind::For(initial, _, _, body) => {
                 if let Some(initial) = initial { child(*initial, false)?; }
-                child(*body, false)?;
+                child(*body, children_eligible)?;
             }
             StmtKind::ForIn(initial, _, body) | StmtKind::ForOf(initial, _, body) => {
                 child(*initial, false)?;
@@ -415,6 +419,7 @@ enum Emit {
     Else { branch: Range<usize>, alternative: StmtId },
     FinishBranch(Range<usize>),
     FinishJump(usize),
+    FinishFor { statement: StmtId, start: usize, test: bool, advance: Option<ExprId> },
     FinishTry { handler: usize, catch: Option<StmtId>, finally: Option<StmtId> },
     FinishCatch(usize),
     FinishFinally(usize),
@@ -468,6 +473,19 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
             }
             Emit::FinishJump(jump) => {
                 code[jump] = Instruction::Jump(code.len());
+                continue;
+            }
+            Emit::FinishFor { statement, start, test, advance } => {
+                if let Some(expression) = advance {
+                    push(&mut code, Instruction::Evaluate {
+                        statement, expression, action: Resume::Discard,
+                    })?;
+                }
+                push(&mut code, Instruction::Jump(start))?;
+                if test {
+                    let destination = code.len();
+                    set_branch_target(&mut code[start..start + 1], destination);
+                }
                 continue;
             }
             Emit::FinishTry { handler, catch, finally } => {
@@ -540,6 +558,18 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     push(&mut pending, next)?;
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
+                StmtKind::For(None, condition, advance, body) => {
+                    let start = code.len();
+                    if let Some(condition) = condition {
+                        push(&mut code, Instruction::BranchFalse {
+                            statement: id, condition: *condition, target: 0,
+                        })?;
+                    }
+                    push(&mut pending, Emit::FinishFor {
+                        statement: id, start, test: condition.is_some(), advance: *advance,
+                    })?;
+                    push(&mut pending, Emit::Statement(*body))?;
+                }
                 StmtKind::Try(body, catch, finally) => {
                     let handler = code.len();
                     let catch = catch.map(|(_, body)| body).filter(|body| split.contains(body));
@@ -608,6 +638,9 @@ mod tests {
             "let a=await p,b=1+await p;",
             "let {value=await p}=await p;",
             "while(false){await p;}",
+            "for(let i=0;i<2;i++){await p;}",
+            "for(;await p;){await p;}",
+            "for(;true;await p){await p;}",
             "try{}catch(e){await p;}finally{}",
             "try{}catch{}finally{await p;}",
             "await (await p);",
@@ -618,6 +651,9 @@ mod tests {
         }
         let source = "async function go(p){exit:{try{await p;}catch(e){break exit;}}}";
         let error = parse(source).err().expect("jump to split ancestor was accepted");
+        assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
+        let error = parse("async function go(p){for(;;){await p;continue;}}")
+            .err().expect("jump to a split loop was accepted");
         assert!(error.message.contains("jump to a statement split by await"), "{}", error.display());
     }
 
@@ -644,6 +680,8 @@ mod tests {
             ("async function f(p){return {entry:use(await p)};}", 1),
             ("async function f(p){if(!use(await p)){done();}}", 2),
             ("async function f(p){try{}finally{await p;}}", 7),
+            ("async function f(p){for(;test();advance()){await p;}}", 6),
+            ("async function f(p){for(;;)return await p;}", 2),
             ("async function f(p){return yes() && use(await p);}", 3),
             ("async function f(p){return yes() && use(await p).ready;}", 3),
             ("async function f(p){if(yes() && use(await p).ready){noop();}}", 4),
