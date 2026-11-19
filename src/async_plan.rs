@@ -15,8 +15,8 @@ pub(super) enum Instruction {
     LeaveBlock,
     BranchFalse { statement: StmtId, condition: ExprId, target: usize },
     Jump(usize),
-    PushCatch { statement: StmtId, after: usize },
-    PopCatch,
+    PushTry { statement: StmtId, after: usize },
+    FinishTry,
     Await { statement: StmtId, operand: ExprId, callee: Option<ExprId>, action: Resume },
 }
 
@@ -82,7 +82,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
                         StmtKind::Block(body) => body.len() + 1,
                         StmtKind::If(_, _, Some(_)) => 3,
                         StmtKind::If(_, _, None) => 1,
-                        StmtKind::Try(_, Some(_), None) => 2,
+                        StmtKind::Try(_, _, _) => 2,
                         _ => unreachable!(),
                     };
                 }
@@ -98,7 +98,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             continue;
         }
         let children_eligible = eligible && matches!(kind,
-            StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, Some(_), None));
+            StmtKind::Block(_) | StmtKind::If(_, _, _) | StmtKind::Try(_, _, _));
         if children_eligible {
             push(&mut pending, Visit::Finish { id, before: sites })?;
         }
@@ -191,9 +191,9 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                 continue;
             }
             Emit::FinishTry(handler) => {
-                push(&mut code, Instruction::PopCatch)?;
+                push(&mut code, Instruction::FinishTry)?;
                 let end = code.len();
-                let Instruction::PushCatch { after, .. } = &mut code[handler] else { unreachable!() };
+                let Instruction::PushTry { after, .. } = &mut code[handler] else { unreachable!() };
                 *after = end;
                 continue;
             }
@@ -219,9 +219,9 @@ pub(super) fn compile(program: &Program, template: usize, expected_await_count: 
                     push(&mut pending, next)?;
                     push(&mut pending, Emit::Statement(*yes))?;
                 }
-                StmtKind::Try(body, Some(_), None) => {
+                StmtKind::Try(body, _, _) => {
                     let handler = code.len();
-                    push(&mut code, Instruction::PushCatch { statement: id, after: 0 })?;
+                    push(&mut code, Instruction::PushTry { statement: id, after: 0 })?;
                     push(&mut pending, Emit::FinishTry(handler))?;
                     push(&mut pending, Emit::Statement(*body))?;
                 }
@@ -253,8 +253,8 @@ mod tests {
             EnterBlock(_), Await { action: Resume::Initialize { kind: Declaration::Let, .. }, .. },
             Statement(_), LeaveBlock, Jump(10),
             EnterBlock(_), Await { action: Resume::Discard, .. }, LeaveBlock,
-            PushCatch { after: 15, .. }, EnterBlock(_), Await { action: Resume::Return, .. },
-            LeaveBlock, PopCatch,
+            PushTry { after: 15, .. }, EnterBlock(_), Await { action: Resume::Return, .. },
+            LeaveBlock, FinishTry,
         ]));
     }
 
@@ -270,7 +270,7 @@ mod tests {
             "let {value=await p}=await p;",
             "while(false){await p;}",
             "try{}catch(e){await p;}",
-            "try{await p;}finally{}",
+            "try{}finally{await p;}",
             "await (await p);",
         ] {
             let source = format!("async function go(p){{{body}}}");

@@ -6566,6 +6566,9 @@ impl Runtime {
         let tail = true;
         let result = if tail && matches!(program.stmts[id].kind, StmtKind::If(_, _, _)) {
             self.selected_if_statement(program, id, env, this, host)
+        } else if matches!(program.stmts[id].kind, StmtKind::Try(_, _, _)) {
+            // Avoid retaining the general match frame across a recursive try body.
+            self.try_statement(program, id, env, this, host)
         } else if let Some((expression, returning)) = expression {
             self.step().and_then(|_| {
                 #[cfg(test)]
@@ -6637,7 +6640,7 @@ impl Runtime {
                 self.work(value.bytes())?;
                 Err(Fault::thrown(value))
             }
-            StmtKind::Try(_, _, _) => self.try_statement(program, id, env, this, host),
+            StmtKind::Try(_, _, _) => unreachable!("try statements have a dedicated dispatch"),
             StmtKind::Return(value) => Ok(Control::Return(match value {
                 Some(expr) => self.eval(program, *expr, env, this, host)?,
                 None => Value::Undefined,
@@ -7213,10 +7216,26 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Control, Fault> {
-        let StmtKind::Try(body, catch, finally) = &program.stmts[id].kind else {
+        let StmtKind::Try(body, _, _) = &program.stmts[id].kind else {
             unreachable!()
         };
-        let mut completion = self.statement(program, *body, env, this, host);
+        let completion = self.statement(program, *body, env, this, host);
+        self.finish_try_statement(program, id, completion, env, this, host)
+    }
+
+    #[inline(never)]
+    fn finish_try_statement(
+        &mut self,
+        program: &Rc<Program>,
+        id: StmtId,
+        mut completion: Result<Control, Fault>,
+        env: usize,
+        this: &Value,
+        host: &mut dyn Host,
+    ) -> Result<Control, Fault> {
+        let StmtKind::Try(_, catch, finally) = &program.stmts[id].kind else {
+            unreachable!()
+        };
         // Limit/capability failures stop this job, including finally.
         // They cannot be caught or replaced with return/break/throw.
         if completion
