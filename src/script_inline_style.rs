@@ -4,6 +4,7 @@ use super::*;
 pub(super) const PROPERTIES: &[&str] = &[
     "align-items",
     "align-self",
+    "animation-timing-function",
     "background",
     "background-color",
     "background-image",
@@ -81,7 +82,9 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
 }
 
 pub(super) fn same_name(raw: &str, expected: &str) -> bool {
-    if expected.starts_with("--") {
+    if expected == "animation-timing-function" {
+        crate::css::easing_trim(raw).eq_ignore_ascii_case(expected)
+    } else if expected.starts_with("--") {
         raw.trim() == expected
     } else {
         raw.trim().eq_ignore_ascii_case(expected)
@@ -90,7 +93,7 @@ pub(super) fn same_name(raw: &str, expected: &str) -> bool {
 
 fn skip_trivia(mut raw: &str) -> Option<&str> {
     loop {
-        raw = raw.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        raw = raw.trim_start_matches([' ', '\t', '\r', '\n', '\u{c}']);
         let Some(after) = raw.strip_prefix("/*") else {
             return Some(raw);
         };
@@ -122,7 +125,7 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
         } else {
             raw
         };
-        let (specified, priority) = crate::css::declaration_priority(value);
+        let (specified, priority) = if name == "animation-timing-function" { crate::css::easing_priority(value) } else { crate::css::declaration_priority(value) };
         if important && !priority {
             continue;
         }
@@ -130,6 +133,12 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             && !crate::css::inline_color_value(specified)
         {
             continue;
+        }
+        if name == "animation-timing-function" {
+            // Validation formats bounded specified numbers even on removal.
+            // Charge this actual candidate here, not an unrelated whole style.
+            state.work(crate::css::easing_source_cost(specified.len()).0)?;
+            if !crate::css::inline_easing_value(specified) { continue; }
         }
         if name == "opacity" && metered_opacity(specified, state)?.is_none() {
             continue;
@@ -202,7 +211,31 @@ pub(super) fn replace(
     Ok(Some(result))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum EasingText { Specified, Cssom }
+
+pub(super) fn normalize_easing(value: &str, state: &mut State, kind: EasingText) -> Result<Option<String>, String> {
+    let (work, copies) = crate::css::easing_source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)?;
+    Ok(match kind {
+        EasingText::Specified => crate::css::specified_easing(value),
+        EasingText::Cssom => crate::css::normalize_easing(value),
+    })
+}
+
+pub(super) fn easing_declaration(style: &str, state: &mut State, kind: EasingText) -> Result<Option<(String, bool)>, String> {
+    state.work(1 + style.len().saturating_mul(4))?;
+    state.copies(style.len())?;
+    let Some((_, raw)) = winner(style, "animation-timing-function", state)? else { return Ok(None); };
+    let clean;
+    let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); clean.as_str() } else { raw };
+    let (value, important) = crate::css::easing_priority(raw);
+    Ok(normalize_easing(value, state, kind)?.map(|value| (value, important)))
+}
+
 impl Bridge<'_> {
+
     pub(super) fn inline_names(&mut self, node: usize) -> Result<Vec<String>, String> {
         let raw = self.doc.attr(node, "style").unwrap_or("");
         if raw.len() > self.state.limits.host.string_bytes {
@@ -356,6 +389,25 @@ for(var receiver of [document,document.createTextNode('x'),native,Object.create(
         let outcome = page.console_eval(&mut doc, &mut forms,
             "if(p.ownerDocument!==document||p.style!==native||Object.hasOwn(p,'style')||p.getAttribute('style')!==keep)throw 'protected native state';");
         assert_eq!(outcome.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn inline_easing_and_opacity_share_checked_writes_without_replacing_each_other() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let result = page.console_eval(&mut doc, &mut forms, r#"
+var mixed=document.createElement('div');
+mixed.setAttribute('style','OPACITY:.2;ANIMATION-TIMING-FUNCTION:ease; width:24px');
+mixed.style.width='30px';
+if(mixed.style.opacity!=='0.2'||mixed.style.animationTimingFunction!=='ease'||mixed.style.width!=='30px')throw 'raw CSS spelling and neighboring write';
+mixed.style.animationTimingFunction='cubic-bezier(.1234564,0,1,1)';
+var stored=mixed.getAttribute('style');
+if(stored.indexOf('0.1234564')<0||mixed.style.opacity!=='0.2')throw 'precise easing and genuine opacity';
+mixed.style.opacity=null;
+if(mixed.style.opacity!==''||mixed.style.animationTimingFunction!=='cubic-bezier(0.123456, 0, 1, 1)'||mixed.getAttribute('style').indexOf('0.1234564')<0)throw 'opacity legacy null must preserve precise easing';
+mixed.style.opacity=.75;mixed.style.animationTimingFunction=null;
+if(mixed.style.opacity!=='0.75'||mixed.style.animationTimingFunction!==''||mixed.style.width!=='30px'||mixed.style.length!==2)throw 'easing legacy null must preserve opacity and width';
+"#);
+        assert_eq!(result.errors, 0, "{}", page.report());
     }
 
     #[test]
