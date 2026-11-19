@@ -487,12 +487,27 @@ pub(crate) enum NativePromiseFailure {
     Fatal(String),
 }
 
+pub struct NativeChildListChange {
+    pub target: u32,
+    pub added: Vec<u32>,
+    pub removed: Vec<u32>,
+    pub previous: Option<u32>,
+    pub next: Option<u32>,
+}
+
 pub trait Host {
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
     fn mutation_observation_target(&self, _target: u32) -> Option<bool> { None }
     fn character_data_write_generation(&self, _target: u32, _property: &str) -> Option<u64> { None }
-    fn empty_mutation_node_list(&mut self) -> Result<u32, String> { Err("MutationRecord nodes are unavailable.".into()) }
+    fn mutation_child_list_target(&self, _target: u32) -> bool { false }
+    fn mutation_observation_parent(&self, _target: u32) -> Option<u32> { None }
+    fn mutation_tree_generation(&self) -> Option<u64> { None }
+    fn mutation_child_list_changes(&mut self, _target: u32, _method: &str, _args: &[Value])
+        -> Result<Vec<NativeChildListChange>, String> { Ok(Vec::new()) }
+    fn mutation_node_list(&mut self, _nodes: &[u32]) -> Result<u32, String> {
+        Err("MutationRecord nodes are unavailable.".into())
+    }
     fn mutation_callback_error(&mut self, _message: &str) {}
     fn promise_returning_operation(&self,_object:u32,_method:&str)->bool {false}
     fn validate_promise_operation(&self,_object:u32,_method:&str)->Result<(),NativePromiseFailure> {Ok(())}
@@ -9006,7 +9021,9 @@ impl Runtime {
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
+        let observation = self.prepare_child_list_write(object, method, args, host)?;
         let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        self.finish_child_list_write(observation, host)?;
         if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
         if self.drain_native_promise_effects(host)?!=0 {
             self.defer_host_microtask_after_effects(ticket)?;

@@ -995,7 +995,7 @@ var second=new MutationObserver(function(records){
 var types=0;
 try {first.observe(text,{characterData:false,characterDataOldValue:true});} catch(e){if(e instanceof TypeError)types++;}
 try {first.observe(navigator,{characterData:true});} catch(e){if(e instanceof TypeError)types++;}
-try {first.observe(document,{childList:true});} catch(e){if(e.name==='NotSupportedError')types++;}
+try {first.observe(document,{attributes:true});} catch(e){if(e.name==='NotSupportedError')types++;}
 try {MutationObserver.prototype.takeRecords.call({});} catch(e){if(e instanceof TypeError)types++;}
 try {new MutationRecord();} catch(e){if(e instanceof TypeError)types++;}
 if(types!==5)throw 'validation';
@@ -1009,6 +1009,85 @@ queueMicrotask(function(){trace+='later|';});
     assert!(page.report().lines().any(|line| line.starts_with("MutationObserver callback:")
         && line.contains("reported observer exception")));
     assert_eq!(doc.title, "observer-rescheduled");
+}
+
+#[test]
+fn mutation_observer_child_list_keeps_native_moves_fragments_and_neighbors() {
+    let (mut doc, mut forms, mut page, outcome) = page(
+        "<section id=left><b id=first>before</b><b id=last>after</b></section><section id=right></section>", &[r#"
+var l=document.getElementById('left'),r=document.getElementById('right');
+var first=document.getElementById('first'),last=document.getElementById('last'), moving=document.createElement('span');
+var originalParent=l.parentNode;
+var obs=new MutationObserver(function(){throw 'takeRecords should drain this callback';});
+obs.observe(document,{childList:true,subtree:true,characterDataOldValue:true});
+obs.observe(l,{childList:true});
+l.insertBefore(moving,last);
+r.appendChild(moving);
+var fragment=document.createDocumentFragment(),a=document.createTextNode('origin'),b=document.createElement('i');
+fragment.appendChild(a);fragment.appendChild(b);
+obs.observe(fragment,{childList:true});
+r.replaceChild(fragment,moving);
+a.data='changed';
+var records=obs.takeRecords();
+if(records.length!==6||r.childNodes.length!==2||r.firstChild!==a||r.lastChild!==b||
+    fragment.childNodes.length!==0||moving.parentNode!==null)throw 'actual changed tree and deduplicated records';
+for(var i=0;i<5;i++){
+    var rec=records[i];
+    if(!(rec instanceof MutationRecord)||rec.type!=='childList'||rec.oldValue!==null||
+        rec.addedNodes!==rec.addedNodes||!(rec.addedNodes instanceof NodeList)||
+        rec.removedNodes!==rec.removedNodes||!(rec.removedNodes instanceof NodeList))throw 'real record branded snapshots';
+}
+if(records[0].target!==l||records[0].addedNodes[0]!==moving||records[0].removedNodes.length!==0||
+    records[0].previousSibling!==first||records[0].nextSibling!==last)throw 'ordered insert';
+if(records[1].target!==l||records[1].removedNodes[0]!==moving||records[1].addedNodes.length!==0||
+    records[1].previousSibling!==first||records[1].nextSibling!==last)throw 'old parent removal';
+if(records[2].target!==r||records[2].addedNodes[0]!==moving||records[2].previousSibling!==null||
+    records[2].nextSibling!==null)throw 'new parent insertion';
+if(records[3].target!==fragment||records[3].removedNodes.length!==2||records[3].removedNodes.item(0)!==a||
+    records[3].removedNodes[1]!==b||records[3].addedNodes.length!==0)throw 'fragment removals';
+if(records[4].target!==r||records[4].removedNodes[0]!==moving||records[4].addedNodes.length!==2||
+    records[4].addedNodes[0]!==a||records[4].addedNodes[1]!==b)throw 'atomic fragment replacement';
+if(records[5].type!=='characterData'||records[5].target!==a||records[5].oldValue!=='origin')
+    throw 'ancestor CharacterData and oldValue';
+l.insertBefore(last,last);
+r.appendChild(document.createDocumentFragment());
+if(obs.takeRecords().length!==0)throw 'no-op tree operations';
+document.title='verified-mutation-child-list';
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-mutation-child-list");
+    let committed = page.state.dom_commits;
+    let refused = page.console_eval(&mut doc, &mut forms, "l.appendChild(l);");
+    assert_eq!(refused.errors, 1);
+    assert_eq!(page.state.dom_commits, committed);
+    let recovered = page.console_eval(&mut doc, &mut forms,
+        "if(obs.takeRecords().length!==0||l.parentNode!==originalParent)throw 'refusal queued a record';");
+    assert_eq!(recovered.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn mutation_observer_child_list_uses_the_native_microtask_queue() {
+    let (doc, _, page, outcome) = page("<div id=parent><b id=only>child</b></div>", &[r#"
+var p=document.getElementById('parent'), old=document.getElementById('only'), trace='';
+var observer=new MutationObserver(function(records, self){
+    if(trace!=='before|'||records.length!==1||records[0].type!=='childList'||records[0].target!==p||
+        records[0].removedNodes[0]!==old||records[0].addedNodes.length!==0||self!==observer)
+        throw 'native child list delivery order or values';
+    trace+='observer|';
+});
+observer.observe(p,{childList:true});
+queueMicrotask(function(){trace+='before|';});
+p.removeChild(old);
+queueMicrotask(function(){
+    if(trace!=='before|observer|'||old.parentNode!==null)throw 'observer ordering or removal';
+    observer.disconnect();
+    p.appendChild(old);
+    if(observer.takeRecords().length!==0)throw 'disconnect stops native observations';
+    document.title='verified-child-list-microtasks';
+});
+"#]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "verified-child-list-microtasks");
 }
 
 #[test]

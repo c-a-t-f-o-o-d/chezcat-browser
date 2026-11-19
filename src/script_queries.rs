@@ -5,6 +5,7 @@ use super::*;
 
 pub(super) enum NodeList {
     Snapshot(Vec<usize>),
+    MutationSnapshot(Vec<u32>),
     Name(String),
     // A live SameObject list over this real node's immediate children.
     Children(usize),
@@ -41,10 +42,14 @@ impl Bridge<'_> {
         Ok(handle)
     }
 
-    pub(super) fn empty_snapshot_node_list(&mut self) -> Result<u32, String> {
-        self.state.work(1)?;
-        let handle = self.reserve_node_list("identity")?;
-        self.state.node_lists.push(NodeList::Snapshot(Vec::new()));
+    pub(super) fn snapshot_mutation_node_list(&mut self, nodes: &[u32]) -> Result<u32, String> {
+        self.state.work(nodes.len().saturating_add(1))?;
+        let handle = self.reserve_node_list("mutation snapshot")?;
+        let mut handles = Vec::new();
+        handles.try_reserve_exact(nodes.len()).map_err(|_| "Cannot reserve MutationRecord node identities.")?;
+        self.state.replace_bytes(0, handles.capacity().saturating_mul(std::mem::size_of::<u32>()))?;
+        handles.extend_from_slice(nodes);
+        self.state.node_lists.push(NodeList::MutationSnapshot(handles));
         Ok(handle)
     }
 
@@ -143,6 +148,11 @@ impl Bridge<'_> {
             let nodes = self.name_list_nodes(index)?;
             return if property == "length" { Ok(Value::Number(nodes.len() as f64)) }
                 else { Ok(collection_index(property).and_then(|index|nodes.get(index)).map_or(Value::Undefined,|&node|Value::Host(node_handle(node)))) };
+        }
+        if let NodeList::MutationSnapshot(nodes) = list {
+            return if property == "length" { Ok(Value::Number(nodes.len() as f64)) }
+                else { Ok(collection_index(property).and_then(|index| nodes.get(index)).copied()
+                    .map_or(Value::Undefined, Value::Host)) };
         }
         let NodeList::Snapshot(list) = list else { unreachable!() };
         if property == "length" {

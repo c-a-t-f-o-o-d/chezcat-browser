@@ -119,6 +119,9 @@ use script_resources::DynamicState;
 mod script_blank_frames;
 #[path = "script_inert_documents.rs"]
 mod script_inert_documents;
+
+#[path = "script_mutation_child_list.rs"]
+mod script_mutation_child_list;
 #[path = "script_stylesheets.rs"]
 mod script_stylesheets;
 pub use script_stylesheets::DynamicStylesheet;
@@ -2641,8 +2644,26 @@ impl Host for Bridge<'_> {
         }
     }
 
-    fn empty_mutation_node_list(&mut self) -> Result<u32, String> {
-        self.empty_snapshot_node_list()
+    fn mutation_child_list_target(&self, target: u32) -> bool {
+        target == DOCUMENT || node_index(target).is_some_and(|node| self.dom_accessible(node))
+    }
+
+    fn mutation_observation_parent(&self, target: u32) -> Option<u32> {
+        let node = node_index(target).filter(|&node| self.dom_accessible(node))?;
+        let parent = self.state.tree.parents.get(node).copied().flatten()?;
+        Some(if parent == 0 { DOCUMENT } else { node_handle(parent) })
+    }
+
+    fn mutation_tree_generation(&self) -> Option<u64> { self.state.dom_commits }
+
+    fn mutation_child_list_changes(&mut self, target: u32, method: &str, args: &[Value])
+        -> Result<Vec<crate::javascript::NativeChildListChange>, String>
+    {
+        self.child_list_change_plan(target, method, args)
+    }
+
+    fn mutation_node_list(&mut self, nodes: &[u32]) -> Result<u32, String> {
+        self.snapshot_mutation_node_list(nodes)
     }
 
     fn mutation_callback_error(&mut self, message: &str) {

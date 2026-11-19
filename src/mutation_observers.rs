@@ -1,4 +1,4 @@
-//! Direct, document-owned CharacterData observers.
+//! Document-owned mutation observers and microtask delivery.
 //! https://dom.spec.whatwg.org/#mutation-observers
 use super::function_reachability::Edge;
 use super::*;
@@ -36,6 +36,7 @@ pub(super) struct Arena {
     targets: HashMap<u32, Vec<Registration>>,
     records: HashMap<usize, Record>,
     registrations: usize,
+    child_list_registrations: usize,
     pending_records: usize,
     queued: bool,
 }
@@ -50,19 +51,27 @@ struct Observer {
 #[derive(Clone, Copy)]
 struct Registration {
     observer: usize,
+    character_data: bool,
+    child_list: bool,
+    subtree: bool,
     old_value: bool,
 }
 
 struct Record {
     target: u32,
     old_value: Value,
+    child_list: Option<Rc<NativeChildListChange>>,
     added_nodes: Option<u32>,
     removed_nodes: Option<u32>,
 }
 
 impl Record {
     fn retained_bytes(&self) -> usize {
-        std::mem::size_of::<Self>().saturating_add(self.old_value.bytes())
+        let child_references = self.child_list.as_ref().map_or(0, |change|
+            std::mem::size_of::<NativeChildListChange>().saturating_add(
+                change.added.capacity().saturating_add(change.removed.capacity())
+                    .saturating_mul(std::mem::size_of::<u32>())));
+        std::mem::size_of::<Self>().saturating_add(self.old_value.bytes()).saturating_add(child_references)
     }
 }
 
@@ -175,13 +184,17 @@ impl Runtime {
         }
         match op {
             Op::Observe => {
-                self.observe_character_data(id, args, host)?;
+                self.observe_mutations(id, args, host)?;
                 Ok(Value::Undefined)
             }
             Op::Disconnect => {
                 for target in std::mem::take(&mut self.mutations.observers.get_mut(&id).unwrap().targets) {
                     let registrations = self.mutations.targets.get_mut(&target).unwrap();
-                    registrations.retain(|registration| registration.observer != id);
+                    registrations.retain(|registration| {
+                        if registration.observer != id { return true; }
+                        self.mutations.child_list_registrations -= usize::from(registration.child_list);
+                        false
+                    });
                     self.mutations.registrations -= 1;
                     if registrations.is_empty() {
                         self.mutations.targets.remove(&target);
@@ -195,7 +208,7 @@ impl Runtime {
         }
     }
 
-    fn observe_character_data(&mut self, id: usize, args: &[Value], host: &mut dyn Host) -> Result<(), Fault> {
+    fn observe_mutations(&mut self, id: usize, args: &[Value], host: &mut dyn Host) -> Result<(), Fault> {
         let (Some(Value::Host(target)), Some(options)) = (args.first(), args.get(1)) else {
             return Err(Fault::exception("TypeError", "MutationObserver.observe requires a Node and options."));
         };
@@ -214,8 +227,8 @@ impl Runtime {
         let attributes = option("attributes")?;
         let character = option("characterData")?;
         let old = option("characterDataOldValue")?;
-        let children = option("childList")?;
-        option("subtree")?;
+        let children = option("childList")?.truthy();
+        let subtree = option("subtree")?.truthy();
         let has_filter = !matches!(filter, Value::Undefined);
         let attributes = if matches!(attributes, Value::Undefined) {
             has_filter || !matches!(attribute_old, Value::Undefined)
@@ -223,22 +236,27 @@ impl Runtime {
         let character = if matches!(character, Value::Undefined) { !matches!(old, Value::Undefined) }
             else { character.truthy() };
         if (!attributes && (has_filter || attribute_old.truthy())) || (!character && old.truthy())
-            || !(attributes || character || children.truthy())
+            || !(attributes || character || children)
         {
             return Err(Fault::exception("TypeError", "MutationObserver options select inconsistent or empty mutation types."));
         }
-        if attributes || children.truthy() {
-            let error = self.native_dom_exception("NotSupportedError", "Attribute and child-list observation are unavailable.")?;
+        if attributes {
+            let error = self.native_dom_exception("NotSupportedError", "Attribute observation is unavailable.")?;
             return Err(Fault::thrown(error));
         }
-        if !supported_target {
-            let error = self.native_dom_exception("NotSupportedError", "Only direct CharacterData observation is available.")?;
+        let tree_target = host.mutation_child_list_target(*target);
+        if (children || subtree) && !tree_target || character && !supported_target && !(subtree && tree_target) && !children {
+            let error = self.native_dom_exception("NotSupportedError", "This Node does not support the requested observations.")?;
             return Err(Fault::thrown(error));
         }
+        let requested = Registration { observer: id, character_data: character, child_list: children,
+            subtree, old_value: old.truthy() };
         if let Some(registration) = self.mutations.targets.get_mut(target)
             .and_then(|registrations| registrations.iter_mut().find(|registration| registration.observer == id))
         {
-            registration.old_value = old.truthy();
+            self.mutations.child_list_registrations -= usize::from(registration.child_list);
+            self.mutations.child_list_registrations += usize::from(requested.child_list);
+            *registration = requested;
             return Ok(());
         }
         if self.mutations.registrations >= MAX_REGISTRATIONS {
@@ -260,41 +278,95 @@ impl Runtime {
                 entry.insert(registrations)
             }
         };
-        registrations.push(Registration { observer: id, old_value: old.truthy() });
+        registrations.push(requested);
         observer.targets.push(*target);
         self.mutations.registrations += 1;
+        self.mutations.child_list_registrations += usize::from(requested.child_list);
         Ok(())
+    }
+
+    fn matching_observers(&mut self, target: u32, child_list: bool, host: &dyn Host)
+        -> Result<BTreeMap<usize, bool>, Fault>
+    {
+        let mut interested = BTreeMap::new();
+        let mut current = Some(target);
+        while let Some(node) = current {
+            let count = self.mutations.targets.get(&node).map_or(0, Vec::len);
+            self.work(count.saturating_add(1))?;
+            if let Some(registrations) = self.mutations.targets.get(&node) {
+                for registration in registrations {
+                    let matches = if child_list { registration.child_list } else { registration.character_data };
+                    if matches && (node == target || registration.subtree) {
+                        *interested.entry(registration.observer).or_insert(false) |= registration.old_value;
+                    }
+                }
+            }
+            current = host.mutation_observation_parent(node);
+        }
+        Ok(interested)
     }
 
     pub(super) fn prepare_character_data_write(
         &mut self, target: u32, property: &str, host: &mut dyn Host,
     ) -> Result<Option<PreparedChange>, Fault> {
+        if self.mutations.targets.is_empty() { return Ok(None); }
         let Some(generation) = host.character_data_write_generation(target, property) else { return Ok(None) };
-        let Some(registrations) = self.mutations.targets.get(&target) else { return Ok(None) };
-        if self.mutations.pending_records.saturating_add(registrations.len()) > MAX_PENDING_RECORDS {
-            return Err(Fault::new("MutationObserver pending-record limit reached."));
-        }
-        let count = registrations.len();
-        if count == 0 { return Ok(None); }
-        self.work(count)?;
-        let registrations = self.mutations.targets[&target].clone();
-        let old = if registrations.iter().any(|registration| registration.old_value) {
+        let observers = self.matching_observers(target, false, host)?;
+        if observers.is_empty() { return Ok(None); }
+        let old = if observers.values().any(|&old_value| old_value) {
             self.host_get_checked(target, "data", host)?
         } else { Value::Null };
         let mut entries = Vec::new();
-        entries.try_reserve_exact(registrations.len()).map_err(|_| Fault::new("Cannot reserve mutation records."))?;
-        let copies = registrations.iter().filter(|registration| registration.old_value).count();
-        let retained = count.saturating_mul(std::mem::size_of::<Record>())
-            .saturating_add(copies.saturating_mul(old.bytes()));
+        entries.try_reserve_exact(observers.len()).map_err(|_| Fault::new("Cannot reserve mutation records."))?;
+        for (observer, old_value) in observers {
+            let record = Record { target, old_value: if old_value { self.copy_value(&old)? } else { Value::Null },
+                child_list: None, added_nodes: None, removed_nodes: None };
+            entries.push((observer, record));
+        }
+        self.prepare_mutation_records(target, generation, entries)
+    }
+
+    pub(super) fn prepare_child_list_write(&mut self, target: u32, method: &str, args: &[Value], host: &mut dyn Host)
+        -> Result<Option<PreparedChange>, Fault>
+    {
+        if self.mutations.child_list_registrations == 0 { return Ok(None); }
+        let Some(generation) = host.mutation_tree_generation() else { return Ok(None) };
+        let changes = host.mutation_child_list_changes(target, method, args).map_err(Fault::new)?;
+        if changes.is_empty() { return Ok(None); }
+        let mut entries = Vec::new();
+        for change in changes {
+            let observers = self.matching_observers(change.target, true, host)?;
+            entries.try_reserve(observers.len()).map_err(|_| Fault::new("Cannot reserve child-list records."))?;
+            let change = Rc::new(change);
+            for (observer, _) in observers {
+                entries.push((observer, Record {
+                    target: change.target, old_value: Value::Null, child_list: Some(Rc::clone(&change)),
+                    added_nodes: None, removed_nodes: None,
+                }));
+            }
+        }
+        self.prepare_mutation_records(target, generation, entries)
+    }
+
+    fn prepare_mutation_records(&mut self, target: u32, generation: u64, entries: Vec<(usize, Record)>)
+        -> Result<Option<PreparedChange>, Fault>
+    {
+        if entries.is_empty() { return Ok(None); }
+        if self.mutations.pending_records.saturating_add(entries.len()) > MAX_PENDING_RECORDS {
+            return Err(Fault::new("MutationObserver pending-record limit reached."));
+        }
+        let mut counts = BTreeMap::new();
+        let mut retained = 0usize;
+        for (observer, record) in &entries {
+            *counts.entry(*observer).or_insert(0) += 1;
+            retained = retained.saturating_add(record.retained_bytes());
+        }
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new("MutationObserver retained-value limit reached."));
         }
-        for registration in registrations {
-            self.mutations.observers.get_mut(&registration.observer).unwrap().pending.try_reserve(1)
+        for (observer, count) in counts {
+            self.mutations.observers.get_mut(&observer).unwrap().pending.try_reserve(count)
                 .map_err(|_| Fault::new("Cannot reserve observer records."))?;
-            let old_value = if registration.old_value { self.copy_value(&old)? } else { Value::Null };
-            let record = Record { target, old_value, added_nodes: None, removed_nodes: None };
-            entries.push((registration.observer, record));
         }
         self.value_bytes += retained;
         let new_job = !self.mutations.queued;
@@ -311,9 +383,21 @@ impl Runtime {
         &mut self, pending: Option<PreparedChange>, property: &str, host: &dyn Host,
     ) -> Result<(), Fault> {
         let Some(pending) = pending else { return Ok(()) };
-        if host.character_data_write_generation(pending.target, property)
-            .is_some_and(|generation| generation != pending.generation)
-        {
+        let committed = host.character_data_write_generation(pending.target, property)
+            .is_some_and(|generation| generation != pending.generation);
+        self.finish_mutation_records(pending, committed)
+    }
+
+    pub(super) fn finish_child_list_write(
+        &mut self, pending: Option<PreparedChange>, host: &dyn Host,
+    ) -> Result<(), Fault> {
+        let Some(pending) = pending else { return Ok(()) };
+        let committed = host.mutation_tree_generation().is_some_and(|generation| generation != pending.generation);
+        self.finish_mutation_records(pending, committed)
+    }
+
+    fn finish_mutation_records(&mut self, pending: PreparedChange, committed: bool) -> Result<(), Fault> {
+        if committed {
             self.mutations.queued = true;
             self.mutations.pending_records += pending.entries.len();
             for (id, record) in pending.entries {
@@ -368,7 +452,9 @@ impl Runtime {
             .ok_or_else(|| Fault::exception("TypeError", "Incompatible MutationRecord receiver."))?;
         self.validate_native_access(record.target, host)?;
         match field {
-            "type" => Ok(Value::String("characterData".into())),
+            "type" => Ok(Value::String(if record.child_list.is_some() { "childList" } else { "characterData" }.into())),
+            "previousSibling" => Ok(record.child_list.as_ref().and_then(|change| change.previous).map_or(Value::Null, Value::Host)),
+            "nextSibling" => Ok(record.child_list.as_ref().and_then(|change| change.next).map_or(Value::Null, Value::Host)),
             "target" => Ok(Value::Host(record.target)),
             "oldValue" => {
                 self.work(record.old_value.bytes())?;
@@ -377,7 +463,9 @@ impl Runtime {
             "addedNodes" | "removedNodes" => {
                 let list = if field == "addedNodes" { record.added_nodes } else { record.removed_nodes };
                 let handle = if let Some(handle) = list { handle } else {
-                    let handle = host.empty_mutation_node_list().map_err(Fault::new)?;
+                    let nodes = record.child_list.as_ref().map_or(&[][..], |change|
+                        if field == "addedNodes" { change.added.as_slice() } else { change.removed.as_slice() });
+                    let handle = host.mutation_node_list(nodes).map_err(Fault::new)?;
                     let record = self.mutations.records.get_mut(&id).unwrap();
                     if field == "addedNodes" { record.added_nodes = Some(handle); }
                     else { record.removed_nodes = Some(handle); }
