@@ -1669,10 +1669,8 @@ impl Runtime {
                     self.prototype_argument(args.get(1).unwrap_or(&Value::Undefined))?;
                 if let Some(object) = Ordinary::from_value(first) {
                     self.set_prototype(object, prototype)?;
-                } else if matches!(first, Value::Host(_)) {
-                    return Err(Fault::new(
-                        "Native host object prototypes cannot be changed.",
-                    ));
+                } else if let Value::Host(handle) = first {
+                    self.set_native_element_prototype(*handle, prototype, host)?;
                 }
                 self.copy_value(first)
             }
@@ -2023,14 +2021,15 @@ impl Runtime {
             if !matches!(prototype, Value::Null | Value::Object(_) | Value::Function(_) | Value::Host(_)) {
                 return Ok(Value::Undefined);
             }
-            let Some(object) = Ordinary::from_value(&this) else {
-                return if matches!(this, Value::Host(_)) {
-                    Err(Fault::new("Native host object prototypes cannot be changed."))
-                } else { Ok(Value::Undefined) };
-            };
-            self.reject_foreign_window(prototype, host)?;
-            let prototype = self.prototype_argument(prototype)?;
-            self.set_prototype(object, prototype)?;
+            if let Value::Host(handle) = this {
+                self.reject_foreign_window(prototype, host)?;
+                let prototype = self.prototype_argument(prototype)?;
+                self.set_native_element_prototype(handle, prototype, host)?;
+            } else if let Some(object) = Ordinary::from_value(&this) {
+                self.reject_foreign_window(prototype, host)?;
+                let prototype = self.prototype_argument(prototype)?;
+                self.set_prototype(object, prototype)?;
+            }
             return Ok(Value::Undefined);
         }
         if method == "toString" {
@@ -2107,7 +2106,7 @@ impl Runtime {
         }
         if method == "isPrototypeOf" {
             if let Some(Value::Host(handle))=args.first() {
-                let anchor=self.native_instance_anchor(*handle,host)?;
+                let anchor=self.native_instance_visible_anchor(*handle,host)?;
                 if matches!(this,Value::Null|Value::Undefined) {return Err(Fault::exception("TypeError","Cannot convert null or undefined to an object."));}
                 let Some(prototype)=Ordinary::from_value(&this) else {return Ok(Value::Bool(false));};
                 return Ok(Value::Bool(anchor==prototype || self.inherits_from(anchor,prototype,host)?));

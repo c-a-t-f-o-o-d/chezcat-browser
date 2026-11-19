@@ -1024,6 +1024,31 @@ document.title='expando-realm-ok';
     }
 
     #[test]
+    fn html_element_prototype_keeps_the_original_native_origin() {
+        let source=format!("{CREATE}{}",r#"
+var element=document.createElement('original-card');
+var canonical=Object.getPrototypeOf(element), wrap=Object.create(canonical, { flag: { value: 17 } });
+var setFromChild=w.Function('receiver','proto','return Object.setPrototypeOf(receiver,proto);');
+var readFromChild=w.Function('receiver','return Object.getPrototypeOf(receiver);');
+if(setFromChild(element,wrap)!==element||readFromChild(element)!==wrap||element.flag!==17)
+    throw 'same-origin overlay';
+"#);
+        let (mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location {
+            url:Some(crate::url::parse("https://other.test/").unwrap().0),
+            path:None,fragment:String::new(),root:None,
+        });
+        for source in ["setFromChild(element,canonical);", "readFromChild(element);"] {
+            let result=page.console_eval(&mut doc,&mut forms,source);
+            assert_eq!(result.errors,1,"{}",page.report());
+            assert!(page.report().contains("same-origin"),"{}",page.report());
+        }
+        let result=page.console_eval(&mut doc,&mut forms,"if(Object.getPrototypeOf(element)!==wrap||element.flag!==17)throw 'foreign write changed prototype';");
+        assert_eq!(result.errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn native_instanceof_blank_objects_keep_owner_realm_and_origin_validation() {
         let source=format!("{CREATE}{}",r#"
 var childObject=w.Object,childArray=w.Array,foreignDocument=w.document;

@@ -4089,3 +4089,46 @@ document.title='fullscreen-feature-absent';
     assert_eq!(result.errors, 0, "{}", page.report());
     assert_eq!(doc.title, "fullscreen-feature-absent");
 }
+
+#[test]
+fn html_element_prototype_keeps_real_native_receiver_and_ordinary_ancestry() {
+    let (mut doc, mut forms, mut page, result) = page("<!doctype html><html><body><iframe id=guard hidden></iframe><original-card id=card></original-card><original-card id=other></original-card></body></html>", &[r#"
+var card=document.getElementById('card'),other=document.getElementById('other'),guard=document.getElementById('guard');
+var canonical=Object.getPrototypeOf(card), proof={}, reads=0, parent=Object.getOwnPropertyDescriptor(Node.prototype,'parentNode').get;
+var wrapped=Object.create(canonical,{
+    report:{get:function(){reads++;if(this!==card)throw 'receiver';return this.marker;}},
+    parentAlias:{get:parent}
+});
+function Author(){}
+Author.prototype=wrapped;
+card.marker=proof;
+card.__proto__=wrapped;
+if(Object.getPrototypeOf(card)!==wrapped||card.__proto__!==wrapped||!wrapped.isPrototypeOf(card)||
+   !(card instanceof Author)||!(card instanceof HTMLElement)||card.report!==proof||reads!==1||
+   card.parentAlias!==document.body||card.ownerDocument!==document||!card.isConnected||
+   Object.getPrototypeOf(other)!==canonical||other.report!==undefined||guard.contentWindow!==null)
+    throw 'overlay identity and native state';
+var replacement=Object.create(wrapped,{flag:{value:42}});
+if(Object.setPrototypeOf(card,replacement)!==card||Object.getPrototypeOf(card)!==replacement||card.flag!==42||
+   card.report!==proof||reads!==2)throw 'ordinary replacement';
+var rejected=0, trapCalls=0;
+var proxy=new Proxy(Object.create(canonical),{getPrototypeOf:function(){trapCalls++;return canonical;}});
+for(var invalid of [Array.prototype,Object.prototype,null,proxy,Object.create(proxy)]){
+    try{Object.setPrototypeOf(card,invalid);}
+    catch(e){if(e.name==='TypeError')rejected++;else throw e;}
+}
+if(rejected!==5||trapCalls!==0||Object.getPrototypeOf(card)!==replacement||card.flag!==42||
+   guard.nextElementSibling!==card)throw 'protected chain';
+Object.setPrototypeOf(card,canonical);
+if(card instanceof Author||card.flag!==undefined||card.marker!==proof||card.parentNode!==document.body)
+    throw 'restore canonical prototype';
+document.title='element-prototype-ok';
+"#]);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "element-prototype-ok");
+    let denied = page.console_eval(&mut doc, &mut forms, "Object.setPrototypeOf(guard, canonical);");
+    assert_eq!(denied.errors, 1);
+    assert!(page.report().contains("Native host object prototypes cannot be changed"));
+    let result = page.console_eval(&mut doc, &mut forms, "if(guard.contentWindow!==null||guard.nextElementSibling!==card)throw 'frame changed';");
+    assert_eq!(result.errors, 0, "{}", page.report());
+}

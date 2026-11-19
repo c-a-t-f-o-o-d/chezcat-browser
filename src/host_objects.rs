@@ -155,8 +155,50 @@ impl Runtime {
     pub(super) fn native_instance_prototype(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
         self.validate_native_access(handle,host)?;
         if !host.exposed_native_prototype(handle) {return Err(Fault::new("Native host prototype inspection is not implemented for this receiver."));}
-        self.native_instance_anchor(handle,host)
+        self.native_instance_visible_anchor(handle,host)
     }
+
+    pub(super) fn native_instance_visible_anchor(&mut self, handle: u32, host: &mut dyn Host) -> Result<Ordinary, Fault> {
+        let native = self.native_instance_anchor(handle, host)?;
+        if host.mutable_element_prototype(handle) {
+            self.ensure_native_expando(handle, host, false)?;
+            if let Some(&backing) = self.host_objects.get(&handle) {
+                return self.ordinary_prototype(Ordinary::Object(backing))?
+                    .ok_or_else(|| Fault::new("Element prototype backing is unavailable."));
+            }
+        }
+        Ok(native)
+    }
+
+    pub(super) fn set_native_element_prototype(
+        &mut self, handle: u32, prototype: Option<Ordinary>, host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.validate_native_access(handle, host)?;
+        if !host.mutable_element_prototype(handle) {
+            return Err(Fault::new("Native host object prototypes cannot be changed."));
+        }
+        let native = self.native_instance_anchor(handle, host)?;
+        let mut current = prototype;
+        while let Some(parent) = current {
+            self.step()?;
+            if parent == native {
+                // The VM's object owns author properties and the script-visible
+                // chain. The host keeps its immutable native brand and owner.
+                if prototype == Some(native) && !self.host_objects.contains_key(&handle) {
+                    return Ok(());
+                }
+                self.ensure_native_expando(handle, host, true)?;
+                let backing = self.host_objects[&handle];
+                return self.set_prototype(Ordinary::Object(backing), prototype);
+            }
+            if self.objects[self.ordinary_id(parent)?].proxy.is_some() {
+                break;
+            }
+            current = self.ordinary_prototype(parent)?;
+        }
+        Err(Fault::exception("TypeError", "An element prototype must retain its real native interface in the ordinary chain."))
+    }
+
     pub(super) fn native_instance_anchor(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
         self.validate_native_access(handle,host)?;
         if !host.native_ancestry_inspection(handle) {return Err(Fault::new("Native host ancestry inspection is not implemented for this receiver."));}
