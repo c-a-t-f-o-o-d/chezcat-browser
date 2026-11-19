@@ -107,9 +107,14 @@ var thrown=false;try{detachedStyle.type={toString:function(){throw 17;}};}catch(
 document.title='detached-style-type-ok';
 "#]);assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"detached-style-type-ok");assert!(!page.has_host_tasks());assert!(page.take_dynamic_stylesheets().is_empty());
     let style=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element {tag,..} if tag=="style")).unwrap();let nodes=doc.nodes.len();let commits=page.state.dom_commits;
-    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.textContent='body{display:none}';","detachedStyle.innerHTML='body{display:none}';"]{
+    for source in ["document.body.appendChild(detachedStyle);","detachedStyle.innerHTML='body{display:none}';"]{
         let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,commits);assert!(doc.nodes[style].children.is_empty());assert!(!page.has_host_tasks());
     }
+    let text = page.console_eval(&mut doc, &mut forms, "detachedStyle.textContent='body{display:none}';if(detachedStyle.isConnected||detachedStyle.firstChild.data!==detachedStyle.textContent||detachedStyle.type!=='text/css')throw 'detached style text or type';");
+    assert_eq!(text.errors, 0, "{}", page.report());
+    assert_eq!(doc.nodes.len(), nodes + 1);
+    assert_eq!(doc.nodes[style].children.len(), 1);
+    assert!(!page.has_host_tasks());
 }
 
 #[test]
@@ -1000,9 +1005,9 @@ word.setAttribute('data-words','left\tready\nlast\fend\rtrail');if(!word.matches
 
 #[test]
 fn unavailable_animation_feature_reads_are_absent_without_advertising_or_running_animation() {
-    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><svg id=foreign></svg></body></html>",&[r#"
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=d></div><form id=f><input name=animate id=control></form><video id=video></video><x-custom id=custom></x-custom><unlisted id=opaque></unlisted><svg id=foreign></svg></body></html>",&[r#"
 var d=document.getElementById('d'),created=document.createElement('span'),video=document.getElementById('video'),calls=0;
-for(var element of [document.documentElement,document.body,d,created,video]){
+for(var element of [document.documentElement,document.body,d,created,video,document.getElementById('custom')]){
  if(element.animate!==undefined||typeof element.animate!=='undefined'||'animate' in element)throw 'absent animation';
  if(element.animate)calls++;
  var caught=false;try{element.animate([]);}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'missing method call';
@@ -1016,7 +1021,7 @@ document.title='animation-absence-ok';
         let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert_eq!(doc.nodes.len(),nodes);assert!(!page.has_host_tasks());
     }
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    for id in ["foreign","custom"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
+    for id in ["foreign","opaque"] {let node=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some(id)).then_some(n)).unwrap();assert!(bridge.get(node_handle(node),"animate").is_err(),"{id} must retain its unsupported boundary");}
 }
 
 #[test]

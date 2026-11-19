@@ -57,7 +57,7 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-The development priority remains signed-out video search and playback. The larger compressed-script allowance, canvas dimensions and the Document interface have landed. Rectangle and solid-color App pixel checks pass on `f53ab3e` and `124686e`, integrated by `main` at `9610baf`. Independent readback still stops at missing `getImageData`. The owner's manual signed-out run remains pending, and search and playback need separate verification.
+The next milestone is a usable signed-out video homepage. On clean dev137 (`1aeef14`), the main script decoded and entered the engine, but the site header and search box stayed missing. Current work follows the surrogate-escape failure, detached STYLE text assignment and CSS work limit on an opacity read. Search results, watch navigation and playback each need a live check. [Measured homepage and offline animation results](COMPATIBILITY.md)
 
 Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
 
