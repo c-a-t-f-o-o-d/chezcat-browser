@@ -321,7 +321,7 @@ pub struct Style {
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
-    /// Computed scalar only. Group opacity painting is not yet implemented.
+    /// Computed scalar. Ordinary HTML paint groups composite after descendants.
     pub opacity: f64,
     pub background: Option<u32>,
     /// Retain currentColor through explicit inheritance; background holds the
@@ -3287,7 +3287,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             } else if matches!(value.as_str(), "transparent" | "none" | "initial" | "unset") {
                 style.background = None;
                 style.background_current_color = false;
-            } else if let Some(color) = color(&value) {
+            } else if let Some(color) = opaque_background_color(&value) {
                 style.background = Some(color);
                 style.background_current_color = false;
             }
@@ -3354,7 +3354,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 } else if value == "currentcolor" {
                     Some(Some(style.color))
                 } else {
-                    color(&value).map(Some)
+                    opaque_background_color(&value).map(Some)
                 };
                 if let Some(background) = background {
                     style.background = background;
@@ -3791,13 +3791,8 @@ pub(crate) fn parse_solid_color(value: &str) -> Option<ParsedColor> {
         };
         return Some(ParsedColor::Solid((alpha << 24) | rgb));
     }
-    if let Some(body) = value
-        .strip_prefix("rgb(")
-        .or_else(|| value.strip_prefix("rgba("))
-    {
-        let body = body.strip_suffix(')')?;
-        let (rgb, alpha) = solid_rgb(body)?;
-        return Some(ParsedColor::Solid((u32::from(alpha) << 24) | rgb));
+    if let Some((rgb, alpha)) = functional_rgb(&value) {
+        return Some(ParsedColor::Solid(((alpha.round() as u32) << 24) | rgb));
     }
     named_color(&value).map(|rgb| ParsedColor::Solid(0xff00_0000 | rgb))
 }
@@ -3806,7 +3801,23 @@ fn color_whitespace(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\n' | '\r' | '\x0c')
 }
 
-fn solid_rgb(body: &str) -> Option<(u32, u8)> {
+fn opaque_background_color(value: &str) -> Option<u32> {
+    if value.starts_with("rgb(") || value.starts_with("rgba(") {
+        let (rgb, alpha) = functional_rgb(value)?;
+        return (alpha == 255.0).then_some(rgb);
+    }
+    color(value)
+}
+
+// Keep alpha unrounded on the 0–255 scale. Canvas stores it in an 8-bit
+// channel; an opaque-only background must recognize partial alpha first.
+fn functional_rgb(value: &str) -> Option<(u32, f64)> {
+    if value.len() > 2048 {
+        return None;
+    }
+    let body = value.strip_prefix("rgb(")
+        .or_else(|| value.strip_prefix("rgba("))?
+        .strip_suffix(')')?;
     let (channels, alpha, legacy) = if body.contains(',') {
         if body.contains('/') {
             return None;
@@ -3845,15 +3856,11 @@ fn solid_rgb(body: &str) -> Option<(u32, u8)> {
         rgb |= (number.round() as u32) << shift;
     }
     let alpha = match alpha {
-        None => 255,
-        Some(alpha) => {
-            let number = if let Some(percent) = alpha.strip_suffix('%') {
-                rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0
-            } else {
-                rgba_number(alpha)?.clamp(0.0, 1.0) * 255.0
-            };
-            number.round() as u8
-        }
+        None => 255.0,
+        Some(alpha) => match alpha.strip_suffix('%') {
+            Some(percent) => rgba_number(percent)?.clamp(0.0, 100.0) * 255.0 / 100.0,
+            None => rgba_number(alpha)?.clamp(0.0, 1.0) * 255.0,
+        },
     };
     Some((rgb, alpha))
 }
@@ -3975,6 +3982,46 @@ mod background_tests {
         assert_eq!(style.background_repeat, [true, true]);
         assert_eq!(style.background_position, [ObjectPosition::START; 2]);
         assert_eq!(style.background_size, BackgroundSize::Auto);
+    }
+
+    #[test]
+    fn opaque_functional_background_checks_opacity_before_byte_rounding() {
+        for value in [
+            "rgba(12,34,56,.999)", "rgb(12 34 56 / 99.9%)", "rgba(12,34,56,0)",
+            "rgb(12,,34,56)", "rgba(12,34%,56,1)", "rgb(12 34 56 / 1.)",
+        ] {
+            assert_eq!(opaque_background_color(value), None, "{value}");
+        }
+        assert_eq!(opaque_background_color(&format!("rgba(12,34,56,{}1)", " ".repeat(2048))), None);
+        assert_eq!(opaque_background_color("rgba(12,34,56)"), Some(0x0c2238));
+        assert_eq!(opaque_background_color("rgb(12 34 56 / 120%)"), Some(0x0c2238));
+        assert_eq!(parse_solid_color("rgba(12,34,56,.999)"), Some(ParsedColor::Solid(0xff0c2238)));
+    }
+
+    #[test]
+    fn opaque_functional_background_variable_and_shorthand_share_cascade_rules() {
+        let doc = crate::html::parse(r#"<style>
+            .base{--paint:rgba(24,68,101,1);background-image:url(Tile.ppm);background-clip:content-box}
+            #long{background-color:var(--paint)}#short{background:var(--paint)}
+            #sheet{background:rgba(24,68,101,1)}#partial{background:rgba(24,68,101,.999)}
+            </style><div class=base id=long></div><div class=base id=short></div>
+            <div class=base id=sheet style='background-clip:revert-layer'></div>
+            <div class=base id=partial style='background-clip:revert-layer'></div>"#);
+        let styles = compute(&doc, &HashMap::new());
+        let long = &styles[node(&doc, "long")];
+        assert_eq!(long.background, Some(0x184465));
+        assert_eq!(long.background_image.as_ref().unwrap().url, "Tile.ppm");
+        assert_eq!(long.background_clip, Some(BackgroundClip::ContentBox));
+        for id in ["short", "sheet"] {
+            let style = &styles[node(&doc, id)];
+            assert_eq!(style.background, Some(0x184465), "{id}");
+            assert_eq!(style.background_clip, Some(BackgroundClip::BorderBox), "{id}");
+            assert_initial(style);
+        }
+        let partial = &styles[node(&doc, "partial")];
+        assert_eq!(partial.background, None);
+        assert_eq!(partial.background_image, long.background_image);
+        assert_eq!(partial.background_clip, Some(BackgroundClip::ContentBox));
     }
 
     #[test]

@@ -29,6 +29,8 @@ pub(crate) use offset_parent::{offset_parent_storage, offset_parent_work, Offset
 #[path = "layout_translate.rs"]
 mod translate;
 pub(crate) use translate::VisualBorderRect;
+#[path = "layout_opacity.rs"]
+mod opacity;
 #[path = "layout_grid.rs"]
 mod grid;
 use grid::GridGroup;
@@ -373,6 +375,11 @@ pub struct Layout {
     pub(crate) computed_properties: css::ComputedProperties,
     pub runs: Vec<TextRun>,
     pub items: Vec<PaintItem>,
+    pub(crate) opacity_groups: Vec<crate::paint::OpacityGroup>,
+    pub(crate) opacity_unavailable: bool,
+    pub(crate) opacity_unsupported: bool,
+    pub(crate) opacity_draw_refused: std::cell::Cell<bool>,
+    pub(crate) opacity_root_background_unsupported: bool,
     pub anchors: Vec<(String, i32)>,
     pub controls: Vec<ControlBox>,
     targets: Vec<String>,
@@ -630,6 +637,7 @@ struct DecorationGroup {
     fixed: bool,
     layer: usize,
     clip: Option<ClipRect>,
+    opacity: usize,
     items: Vec<PaintItem>,
 }
 
@@ -674,6 +682,9 @@ struct Engine<'a> {
     inline_context: Option<usize>,
     translated_ranks: Vec<usize>,
     translated_owners: Option<(Vec<usize>, Vec<usize>)>,
+    opacity_nodes: Vec<usize>,
+    opacity_items: Vec<usize>,
+    opacity_contexts: Vec<opacity::Context>,
 }
 
 /// Scripts and renderer use the document's full media viewport. Standalone
@@ -796,6 +807,11 @@ fn build_viewport_with_fonts_inner(
         computed_properties,
         runs: Vec::new(),
         items: Vec::new(),
+        opacity_groups: Vec::new(),
+        opacity_unavailable: false,
+        opacity_unsupported: false,
+        opacity_draw_refused: std::cell::Cell::new(false),
+        opacity_root_background_unsupported: false,
         anchors: Vec::new(),
         controls: Vec::new(),
         targets: Vec::new(),
@@ -919,6 +935,9 @@ fn build_viewport_with_fonts_inner(
         inline_context: None,
         translated_ranks: Vec::new(),
         translated_owners: None,
+        opacity_nodes: Vec::new(),
+        opacity_items: Vec::new(),
+        opacity_contexts: Vec::new(),
     };
     if !doc.nodes.is_empty() {
         engine.walk(0, None, 0);
@@ -939,6 +958,7 @@ fn build_viewport_with_fonts_inner(
         engine.withhold_incomplete_grid_geometry(budget.as_deref_mut())?;
     }
     engine.apply_translations(budget.as_deref_mut(), &fixed_boxes)?;
+    engine.prepare_opacity(budget.as_deref_mut())?;
     let atom_clips = engine.clip_overflow();
     // Flex children may move up as well as down after their single paint pass.
     // Recompute the final extent instead of retaining intermediate coordinates.
@@ -1007,6 +1027,7 @@ fn build_viewport_with_fonts_inner(
         .clamp(16, MAX_HEIGHT);
     engine.finish_decorations();
     engine.order_positioned_paint();
+    engine.finish_opacity();
     engine.build_hits();
     engine.restore_source_order();
     let indices = |flags: &[bool]| {
@@ -1638,18 +1659,33 @@ impl Engine<'_> {
         let fixed = std::mem::take(&mut self.layout.fixed_items);
         let layers = std::mem::take(&mut self.layout.positioned_items);
         let clips = std::mem::take(&mut self.layout.item_clips);
+        let opacity = std::mem::take(&mut self.opacity_items);
+        if opacity.is_empty() {
+            let mut ordered: Vec<_> = items.into_iter().zip(fixed).zip(layers).zip(clips).collect();
+            ordered.sort_by_key(|((_, layer), _)| *layer);
+            for (((item, fixed), layer), clip) in ordered {
+                self.layout.items.push(item);
+                self.layout.fixed_items.push(fixed);
+                self.layout.positioned_items.push(layer);
+                self.layout.item_clips.push(clip);
+            }
+            return;
+        }
         let mut ordered: Vec<_> = items
             .into_iter()
             .zip(fixed)
             .zip(layers)
             .zip(clips)
+            .enumerate()
+            .map(|(index, item)| (item, opacity[index]))
             .collect();
-        ordered.sort_by_key(|((_, layer), _)| *layer);
-        for (((item, fixed), layer), clip) in ordered {
+        ordered.sort_by_key(|(((_, layer), _), _)| *layer);
+        for ((((item, fixed), layer), clip), opacity) in ordered {
             self.layout.items.push(item);
             self.layout.fixed_items.push(fixed);
             self.layout.positioned_items.push(layer);
             self.layout.item_clips.push(clip);
+            self.opacity_items.push(opacity);
         }
     }
 
@@ -4955,6 +4991,7 @@ impl Engine<'_> {
             }
             let (layer, fixed) = self.decoration_layer(self.decorations[index].node);
             let clip = self.ancestor_clip(self.decorations[index].node);
+            let opacity = self.opacity_nodes.get(self.decorations[index].node).copied().unwrap_or(0);
             let decoration = &mut self.decorations[index];
             let mut items = std::mem::take(&mut decoration.items);
             items.truncate(remaining);
@@ -4967,6 +5004,7 @@ impl Engine<'_> {
                     fixed,
                     layer,
                     clip,
+                    opacity,
                     items,
                 });
         }
@@ -4977,6 +5015,8 @@ impl Engine<'_> {
         let original_fixed = std::mem::take(&mut self.layout.fixed_items);
         let original_positioned = std::mem::take(&mut self.layout.positioned_items);
         let original_clips = std::mem::take(&mut self.layout.item_clips);
+        let original_opacity = std::mem::take(&mut self.opacity_items);
+        let has_opacity = !original_opacity.is_empty();
         let mut ordered =
             Vec::with_capacity(original.len() + MAX_ITEMS.saturating_sub(remaining).min(8_192));
         for (index, item) in original.into_iter().enumerate() {
@@ -4991,6 +5031,7 @@ impl Engine<'_> {
                     self.layout
                         .item_clips
                         .extend(std::iter::repeat_n(group.clip, group.items.len()));
+                    if has_opacity { self.opacity_items.extend(std::iter::repeat_n(group.opacity, group.items.len())); }
                     ordered.extend(group.items);
                 }
             }
@@ -4999,6 +5040,7 @@ impl Engine<'_> {
                 .positioned_items
                 .push(original_positioned[index]);
             self.layout.item_clips.push(original_clips[index]);
+            if has_opacity { self.opacity_items.push(original_opacity[index]); }
             ordered.push(item);
         }
         self.layout.items = ordered;
