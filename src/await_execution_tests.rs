@@ -293,6 +293,43 @@ if(trace!=='outer:next0|inner:next0|cleanup:start|cleanup:1:8|inner:close|outer:
 }
 
 #[test]
+fn await_execution_computed_operand_can_suspend_before_the_outer_wait() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', firstRelease, secondRelease, firstReject, result, caught, token={}, reason={};
+var first=new Promise(resolve=>firstRelease=resolve);
+var second=new Promise(resolve=>secondRelease=resolve);
+var failure=new Promise((resolve,reject)=>firstReject=reject);
+function relay(value){if(value!==token)throw 'inner result';trace+='relay|';return second;}
+async function run(gate){
+    try{return await relay(await gate);}
+    catch(error){caught=error;}
+    finally{trace+='finally|';}
+}
+async function direct(gate){return await (await gate);}
+run(first).then(value=>result=value);
+run(failure);
+var directValue;
+direct(first).then(value=>directValue=value);
+if(trace||result||caught||directValue)throw 'early outer wait';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    runtime.begin_job();
+    succeeds(&mut runtime, "firstReject(reason);firstRelease(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, r#"
+if(trace!=='finally|relay|'||result||caught!==reason||directValue!==token)
+    throw 'inner rejection or premature outer continuation';
+'ok';
+"#);
+    runtime.begin_job();
+    succeeds(&mut runtime, "secondRelease(token);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='finally|relay|finally|'||result!==token)throw 'outer fulfillment';'ok';");
+}
+
+#[test]
 fn await_execution_nested_switch_break_runs_finally_and_leaves_the_case_scope() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"
@@ -1959,7 +1996,7 @@ fn await_execution_unsupported_positions_reject_before_effects_even_in_dead_code
         "try{}catch{}finally{await p;}",
         "var values=[...await p];",
         "var value={entry:await p,another:await p};",
-        "await (await p);",
+        "await (1 + await p);",
     ] {
         let mut runtime = Runtime::for_test();
         let source = format!("var effect=1;async function unsupported(p){{{body}}}effect=2;");
