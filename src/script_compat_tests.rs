@@ -3917,3 +3917,65 @@ var third=document.createElement('script');third.async=false;third.crossOrigin='
     assert!(requests[2].same_origin_only);
     assert!(requests[2].error.as_deref().unwrap().contains("CORS-mode"));
 }
+
+#[test]
+fn template_content_append_keeps_real_identity_and_adopts_into_inert_ownership() {
+    let (mut doc, mut forms, mut page, _) = page(r#"<html><body><iframe hidden srcdoc="early" id=early></iframe><div id=app></div></body></html>"#, &[]);
+    let result = page.console_eval(&mut doc, &mut forms, r#"
+var f=document.getElementById('early'), app=document.getElementById('app');
+if(f.nextElementSibling!==app||f.contentWindow!==null)throw 'parsed iframe guard';
+var p=document.createElement('template'), r=document.createElement('template'), n=document.createElement('div');
+var pc=p.content, rc=r.content, owner=pc.ownerDocument, proof={};
+n.id='adopted-leaf';n.proof=proof;
+if(n.ownerDocument!==document||n.parentNode!==null||n.getRootNode()!==n||owner===document||owner.defaultView!==null)
+    throw 'before adoption';
+if(rc.appendChild(n)!==n||rc.firstChild!==n||n.ownerDocument!==owner||n.parentNode!==rc||
+   n.getRootNode()!==rc||n.isConnected||n.id!=='adopted-leaf'||n.proof!==proof)
+    throw 'ordinary leaf adopted';
+if(pc.appendChild(r)!==r||pc.firstChild!==r||r.ownerDocument!==owner||r.parentNode!==pc||
+   r.content!==rc||r.getRootNode()!==pc||r.content.firstChild!==n||n.parentNode!==rc)
+    throw 'nested template adopted';
+var shallow=document.importNode(n,true);
+if(shallow===n||shallow.ownerDocument!==document||shallow.parentNode!==null||shallow.id!=='adopted-leaf')
+    throw 'checked copy after adoption';
+if(document.getElementById('adopted-leaf')!==null||p.firstChild!==null||r.firstChild!==null)
+    throw 'inert nodes leaked into document';
+p.innerHTML='<span id="replacement"></span>';
+if(pc.firstChild===r||pc.firstChild.id!=='replacement'||r.parentNode!==null||
+   r.ownerDocument!==owner||r.content!==rc||rc.firstChild!==n)
+    throw 'replace detaches retained adopted child';
+document.title='inert-adoption-ok';
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "inert-adoption-ok");
+}
+
+#[test]
+fn template_content_append_refuses_active_and_cyclic_transfers_atomically() {
+    let (mut doc, mut forms, mut page, _) = page("<html><body><div id=guard></div></body></html>", &[]);
+    let result = page.console_eval(&mut doc, &mut forms, r#"
+var outer=document.createElement('template'), inner=document.createElement('template');
+var outerFragment=outer.content, innerFragment=inner.content;
+outerFragment.appendChild(inner);
+var connected=document.createElement('div'), image=document.createElement('img'), bad=0;
+document.body.appendChild(connected);
+for(var node of [connected,image,{}]){
+  try{innerFragment.appendChild(node);}catch(e){
+    if(e.name==='TypeError'||e.name==='NotSupportedError')bad++;else throw e;
+  }
+}
+var separate=document.implementation.createHTMLDocument().createElement('template').content;
+try{separate.appendChild(outer);}catch(e){if(e.name==='NotSupportedError')bad++;else throw e;}
+if(bad!==4||innerFragment.firstChild!==null||outerFragment.firstChild!==inner||
+   connected.parentNode!==document.body||image.parentNode!==null||separate.firstChild!==null)
+    throw 'rejected transfer';
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+    let retained = page.state.retained;
+    let result = page.console_eval(&mut doc, &mut forms, "innerFragment.appendChild(outer);");
+    assert_eq!(result.errors, 1);
+    assert!(page.report().contains("ancestor cycle"));
+    assert_eq!(page.state.retained, retained);
+    let result = page.console_eval(&mut doc, &mut forms, "if(outer.parentNode!==null||innerFragment.firstChild!==null||outerFragment.firstChild!==inner)throw 'cycle changed tree';");
+    assert_eq!(result.errors, 0, "{}", page.report());
+}

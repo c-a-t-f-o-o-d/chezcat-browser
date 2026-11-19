@@ -14,11 +14,13 @@ pub(super) const ROOT_METHOD: &str = "\0Node.getRootNode";
 impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
-            "getRootNode" | "cloneNode" => self.root_node_receiver(object),
+            "getRootNode" => self.get_root_receiver(object),
+            "cloneNode" => self.root_node_receiver(object),
             // Prototype selection depends on the genuine Node interface. The
             // VM guards property access from its current realm, and the call
             // rechecks the incumbent before accessing either document.
             "contains" => self.root_node_receiver(object) || self.frame_contains_node(object).is_some(),
+            "appendChild" if self.template_fragment_receiver(object) => true,
             _ if dom_tree::node_mutation_method(name) => self.node_mutation_receiver(object),
             _ => return false,
         };
@@ -36,13 +38,17 @@ impl Bridge<'_> {
         self.namespace_receiver(object)
     }
 
+    pub(super) fn get_root_receiver(&self, object: u32) -> bool {
+        self.root_node_receiver(object) || self.inert_node_type(object).is_some()
+    }
+
     /// Pure validation for Host::validate_call, before dictionary member Get.
     pub(super) fn validate_root_node_options(
         &self,
         object: u32,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
-        if !self.root_node_receiver(object) {
+        if !self.get_root_receiver(object) {
             return Err(("TypeError", "getRootNode requires a genuine accessible Node.".into()));
         }
         if args.first().is_some_and(|value| !matches!(value,
@@ -86,6 +92,10 @@ impl Bridge<'_> {
                 return Err("Main Document root is unavailable.".into());
             }
             return Ok(Value::Host(DOCUMENT));
+        }
+
+        if self.inert_node_type(object).is_some() {
+            return self.inert_root(object);
         }
 
         // Rebuild after dictionary conversion: its getter may have moved the
