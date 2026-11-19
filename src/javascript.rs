@@ -7762,8 +7762,7 @@ impl Runtime {
         self.resolve_member_call(object, property, host)
     }
 
-    // Shared by the recursive reference path and the heap expression driver.
-    // Both have already evaluated the receiver and key, in that order.
+    // Callers have already evaluated the receiver and key, in that order.
     #[inline(never)]
     fn resolve_member_call(
         &mut self,

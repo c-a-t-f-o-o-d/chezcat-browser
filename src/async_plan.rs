@@ -26,6 +26,7 @@ pub(super) enum Instruction {
         statement: StmtId,
         operand: ExprId,
         callee: Option<ExprId>,
+        method: Option<ExprId>,
         member_key: Option<ExprId>,
         chain: Option<ExprId>,
         assignment: Option<ExprId>,
@@ -54,6 +55,7 @@ fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume
 struct AwaitSite {
     operand: ExprId,
     callee: Option<ExprId>,
+    method: Option<ExprId>,
     guard: Option<(ExprId, &'static str)>,
     member_key: Option<ExprId>,
     chain: Option<ExprId>,
@@ -81,6 +83,13 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         ExprKind::Member(receiver, key) => (receiver, Some(key)),
         _ => (expression, None),
     };
+    let (expression, method) = match &program.exprs[expression].kind {
+        ExprKind::Call(method, arguments) if matches!(program.exprs[*method].kind, ExprKind::Member(..)) => {
+            let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
+            (*expression, Some(*method))
+        }
+        _ => (expression, None),
+    };
     let (expression, callee) = match &program.exprs[expression].kind {
         ExprKind::Call(callee, arguments) if matches!(&program.exprs[*callee].kind, ExprKind::Name(_)) => {
             let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
@@ -89,7 +98,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         _ => (expression, None),
     };
     let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some(AwaitSite { operand, callee, guard, member_key, chain, assignment })
+    Some(AwaitSite { operand, callee, method, guard, member_key, chain, assignment })
 }
 
 fn visit_sequence(
@@ -146,14 +155,14 @@ fn emit_expression(
 ) -> Result<(), Fault> {
     visit_sequence(program, expression, |expression, last| {
         let action = if last { action } else { Resume::Discard };
-        let instruction = if let Some(AwaitSite { operand, callee, guard, member_key, chain, assignment }) =
+        let instruction = if let Some(AwaitSite { operand, callee, method, guard, member_key, chain, assignment }) =
             await_expression(program, expression)
         {
             if let Some((left, operator)) = guard {
                 // A successful short circuit skips this site's next instruction.
                 push(code, Instruction::GuardAwait { statement: id, left, operator, action })?;
             }
-            Instruction::Await { statement: id, operand, callee, member_key, chain, assignment, action }
+            Instruction::Await { statement: id, operand, callee, method, member_key, chain, assignment, action }
         } else {
             Instruction::Evaluate { statement: id, expression, action }
         };
@@ -414,7 +423,8 @@ mod tests {
     fn async_plan_rejects_unreachable_embedded_await_and_cross_scope_jumps_during_parse() {
         for body in [
             "if(false){use(1,await p);}",
-            "return receiver.method(await p);",
+            "return receiver.method(await p, 1);",
+            "return receiver.method(1 + await p);",
             "receiver.key = await p;",
             "value += await p;",
             "value = flag && await p;",
@@ -466,6 +476,7 @@ mod tests {
             ("async function f(p){return yes() && use(await p).ready;}", 2),
             ("async function f(p){if(yes() && use(await p).ready){noop();}}", 3),
             ("async function f(p){let value; value=use(await p);}", 2),
+            ("async function f(p){let value=receiver.method(use(await p));}", 1),
         ] {
             let mut runtime = Runtime::for_test();
             let program = runtime.register_program(source, false).unwrap();
