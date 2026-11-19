@@ -1009,28 +1009,71 @@ enum TokenKind {
 struct Token {
     kind: TokenKind,
     start_and_newline: u32,
-    end: u32,
+    end_or_delimiter: u32,
 }
 
 impl Token {
     const NEWLINE: u32 = 1 << 31;
     const MAX_SOURCE_BYTES: usize = (Self::NEWLINE - 1) as usize;
+    const UNMATCHED_DELIMITER: u32 = u32::MAX;
 
     fn new(kind: TokenKind, start: usize, end: usize, newline: bool) -> Self {
         debug_assert!(start <= end && end <= Self::MAX_SOURCE_BYTES);
         let start_and_newline = start as u32 | if newline { Self::NEWLINE } else { 0 };
-        Self { kind, start_and_newline, end: end as u32 }
+        let end_or_delimiter = if matches!(kind, TokenKind::Punct("(" | "{")) {
+            debug_assert_eq!(end, start + 1);
+            Self::UNMATCHED_DELIMITER
+        } else {
+            end as u32
+        };
+        Self { kind, start_and_newline, end_or_delimiter }
     }
 
     fn at(&self) -> usize { (self.start_and_newline & !Self::NEWLINE) as usize }
-    fn end(&self) -> usize { self.end as usize }
+    fn end(&self) -> usize {
+        if matches!(self.kind, TokenKind::Punct("(" | "{")) {
+            self.at() + 1
+        } else {
+            self.end_or_delimiter as usize
+        }
+    }
     fn newline(&self) -> bool { self.start_and_newline & Self::NEWLINE != 0 }
+
+    fn delimiter_end(&self) -> Option<usize> {
+        debug_assert!(matches!(self.kind, TokenKind::Punct("(" | "{")));
+        (self.end_or_delimiter != Self::UNMATCHED_DELIMITER).then_some(self.end_or_delimiter as usize)
+    }
 }
 
-// Keep token records and the delimiter index within the previous 128 MiB
-// structural allowance. Source, parsing work and AST limits are independent.
-const _: () = assert!((limits::BROWSER_CAPACITIES.tokens + 1) *
-    (std::mem::size_of::<Token>() + std::mem::size_of::<u32>()) <= 128 * 1024 * 1024);
+// Byte offsets also bound the token index, including for custom test profiles.
+const _: () = assert!(Token::MAX_SOURCE_BYTES < Token::UNMATCHED_DELIMITER as usize);
+
+fn index_token_delimiters(tokens: &mut [Token]) {
+    let mut parentheses = Token::UNMATCHED_DELIMITER;
+    let mut braces = Token::UNMATCHED_DELIMITER;
+    // Use the one-byte opening token's redundant end slot to link pending
+    // openers, then replace that link with the closing token's index.
+    // Each delimiter kind keeps the lookup behavior used for malformed input.
+    for index in 0..tokens.len() {
+        let (head, opening) = match tokens[index].kind {
+            TokenKind::Punct("(") => (&mut parentheses, true),
+            TokenKind::Punct(")") => (&mut parentheses, false),
+            TokenKind::Punct("{") => (&mut braces, true),
+            TokenKind::Punct("}") => (&mut braces, false),
+            _ => continue,
+        };
+        if opening {
+            tokens[index].end_or_delimiter = std::mem::replace(head, index as u32);
+        } else if *head != Token::UNMATCHED_DELIMITER {
+            *head = std::mem::replace(&mut tokens[*head as usize].end_or_delimiter, index as u32);
+        }
+    }
+    for mut head in [parentheses, braces] {
+        while head != Token::UNMATCHED_DELIMITER {
+            head = std::mem::replace(&mut tokens[head as usize].end_or_delimiter, Token::UNMATCHED_DELIMITER);
+        }
+    }
+}
 
 fn reserved(name: &str) -> bool {
     matches!(
@@ -1410,7 +1453,25 @@ fn tokenize(source: &str, regexp_budget: &mut usize) -> Result<Vec<Token>, Fault
     tokenize_with_capacity(source, regexp_budget, limits::REGRESSION_CAPACITIES)
 }
 
+#[cfg(test)]
 fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: limits::Capacities) -> Result<Vec<Token>, Fault> {
+    tokenize_for_parse(source, regexp_budget, capacity, None).map(|(tokens, _)| tokens)
+}
+
+fn check_compilation_deadline(deadline: Option<Instant>) -> Result<(), Fault> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(Fault::new("Script compilation deadline reached."));
+    }
+    Ok(())
+}
+
+fn compilation_storage_limit(capacity: limits::Capacities) -> Fault {
+    Fault::new(format!("Script compilation storage limit reached ({} MiB).", capacity.compilation_bytes / (1024 * 1024)))
+}
+
+fn tokenize_for_parse(
+    source: &str, regexp_budget: &mut usize, capacity: limits::Capacities, deadline: Option<Instant>,
+) -> Result<(Vec<Token>, usize), Fault> {
     let source_limit = capacity.source_bytes.min(Token::MAX_SOURCE_BYTES);
     if source.len() > source_limit {
         return Err(Fault::new(format!("Script source limit reached ({} KiB).", source_limit / 1024)));
@@ -1419,12 +1480,18 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
     let (mut at, mut newline) = (0, false);
     let mut tokens = Vec::new();
     let max_records = capacity.tokens.min(source.len()) + 1;
+    let mut owned_bytes = source.len().saturating_mul(2);
+    let mut next_deadline_check = 0usize;
     let mut goal = LexGoal::new();
     // Moving lexical goals into bounded interpolation frames preserves their
     // regexp/division context without copying enclosing delimiter stacks.
     let mut templates: Vec<(LexGoal, usize)> = Vec::new();
     let mut regexp_bytes = 0usize;
     while at < source.len() {
+        if at >= next_deadline_check {
+            check_compilation_deadline(deadline).map_err(|error| error.at(source, at))?;
+            next_deadline_check = at + 65_536;
+        }
         let ch = source[at..].chars().next().unwrap();
         if js_space(ch) {
             newline |= line_end(ch);
@@ -1433,6 +1500,10 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
         }
         if source[at..].starts_with("//") {
             while at < source.len() {
+                if at >= next_deadline_check {
+                    check_compilation_deadline(deadline).map_err(|error| error.at(source, at))?;
+                    next_deadline_check = at + 65_536;
+                }
                 let ch = source[at..].chars().next().unwrap();
                 if line_end(ch) {
                     break;
@@ -1659,7 +1730,7 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
             }
         }
         goal.accept(&kind, newline);
-        push_token(&mut tokens, Token::new(kind, start, at, newline), max_records)
+        push_token(&mut tokens, Token::new(kind, start, at, newline), max_records, &mut owned_bytes, capacity)
             .map_err(|error| error.at(source, start))?;
         newline = false;
     }
@@ -1668,13 +1739,29 @@ fn tokenize_with_capacity(source: &str, regexp_budget: &mut usize, capacity: lim
             Fault::exception("SyntaxError", "Unterminated template substitution.").at(source, at),
         );
     }
-    push_token(&mut tokens, Token::new(TokenKind::End, at, at, newline), max_records)?;
-    Ok(tokens)
+    check_compilation_deadline(deadline).map_err(|error| error.at(source, at))?;
+    push_token(&mut tokens, Token::new(TokenKind::End, at, at, newline), max_records, &mut owned_bytes, capacity)?;
+    let charged = owned_bytes.saturating_add(tokens.capacity().saturating_mul(size_of::<Token>()));
+    Ok((tokens, charged))
 }
 
-fn push_token(tokens: &mut Vec<Token>, token: Token, max_records: usize) -> Result<(), Fault> {
+fn push_token(
+    tokens: &mut Vec<Token>, token: Token, max_records: usize, owned_bytes: &mut usize, capacity: limits::Capacities,
+) -> Result<(), Fault> {
+    let payload = match &token.kind {
+        TokenKind::Word(value) | TokenKind::EscapedWord(value) | TokenKind::String(value)
+        | TokenKind::Template(value, _) => value.capacity(),
+        TokenKind::StringUnits(value) => value.capacity().saturating_mul(size_of::<u16>()),
+        TokenKind::RegExp(value) => value.retained_bytes,
+        _ => 0,
+    };
+    *owned_bytes = owned_bytes.saturating_add(payload);
+    let usable_records = capacity.compilation_bytes.saturating_sub(*owned_bytes) / size_of::<Token>();
+    if tokens.capacity() > usable_records || tokens.len() == usable_records {
+        return Err(compilation_storage_limit(capacity));
+    }
     if tokens.len() == tokens.capacity() {
-        let next = tokens.capacity().saturating_mul(2).max(8).min(max_records);
+        let next = tokens.capacity().saturating_mul(2).max(8).min(max_records).min(usable_records);
         tokens.try_reserve_exact(next - tokens.len())
             .map_err(|_| Fault::new("Script token storage reservation failed."))?;
     }
@@ -1693,6 +1780,35 @@ fn compact_token_records_preserve_byte_offsets_newlines_and_capacity() {
     let error = tokenize_with_capacity(";;;;", &mut regexp_work, capacity).err().unwrap();
     assert!(error.message.contains("Script token limit reached (3)."));
 }
+
+#[test]
+fn token_delimiter_index_preserves_byte_spans_and_independent_matching() {
+    let mut regexp_work = limits::BROWSER.regexp_work;
+    let mut tokens = tokenize("\n({)}(({", &mut regexp_work).unwrap();
+    index_token_delimiters(&mut tokens);
+    let spans: Vec<_> = tokens.iter().map(|token| (token.at(), token.end())).collect();
+    assert_eq!(spans, [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 8)]);
+    for (index, expected) in [(0, Some(2)), (1, Some(3)), (4, None), (5, None), (6, None)] {
+        assert_eq!(tokens[index].delimiter_end(), expected);
+    }
+    assert!(tokens[0].newline());
+}
+
+#[test]
+fn compilation_storage_and_deadline_reject_before_program_registration() {
+    let source = ";".repeat(110);
+    let mut regexp_work = limits::BROWSER.regexp_work;
+    let limited = limits::Capacities { compilation_bytes: 8192, ..limits::REGRESSION_CAPACITIES };
+    assert!(tokenize_with_capacity(&source, &mut regexp_work, limited).is_ok());
+    let error = Parser::parse_context_with_capacity(&source, &mut regexp_work, false, 0, limited, limits::REGRESSION_HEAP)
+        .err().unwrap();
+    assert!(error.message.contains("Script compilation storage limit"), "{}", error.display());
+    let error = Parser::parse_invocation_context("1;", &mut regexp_work, false, 0, limits::REGRESSION_CAPACITIES,
+        limits::REGRESSION_HEAP, Some(Instant::now()), false, false, false).err().unwrap();
+    assert_eq!(error.message, "Script compilation deadline reached.");
+    assert!(error.exception.is_none());
+}
+
 fn hex_escape(source: &str, at: &mut usize, count: usize) -> Result<u32, Fault> {
     let end = at.saturating_add(count);
     let bytes = source.as_bytes();
@@ -1859,6 +1975,21 @@ impl Program {
         self.exprs.len() + self.stmts.len() + self.chain_steps + self.patterns.len()
             + self.classes.len() + self.class_members + self.resumption_plan_nodes
     }
+
+    fn compilation_ast_bytes(&self) -> usize {
+        fn arena<T>(items: &Vec<T>) -> usize { items.capacity().saturating_mul(size_of::<T>()) }
+        // Charge arena reservations and a per-node allowance for variable
+        // child lists. Source-sized text copies are charged separately.
+        arena(&self.exprs)
+            .saturating_add(arena(&self.stmts))
+            .saturating_add(arena(&self.templates))
+            .saturating_add(arena(&self.classes))
+            .saturating_add(arena(&self.patterns))
+            .saturating_add(arena(&self.body))
+            .saturating_add(self.node_count().saturating_mul(16))
+            .saturating_add(self.resumption_plan_nodes.saturating_mul(size_of::<async_plan::Instruction>()))
+            .saturating_add(self.source.len())
+    }
 }
 
 struct DeferredBody {
@@ -1877,7 +2008,8 @@ struct Parser {
     heap: limits::HeapLimits,
     program: Program,
     tokens: Vec<Token>,
-    delimiter_ends: Vec<u32>,
+    token_storage_bytes: usize,
+    compilation_deadline: Option<Instant>,
     deferred_bodies: Vec<DeferredBody>,
     current: usize,
     depth: usize,
@@ -1918,46 +2050,26 @@ impl Parser {
     fn parse_context_with_capacity(source: &str, regexp_budget: &mut usize,
         strict: bool, active_depth: usize, capacity: limits::Capacities,
         heap: limits::HeapLimits) -> Result<Program, Fault> {
-        Self::parse_invocation_context(source, regexp_budget, strict, active_depth, capacity, heap, false, false, false)
+        Self::parse_invocation_context(source, regexp_budget, strict, active_depth, capacity, heap, None, false, false, false)
     }
 
     fn parse_invocation_context(source: &str, regexp_budget: &mut usize,
         strict: bool, active_depth: usize, capacity: limits::Capacities,
-        heap: limits::HeapLimits, new_target_allowed: bool,
+        heap: limits::HeapLimits, compilation_deadline: Option<Instant>, new_target_allowed: bool,
         super_property_allowed: bool, super_call_allowed: bool) -> Result<Program, Fault> {
-        let tokens = tokenize_with_capacity(source, regexp_budget, capacity)?;
+        let (mut tokens, token_storage_bytes) = tokenize_for_parse(source, regexp_budget, capacity, compilation_deadline)?;
         // Index braces and parentheses once. Deferred bodies and arrow lookahead
-        // reuse this token-sized map instead of rescanning nested token ranges.
-        // Separate delimiter stacks preserve the existing lookahead semantics;
-        // parsing, not this index, diagnoses mixed/malformed delimiters.
-        let mut delimiter_ends = vec![u32::MAX; tokens.len()];
-        let mut braces = Vec::new();
-        let mut parentheses = Vec::new();
-        for (index, token) in tokens.iter().enumerate() {
-            let index = index as u32;
-            match token.kind {
-                TokenKind::Punct("(") => parentheses.push(index),
-                TokenKind::Punct(")") => {
-                    if let Some(start) = parentheses.pop() {
-                        delimiter_ends[start as usize] = index;
-                    }
-                }
-                TokenKind::Punct("{") => braces.push(index),
-                TokenKind::Punct("}") => {
-                    if let Some(start) = braces.pop() {
-                        delimiter_ends[start as usize] = index;
-                    }
-                }
-                _ => {}
-            }
-        }
-        drop(braces);
-        drop(parentheses);
+        // reuse these links instead of rescanning nested token ranges.
+        index_token_delimiters(&mut tokens);
+        check_compilation_deadline(compilation_deadline)?;
+        let mut owned_source = String::new();
+        owned_source.try_reserve_exact(source.len()).map_err(|_| compilation_storage_limit(capacity))?;
+        owned_source.push_str(source);
         let mut parser = Self {
             capacity,
             heap,
             program: Program {
-                source: source.into(),
+                source: owned_source,
                 strict,
                 exprs: Vec::new(),
                 stmts: Vec::new(),
@@ -1970,7 +2082,8 @@ impl Parser {
                 resumption_plan_nodes: 0,
             },
             tokens,
-            delimiter_ends,
+            token_storage_bytes,
+            compilation_deadline,
             deferred_bodies: Vec::new(),
             current: 0,
             // Dynamic compilation runs on the caller's native stack. Account
@@ -1999,7 +2112,9 @@ impl Parser {
         }
         parser.program.strict = parser.strict;
         parser.parse_deferred_bodies(active_depth)?;
+        parser.check_compilation_progress()?;
         validate_program(&parser.program)?;
+        check_compilation_deadline(compilation_deadline)?;
         Ok(parser.program)
     }
 
@@ -2009,11 +2124,9 @@ impl Parser {
         }
         let start = self.current;
         self.need("{")?;
-        let end = self.delimiter_ends[start];
-        if end == u32::MAX {
+        let Some(end) = self.tokens[start].delimiter_end() else {
             return Err(self.error("Unterminated function body."));
-        }
-        let end = end as usize;
+        };
         template.source_end = self.tokens[end].end();
         let id = self.program.templates.len();
         self.program.templates.push(template);
@@ -2158,12 +2271,20 @@ impl Parser {
     fn stmt(&mut self, kind: StmtKind, at: usize) -> Result<StmtId, Fault> {
         self.check_nodes()?;
         let id = self.program.stmts.len();
+        if id == self.program.stmts.capacity() {
+            let slots = self.ast_arena_growth(&self.program.stmts)?;
+            self.program.stmts.try_reserve_exact(slots).map_err(|_| compilation_storage_limit(self.capacity))?;
+        }
         self.program.stmts.push(Stmt { kind, at });
         Ok(id)
     }
     fn expr(&mut self, kind: ExprKind, at: usize) -> Result<ExprId, Fault> {
         self.check_nodes()?;
         let id = self.program.exprs.len();
+        if id == self.program.exprs.capacity() {
+            let slots = self.ast_arena_growth(&self.program.exprs)?;
+            self.program.exprs.try_reserve_exact(slots).map_err(|_| compilation_storage_limit(self.capacity))?;
+        }
         self.program.exprs.push(Expr {
             kind,
             at,
@@ -2172,11 +2293,38 @@ impl Parser {
         Ok(id)
     }
     fn check_nodes(&self) -> Result<(), Fault> {
-        if self.program.node_count() >= self.capacity.ast_nodes {
-            Err(self.unsupported(format!("AST node limit reached ({max_ast}).", max_ast=self.capacity.ast_nodes)))
-        } else {
-            Ok(())
+        let nodes = self.program.node_count();
+        if nodes >= self.capacity.ast_nodes {
+            return Err(self.unsupported(format!("AST node limit reached ({max_ast}).", max_ast=self.capacity.ast_nodes)));
         }
+        if nodes % 4096 == 0 {
+            self.check_compilation_progress()?;
+        }
+        Ok(())
+    }
+
+    fn compilation_bytes(&self) -> usize {
+        self.token_storage_bytes.saturating_add(self.program.compilation_ast_bytes())
+            .saturating_add(self.deferred_bodies.capacity().saturating_mul(size_of::<DeferredBody>()))
+    }
+
+    fn check_compilation_progress(&self) -> Result<(), Fault> {
+        check_compilation_deadline(self.compilation_deadline)?;
+        if self.compilation_bytes() > self.capacity.compilation_bytes {
+            return Err(compilation_storage_limit(self.capacity).at(&self.program.source, self.at()));
+        }
+        Ok(())
+    }
+
+    fn ast_arena_growth<T>(&self, arena: &Vec<T>) -> Result<usize, Fault> {
+        let spare = self.capacity.compilation_bytes.saturating_sub(self.compilation_bytes());
+        let slot_charge = size_of::<T>().saturating_add(16);
+        let remaining = self.capacity.ast_nodes.saturating_sub(self.program.node_count()).max(1);
+        let slots = arena.capacity().max(8).min(remaining).min(spare / slot_charge);
+        if slots == 0 {
+            return Err(compilation_storage_limit(self.capacity).at(&self.program.source, self.at()));
+        }
+        Ok(slots)
     }
     fn semi(&mut self) -> Result<(), Fault> {
         if self.eat(";")
@@ -2668,8 +2816,7 @@ impl Parser {
         }
         // Parenthesis matching was indexed once with the tokens. Looking through
         // every nested group here would make the new heap path quadratic.
-        let end = self.delimiter_ends[at];
-        end != u32::MAX && punct(tokens.get(end as usize + 1), "=>")
+        self.tokens[at].delimiter_end().is_some_and(|end| punct(tokens.get(end + 1), "=>"))
     }
 
     fn arrow(&mut self) -> Result<ExprId, Fault> {
@@ -4480,7 +4627,7 @@ impl Runtime {
         }
         self.work_as(source.len(), WorkKind::ProgramCompilation)?;
         let program = Rc::new(Parser::parse_invocation_context(source, &mut self.regexp_work,
-            strict, self.eval_depth, self.limits.capacity, self.limits.heap, new_target_allowed,
+            strict, self.eval_depth, self.limits.capacity, self.limits.heap, Some(self.job_deadline), new_target_allowed,
             super_property_allowed, super_call_allowed).map_err(|mut fault| {
             if fault.message.contains("Parser nesting limit") && self.eval_depth != 0 {
                 fault.message.push_str(&format!(" Active native entries={}; calls={}; heap expression frames={}.",

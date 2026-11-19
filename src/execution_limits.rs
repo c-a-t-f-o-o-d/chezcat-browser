@@ -45,6 +45,7 @@ pub struct Capacities {
     pub string_bytes: usize,
     pub tokens: usize,
     pub ast_nodes: usize,
+    pub compilation_bytes: usize,
     pub retained_source: usize,
     pub retained_ast: usize,
     pub retained_regexp: usize,
@@ -58,15 +59,19 @@ pub const REGRESSION_CAPACITIES: Capacities = Capacities {
     functions: 1024, programs: 128, environments: 4096, bindings: 4096,
     arguments: 256, source_bytes: 512 * 1024, string_bytes: 128 * 1024,
     tokens: 131_072, ast_nodes: 131_072, retained_source: 2 * 1024 * 1024,
+    compilation_bytes: 64 * 1024 * 1024,
     retained_ast: 262_144, retained_regexp: 2 * 1024 * 1024,
     property_bytes: 256, promises: 1024, promise_jobs: 4096,
 };
 
+const BROWSER_TOKEN_RECORD_BYTES: usize = 256 * 1024 * 1024;
+
 pub const BROWSER_CAPACITIES: Capacities = Capacities {
     functions: 65_536, programs: 4096, environments: 65_536, bindings: 1_048_576,
-    arguments: 65_536, source_bytes: 16 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
-    tokens: 3_000_000, ast_nodes: 2_097_152, retained_source: 128 * 1024 * 1024,
-    retained_ast: 8_388_608, retained_regexp: 16 * 1024 * 1024,
+    arguments: 65_536, source_bytes: 32 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
+    tokens: BROWSER_TOKEN_RECORD_BYTES / std::mem::size_of::<super::Token>() - 1,
+    ast_nodes: 6_291_456, compilation_bytes: 768 * 1024 * 1024,
+    retained_source: 256 * 1024 * 1024, retained_ast: 16_777_216, retained_regexp: 16 * 1024 * 1024,
     property_bytes: 8192, promises: 65_536, promise_jobs: 262_144,
 };
 
