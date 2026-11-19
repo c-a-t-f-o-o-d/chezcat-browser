@@ -32,6 +32,42 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_execution_resumed_method_receiver_precedes_key_and_arguments() {
+    let mut runtime = Runtime::for_test();
+    succeeds(&mut runtime, r#"
+var trace='', release, reason={}, result=0, invalid=0, rejected=0;
+var gate=new Promise(function(resolve){release=resolve;});
+var holder={base:5,get run(){
+    trace+='getter|';
+    return function(first,second){if(this!==holder)throw 'receiver';trace+='invoke|';return this.base+first+second;};
+}};
+function receiver(value){if(value!==3)throw 'receiver argument';trace+='receiver|';return holder;}
+function key(){trace+='key|';return {toString(){trace+='convert|';return 'run';}};}
+function mark(label,value){trace+=label+'|';return value;}
+function never(){throw 'arguments evaluated on failed receiver';}
+async function work(){return receiver(await gate)[key()](mark('argument',2),...mark('spread',[3]));}
+async function bad(){
+    try {return (await Promise.resolve(null))[mark('null-key','run')](never());}
+    catch(error){if(error.name!=='TypeError')throw error;invalid++;}
+}
+async function skip(){
+    try {return (await Promise.reject(reason))[key()](never());}
+    catch(error){if(error!==reason)throw error;rejected++;}
+}
+work().then(value=>result=value);
+bad();skip();
+if(trace!==''||result||invalid||rejected)throw 'method evaluated before its receiver';
+'ok';
+"#);
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='null-key|'||invalid!==1||rejected!==1||result)throw 'invalid or rejected receiver';'ok';");
+    runtime.begin_job();
+    succeeds(&mut runtime, "release(3);'ok';");
+    checkpoint(&mut runtime);
+    succeeds(&mut runtime, "if(trace!=='null-key|receiver|key|convert|getter|argument|spread|invoke|'||result!==10)throw 'method receiver, key or argument order';'ok';");
+}
+
+#[test]
 fn await_execution_assignment_of_branch_values_keeps_references_and_completion() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

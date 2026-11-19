@@ -578,8 +578,11 @@ impl Runtime {
     ) {
         scratch.frames[0].state = match &program.exprs[id].kind {
             ExprKind::OptionalChain(_, steps) => State::ChainNext { steps, next: 0, end: ChainEnd::Value },
-            // A function-valued result has no receiver or direct eval reference.
-            ExprKind::Call(_, arguments) => State::Callee { arguments, direct_eval: false, construct: false },
+            ExprKind::Call(callee, arguments) => match program.exprs[*callee].kind {
+                ExprKind::Member(_, key) => State::MemberBase { key, arguments },
+                // A function-valued result has no receiver or direct eval reference.
+                _ => State::Callee { arguments, direct_eval: false, construct: false },
+            },
             _ => unreachable!("a resumed entry requires a call or optional chain"),
         };
         *completed = Some(Completion::Value(std::mem::replace(value, Value::Undefined)));

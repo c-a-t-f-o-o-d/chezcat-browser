@@ -82,12 +82,26 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         ExprKind::Member(receiver, key) => (receiver, Some(key)),
         _ => (expression, None),
     };
-    let (expression, followup_call) = match &program.exprs[expression].kind {
-        ExprKind::Call(callee, _) if matches!(
-            program.exprs[*callee].kind, ExprKind::Call(..) | ExprKind::Unary("await", _)
-        ) => (*callee, Some(expression)),
-        _ => (expression, None),
+    let resumed_base = match program.exprs[expression].kind {
+        ExprKind::Call(callee, _) => match program.exprs[callee].kind {
+            ExprKind::Member(receiver, _) => Some(receiver),
+            ExprKind::Call(..) | ExprKind::Unary("await", _) => Some(callee),
+            _ => None,
+        },
+        _ => None,
     };
+    let ((operand, callee, method), followup_call) =
+        if let Some(parts) = resumed_base.and_then(|base| await_operand(program, base)) {
+            (parts, Some(expression))
+        } else {
+            (await_operand(program, expression)?, None)
+        };
+    Some(AwaitSite { operand, callee, method, followup_call, member_key, chain, assignment })
+}
+
+fn await_operand(program: &Program, expression: ExprId) -> Option<(ExprId, Option<ExprId>, Option<ExprId>)> {
+    // If the receiver is synchronous, the await can still be in the argument
+    // of the ordinary member call.
     let (expression, method) = match &program.exprs[expression].kind {
         ExprKind::Call(method, arguments) if matches!(program.exprs[*method].kind, ExprKind::Member(..)) => {
             let [Argument { expression, spread: false }] = arguments.as_slice() else { return None };
@@ -103,7 +117,7 @@ fn await_expression(program: &Program, expression: ExprId) -> Option<AwaitSite> 
         _ => (expression, None),
     };
     let ExprKind::Unary("await", operand) = program.exprs[expression].kind else { return None };
-    Some(AwaitSite { operand, callee, method, followup_call, member_key, chain, assignment })
+    Some((operand, callee, method))
 }
 
 enum ExpressionPart {
@@ -543,7 +557,7 @@ mod tests {
             "return (await p)?.[await p];",
             "return (await p)?.method(await p);",
             "return (await p)(await p);",
-            "return ((await p).method)();",
+            "return (await p).method(await p);",
             "return use(...await p);",
             "return (use(), 1 + await p);",
             "return (1+await p) && use(await p);",
@@ -592,6 +606,7 @@ mod tests {
             ("async function f(p){return yes() && use(await p) && after();}", 5),
             ("async function f(p){return choose() ? await p : other();}", 5),
             ("async function f(p){return choose() ? one() : make(await p)(1);}", 5),
+            ("async function f(p){target=use(await p).read(1);}", 1),
             ("async function f(p){try{throw 1;}catch(e){await p;}}", 7),
             ("async function f(p){value=flag ? left(await p) : right(await p);}", 7),
             ("async function f(p){let value; value=use(await p);}", 2),
