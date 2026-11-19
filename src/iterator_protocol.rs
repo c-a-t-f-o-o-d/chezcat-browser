@@ -18,7 +18,7 @@ pub(super) struct Record {
 
 pub(super) enum Delegated {
     Yield(Value),
-    Done,
+    Done(Value),
     Return(Value),
 }
 
@@ -257,7 +257,7 @@ impl Runtime {
             record.done = true;
             let value = self.get_ordinary_property_with_host(object, "value", host)?;
             if matches!(operation, GeneratorOp::Return) { Ok(Delegated::Return(value)) }
-            else { Ok(Delegated::Done) }
+            else { Ok(Delegated::Done(value)) }
         })();
         self.restore_transient_marker(marker);
         result

@@ -1734,6 +1734,7 @@ enum ExprKind {
     SuperCall(Vec<Argument>),
     SuperMember(String),
     Unary(&'static str, ExprId),
+    Yield { operand: Option<ExprId>, delegate: bool },
     Binary(&'static str, ExprId, ExprId),
     Conditional(ExprId, ExprId, ExprId),
     Sequence(ExprId, ExprId),
@@ -2237,10 +2238,13 @@ impl Parser {
         Ok((body, strict, own_strict))
     }
 
+    fn yield_operand_omitted(&self) -> bool {
+        self.token().newline() || matches!(self.token().kind,
+            TokenKind::End | TokenKind::Punct(";" | "}" | ")" | "]" | "," | ":"))
+    }
+
     fn generator_yield_statement(&mut self) -> Result<StmtKind, Fault> {
-        let kind = if self.token().newline() || self.is(";") || self.is("}")
-            || matches!(self.token().kind, TokenKind::End)
-        {
+        let kind = if self.yield_operand_omitted() {
             StmtKind::Yield(None)
         } else if self.eat("*") {
             StmtKind::YieldFrom(self.assignment_with_in()?)
@@ -2582,6 +2586,7 @@ impl Parser {
         super_property_allowed: bool, super_call_allowed: bool) -> Result<usize, Fault> {
         self.enter()?;
         let outer_await_count = self.await_count.take();
+        let outer_yield_count = self.yield_count.take();
         let previous_new_target = std::mem::replace(&mut self.new_target_allowed, true);
         let previous_super_property = std::mem::replace(&mut self.super_property_allowed, super_property_allowed);
         let previous_super_call = std::mem::replace(&mut self.super_call_allowed, super_call_allowed);
@@ -2606,6 +2611,7 @@ impl Parser {
             body: Vec::new(),
         })?;
         self.await_count = outer_await_count;
+        self.yield_count = outer_yield_count;
         self.new_target_allowed = previous_new_target;
         self.super_property_allowed = previous_super_property;
         self.super_call_allowed = previous_super_call;
@@ -2674,6 +2680,7 @@ impl Parser {
             self.current += 1;
         }
         let outer_await_count = self.await_count.take();
+        let outer_yield_count = self.yield_count.take();
         let (params, rest, trailing_parameter_comma) = if self.is("(") {
             self.parameters(true)?
         } else {
@@ -2711,6 +2718,7 @@ impl Parser {
                 body: Vec::new(),
             })?;
             self.await_count = outer_await_count;
+            self.yield_count = outer_yield_count;
             self.depth -= 1;
             return self.expr(ExprKind::Function(template), at);
         }
@@ -2738,6 +2746,7 @@ impl Parser {
         self.allow_in = previous_in;
         let count = self.await_count.unwrap_or(0);
         self.await_count = outer_await_count;
+        self.yield_count = outer_yield_count;
         self.functions -= 1;
         self.depth -= 1;
         let template = self.program.templates.len();
@@ -7530,6 +7539,7 @@ impl Runtime {
                 self.eval_collection(program, id, env, this, host)
             }
             ExprKind::Unary(_, _) => self.eval_unary(program, id, env, this, host),
+            ExprKind::Yield { .. } => Err(Fault::new("Yield expression requires a generator resumption point.")),
             ExprKind::Binary(_, _, _) => self.eval_binary(program, id, env, this, host),
             ExprKind::Sequence(first, last) => {
                 self.eval(program, *first, env, this, host)?;

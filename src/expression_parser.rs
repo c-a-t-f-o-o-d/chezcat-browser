@@ -68,6 +68,7 @@ enum Frame {
     Sequence(Context, ExprId),
     Binary(Context, ExprId, &'static str),
     Assign(Context, ExprId, &'static str),
+    Yield(Context, bool),
     Yes(Context, ExprId),
     No(Context, ExprId, ExprId),
     Key(Context, Postfix, bool),
@@ -299,7 +300,17 @@ impl Parser {
         pending: &mut Vec<Frame>,
     ) -> Result<(Context, Phase), Fault> {
         self.trim_expression_frames(pending)?;
-        let phase = if context.goal.minimum <= 1 && self.arrow_ahead() {
+        let phase = if context.goal.minimum <= 1 && self.yield_count.is_some() && self.eat("yield") {
+            *self.yield_count.as_mut().expect("generator expression context") += 1;
+            if self.yield_operand_omitted() {
+                Phase::AssignmentDone(self.expr(ExprKind::Yield { operand: None, delegate: false }, context.at)?)
+            } else {
+                let delegate = self.eat("*");
+                self.push_expression_frame(pending, Frame::Yield(context, delegate))?;
+                context = Context { goal: Goal::expression(1), at: self.at(), allow_in: context.allow_in };
+                Phase::Start
+            }
+        } else if context.goal.minimum <= 1 && self.arrow_ahead() {
             // A block-bodied arrow is a complete assignment expression;
             // a following binary operator cannot attach outside it.
             Phase::AssignmentDone(self.arrow()?)
@@ -496,6 +507,10 @@ impl Parser {
             Frame::Assign(parent, left, op) => {
                 context = parent;
                 Phase::AssignmentDone(self.expr(ExprKind::Assign(op, left, value), parent.at)?)
+            }
+            Frame::Yield(parent, delegate) => {
+                context = parent;
+                Phase::AssignmentDone(self.expr(ExprKind::Yield { operand: Some(value), delegate }, parent.at)?)
             }
             Frame::Yes(parent, condition) => {
                 self.need(":")?;
