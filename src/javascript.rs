@@ -472,6 +472,9 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const MEDIA_QUERY_LIST: &str = "MediaQueryList";
+pub(crate) const MEDIA_QUERY_MATCHES: &str = "\0MediaQueryList.get.matches";
+pub(crate) const MEDIA_QUERY_MEDIA: &str = "\0MediaQueryList.get.media";
 pub(crate) const DOCUMENT_CURRENT_SCRIPT_GET: &str = "\0Document.get.currentScript";
 pub(crate) const HTML_SLOT_NAME_GET: &str = "\0HTMLSlotElement.get.name";
 pub(crate) const HTML_SLOT_NAME_SET: &str = "\0HTMLSlotElement.set.name";

@@ -59,12 +59,7 @@ impl Bridge<'_> {
             return Err("AbortSignal creation requires an active scripting owner.".into());
         }
         self.state.work(1)?;
-        let occupied = self
-            .state
-            .standalone_targets
-            .len()
-            .saturating_add(self.state.abort_signals.len())
-            .saturating_add(self.state.message_channels.port_count());
+        let occupied = self.event_target_count();
         if occupied >= self.state.limits.host.event_targets {
             return Err("Native EventTarget limit reached.".into());
         }
