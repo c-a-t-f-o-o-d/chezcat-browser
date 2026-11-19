@@ -92,24 +92,29 @@ impl State {
         // Active lookup deliberately excludes inert subtrees; physical parent
         // links and connection state must still describe created script nodes.
         self.work(doc.nodes.len())?;
+        // Charge the slot index and up to twice the added traversal field
+        // size for growth of the temporary stack.
+        self.copies(doc.nodes.len().saturating_mul(3 * std::mem::size_of::<usize>()))?;
         let mut tree = Tree {
             active: vec![false; doc.nodes.len()],
             parents: vec![None; doc.nodes.len()],
+            sibling_slots: vec![usize::MAX; doc.nodes.len()],
             ..Tree::default()
         };
         let mut connected = vec![false; doc.nodes.len()];
         let mut stack = if doc.nodes.is_empty() {
             Vec::new()
         } else {
-            vec![(0, None, false)]
+            vec![(0, None, false, usize::MAX)]
         };
-        while let Some((node, parent, inert)) = stack.pop() {
+        while let Some((node, parent, inert, slot)) = stack.pop() {
             self.work(1)?;
             if node >= doc.nodes.len() || connected[node] {
                 return Err("DOM tree has an invalid child or repeated parent.".into());
             }
             connected[node] = true;
             tree.parents[node] = parent;
+            tree.sibling_slots[node] = slot;
             let name = tag(doc, node);
             let inert_children = inert_dom_tag(name, doc.scripting_enabled);
             // The embedding element belongs to this document. Indexing it
@@ -141,8 +146,9 @@ impl State {
                 doc.nodes[node]
                     .children
                     .iter()
+                    .enumerate()
                     .rev()
-                    .map(|&child| (child, Some(node), inert || inert_children)),
+                    .map(|(slot, &child)| (child, Some(node), inert || inert_children, slot)),
             );
         }
         // Saved handles and static NodeLists retain detached ordinary subtrees,
@@ -155,9 +161,10 @@ impl State {
                 .sum(),
         )?;
         for &parent in &self.detached_nodes {
-            for &child in &doc.nodes[parent].children {
+            for (slot, &child) in doc.nodes[parent].children.iter().enumerate() {
                 if self.detached_nodes.contains(&child) {
                     tree.parents[child] = Some(parent);
+                    tree.sibling_slots[child] = slot;
                 }
             }
         }
@@ -737,21 +744,28 @@ impl Bridge<'_> {
                 _ => {
                     let mut found = None;
                     if let Some(parent) = self.state.tree.parents[node] {
-                        self.state.work(self.doc.nodes[parent].children.len())?;
                         let siblings = &self.doc.nodes[parent].children;
-                        if let Some(index) = siblings.iter().position(|&child| child == node) {
-                            found = if property == "nextSibling" {
-                                siblings[index + 1..]
-                                    .iter()
-                                    .copied()
-                                    .find(|&child| self.dom_accessible(child))
-                            } else {
-                                siblings[..index]
-                                    .iter()
-                                    .rev()
-                                    .copied()
-                                    .find(|&child| self.dom_accessible(child))
-                            };
+                        self.state.work(1)?;
+                        let slot = self.state.tree.sibling_slots.get(node).copied();
+                        let index = if slot.is_some_and(|slot| siblings.get(slot) == Some(&node)) {
+                            slot
+                        } else {
+                            // Checked detached-tree updates can publish a
+                            // parent before the complete index is rebuilt.
+                            self.state.work(siblings.len())?;
+                            siblings.iter().position(|&child| child == node)
+                        };
+                        if let Some(index) = index {
+                            let forward = property == "nextSibling";
+                            let count = if forward { siblings.len() - index - 1 } else { index };
+                            for distance in 1..=count {
+                                self.state.work(1)?;
+                                let sibling = siblings[if forward { index + distance } else { index - distance }];
+                                if self.dom_accessible(sibling) {
+                                    found = Some(sibling);
+                                    break;
+                                }
+                            }
                         }
                     }
                     found.map_or(Value::Null, |child| Value::Host(node_handle(child)))
