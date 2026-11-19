@@ -2596,6 +2596,10 @@ fn node_traversal_property(operation: &str) -> Option<&'static str> {
 }
 
 impl Bridge<'_> {
+    fn text_or_comment_receiver(&self, object: u32) -> bool {
+        self.comment_receiver(object) || self.slottable(object) == Some(Slottable::Text)
+    }
+
     fn node_traversal_receiver(&self, object: u32) -> bool {
         object == DOCUMENT || node_index(object).is_some_and(|node| self.dom_accessible(node))
             || self.inert_children(object).is_some()
@@ -2829,8 +2833,9 @@ impl Host for Bridge<'_> {
         if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
-        if self.comment_receiver(object) {
+        if self.text_or_comment_receiver(object) {
             return matches!(property, "data" | "length" | "nodeValue" | "ownerDocument" | "isConnected" | "baseURI")
+                || matches!(property, "isDefaultNamespace" | "compareDocumentPosition")
                 || dom_tree::node_constant(property).is_some();
         }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
@@ -2839,7 +2844,7 @@ impl Host for Bridge<'_> {
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object)
-            || self.comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
+            || self.text_or_comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
