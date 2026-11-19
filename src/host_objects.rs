@@ -89,6 +89,47 @@ impl Runtime {
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
     }
+    pub(crate) fn define_abort_interfaces(&mut self, window: u32) -> Result<(), String> {
+        use super::abort_interface::*;
+        let marker = self.inhibit_transient_collection();
+        let result = (|| {
+            let target = self.native_constructor_prototypes[&(window, "EventTarget")];
+            for name in [CONTROLLER, SIGNAL_INTERFACE] {
+                let allocation = self.allocate_host_function_with_length(window, name, 0).map_err(Fault::new)?;
+                let prototype = self.new_object(None)?;
+                let constructor = Value::Function(allocation.id);
+                let properties = self.function_properties[allocation.id];
+                if name == CONTROLLER {
+                    if let Some(Function::Host { constructible, .. }) = self.functions.get_mut(allocation.id) {
+                        *constructible = true;
+                    }
+                    self.define_readonly_node_getter(prototype, window, "signal", SIGNAL)?;
+                    self.define_canvas_operation(prototype, window, "abort", ABORT, 0)?;
+                } else {
+                    let parent = self.get_property(target, "constructor")?;
+                    self.objects[properties].prototype = Ordinary::from_value(&parent);
+                    self.objects[prototype].prototype = Some(Ordinary::Object(target));
+                    self.define_readonly_node_getter(prototype, window, "aborted", ABORTED)?;
+                    self.define_readonly_node_getter(prototype, window, "reason", REASON)?;
+                    self.define_canvas_operation(prototype, window, "throwIfAborted", THROW, 0)?;
+                    self.define_node_attribute(prototype, window, "onabort", ON_ABORT, Some(SET_ON_ABORT))?;
+                    let method = self.allocate_host_function_with_length(window, STATIC_ABORT, 0).map_err(Fault::new)?;
+                    self.store_property(self.function_properties[method.id], "name".into(), Value::String("abort".into()), Some((false, false, true)))?;
+                    self.store_property(properties, "abort".into(), Value::Function(method.id), Some((true, true, true)))?;
+                }
+                self.store_property(properties, "prototype".into(), Value::Object(prototype), Some((false, false, false)))?;
+                self.store_property(prototype, "constructor".into(), constructor.clone(), Some((false, true, true)))?;
+                self.store_symbol_property(prototype, self.symbol_to_string_tag.unwrap(), Value::String(name.into()), Some((false, false, true)))?;
+                self.native_constructor_prototypes.insert((window, name), prototype);
+                self.put_binding(self.global_environment, name.into(), Some(constructor), super::Declaration::Var, false)?;
+                self.global_attributes.insert(name.into(), (false, true, true));
+            }
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);
+        result.map_err(Fault::display)
+    }
+
     pub(super) fn native_instance_prototype(&mut self,handle:u32,host:&mut dyn Host)->Result<Ordinary,Fault> {
         self.validate_native_access(handle,host)?;
         if !host.exposed_native_prototype(handle) {return Err(Fault::new("Native host prototype inspection is not implemented for this receiver."));}

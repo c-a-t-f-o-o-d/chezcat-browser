@@ -101,6 +101,8 @@ mod script_anchor_url;
 pub use script_anchor_mouse::AnchorMouseInput;
 #[path = "script_dispatch.rs"]
 mod script_dispatch;
+#[path = "script_abort.rs"]
+mod script_abort;
 #[cfg(test)]
 #[path = "script_listener_object_tests.rs"]
 mod script_listener_object_tests;
@@ -467,6 +469,7 @@ struct State {
     event: Option<Event>,
     created_events: Vec<script_created_events::CreatedEvent>,
     standalone_targets: Vec<u32>,
+    abort_signals: Vec<script_abort::Record>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     #[cfg(test)]
     disable_event_factory: bool,
@@ -548,6 +551,7 @@ impl State {
             event: None,
             created_events: Vec::new(),
             standalone_targets: Vec::new(),
+            abort_signals: Vec::new(),
             synthetic_dispatches: Vec::new(),
             #[cfg(test)]
             disable_event_factory: false,
@@ -977,6 +981,7 @@ impl Page {
             .expect("fixed image constructor");
         state.native_functions.insert("Image", image);
         runtime.define_event_target_interface(WINDOW).expect("fixed EventTarget interface");
+        runtime.define_abort_interfaces(WINDOW).expect("fixed abort interfaces");
         runtime.define_event_interface(WINDOW).expect("fixed Event interface");
         runtime.define_custom_event_interface(WINDOW).expect("fixed CustomEvent interface");
         runtime.define_ui_event_interface(WINDOW).expect("fixed UIEvent interface");
@@ -2368,7 +2373,8 @@ impl Bridge<'_> {
     fn handler_event_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
         // Keep native on* property availability unchanged. Custom names are
         // accepted through add/removeEventListener on existing EventTargets.
-        let allowed = self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
+        let allowed = event == "abort" && self.abort_signal_owner(handle).is_some()
+            || self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
             "click" | "auxclick" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup"
         ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
@@ -2386,7 +2392,8 @@ impl Bridge<'_> {
     }
 
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
-        let Some(event) = self.media_handler_event(object,property) else {
+        let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
+            .then_some("abort").or_else(|| self.media_handler_event(object,property)) else {
             return Ok(None);
         };
         let object = self.handler_target(object, event);
@@ -2401,7 +2408,8 @@ impl Bridge<'_> {
     }
 
     fn set_handler(&mut self, object: u32, property: &str, value: Value) -> Result<bool, String> {
-        let Some(event) = self.media_handler_event(object,property) else {
+        let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
+            .then_some("abort").or_else(|| self.media_handler_event(object,property)) else {
             return Ok(false);
         };
         let object = self.handler_target(object, event);
@@ -2683,13 +2691,14 @@ impl Host for Bridge<'_> {
     fn mutation_callback_error(&mut self, message: &str) {
         self.state.error("MutationObserver callback", message);
     }
-    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+    fn expando_owner(&self,object:u32)->Option<u32> {self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
         self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
+            || self.abort_instance(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
@@ -2725,6 +2734,9 @@ impl Host for Bridge<'_> {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if self.custom_receiver(object) {"CustomEvent"}else if self.mouse_receiver(object) {"MouseEvent"}else if self.ui_receiver(object) {"UIEvent"}else{"Event"}))});
+        }
+        if let Some((window, interface)) = self.abort_instance(object) {
+            return Some(crate::javascript::NativeAncestry { window, constructor: Some((window, interface)) });
         }
         if let Some(window)=self.standalone_target_owner(object) {
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"EventTarget"))});
@@ -2781,6 +2793,7 @@ impl Host for Bridge<'_> {
     }
     fn primitive_conversion(&self, object: u32) -> bool {
         object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
+            || self.abort_instance(object).is_some()
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
@@ -2802,7 +2815,7 @@ impl Host for Bridge<'_> {
         if self.ordinary_event_owner(object).is_some() {return false;}
         if self.node_event_method(object,property) {return false;}
         if self.fragment_receiver(object) {return matches!(property,"childNodes"|"nodeValue"|"textContent"|"parentNode"|"parentElement"|"ownerDocument"|"isConnected"|"firstChild"|"lastChild"|"previousSibling"|"nextSibling") || self.dom_method(object,property).is_some();}
-        if self.standalone_target_owner(object).is_some() {return false;}
+        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {return false;}
         if property=="prototype"&&self.location_instance_owner(object).is_some(){return false;}
         if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
@@ -2836,6 +2849,7 @@ impl Host for Bridge<'_> {
         if let Some(owner)=self.event_owner(object) {return Some(owner);}
         if self.event_target_interface(object) {return Some(object);}
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
+        if let Some((owner, _))=self.abort_instance(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
         if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
@@ -3095,6 +3109,9 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object) && crate::javascript::abort_interface::operation(method) {
+            return Some(object);
+        }
         if self.event_target_interface(object)
             && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE
                 | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
@@ -3269,6 +3286,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method == crate::javascript::abort_interface::SIGNAL_INTERFACE && self.event_target_interface(object) {
+            return Err(("TypeError", "Illegal AbortSignal constructor.".into()));
+        }
         if object == WINDOW && matches!(method, "DOMImplementation" | "DocumentType") {
             return Err(("TypeError", "Illegal inert DOM interface constructor.".into()));
         }
@@ -3535,7 +3555,7 @@ impl Host for Bridge<'_> {
     fn resolve_member_before_call(&self, object: u32) -> bool {
         if self.canvas_context_receiver(object) {return true;}
         if self.event_receiver(object) {return true;}
-        if self.standalone_target_owner(object).is_some() {return true;}
+        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {return true;}
         if object == HISTORY || self.attr_receiver(object) || self.constructed_event_receiver(object) || self.named_map_receiver(object) || self.media_element_receiver(object) { return true; }
         self.form_receiver(object)
     }
@@ -3704,6 +3724,9 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
             return self.root_node_receiver(receiver) || self.frame_contains_node(receiver).is_some();
         }
+        if self.event_target_interface(object) && crate::javascript::abort_interface::operation(method) {
+            return self.matches_abort_receiver(receiver, method);
+        }
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return self.custom_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Video.") {return self.video_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
@@ -3815,7 +3838,7 @@ impl Host for Bridge<'_> {
         if script_inline_style::handle(object) {return self.inline_keys(object, false);}
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
-        if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
+        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
             self.named_map_get(object, "length")?;
             return Err("NamedNodeMap complete indexed/named enumeration is not implemented; use length and item.".into());
@@ -3881,7 +3904,7 @@ impl Host for Bridge<'_> {
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
         if self.node_tree_method_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
-        if self.standalone_target_owner(object).is_some() {self.state.work(1)?;return Ok(None);}
+        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
         if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
         if self.event_receiver(object) {
@@ -3971,6 +3994,12 @@ impl Host for Bridge<'_> {
         Err("Deleting this native host property is not implemented.".into())
     }
     fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
+    fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<usize, String> {
+        self.commit_abort_dispatch(controller, reason)
+    }
+    fn new_aborted_signal(&mut self, owner: u32, reason: Value) -> Result<u32, String> {
+        self.create_abort_record(owner, false, reason)
+    }
     fn prepare_event_dispatch(&mut self)->Result<(),String>{self.state.work(self.state.created_events.len().checked_mul(5).ok_or("Event validation work overflow.")?)}
     fn begin_event_dispatch(&mut self,object:u32,args:&[Value])->Result<usize,String>{self.begin_synthetic_dispatch(object,args)}
     fn next_event_callback(&mut self,token:usize)->Result<Option<crate::javascript::EventCallback>,String>{self.next_synthetic_callback(token)}
@@ -5071,6 +5100,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if crate::javascript::abort_interface::operation(method) {
+            return self.abort_call(object, method, args);
+        }
         if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
         if method == HTML_TEMPLATE_CONTENT_GET { return self.template_content(object); }
         if method == CREATE_PROCESSING_INSTRUCTION {
