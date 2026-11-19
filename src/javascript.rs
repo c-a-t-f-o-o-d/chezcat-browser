@@ -469,6 +469,7 @@ pub(crate) fn valid_custom_element_name(name: &str) -> bool {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const DOCUMENT_CURRENT_SCRIPT_GET: &str = "\0Document.get.currentScript";
 pub(crate) const HTML_SLOT_NAME_GET: &str = "\0HTMLSlotElement.get.name";
 pub(crate) const HTML_SLOT_NAME_SET: &str = "\0HTMLSlotElement.set.name";
 pub(crate) const NODE_MUTATION_METHODS: [(&str, usize); 4] = [

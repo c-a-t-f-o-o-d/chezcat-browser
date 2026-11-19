@@ -13,7 +13,7 @@ impl Bridge<'_> {
             return object == DOCUMENT || self.inert_document(object);
         }
         object==DOCUMENT && matches!(name, "createTreeWalker" | "implementation") || self.document_interface_receiver(object)
-            && (name=="documentElement" || script_element_properties::ordinary_interface_member(name))
+            && (matches!(name, "documentElement" | "currentScript") || script_element_properties::ordinary_interface_member(name))
     }
 
     pub(super) fn frame_document_prototype_lookup(&self, object:u32, name:&str)->bool {
@@ -35,7 +35,7 @@ impl Bridge<'_> {
             || handler_event(name).is_some()
             || matches!(name,
                 "location" | "cookie" | "URL" | "documentURI" | "contentType" | "title"
-                | "body" | "head" | "documentElement" | "readyState" | "referrer"
+                | "body" | "head" | "documentElement" | "currentScript" | "readyState" | "referrer"
                 | "compatMode" | "prerendering" | "images" | "defaultView"
                 | "localName" | "prefix" | "namespaceURI")
     }

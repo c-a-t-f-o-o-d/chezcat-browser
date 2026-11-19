@@ -3574,6 +3574,49 @@ document.title='script objects passed';
 }
 
 #[test]
+fn current_script_is_the_genuine_element_through_classic_evaluation_and_checkpoint() {
+    let mut doc = crate::html::parse(r#"<html><head><script id=one></script><script id=two></script></head>
+<body><div id=currentScript>named property collision</div></body></html>"#);
+    doc.scripting_enabled = true;
+    let mut forms = Forms::new(&doc);
+    let mut page = Page::for_test();
+    let script = |id, source: &str| Script {
+        node: (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some(id)).unwrap(),
+        source: source.into(),
+        label: format!("original script {id}"),
+    };
+    let sources = [
+        script("one", r#"
+var getter = Object.getOwnPropertyDescriptor(Document.prototype, 'currentScript').get;
+var one = document.getElementById('one'), microtask = false;
+if (document.currentScript !== one || getter.call(document) !== one ||
+    Object.hasOwn(document,'currentScript') || !('currentScript' in document))
+    throw 'classic element identity';
+var rejected = false;
+try { getter.call({}); } catch(error) { rejected = error instanceof TypeError; }
+if (!rejected || getter.call(document.implementation.createHTMLDocument()) !== null)
+    throw 'document brand and independent owner';
+Promise.resolve().then(function(){ microtask = document.currentScript === one; });
+throw 'intentional first script fault';
+"#),
+        script("two", r#"
+if (!microtask || document.currentScript !== document.getElementById('two'))
+    throw 'checkpoint or independent classic element';
+window.addEventListener('load',function(){
+    if (document.currentScript !== null || getter.call(document) !== null)
+        throw 'load inherited previous currentScript';
+    document.title = 'current-script-ok';
+});
+"#),
+    ];
+    assert_eq!(page.start(&mut doc, &mut forms, &sources).errors, 1, "{}", page.report());
+    assert!(page.report().contains("intentional first script fault"));
+    assert_eq!(doc.title, "current-script-ok");
+    assert_eq!(page.console_eval(&mut doc, &mut forms,
+        "if(document.currentScript!==null)throw 'console has no script element';").errors, 0);
+}
+
+#[test]
 fn connected_created_scripts_queue_once_and_completion_keeps_native_receivers() {
     let (mut doc, mut forms, mut page, outcome) = page(
         "<html><head></head><body><div id=root></div></body></html>",
@@ -3581,7 +3624,7 @@ fn connected_created_scripts_queue_once_and_completion_keeps_native_receivers() 
 var first=document.createElement('script'),second=document.createElement('script'),phases='';
 window.addEventListener('load',function(e){if(e.target===first){if(e.eventPhase!==1||e.bubbles)throw 'capture phase';phases+='capture,';}},true);
 first.src='/one.js';first.async=false;
-first.onload=function(e){if(this!==first||e.target!==first||e.currentTarget!==first||e.eventPhase!==2||e.bubbles||window.loadedValue!==17)throw 'load receiver';phases+='target';document.title=phases;};
+first.onload=function(e){if(this!==first||e.target!==first||e.currentTarget!==first||e.eventPhase!==2||e.bubbles||window.loadedValue!==17||document.currentScript!==null)throw 'load receiver';phases+='target';document.title=phases;};
 document.head.appendChild(first);document.head.appendChild(first);
 document.head.appendChild(second);second.src='/two.js';
 second.onerror=function(e){if(this!==second||e.target!==second||e.bubbles||this.isConnected||this.parentNode!==null)throw 'detached error receiver';document.title+=' + error';};
@@ -3609,7 +3652,7 @@ if(!first.isConnected||first.parentNode!==document.head||second.isConnected||!da
         &first,
         Ok(Script {
             node: first.node,
-            source: "window.loadedValue=17;".into(),
+            source: "if(document.currentScript!==first)throw 'dynamic currentScript';window.loadedValue=17;".into(),
             label: "original local fixture".into(),
         }),
     );
