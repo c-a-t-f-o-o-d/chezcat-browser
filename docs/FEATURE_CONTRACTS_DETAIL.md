@@ -307,9 +307,10 @@ button/form captions, executable script/style source, a resource request, a
 rendered box, an intrinsic/flex item or a link hit. Original App controls verify
 real nodes with preserved text/layout/hits and resource ownership.
 
-The tokenizer still omits parsed comments, and checked fragment parsing still
-refuses comments. No Comment constructor/prototype family, full CharacterData,
-DocumentType, template-content tree or child-context factory is claimed.
+The main document exposes the Comment constructor and its CharacterData-based
+prototype. The tokenizer still omits parsed comments, and checked fragment
+parsing still refuses comments. Full CharacterData, DocumentType, template-content
+trees and child-context factories are outside this slice.
 Loaded-resource, origin and cancellation boundaries remain.
 
 Existing native RegExp exec/test paths now perform actual input ToString, using

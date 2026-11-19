@@ -2655,6 +2655,7 @@ impl Host for Bridge<'_> {
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
+            || self.comment_receiver(object)
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
@@ -2702,7 +2703,7 @@ impl Host for Bridge<'_> {
                 } else {(WINDOW,"Element")}
             } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
-            else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"CharacterData")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"Comment")}
             else {(WINDOW,"Node")})
         } else if object==DOCUMENT {Some((WINDOW,"Document"))}
         else if self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
@@ -2911,7 +2912,7 @@ impl Host for Bridge<'_> {
             return if operation.accepts(self, object) { operation.conversions() } else { &[] };
         }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[(0, true)]; }
-        if object == WINDOW && method == "Text" {
+        if object == WINDOW && matches!(method, "Text" | "Comment") {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
         if object==WINDOW && method=="getComputedStyle" {return &[(1,true)];}
@@ -3058,7 +3059,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName"|NODE_TEXT_CONTENT_GET|NODE_TEXT_CONTENT_SET) {return Some(object);}
         if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
@@ -3233,8 +3234,8 @@ impl Host for Bridge<'_> {
             self.validate_element_selector_receiver(object)?;
             operation
         } else {method};
-        if self.event_target_interface(object) && method == "Text" {
-            return if object == WINDOW { Ok(()) } else { Err(("NotSupportedError", "Child Text allocation is not implemented.".into())) };
+        if self.event_target_interface(object) && matches!(method, "Text" | "Comment") {
+            return if object == WINDOW { Ok(()) } else { Err(("NotSupportedError", format!("Child {method} allocation is not implemented."))) };
         }
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
@@ -5006,12 +5007,13 @@ impl Host for Bridge<'_> {
         if let Some((name, false)) = script_scroll_offsets::accessor(method) {
             return self.element_scroll_offset(object, script_scroll_offsets::axis(name).unwrap(), None);
         }
-        if object == WINDOW && method == "Text" {
+        if object == WINDOW && matches!(method, "Text" | "Comment") {
             let data = match args.first() {
                 None | Some(Value::Undefined) => String::new(),
                 Some(value) => self.text(value)?,
             };
-            return self.create_dom_node(NodeKind::Text(data));
+            let kind = if method == "Comment" { NodeKind::Comment(data) } else { NodeKind::Text(data) };
+            return self.create_dom_node(kind);
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
         if method=="\0Document.get.documentElement" {
