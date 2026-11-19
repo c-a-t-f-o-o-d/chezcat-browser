@@ -270,7 +270,11 @@ impl Runtime {
                     }
                     self.define_element_sibling_getters(prototype,window,"Element")?;
                     self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Element.get.assignedSlot")?;
-                    for (key,operation) in [("querySelector","\0Element.querySelector"),("querySelectorAll","\0Element.querySelectorAll")] {
+                    for (key, operation) in [
+                        ("querySelector", "\0Element.querySelector"),
+                        ("querySelectorAll", "\0Element.querySelectorAll"),
+                        ("getAttribute", "getAttribute"),
+                    ] {
                         let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
                         if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                         self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;

@@ -3000,6 +3000,9 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
         }
+        if method == "getAttribute" && self.inert_node_type(object) == Some(1) {
+            return &[(0, true)];
+        }
         if let Some(operation) = CanvasOperation::parse(method) {
             return if operation.accepts(self, object) { operation.conversions() } else { &[] };
         }
@@ -3143,6 +3146,7 @@ impl Host for Bridge<'_> {
             return Some(object);
         }
         if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
+        if method == "getAttribute" && self.event_target_interface(object) { return Some(object); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -3238,6 +3242,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { 2 } else { 1 };
         }
+        if method == "getAttribute" && self.inert_node_type(object) == Some(1) { return 1; }
         if script_inline_style::handle(object) && method == "item" { return 1; }
         if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
@@ -3712,6 +3717,10 @@ impl Host for Bridge<'_> {
             }
         }
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
+        if method == "getAttribute" {
+            return (self.event_target_interface(object) || self.attr_element_receiver(object))
+                && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
+        }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return self.content_editable_receiver(receiver);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
             return self.event_target_interface(object) && (self.attr_element_receiver(receiver) || self.template_receiver(receiver));
@@ -5162,6 +5171,9 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
+        if method == "getAttribute" && self.inert_node_type(object) == Some(1) {
+            return self.inert_element_attribute(object, args.first().ok_or("getAttribute requires one argument.")?);
+        }
         if method == ELEMENT_INNER_HTML_GET {
             return self.get(object, "innerHTML");
         }
