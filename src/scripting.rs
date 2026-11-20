@@ -1341,6 +1341,7 @@ impl Page {
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
         let stylesheet_rules = self.state.stylesheets.source_rules;
         let stylesheet_sources = std::mem::take(&mut self.state.stylesheets.sources);
+        let stylesheet_source_capacity = self.state.stylesheets.source_capacity;
         let stylesheet_sources_prepared = self.state.stylesheets.sources_prepared;
         let stylesheet_source_error = self.state.stylesheets.source_setup_error.take();
         let images = std::mem::take(&mut self.state.images);
@@ -1358,6 +1359,7 @@ impl Page {
         self.state.stylesheets.source_bytes = stylesheet_bytes;
         self.state.stylesheets.source_rules = stylesheet_rules;
         self.state.stylesheets.sources = stylesheet_sources;
+        self.state.stylesheets.source_capacity = stylesheet_source_capacity;
         self.state.stylesheets.sources_prepared = stylesheet_sources_prepared;
         self.state.stylesheets.source_setup_error = stylesheet_source_error;
         self.state.images = images;
