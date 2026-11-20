@@ -389,7 +389,7 @@ impl Runtime {
             }
             let element=self.native_constructor_prototypes[&(window,"Element")];
             self.define_svg_element_interface(window, element)?;
-            self.define_concrete_html_node_interfaces(window, parent)?;
+            self.define_concrete_html_node_interfaces(window, parent, image)?;
             self.define_canvas_2d_interface(window)?;
             // Text and Comment inherit CharacterData. Only Text includes Slottable.
             let node=self.native_constructor_prototypes[&(window,"Node")];
@@ -501,6 +501,7 @@ impl Runtime {
         &mut self,
         window: u32,
         html_element: usize,
+        image: Option<(u32, &'static str)>,
     ) -> Result<(), Fault> {
         let parent_constructor = self.objects[html_element].properties
             .get("constructor")
@@ -519,7 +520,18 @@ impl Runtime {
                 *constructible = true;
                 *illegal_interface_constructor = true;
             }
-            let prototype = self.new_object(None)?;
+            // The legacy Image factory and HTMLImageElement have distinct
+            // constructors but share the actual image-element prototype.
+            let prototype = if name == "HTMLImageElement" {
+                if let Some(key) = image {
+                    *self.native_constructor_prototypes.get(&key)
+                        .ok_or_else(|| Fault::new("Missing canonical Image prototype."))?
+                } else {
+                    self.new_object(None)?
+                }
+            } else {
+                self.new_object(None)?
+            };
             self.objects[prototype].prototype = Some(Ordinary::Object(html_element));
             self.objects[self.function_properties[allocation.id]].prototype =
                 Some(Ordinary::Function(parent_function));
