@@ -1633,7 +1633,7 @@ impl App {
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
             page.set_history_context(history_data, self.base_is_document_url, history_length);
-            page.set_stylesheet_usage(crate::css::stylesheet_usage(&self.document,&self.styles));
+            page.set_stylesheet_sources(&self.document,&self.styles);
             page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(
                 self.width - 12,

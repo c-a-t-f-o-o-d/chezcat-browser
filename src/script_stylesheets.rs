@@ -1,4 +1,4 @@
-//! Created LINK stylesheets use the existing CSS renderer and real, bounded
+//! Live LINK stylesheets use the existing CSS renderer and real, bounded
 //! HTTP responses. Attribute changes invalidate old completions; no stylesheet
 //! or load event is invented when a request is blocked or canceled.
 use super::*;
@@ -55,13 +55,16 @@ pub(super) struct StylesheetState {
     policy: Option<Arc<crate::csp::PolicySet>>,
     pub source_bytes: usize,
     pub source_rules: usize,
+    pub sources: HashMap<usize, crate::css::StylesheetUsage>,
+    pub sources_prepared: bool,
+    pub source_setup_error: Option<String>,
     pub in_flight: usize,
 }
 
 pub(super) enum InlineSheetPlan {
     Disconnected,
     Withheld(Option<String>),
-    Admitted(crate::css::StylesheetUsage),
+    Admitted { source: crate::css::StylesheetUsage, total: crate::css::StylesheetUsage },
 }
 
 pub(super) fn validate_inline_sheet_media(raw: Option<&str>) -> Result<(), String> {
@@ -82,6 +85,17 @@ pub(super) fn bare_fragment_link(doc: &Document, node: usize) -> bool {
 }
 
 impl StylesheetState {
+    pub(super) fn source_metadata_bytes(&self) -> usize {
+        self.sources.capacity() * std::mem::size_of::<(usize, crate::css::StylesheetUsage)>()
+    }
+
+    fn retire_source(&mut self, node: usize) {
+        if let Some(source) = self.sources.remove(&node) {
+            self.source_bytes = self.source_bytes.checked_sub(source.bytes).expect("owned stylesheet bytes");
+            self.source_rules = self.source_rules.checked_sub(source.rules).expect("owned stylesheet rules");
+        }
+    }
+
     /// A keyless retired entry still owns generation/cancellation history and
     /// possibly a worker completion outside `pending`. Never erase that state
     /// through fragment replacement. A pristine empty entry has never issued
@@ -110,11 +124,71 @@ pub(super) fn link_attribute(property: &str) -> Option<&'static str> {
     })
 }
 
+impl State {
+    fn prepare_stylesheet_source(
+        &mut self, node: usize, source: &str, limits: crate::css::StylesheetLimits,
+    ) -> Result<(crate::css::StylesheetUsage, crate::css::StylesheetUsage), String> {
+        let old = self.stylesheets.sources.get(&node).copied().unwrap_or_default();
+        let used = crate::css::StylesheetUsage {
+            bytes: self.stylesheets.source_bytes.checked_sub(old.bytes).ok_or("Stylesheet byte ownership mismatch.")?,
+            rules: self.stylesheets.source_rules.checked_sub(old.rules).ok_or("Stylesheet rule ownership mismatch.")?,
+        };
+        let total = limits.accept(source, used)?;
+        let record = crate::css::StylesheetUsage { bytes: total.bytes - used.bytes, rules: total.rules - used.rules };
+        if !self.stylesheets.sources.contains_key(&node) && self.stylesheets.sources.len() == self.stylesheets.sources.capacity() {
+            let slot = std::mem::size_of::<(usize, crate::css::StylesheetUsage)>();
+            let before = self.stylesheets.sources.capacity();
+            let available = self.retained_limit.saturating_sub(self.retained);
+            let growth = before.max(4).min(available / slot);
+            if growth == 0 { return Err("Stylesheet source ownership storage exhausted.".into()); }
+            let capacity = before.checked_add(growth).ok_or("Stylesheet ownership capacity overflow.")?;
+            let mut replacement = HashMap::new();
+            replacement.try_reserve(capacity).map_err(|_| "Cannot allocate stylesheet source ownership.")?;
+            let added = (replacement.capacity() - before).checked_mul(slot).ok_or("Stylesheet ownership size overflow.")?;
+            let retained = self.retained.checked_add(added).filter(|bytes| *bytes <= self.retained_limit)
+                .ok_or_else(|| format!("Stylesheet source ownership exceeds host retained storage ({} bytes).", self.retained_limit))?;
+            replacement.extend(self.stylesheets.sources.drain());
+            self.stylesheets.sources = replacement;
+            self.retained = retained;
+        }
+        Ok((record, total))
+    }
+
+    fn commit_stylesheet_source(&mut self, node: usize, source: crate::css::StylesheetUsage, total: crate::css::StylesheetUsage) {
+        self.stylesheets.sources.insert(node, source);
+        self.stylesheets.source_bytes = total.bytes;
+        self.stylesheets.source_rules = total.rules;
+    }
+}
+
 impl Page {
-    /// Include already retained external styles in the dynamic-source budget.
-    pub fn set_stylesheet_usage(&mut self, usage: crate::css::StylesheetUsage) {
-        self.state.stylesheets.source_bytes = usage.bytes;
-        self.state.stylesheets.source_rules = usage.rules;
+    /// Prepare initial ownership before start_document resets execution state.
+    pub fn set_stylesheet_sources(&mut self, doc: &Document, external: &HashMap<usize, String>) {
+        let result = (|| -> Result<_, String> {
+            let (accepted, _, total) = crate::css::accepted_stylesheets(doc, external);
+            let mut records = HashMap::new();
+            records.try_reserve(accepted.len()).map_err(|_| "Cannot reserve stylesheet source ownership.")?;
+            let bytes = records.capacity().checked_mul(std::mem::size_of::<(usize, crate::css::StylesheetUsage)>())
+                .ok_or("Stylesheet source ownership size overflow.")?;
+            if bytes > self.state.limits.host.retained_bytes {
+                return Err("Stylesheet source ownership exceeds host retained storage.".into());
+            }
+            for (node, source) in accepted {
+                let usage = doc.stylesheet_limits.accept(&source, crate::css::StylesheetUsage::default())?;
+                records.insert(node, usage);
+            }
+            Ok((records, total))
+        })();
+        self.state.stylesheets.sources_prepared = true;
+        match result {
+            Ok((records, total)) => {
+                self.state.stylesheets.sources = records;
+                self.state.stylesheets.source_bytes = total.bytes;
+                self.state.stylesheets.source_rules = total.rules;
+                self.state.stylesheets.source_setup_error = None;
+            }
+            Err(error) => self.state.stylesheets.source_setup_error = Some(error),
+        }
     }
 
     pub fn take_dynamic_stylesheets(&mut self) -> VecDeque<DynamicStylesheet> {
@@ -168,15 +242,15 @@ impl Page {
                 // The immutable fetch profile still applies to this complete
                 // source; document retention uses the current connected set.
                 request.limits.accept(&source,crate::css::StylesheetUsage::default())?;
-                let next=crate::css::check_stylesheet_candidate(doc,styles,request.node,&source)?;
-                Ok((source,next))
+                crate::css::check_stylesheet_candidate(doc,styles,request.node,&source)?;
+                let (record, total) = self.state.prepare_stylesheet_source(request.node, &source, doc.stylesheet_limits)?;
+                Ok((source,record,total))
             });
             let event = match result {
-                Ok((source,next)) => {
+                Ok((source,record,total)) => {
                     // Replaced/retired sources do not consume a lifetime byte
                     // or rule allowance. Network and work accounting is separate.
-                    self.state.stylesheets.source_bytes = next.bytes;
-                    self.state.stylesheets.source_rules = next.rules;
+                    self.state.commit_stylesheet_source(request.node, record, total);
                     if let Some(geometry) = &mut self.state.geometry {
                         geometry.set_stylesheet(request.node, Some(&source));
                     }
@@ -244,32 +318,24 @@ impl Bridge<'_> {
             self.doc.withheld_inline_styles.try_reserve(1).map_err(|_| "Stylesheet state reservation failed.")?;
             return Ok(InlineSheetPlan::Withheld(Some(reason)));
         }
-        let used = crate::css::StylesheetUsage {
-            bytes: self.state.stylesheets.source_bytes,
-            rules: self.state.stylesheets.source_rules,
-        };
-        // A connected move leaves this same immutable admitted text retained.
-        // A subsequent insertion after removal is a new sheet admission, as
-        // with removed and reinstalled external sources.
-        let next = if self.state.dom.connected[node] && !self.doc.withheld_inline_styles.contains(&node) {
-            used
-        } else {
-            self.doc.stylesheet_limits.accept(&source, used)?
-        };
-        Ok(InlineSheetPlan::Admitted(next))
+        let (source, total) = self.state.prepare_stylesheet_source(node, &source, self.doc.stylesheet_limits)?;
+        Ok(InlineSheetPlan::Admitted { source, total })
     }
 
     pub(super) fn commit_inline_sheet(&mut self, node: usize, sheet: InlineSheetPlan) {
         match sheet {
-            InlineSheetPlan::Disconnected => { self.doc.withheld_inline_styles.remove(&node); }
+            InlineSheetPlan::Disconnected => {
+                self.doc.withheld_inline_styles.remove(&node);
+                self.state.stylesheets.retire_source(node);
+            }
             InlineSheetPlan::Withheld(reason) => {
                 self.doc.withheld_inline_styles.insert(node);
+                self.state.stylesheets.retire_source(node);
                 if let Some(reason) = reason { self.state.log(&reason); }
             }
-            InlineSheetPlan::Admitted(usage) => {
+            InlineSheetPlan::Admitted { source, total } => {
                 self.doc.withheld_inline_styles.remove(&node);
-                self.state.stylesheets.source_bytes = usage.bytes;
-                self.state.stylesheets.source_rules = usage.rules;
+                self.state.commit_stylesheet_source(node, source, total);
             }
         }
     }
@@ -398,8 +464,9 @@ impl Bridge<'_> {
             integrity: self.doc.attr(node, "integrity").map(str::to_owned),
             crossorigin: self.doc.attr(node, "crossorigin").map(str::to_owned),
         });
+        let retained_source = self.state.stylesheets.sources.contains_key(&node);
         let entry = self.state.stylesheets.entries.entry(node).or_default();
-        if entry.key == key {
+        if entry.key == key && !(key.is_none() && retained_source) {
             return Ok(());
         }
         // Retire the exact old source before a worker can follow another hop.
@@ -410,6 +477,7 @@ impl Bridge<'_> {
         entry.key = key.clone();
         let generation = entry.generation;
         let cancel = entry.cancel.clone();
+        self.state.stylesheets.retire_source(node);
         self.state.stylesheets.removed.insert(node);
         if let Some(geometry) = &mut self.state.geometry {
             geometry.set_stylesheet(node, None);
@@ -454,7 +522,7 @@ impl Bridge<'_> {
             self.state
                 .dynamic
                 .policy
-                .allows_external_style(node, key.nonce.as_deref(), &target)?;
+                .allows_external_style(usize::MAX, key.nonce.as_deref(), &target)?;
             Ok(target)
         })();
         let (target, error) = match prepare {
@@ -511,6 +579,64 @@ mod inline_connection_tests {
     use super::*;
 
     #[test]
+    fn stylesheet_initial_ownership_metadata_refuses_before_scripts_and_recovers() {
+        let mut doc = crate::html::parse("<html><head><style>body{color:red}</style></head><body></body></html>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        let limit = page.state.limits.host.retained_bytes;
+        page.state.limits.host.retained_bytes = 0;
+        let source = Script { node: 0, source: "var reached=1;".into(), label: "Original stylesheet ownership".into() };
+        assert_eq!(page.start(&mut doc, &mut forms, std::slice::from_ref(&source)).errors, 1);
+        assert_eq!(page.state.executed, 0);
+        assert!(page.report().contains("source ownership exceeds host retained storage"));
+        page.state.limits.host.retained_bytes = limit;
+        page.set_stylesheet_sources(&doc, &HashMap::new());
+        assert_eq!(page.start(&mut doc, &mut forms, &[source]).errors, 0, "{}", page.report());
+        assert_eq!(page.state.executed, 1);
+        assert_eq!(page.state.retained, document_bytes(&doc) + page.state.stylesheets.source_metadata_bytes());
+    }
+
+    #[test]
+    fn stylesheet_source_ownership_is_rebuilt_for_a_new_document_start() {
+        let mut page = Page::for_test();
+        for text in ["body{color:red}", "p{color:blue}"] {
+            let mut doc = crate::html::parse(&format!("<head><style>{text}</style></head><body></body>"));
+            doc.scripting_enabled = true;
+            let mut forms = Forms::new(&doc);
+            assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0, "{}", page.report());
+            assert_eq!(page.state.stylesheets.source_bytes, text.len());
+            assert_eq!(page.state.stylesheets.source_rules, 1);
+            assert!(!page.state.stylesheets.sources_prepared);
+        }
+    }
+
+    #[test]
+    fn stylesheet_source_ownership_growth_refusal_preserves_old_records_and_recovers() {
+        let mut doc = crate::html::parse("<head><style>a{color:red}</style><style>b{color:red}</style><style>c{color:red}</style></head><body></body>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        assert_eq!(page.state.stylesheets.sources.len(), page.state.stylesheets.sources.capacity());
+        let before = (page.state.retained, page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules);
+        let limit = page.state.retained_limit;
+        page.state.retained_limit = page.state.retained;
+        let refused = page.state.prepare_stylesheet_source(usize::MAX, "d{color:red}", doc.stylesheet_limits);
+        assert!(refused.unwrap_err().contains("ownership storage exhausted"));
+        assert_eq!(before, (page.state.retained, page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules));
+        assert_eq!(page.state.stylesheets.sources.len(), 3);
+        page.state.retained_limit = limit;
+        let (source, total) = page.state.prepare_stylesheet_source(usize::MAX, "d{color:red}", doc.stylesheet_limits).unwrap();
+        page.state.commit_stylesheet_source(usize::MAX, source, total);
+        assert_eq!(page.state.stylesheets.source_rules, 4);
+        assert!(page.state.retained > before.0);
+        page.state.stylesheets.retire_source(usize::MAX);
+        assert_eq!(page.state.stylesheets.source_bytes, before.1);
+        assert_eq!(page.state.stylesheets.source_rules, before.2);
+    }
+
+    #[test]
     fn stylesheet_request_storage_transfers_through_clones_and_refunds_on_drop() {
         let mut doc = crate::html::parse("<html><head></head><body></body></html>");
         doc.scripting_enabled = true;
@@ -559,7 +685,7 @@ mod inline_connection_tests {
         };
         let mut page = Page::for_test();
         let mut forms = Forms::new(&doc);
-        page.set_stylesheet_usage(crate::css::stylesheet_usage(&doc, &external));
+        page.set_stylesheet_sources(&doc, &external);
         assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
         let setup = format!("var f=document.getElementById('field'); f.value='edited'; var s=document.createElement('style'); s.textContent='{extra}'; var t=s.firstChild,list=s.childNodes; document.head.appendChild(s);");
         let result = page.console_eval(&mut doc, &mut forms, &setup);
@@ -581,22 +707,25 @@ mod inline_connection_tests {
         assert_eq!(checked.errors, 0, "{}", page.report());
         let result = page.console_eval(&mut doc, &mut forms, "document.head.insertBefore(s,document.getElementById('base'));document.head.removeChild(s);");
         assert_eq!(result.errors, 0, "{}", page.report());
-        let commits = page.state.dom_commits;
         let usage = (page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules);
-        assert_eq!(usage, (original.len() + extra.len(), 2));
+        assert_eq!(usage, (original.len(), 1));
         let result = page.console_eval(&mut doc, &mut forms, "document.head.insertBefore(s,document.getElementById('base'));");
+        assert_eq!(result.errors, 0, "{}", page.report());
+        assert_eq!((page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules), (original.len() + extra.len(), 2));
+        let check = page.console_eval(&mut doc, &mut forms,
+            "if(s.parentNode!==document.head||!s.isConnected||t.parentNode!==s||list[0]!==t||s.textContent!==t.data||f.value!=='edited'||f.defaultValue!=='seed') throw 'sheet reinsertion';var excess=document.createElement('style');excess.textContent='p{color:blue}';");
+        assert_eq!(check.errors, 0, "{}", page.report());
+        let commits = page.state.dom_commits;
+        let result = page.console_eval(&mut doc, &mut forms, "document.head.appendChild(excess);");
         assert_eq!(result.errors, 1, "{}", page.report());
         assert!(page.report().contains("per document"), "{}", page.report());
-        assert_eq!(commits, page.state.dom_commits);
-        assert_eq!((page.state.stylesheets.source_bytes, page.state.stylesheets.source_rules), usage);
-        let check = page.console_eval(&mut doc, &mut forms,
-            "if(s.parentNode!==null||s.isConnected||t.parentNode!==s||list[0]!==t||s.textContent!==t.data||f.value!=='edited'||f.defaultValue!=='seed') throw 'partial sheet insertion';");
-        assert_eq!(check.errors, 0, "{}", page.report());
+        assert_eq!(page.state.dom_commits, commits);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "if(excess.parentNode!==null||excess.isConnected)throw 'over-budget insertion committed';").errors, 0);
         let (accepted, errors, _) = crate::css::accepted_stylesheets(&doc, &external);
         assert!(errors.is_empty());
-        assert_eq!(accepted.len(), 1);
-        assert_eq!(accepted[0].0, link);
-        assert_eq!(accepted[0].1, original);
+        assert_eq!(accepted.len(), 2);
+        assert_eq!(accepted[1].0, link);
+        assert_eq!(accepted[1].1, original);
         assert!(!page.has_host_tasks());
     }
 }

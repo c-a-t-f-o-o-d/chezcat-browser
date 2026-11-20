@@ -117,7 +117,7 @@ fn fixture() -> (Document, Forms, Page) {
     .unwrap();
     page.set_location(&source);
     page.set_resource_base(&source);
-    page.set_stylesheet_usage(crate::css::stylesheet_usage(&doc, &sheets));
+    page.set_stylesheet_sources(&doc, &sheets);
     page.set_geometry(crate::script_geometry::Geometry::new(
         800,
         600,

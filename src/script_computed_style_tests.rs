@@ -76,7 +76,7 @@ fn computed_style_original_real_sheet_chain_live_handle_viewport_and_copy_failur
     .unwrap();
     page.set_location(&location);
     page.set_resource_base(&location);
-    page.set_stylesheet_usage(crate::css::stylesheet_usage(&doc, &sheets));
+    page.set_stylesheet_sources(&doc, &sheets);
     page.set_geometry(crate::script_geometry::Geometry::new(
         1280,
         800,
