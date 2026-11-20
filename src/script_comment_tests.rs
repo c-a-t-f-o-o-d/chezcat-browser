@@ -196,10 +196,10 @@ p.removeChild(c);if(list.length!==2||c.isConnected||c.parentNode!==null||snapsho
 p.appendChild(c);if(list[2]!==c||!c.isConnected||p.childNodes!==list)throw 'reinsert retained identity';
 "#);
     let count=doc.nodes.len();let commits=page.state.dom_commits;
-    let out=page.console_eval(&mut doc,&mut forms,"document.getElementById('p').innerHTML='x<!--created comments are not parser support-->y';");
-    assert_eq!(out.errors,1,"Checked fragment comments remain explicitly unsupported");
-    assert_eq!(doc.nodes.len(),count);assert_eq!(page.state.dom_commits,commits);
-    evaluate(&mut page,&mut doc,&mut forms,"if(p.childNodes!==list||list[2]!==c||p.textContent!=='AB')throw 'fragment refusal atomicity';");
+    let out=page.console_eval(&mut doc,&mut forms,"document.getElementById('p').innerHTML='x<!--real parsed Comment-->y';");
+    assert_eq!(out.errors,0,"{}",page.report());
+    assert_eq!(doc.nodes.len(),count+3);assert_eq!(page.state.dom_commits,commits.and_then(|generation|generation.checked_add(1)));
+    evaluate(&mut page,&mut doc,&mut forms,"if(p.childNodes!==list||list.length!==3||list[1]===c||list[1].nodeType!==8||list[1].data!=='real parsed Comment'||p.textContent!=='xy'||c.parentNode!==null||c.isConnected||snapshot[1]!==c)throw 'real parsed replacement and retained identity';");
     let out=page.console_eval(&mut doc,&mut forms,"c.appendChild(document.createTextNode('bad'));");
     assert_eq!(out.errors,1);
     evaluate(&mut page,&mut doc,&mut forms,"if(c.childNodes.length||c.nodeType!==8)throw 'Comment remains leaf';");

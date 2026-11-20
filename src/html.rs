@@ -160,7 +160,7 @@ pub enum NodeKind {
         attrs: Vec<Attribute>,
     },
     Text(String),
-    // Genuine retained DOM Comment data; the current HTML tokenizer still omits parsed comments.
+    // Non-rendering DOM Comment data retained with its real parent and order.
     Comment(String),
     ProcessingInstruction { target: String, data: String },
     // A genuine detached Node container; insertion splices its children.
@@ -221,7 +221,7 @@ pub(crate) fn parse_inert_html(
 
 /// Checked fragment subset. The context sets the tokenizer state directly;
 /// callers never create a source wrapper that markup could escape. Unsupported
-/// tree-builder recovery and unrepresented comment nodes reject explicitly.
+/// tree-builder recovery and declaration forms reject explicitly.
 pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
     if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
@@ -332,20 +332,19 @@ fn parse_internal(
         ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
-            svg.root = None;
-            if checked { return Err("HTML fragment comment nodes are not implemented.".into()); }
-            let end = comment.find("-->");
-            if inert_doctype.is_some() {
-                if document.nodes.len() >= node_limit { return Err(node_limit_error()); }
-                let node = document.nodes.len();
-                document.nodes.push(Node {
-                    kind: NodeKind::Comment(comment[..end.unwrap_or(comment.len())].into()),
-                    namespace: Namespace::None, children: Vec::new(),
-                });
-                document.nodes[parent].children.push(node);
+            // A comment neither leaves the current tree context nor terminates
+            // a checked SVG island. Its data never reenters markup scanning.
+            let (data,consumed)=comments::token(comment);
+            if document.nodes.len()>=node_limit {
+                if fail_on_capacity{return Err(node_limit_error());}break;
             }
-            position = end.map_or(input.len(), |end| position + 4 + end + 3);
-            continue;
+            let data=comments::copy_data(data)?;
+            document.nodes.try_reserve(1).map_err(|_|"Could not reserve HTML comment node.")?;
+            document.nodes[parent].children.try_reserve(1).map_err(|_|"Could not reserve HTML comment child link.")?;
+            let node=document.nodes.len();
+            document.nodes.push(Node{kind:NodeKind::Comment(data),namespace:Namespace::None,children:Vec::new()});
+            document.nodes[parent].children.push(node);
+            position+=4+consumed;continue;
         }
         if rest.starts_with("<!") || rest.starts_with("<?") {
             svg.root = None;
@@ -1498,3 +1497,9 @@ mod tests {
 #[cfg(test)]
 #[path = "html_select_fragment_tests.rs"]
 mod select_fragment_tests;
+
+#[path = "html_comments.rs"]
+mod comments;
+#[cfg(test)]
+#[path = "html_comment_tests.rs"]
+mod comment_tests;
