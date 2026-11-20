@@ -2328,9 +2328,11 @@ impl Parser {
 
     fn attach_resumption_plan(&mut self, template: usize, count: usize) -> Result<(), Fault> {
         if count != 0 {
-            let plan = async_plan::compile(&self.program, template, count, self.capacity.ast_nodes)?;
+            let available=self.capacity.compilation_bytes.saturating_sub(self.compilation_bytes());
+            let plan = async_plan::compile(&self.program, template, count, self.capacity.ast_nodes,available,self.compilation_deadline)?;
             self.program.resumption_plan_nodes += plan.len();
             self.program.templates[template].resumption_plan = plan;
+            self.check_compilation_progress()?;
         }
         Ok(())
     }

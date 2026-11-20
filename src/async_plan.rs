@@ -65,10 +65,60 @@ fn storage_error() -> Fault {
     Fault::new("Unable to allocate bounded resumption plan.")
 }
 
-fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), Fault> {
-    items.try_reserve(1).map_err(|_| storage_error())?;
-    items.push(value);
-    Ok(())
+struct Storage {
+    limit: usize,
+    used: std::cell::Cell<usize>,
+    peak: std::cell::Cell<usize>,
+    deadline: Option<Instant>,
+}
+impl Storage {
+    fn tick(&self)->Result<(),Fault>{check_compilation_deadline(self.deadline)}
+    fn quota()->Fault{Fault::new("Script compilation storage limit reached building resumption plan.")}
+}
+struct StorageVec<'a,T> {
+    values:Vec<T>,
+    storage:&'a Storage,
+}
+impl<'a,T> StorageVec<'a,T> {
+    fn new(storage:&'a Storage)->Self{Self{values:Vec::new(),storage}}
+    fn reserve(&mut self,additional:usize,geometric:bool)->Result<(),Fault>{
+        self.storage.tick()?;
+        let required=self.values.len().checked_add(additional).ok_or_else(Storage::quota)?;
+        if required<=self.values.capacity(){return Ok(());}
+        let slot=std::mem::size_of::<T>();
+        let spare=self.storage.limit.saturating_sub(self.storage.used.get());
+        let available=spare/slot;
+        let needed=required-self.values.capacity();
+        if needed>available{return Err(Storage::quota());}
+        let extra=if geometric{self.values.capacity().max(4).max(needed).min(available)}else{needed};
+        let old=self.values.capacity();
+        let target=old.checked_add(extra).ok_or_else(Storage::quota)?;
+        self.values.try_reserve_exact(target-self.values.len()).map_err(|_|storage_error())?;
+        let added=(self.values.capacity()-old).checked_mul(slot).ok_or_else(Storage::quota)?;
+        let used=self.storage.used.get().checked_add(added).ok_or_else(Storage::quota)?;
+        self.storage.used.set(used);self.storage.peak.set(self.storage.peak.get().max(used));
+        if added>spare{return Err(Storage::quota());}
+        Ok(())
+    }
+    fn into_vec(mut self)->Vec<T>{
+        let values=std::mem::take(&mut self.values);
+        self.storage.used.set(self.storage.used.get()-values.capacity()*std::mem::size_of::<T>());
+        values
+    }
+}
+impl<T> std::ops::Deref for StorageVec<'_,T>{type Target=Vec<T>;fn deref(&self)->&Vec<T>{&self.values}}
+impl<T> std::ops::DerefMut for StorageVec<'_,T>{fn deref_mut(&mut self)->&mut Vec<T>{&mut self.values}}
+impl<T> Drop for StorageVec<'_,T>{fn drop(&mut self){self.storage.used.set(self.storage.used.get()-self.values.capacity()*std::mem::size_of::<T>());}}
+fn push<T>(items:&mut StorageVec<'_,T>,value:T)->Result<(),Fault>{
+    items.reserve(1,true)?;items.values.push(value);Ok(())
+}
+struct SplitSet<'a>{marks:StorageVec<'a,u8>}
+impl<'a> SplitSet<'a>{
+    fn new(storage:&'a Storage,count:usize)->Result<Self,Fault>{
+        let mut marks=StorageVec::new(storage);marks.reserve(count,false)?;marks.values.resize(count,0);Ok(Self{marks})
+    }
+    fn insert(&mut self,id:StmtId){self.marks[id]=1;}
+    fn contains(&self,id:&StmtId)->bool{self.marks.get(*id)==Some(&1)}
 }
 
 fn statement_expression(program: &Program, id: StmtId) -> Option<(ExprId, Resume)> {
@@ -332,12 +382,13 @@ pub(super) fn plain_call_parts(program: &Program, expression: ExprId) -> Option<
         .then_some((callee, arguments, kind))
 }
 
-fn await_in_plain_arguments(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
+fn await_in_plain_arguments(storage:&Storage, program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
     let Some((_, arguments, _)) = plain_call_parts(program, expression) else { return Ok(None); };
-    let mut pending = Vec::new();
+    let mut pending = StorageVec::new(storage);
     for (index, argument) in arguments.iter().enumerate().filter(|(_, argument)| !argument.spread) {
         let mut candidate = argument.expression;
         loop {
+            storage.tick()?;
             if matches!(program.exprs[candidate].kind, ExprKind::Unary("await", _)) {
                 return Ok(Some((ArgumentAwait { call: expression, index }, argument.expression)));
             }
@@ -353,20 +404,20 @@ fn await_in_plain_arguments(program: &Program, expression: ExprId) -> Result<Opt
     Ok(None)
 }
 
-fn resumable_await_operand(program: &Program, expression: ExprId) -> Result<bool, Fault> {
-    Ok(await_expression(program, expression).is_some() || await_in_plain_arguments(program, expression)?.is_some())
+fn resumable_await_operand(storage:&Storage, program: &Program, expression: ExprId) -> Result<bool, Fault> {
+    Ok(await_expression(program, expression).is_some() || await_in_plain_arguments(storage, program, expression)?.is_some())
 }
 
-fn nested_plain_call(program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
+fn nested_plain_call(storage:&Storage, program: &Program, expression: ExprId) -> Result<Option<(ArgumentAwait, ExprId)>, Fault> {
     if !matches!(plain_call_parts(program, expression), Some((_, _, PlainCallKind::Ordinary | PlainCallKind::Construct))) {
         return Ok(None);
     }
     if let Some(site) = await_expression(program, expression) {
-        if !resumable_await_operand(program, site.operand)? {
+        if !resumable_await_operand(storage, program, site.operand)? {
             return Ok(None);
         }
     }
-    await_in_plain_arguments(program, expression)
+    await_in_plain_arguments(storage, program, expression)
 }
 
 enum ExpressionPart {
@@ -399,20 +450,21 @@ fn is_composed_expression(kind: &ExprKind) -> bool {
         || matches!(kind, ExprKind::Binary(operator, _, _) if is_comparison(operator))
 }
 
-fn visit_expression(
+fn visit_expression(storage:&Storage,
     program: &Program,
     expression: ExprId,
     action: Resume,
     generator: bool,
     mut visit: impl FnMut(ExpressionPart) -> Result<(), Fault>,
 ) -> Result<(), Fault> {
-    let mut pending = Vec::new();
+    let mut pending = StorageVec::new(storage);
     let mut part = ExpressionPart::Value(expression, action);
     loop {
+        storage.tick()?;
         if let ExpressionPart::Value(expression, action) = part {
             match program.exprs[expression].kind {
                 ExprKind::Unary("await", operand)
-                    if !generator && resumable_await_operand(program, operand)? =>
+                    if !generator && resumable_await_operand(storage, program, operand)? =>
                 {
                     push(&mut pending, ExpressionPart::AwaitComputed(action))?;
                     part = ExpressionPart::Value(operand, Resume::StoreExpressionValue);
@@ -468,9 +520,9 @@ fn visit_expression(
                 ExprKind::Assign("=", target, right)
                     if !generator && matches!(program.exprs[target].kind, ExprKind::Name(_) | ExprKind::Member(..))
                         && (is_composed_expression(&program.exprs[right].kind)
-                            || nested_plain_call(program, right)?.is_some()
+                            || nested_plain_call(storage, program, right)?.is_some()
                             || (matches!(program.exprs[right].kind, ExprKind::OptionalChain(..))
-                                && await_in_plain_arguments(program, right)?.is_some())) =>
+                                && await_in_plain_arguments(storage, program, right)?.is_some())) =>
                 {
                     // These right-hand shapes combine expression results; direct
                     // literal naming and other ordinary assignments stay in eval.
@@ -480,14 +532,14 @@ fn visit_expression(
                     continue;
                 }
                 ExprKind::Call(..) | ExprKind::Construct(..) if !generator => {
-                    if let Some((site, argument)) = nested_plain_call(program, expression)? {
+                    if let Some((site, argument)) = nested_plain_call(storage, program, expression)? {
                         push(&mut pending, ExpressionPart::InvokePlainCall(action))?;
                         push(&mut pending, ExpressionPart::Value(argument, Resume::StoreExpressionValue))?;
                         part = ExpressionPart::CapturePlainCall(site);
                     }
                 }
                 ExprKind::OptionalChain(..) if !generator => {
-                    if let Some((site, argument)) = await_in_plain_arguments(program, expression)? {
+                    if let Some((site, argument)) = await_in_plain_arguments(storage, program, expression)? {
                         push(&mut pending, ExpressionPart::OptionalPlainCallEnd)?;
                         push(&mut pending, ExpressionPart::InvokePlainCall(action))?;
                         push(&mut pending, ExpressionPart::Value(argument, Resume::StoreExpressionValue))?;
@@ -503,11 +555,11 @@ fn visit_expression(
     }
 }
 
-fn expression_size(
+fn expression_size(storage:&Storage,
     program: &Program, expression: ExprId, action: Resume, generator: bool,
 ) -> Result<(usize, usize), Fault> {
     let (mut instructions, mut sites) = (0, 0);
-    visit_expression(program, expression, action, generator, |part| {
+    visit_expression(storage, program, expression, action, generator, |part| {
         match part {
             ExpressionPart::AwaitComputed(_) => {
                 instructions += 1;
@@ -536,14 +588,14 @@ fn expression_size(
     Ok((instructions, sites))
 }
 
-fn statement_size(program: &Program, id: StmtId, generator: bool) -> Result<(usize, usize), Fault> {
+fn statement_size(storage:&Storage, program: &Program, id: StmtId, generator: bool) -> Result<(usize, usize), Fault> {
     match &program.stmts[id].kind {
         StmtKind::Yield(_) | StmtKind::YieldFrom(_) if generator => Ok((1, 1)),
         StmtKind::Declare(kind, declarations) => {
             let (mut instructions, mut sites) = (0, 0);
             for &(pattern, initial) in declarations {
                 let action = Resume::Initialize { kind: *kind, pattern };
-                let (length, suspensions) = initial.map(|expression| expression_size(program, expression, action, generator))
+                let (length, suspensions) = initial.map(|expression| expression_size(storage, program, expression, action, generator))
                     .transpose()?.unwrap_or((1, 0));
                 instructions += if suspensions == 0 { 1 } else { length };
                 sites += suspensions;
@@ -552,7 +604,7 @@ fn statement_size(program: &Program, id: StmtId, generator: bool) -> Result<(usi
         }
         _ => {
             if let Some((expression, action)) = statement_expression(program, id) {
-                expression_size(program, expression, action, generator)
+                expression_size(storage, program, expression, action, generator)
             } else {
                 Ok((1, 0))
             }
@@ -560,12 +612,12 @@ fn statement_size(program: &Program, id: StmtId, generator: bool) -> Result<(usi
     }
 }
 
-fn emit_expression(
+fn emit_expression(storage:&Storage,
     program: &Program, id: StmtId, expression: ExprId, action: Resume,
-    generator: bool, code: &mut Vec<Instruction>,
+    generator: bool, code: &mut StorageVec<'_,Instruction>,
 ) -> Result<(), Fault> {
-    let mut branches = Vec::new();
-    visit_expression(program, expression, action, generator, |part| {
+    let mut branches = StorageVec::new(storage);
+    visit_expression(storage, program, expression, action, generator, |part| {
         let instruction = match part {
             ExpressionPart::AwaitComputed(action) => Instruction::AwaitComputed { statement: id, action },
             ExpressionPart::CapturePlainCall(site) => Instruction::CapturePlainCall { statement: id, site },
@@ -659,21 +711,21 @@ enum Visit {
 // jump targets, but never await sites; nested function bodies are separate
 // roots. The parser's independent expression count catches *all* embedded
 // awaits, including unsupported conditions, pattern defaults and unselected branches.
-fn split_statements(program: &Program, template: &Template, expected: usize) -> Result<(HashSet<StmtId>, usize), Fault> {
+fn split_statements<'a>(storage:&'a Storage, program: &Program, template: &Template, expected: usize) -> Result<(SplitSet<'a>, usize), Fault> {
     let generator = template.kind == FunctionKind::Generator;
-    let mut pending = Vec::new();
+    let mut pending = StorageVec::new(storage);
     for &id in template.body.iter().rev() {
         push(&mut pending, Visit::Statement { id, eligible: true })?;
     }
-    let mut split = HashSet::new();
-    let mut jumps = Vec::new();
+    let mut split = SplitSet::new(storage,program.stmts.len())?;
+    let mut jumps = StorageVec::new(storage);
     let mut sites = 0;
     let mut instructions = template.body.len();
     while let Some(visit) = pending.pop() {
+        storage.tick()?;
         let (id, eligible) = match visit {
             Visit::Finish { id, before, condition_extra } => {
                 if sites > before {
-                    split.try_reserve(1).map_err(|_| storage_error())?;
                     split.insert(id);
                     // Each statement already accounts for one instruction.
                     // Opening a container adds its children and control flow.
@@ -701,11 +753,10 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
         };
         let kind = &program.stmts[id].kind;
         if eligible {
-            let (length, suspensions) = statement_size(program, id, generator)?;
+            let (length, suspensions) = statement_size(storage, program, id, generator)?;
             if suspensions != 0 {
                 instructions += length - 1;
                 sites += suspensions;
-                split.try_reserve(1).map_err(|_| storage_error())?;
                 split.insert(id);
                 continue;
             }
@@ -721,7 +772,7 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
             if matches!(kind, StmtKind::ForOf(_, _, _, true)) { sites += 1; }
             let mut condition_extra = 0;
             if let (false, StmtKind::If(condition, _, _)) = (generator, kind) {
-                let (length, awaits) = expression_size(program, *condition, Resume::BranchFalse(0), false)?;
+                let (length, awaits) = expression_size(storage, program, *condition, Resume::BranchFalse(0), false)?;
                 if awaits != 0 {
                     sites += awaits;
                     condition_extra = length - 1;
@@ -770,7 +821,8 @@ fn split_statements(program: &Program, template: &Template, expected: usize) -> 
     }
     // Split async switches and supported loops have their own exits.
     // Other split ancestors still need explicit subtree unwinding.
-    for (id, target, switch_break) in jumps {
+    for &(id, target, switch_break) in jumps.iter() {
+        storage.tick()?;
         let async_loop = !generator && (
             matches!(program.stmts[target].kind, StmtKind::For(..)) || lexical_for_of(program, target).is_some()
         );
@@ -819,22 +871,28 @@ fn set_branch_target(code: &mut [Instruction], destination: usize) {
     }
 }
 
-pub(super) fn compile(program: &Program, template: usize, expected_suspensions: usize, ast_limit: usize) -> Result<Vec<Instruction>, Fault> {
+pub(super) fn compile(program: &Program, template: usize, expected_suspensions: usize, ast_limit: usize, storage_limit:usize, deadline:Option<Instant>) -> Result<Vec<Instruction>, Fault> {
+    let ledger=Storage{limit:storage_limit,used:std::cell::Cell::new(0),peak:std::cell::Cell::new(0),deadline};
+    compile_with_storage(&ledger,program,template,expected_suspensions,ast_limit)
+}
+fn compile_with_storage(storage:&Storage,program:&Program,template:usize,expected_suspensions:usize,ast_limit:usize)->Result<Vec<Instruction>,Fault>{
+    storage.tick()?;
     let template = &program.templates[template];
     let generator = template.kind == FunctionKind::Generator;
-    let (split, instructions) = split_statements(program, template, expected_suspensions)?;
+    let (split, instructions) = split_statements(storage, program, template, expected_suspensions)?;
     if instructions > ast_limit.saturating_sub(program.node_count()) {
         let operation = if generator { "yield" } else { "await" };
         return Err(Fault::new(format!("AST node limit reached ({ast_limit}) compiling {operation} plan."))
             .at(&program.source, template.source_start));
     }
-    let mut code = Vec::new();
-    code.try_reserve_exact(instructions).map_err(|_| storage_error())?;
-    let mut pending = Vec::new();
+    let mut code = StorageVec::new(storage);
+    code.reserve(instructions,false)?;
+    let mut pending = StorageVec::new(storage);
     for &id in template.body.iter().rev() { push(&mut pending, Emit::Statement(id))?; }
     // Container statements emit bounded control instructions. Split expressions
     // emit instructions for their leaves and branches, within the same AST limit.
     while let Some(task) = pending.pop() {
+        storage.tick()?;
         let id = match task {
             Emit::Statement(id) => id,
             Emit::LeaveBlock => { push(&mut code, Instruction::LeaveBlock)?; continue; }
@@ -927,7 +985,7 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
         if !split.contains(&id) {
             push(&mut code, Instruction::Statement(id))?;
         } else if let Some((expression, action)) = statement_expression(program, id) {
-            emit_expression(program, id, expression, action, generator, &mut code)?;
+            emit_expression(storage, program, id, expression, action, generator, &mut code)?;
         } else {
             match &program.stmts[id].kind {
                 StmtKind::Yield(_) | StmtKind::YieldFrom(_) => push(&mut code, Instruction::Yield { statement: id, call: None })?,
@@ -935,8 +993,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                     for (index, &(pattern, initial)) in declarations.iter().enumerate() {
                         if let Some(expression) = initial {
                             let action = Resume::Initialize { kind: *kind, pattern };
-                            if expression_size(program, expression, action, generator)?.1 != 0 {
-                                emit_expression(program, id, expression, action, generator, &mut code)?;
+                            if expression_size(storage, program, expression, action, generator)?.1 != 0 {
+                                emit_expression(storage, program, id, expression, action, generator, &mut code)?;
                                 continue;
                             }
                         }
@@ -950,10 +1008,10 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
                 }
                 StmtKind::If(condition, yes, no) => {
                     let start = code.len();
-                    if generator || expression_size(program, *condition, Resume::BranchFalse(0), false)?.1 == 0 {
+                    if generator || expression_size(storage, program, *condition, Resume::BranchFalse(0), false)?.1 == 0 {
                         push(&mut code, Instruction::BranchFalse { statement: id, condition: *condition, target: 0 })?;
                     } else {
-                        emit_expression(program, id, *condition, Resume::BranchFalse(0), false, &mut code)?;
+                        emit_expression(storage, program, id, *condition, Resume::BranchFalse(0), false, &mut code)?;
                     }
                     let branch = start..code.len();
                     let next = match no {
@@ -1030,7 +1088,8 @@ pub(super) fn compile(program: &Program, template: usize, expected_suspensions: 
         }
     }
     debug_assert_eq!(code.len(), instructions);
-    Ok(code)
+    storage.tick()?;
+    Ok(code.into_vec())
 }
 
 #[cfg(test)]
@@ -1193,3 +1252,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path="async_plan_storage_tests.rs"]
+mod storage_tests;
