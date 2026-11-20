@@ -91,6 +91,9 @@ mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
 #[cfg(test)]
+#[path = "script_node_handle_tests.rs"]
+mod script_node_handle_tests;
+#[cfg(test)]
 #[path = "script_character_storage_tests.rs"]
 mod script_character_storage_tests;
 #[cfg(test)]
@@ -211,10 +214,13 @@ const NODE_LIST_HANDLES: usize = 0x0100_0000;
 const MAX_NODE_LISTS: usize = 128;
 #[cfg(test)]
 const MAX_NODE_LIST_REFERENCES: usize = 16_384;
-const NODE_BASE: u32 = 1024;
-const STYLE_BASE: u32 = 1_000_000;
-const DATASET_BASE: u32 = 1_500_000;
-const EVENT_BASE: u32 = 2_000_000;
+// A typed byte and 24-bit stable arena index. These are representation domains,
+// not allocation/count policies; all producers still admit actual storage.
+const NODE_HANDLES: u32 = 0x0100_0000;
+const NODE_BASE: u32 = 0x0100_0000;
+const STYLE_BASE: u32 = 0x0200_0000;
+const DATASET_BASE: u32 = 0x0300_0000;
+const EVENT_BASE: u32 = 0x0400_0000;
 const _: () = assert!(
     crate::html::MAX_LOADED_DOCUMENT_NODES + crate::javascript::limits::BROWSER.host.extra_nodes
         <= (DATASET_BASE - STYLE_BASE) as usize
@@ -2548,12 +2554,10 @@ impl Bridge<'_> {
 
     fn prepare_main_nodes(&mut self, count: usize, available: usize) -> Result<(Option<Vec<Node>>, usize), String> {
         if count==0 { return Ok((None,0)); }
-        // All three direct node-derived domains must remain disjoint. Their
-        // current coupled representation is separate unfinished architecture.
-        let maximum = ((STYLE_BASE-NODE_BASE) as usize).min((DATASET_BASE-STYLE_BASE) as usize)
-            .min((EVENT_BASE-DATASET_BASE) as usize);
+        // Node, style, dataset and element wrappers share the 24-bit arena index.
+        let maximum = NODE_HANDLES as usize;
         let required = self.doc.nodes.len().checked_add(count).filter(|length|*length<=maximum)
-            .ok_or_else(||format!("Current DOM/style/dataset identity domains exhausted ({maximum} nodes)."))?;
+            .ok_or_else(||format!("24-bit DOM node identity domain exhausted ({maximum} nodes)."))?;
         let usable = maximum.saturating_sub(self.doc.nodes.capacity()).checked_mul(size_of::<Node>())
             .ok_or("Main DOM representation backing overflow.")?;
         let (growth, added) = retained_storage::grow(&self.doc.nodes, count, available.min(usable))?;
@@ -3127,7 +3131,7 @@ impl Host for Bridge<'_> {
             || self.attr_receiver(object) || self.event_receiver(object) || self.class_list_receiver(object) || self.named_map_receiver(object)
             || node_list_index(object).is_some_and(|index|index<self.state.node_lists.len())
             || collection_handle_index(object).is_some_and(|index|index<self.state.dom.collections.len())
-            || (STYLE_BASE..EVENT_BASE).contains(&object) && self.attr_element_receiver(node_handle(((object-STYLE_BASE)%500_000) as usize));
+            || (STYLE_BASE..EVENT_BASE).contains(&object) && self.attr_element_receiver(node_handle(((object-STYLE_BASE)%NODE_HANDLES) as usize));
         known.then_some(crate::javascript::NativeAncestry {window:WINDOW,constructor})
     }
 

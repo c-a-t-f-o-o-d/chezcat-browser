@@ -6,10 +6,10 @@ use super::*;
 
 const BASE: u32 = 0xc000_0000;
 pub(super) fn element(handle: u32) -> Option<u32> {
-    (BASE..BASE + STYLE_BASE).contains(&handle).then(|| handle - BASE)
+    (BASE..BASE + NODE_HANDLES).contains(&handle).then(|| node_handle((handle - BASE) as usize))
         .filter(|handle| node_index(*handle).is_some())
 }
-pub(super) fn handle(element: u32) -> u32 { BASE + element }
+pub(super) fn handle(element: u32) -> u32 { BASE + (element - NODE_BASE) }
 pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
         "item" => Some("item"),
