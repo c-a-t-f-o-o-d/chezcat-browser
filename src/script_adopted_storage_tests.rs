@@ -49,7 +49,7 @@ fn browser_adopted_storage_parked_source_and_owned_record_fit_as_one_bundle() {
     assert!(bridge.state.inert_documents.entries.capacity() > bridge.state.inert_documents.entries.len());
     // Existing entry backing has one spare slot. New storage owns one source
     // Rc<Node>, its tag and root link, a future main Node, and both new slots.
-    let bundle = 2 * size_of::<Node>() + 2 * size_of::<usize>() + 1 + size_of::<u32>()+2+size_of::<Option<usize>>()
+    let bundle = 2 * size_of::<Node>() + 2 * size_of::<usize>() + 1 + size_of::<u32>()+2+size_of::<Option<usize>>()+size_of::<usize>()
         + size_of::<GeneratedNode>() + size_of::<(u32, InertNode)>();
     bridge.state.retained_limit = before + bundle - 1;
     assert!(bridge.set_template_html(templates[0], "<i></i>").is_err());

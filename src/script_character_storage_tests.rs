@@ -36,7 +36,7 @@ fn character_storage_constructors_admit_capacity_before_identity_and_copy_only_t
         assert!(page.state.dom.created.is_empty());
         page.begin_job();
         page.state.retained_limit += 1;
-        page.state.copy_work = copied + size_of::<Node>()+(nodes+1)*(2+size_of::<Option<usize>>()); // paid spare slot still needs record initialization
+        page.state.copy_work = copied + size_of::<Node>()+(nodes+1)*(2+size_of::<Option<usize>>()+size_of::<usize>()); // paid spare slot still needs record initialization
         Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.create_dom_node(kind()).unwrap();
         assert_eq!(page.state.retained, before + cost);
         assert_eq!(page.state.copy_work, 0);

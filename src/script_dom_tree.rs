@@ -179,15 +179,15 @@ impl State {
         // Active lookup deliberately excludes inert subtrees; physical parent
         // links and connection state must still describe created script nodes.
         self.work(doc.nodes.len())?;
-        // Charge the slot index and up to twice the added traversal field
-        // size for growth of the temporary stack.
-        self.copies(doc.nodes.len().saturating_mul(3 * std::mem::size_of::<usize>()))?;
+        // Legacy traversal scratch estimate; actual scratch admission remains
+        // separate from the now-paid per-node sibling initialization.
+        self.copies(doc.nodes.len().saturating_mul(2 * std::mem::size_of::<usize>()))?;
         let states=self.prepare_rebuilt_states(doc.nodes.len())?;
         let state_bytes=states.bytes();
         let mut tree = Tree {
             active: states.active,
             parents: states.parents,
-            sibling_slots: vec![usize::MAX; doc.nodes.len()],
+            sibling_slots: states.siblings,
             ..Tree::default()
         };
         let mut connected = states.connected;

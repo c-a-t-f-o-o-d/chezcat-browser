@@ -93,6 +93,9 @@ mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
 #[cfg(test)]
+#[path = "script_sibling_order_storage_tests.rs"]
+mod script_sibling_order_storage_tests;
+#[cfg(test)]
 #[path = "script_node_state_tests.rs"]
 mod script_node_state_tests;
 #[cfg(test)]

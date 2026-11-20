@@ -277,6 +277,14 @@ impl Bridge<'_> {
         let base = self.doc.nodes.len();
         let count = staged.len();
         let nonce_count = staged.iter().filter(|copy| copy.unsafe_nonce).count();
+        let end=base.checked_add(count).ok_or("DOM clone sibling identity overflow.")?;
+        let mut links=0usize;
+        for copy in &staged {
+            links=links.checked_add(copy.node.children.len()).ok_or("DOM clone sibling work overflow.")?;
+            if copy.node.children.iter().any(|&child|child<base||child>=end) {return Err("DOM clone sibling link escaped the staged forest.".into());}
+        }
+        self.state.work(links)?;
+        self.state.copies(links.checked_mul(size_of::<usize>()).ok_or("DOM clone sibling copy overflow.")?)?;
         let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
             .ok_or("DOM clone node/payload backing allowance exhausted.")?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
@@ -287,6 +295,7 @@ impl Bridge<'_> {
         self.commit_main_nodes(node_growth);
         for copy in staged {
             let node = self.doc.nodes.len();
+            for (slot,&child) in copy.node.children.iter().enumerate() {self.state.tree.sibling_slots[child]=slot;}
             self.doc.nodes.push(copy.node);
             self.state.dom.created.insert(node);
             self.state.detached_nodes.insert(node);
