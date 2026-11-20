@@ -115,6 +115,7 @@ impl Runtime {
         })();
         if result.is_err() {
             self.objects.truncate(first);
+            self.value_bytes -= self.retained_binary - retained;
             self.retained_binary = retained;
         }
         result
@@ -403,7 +404,7 @@ var saved=ImageData.prototype;delete saved.constructor;ImageData=3;
     fn image_data_failed_snapshot_refunds_unpublished_bytes_and_identities() {
         let mut runtime = Runtime::for_test();
         runtime.new_rgba_image_data(1, 1, |_| Ok(())).unwrap();
-        let usage = (runtime.objects.len(), runtime.retained_binary);
+        let usage = (runtime.objects.len(), runtime.retained_binary, runtime.value_bytes);
         let err = runtime
             .new_rgba_image_data(1, 1, |bytes| {
                 bytes[0] = 17;
@@ -411,20 +412,20 @@ var saved=ImageData.prototype;delete saved.constructor;ImageData=3;
             })
             .unwrap_err();
         assert_eq!(err.message, "producer failed");
-        assert_eq!((runtime.objects.len(), runtime.retained_binary), usage);
+        assert_eq!((runtime.objects.len(), runtime.retained_binary, runtime.value_bytes), usage);
         let limit = runtime.limits.heap.objects;
         runtime.limits.heap.objects = usage.0 + 2;
         let err = runtime
             .new_rgba_image_data(1, 1, |_| panic!("wrapper quota must precede fill"))
             .unwrap_err();
         assert!(err.message.contains("Object identity limit"), "{err:?}");
-        assert_eq!((runtime.objects.len(), runtime.retained_binary), usage);
+        assert_eq!((runtime.objects.len(), runtime.retained_binary, runtime.value_bytes), usage);
         runtime.limits.heap.objects = limit;
         let err = runtime
             .new_rgba_image_data(2048, 2048, |_| panic!("overlarge buffer"))
             .unwrap_err();
-        assert!(err.message.contains("ArrayBuffer byte limit"), "{err:?}");
-        assert_eq!((runtime.objects.len(), runtime.retained_binary), usage);
+        assert!(err.message.contains("Retained value limit"), "{err:?}");
+        assert_eq!((runtime.objects.len(), runtime.retained_binary, runtime.value_bytes), usage);
         let _ = runtime
             .new_rgba_image_data(1, 1, |bytes| {
                 assert_eq!(bytes, &[0; 4]);
