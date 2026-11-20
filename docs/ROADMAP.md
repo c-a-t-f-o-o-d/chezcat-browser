@@ -24,7 +24,7 @@ of complete framework support.
 | :--- | :--- | :--- |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
-| **Public `main`** | Through `9610baf`, includes the compressed-script allowance, Document interface, canvas dimensions, transparent 2D rectangles and solid fill colors beyond alpha.1 | Coherent PRs after applicable integration checks |
+| **Public `main`** | Integrated development source beyond alpha.1; see [recent commits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commits/main/) and the [current capability boundaries](CAPABILITIES.md). A source change does not update a published binary or establish a new site result. | Coherent PRs after applicable development checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
@@ -57,7 +57,36 @@ wait for complete framework or video support.
 
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-The next milestone is a usable signed-out video homepage. On clean dev137 (`1aeef14`), the main script decoded and entered the engine, but the site header and search box stayed missing. Current work follows the surrogate-escape failure, detached STYLE text assignment and CSS work limit on an opacity read. Search results, watch navigation and playback each need a live check. [Measured homepage and offline animation results](COMPATIBILITY.md)
+The next milestone is a usable signed-out YouTube header, guide and search field.
+The November 20 owner checkpoint on clean development source `cffb9d1` decoded
+the main application script and completed 42 of 43 script executions, then stopped
+on missing `Range`; the page remained a skeleton. [PR #359](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/359)
+subsequently integrated a displayed-document Range subset. Its implementation
+checks are separate from a new live-site result. Continue the connected component,
+DOM, layout and input work, using the next measured first cause. The older dev137
+surrogate/STYLE/CSS failures are historical observations. [Latest reviewed owner checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
+
+The selected page uses its supplied Web Components polyfill. Native custom
+elements and complete Shadow DOM are broader capabilities, not established
+prerequisites for this selected first-shell path. Keep genuine DOM semantics and
+truthful feature detection. Search submission, results, watch navigation/Back
+and video/audio playback each require their own observed outcome.
+
+**Compression and fonts:** Brotli and WOFF2 remain shared compatibility work.
+All 15 responses in the reviewed run used gzip, so missing Brotli did not block
+that run. A shared Brotli decoder can serve HTTP content coding and WOFF2, while
+WOFF2 also needs font-table reconstruction and the appropriate font-fetch policy.
+Promote this work for an actual required unsupported response or the selected
+font-fidelity goal; readable fallback fonts remain acceptable for the first shell.
+
+**Playback has two substantial parts:** media APIs/streaming (object URLs,
+MediaSource/SourceBuffer, buffering, append/remove events and seeking), and an
+original container/audio/video decoder path. Select one genuinely server-offered
+combination rather than require every codec. Existing finite VP8/PCM/Matroska
+playback does not establish service playback. Verify real synchronized frames and
+audible output, pause/resume/seek, player-script timing and sustained decode cost.
+The original-code policy already applies to software decoding; the separate
+hardware-delegation decision below does not block that work.
 
 Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
 
