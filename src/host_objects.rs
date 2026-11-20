@@ -4,7 +4,7 @@
 use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
-    NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS,
+    NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET};
 
 #[cfg(test)]
@@ -336,6 +336,11 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
+                    for (property,operation) in PARENT_NODE_GETTERS {
+                        self.define_readonly_node_getter(prototype,window,property,operation)?;
+                    }
+                }
+                if name=="Element" {
                     self.define_node_attribute(prototype, window, "innerHTML",
                         ELEMENT_INNER_HTML_GET, Some(ELEMENT_INNER_HTML_SET))?;
                     for (key, getter, setter) in [
@@ -411,6 +416,9 @@ impl Runtime {
                 self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
+                for (property,operation) in PARENT_NODE_GETTERS {
+                    self.define_readonly_node_getter(prototype,window,property,operation)?;
+                }
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
                     self.define_readonly_node_getter(prototype, window, "currentScript", DOCUMENT_CURRENT_SCRIPT_GET)?;
@@ -443,6 +451,7 @@ impl Runtime {
                 self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
             }
             self.define_node_list_iteration_interface(window)?;
+            self.define_html_collection_interface(window)?;
             self.define_window_interface(window)?;
             Ok(())
         })();
@@ -738,6 +747,29 @@ impl Runtime {
             Ok(runtime.native_constructor_prototypes.get(&(window, "Window"))
                 .copied().map(Ordinary::Object))
         })
+    }
+
+    fn define_html_collection_interface(&mut self,window:u32)->Result<(),Fault> {
+        let allocation=self.allocate_host_function_with_length(window,"HTMLCollection",0).map_err(Fault::new)?;
+        if let Some(Function::Host{constructible,..})=self.functions.get_mut(allocation.id){*constructible=true;}
+        let constructor=Value::Function(allocation.id);
+        let prototype=self.new_object(None)?;
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("HTMLCollection".into()),Some((false,false,true)))?;
+        let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
+        self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
+        for (name,operation,length) in [("length","\0HTMLCollection.get.length",0),("item","\0HTMLCollection.item",1),("namedItem","\0HTMLCollection.namedItem",1)] {
+            let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
+            if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
+            self.store_property(self.function_properties[method.id],"name".into(),Value::String(if name=="length"{"get length"}else{name}.into()),Some((false,false,true)))?;
+            if name=="length"{self.store_accessor_property(prototype,name.into(),Accessors{get:Some(method.id),set:None},(true,true))?;}
+            else {self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;}
+        }
+        self.put_binding(self.global_environment,"HTMLCollection".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("HTMLCollection".into(),(false,true,true));
+        self.native_constructor_prototypes.insert((window,"HTMLCollection"),prototype);
+        Ok(())
     }
 
     fn define_node_list_iteration_interface(&mut self,window:u32)->Result<(),Fault> {

@@ -114,15 +114,19 @@ html,body{margin:0;padding:0;background:#ffffff}
 </style></head><body><template id=seed><a id=copy-link href=#destination>Imported link</a></template>
 <button id=copy type=button>Import template</button><div id=mount></div><div id=destination></div>
 <script>
-var input=document.getElementById('seed').content, source=input.firstChild, mount=document.getElementById('mount');
+var input=document.getElementById('seed').content, sourceView=input.children, source=Array.from(sourceView)[0], mount=document.getElementById('mount'), mountView=mount.children;
+if(input.childElementCount!==1||input.lastElementChild!==source||!source||source.nodeName!=='A')throw 'real inert ParentNode view';
 document.getElementById('copy').onclick=function(event){
     if(!event.isTrusted)throw 'actual pointer activation';
-    var fragment=document.importNode(input,true), imported=fragment.firstChild;
+    var fragment=document.importNode(input,true), importedView=fragment.children, imported=Array.from(importedView)[0], savedChildren=imported.children;
+    if(fragment.childElementCount!==1||fragment.lastElementChild!==imported)throw 'real imported ParentNode view';
     if(imported===source||source.ownerDocument===document||imported.ownerDocument!==document||imported.isConnected)
         throw 'real import ownership';
     mount.appendChild(fragment);
     if(mount.firstChild!==imported||!imported.isConnected||source.isConnected||input.firstChild!==source)
         throw 'real insertion kept source inert';
+    if(fragment.childElementCount!==0||fragment.firstElementChild!==null||fragment.lastElementChild!==null||mount.childElementCount!==1||mount.firstElementChild!==imported||mount.lastElementChild!==imported||input.firstElementChild!==source)throw 'live ParentNode insertion';
+    if(fragment.children!==importedView||importedView.length!==0||mount.children!==mountView||Array.from(mountView)[0]!==imported||input.children!==sourceView||sourceView[0]!==source||imported.children!==savedChildren)throw 'real live HTMLCollection import and insertion';
     document.title='Template imported';
 };
 </script></body></html>"#).unwrap();

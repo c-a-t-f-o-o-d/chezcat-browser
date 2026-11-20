@@ -28,6 +28,11 @@ use dom_compat::{dataset_attribute, navigator_readonly};
 #[path = "script_queries.rs"]
 mod queries;
 use queries::node_list_index;
+#[cfg(test)]
+#[path = "script_parent_children_tests.rs"]
+mod parent_children_tests;
+#[path = "script_parent_children.rs"]
+mod parent_children;
 #[path = "script_collections.rs"]
 mod dom_collections;
 use dom_collections::collection_handle_index;
@@ -2936,7 +2941,8 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        property == "style" && self.html_element_expando_receiver(object)
+        parent_children::member(property) && self.parent_node_receiver(object)
+            || property == "style" && self.html_element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
             || NODE_TRAVERSAL_GETTERS.iter().any(|&(name, _)| property == name)
@@ -3026,13 +3032,14 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
+        if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.inert_adopted_node(object) && self.inert_interface(object)
             .is_some_and(|interface| interface.starts_with("HTML") || interface == "SVGElement")
         {
             return Some(WINDOW);
         }
         if self.message_instance(object).is_some() { return Some(WINDOW); }
-        self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+        self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
@@ -3043,7 +3050,7 @@ impl Host for Bridge<'_> {
             || self.abort_instance(object).is_some() || self.message_instance(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
-            || self.node_list_receiver(object) || self.concrete_html_interface(object).is_some()
+            || self.node_list_receiver(object) || self.collection_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
             || self.comment_receiver(object)
             || self.processing_instruction_receiver(object)
@@ -3076,6 +3083,7 @@ impl Host for Bridge<'_> {
             return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, "CanvasRenderingContext2D")) });
         }
         if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
+        if let Some(window)=self.collection_owner_window(object){return Some(crate::javascript::NativeAncestry{window,constructor:Some((window,"HTMLCollection"))});}
         if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
@@ -3158,6 +3166,7 @@ impl Host for Bridge<'_> {
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
         if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
         if self.frame_document_prototype_lookup(object,property) {return false;}
+        if self.collection_receiver(object){return !self.collection_prototype_member(property);}
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
             // existing item/forEach calls. Other properties use their ordinary
@@ -3195,7 +3204,7 @@ impl Host for Bridge<'_> {
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
         if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
         else if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
-        else if self.node_list_receiver(object) || self.frame_document_prototype_lookup(object,property) {true}
+        else if self.collection_receiver(object) || self.node_list_receiver(object) || self.frame_document_prototype_lookup(object,property) {true}
         else if self.element_selector_member(object,property) {true}
         else if self.inherited_node_property(object,property) {true}
         else if self.node_tree_method_member(object,property) {true}
@@ -3217,6 +3226,7 @@ impl Host for Bridge<'_> {
         if let Some(owner)=self.standalone_target_owner(object) {return Some(owner);}
         if let Some((owner, _))=self.abort_instance(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
+        if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
@@ -3249,6 +3259,8 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.collection_receiver(object)&&self.collection_prototype_member(property){return false;}
+        if parent_children::member(property) && self.parent_node_receiver(object) {return true;}
         if script_inline_style::handle(object) && (property == "length" || collection_index(property).is_some()) { return true; }
         if self.html_offset_member(object, property) {return true;}
         if self.node_list_iteration_member(object,property) {return false;}
@@ -3396,6 +3408,8 @@ impl Host for Bridge<'_> {
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return &[(0, true), (1, true), (2, true)]; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
+        if self.collection_receiver(object)&&method=="\0HTMLCollection.item"{return &[(0,false)];}
+        if self.collection_receiver(object)&&method=="\0HTMLCollection.namedItem"{return &[(0,true)];}
         if collection_handle_index(object).is_some() {
             return match method {
                 "item" => &[(0, false)],
@@ -3511,6 +3525,7 @@ impl Host for Bridge<'_> {
         if Offset::getter(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
         if self.computed_style_receiver(object) {return self.computed_style_owner(object);}
+        if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return Some(object);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
@@ -3520,7 +3535,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
         }
-        if self.event_target_interface(object) && (node_traversal_property(method).is_some()
+        if self.event_target_interface(object) && (node_traversal_property(method).is_some() || parent_children::operation(method).is_some()
             || matches!(method, "\0Node.get.nodeType" | "\0Node.get.nodeName" | NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET))
         {
             return Some(object);
@@ -3724,8 +3739,13 @@ impl Host for Bridge<'_> {
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if matches!(method,"NodeList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"NodeList"|"HTMLCollection"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&!self.collection_receiver(object){return Err(("TypeError","HTMLCollection operation requires a genuine native collection.".into()));}
+        if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
+        if parent_children::operation(method).is_some() && !self.parent_node_receiver(object) {
+            return Err(("TypeError","ParentNode getter requires a genuine accessible parent node.".into()));
+        }
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object)?;
             operation
@@ -3957,6 +3977,7 @@ impl Host for Bridge<'_> {
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
+        if self.collection_receiver(object){return true;}
         if self.canvas_context_receiver(object) {return true;}
         if self.event_receiver(object) {return true;}
         if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {return true;}
@@ -3968,7 +3989,6 @@ impl Host for Bridge<'_> {
         // NodeLists now have a genuine ordinary backing/canonical prototype;
         // the legacy dataset-style descriptor route must not classify them.
         self.class_list_receiver(object)
-            || collection_handle_index(object).is_some()
             || (DATASET_BASE..EVENT_BASE).contains(&object)
     }
 
@@ -4020,13 +4040,7 @@ impl Host for Bridge<'_> {
         if property == "submit" {
             return self.form_submit_method(object);
         }
-        if collection_handle_index(object).is_some() {
-            return match property {
-                "item" => Some("item"),
-                "namedItem" => Some("namedItem"),
-                _ => None,
-            };
-        }
+        if self.collection_receiver(object){return None;}
         if let Some(method) = self.dom_method(object, property) {
             return Some(method);
         }
@@ -4120,6 +4134,7 @@ impl Host for Bridge<'_> {
             return self.html_element_receiver(receiver);
         }
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
+        if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return self.collection_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
@@ -4155,6 +4170,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
+        }
+        if self.event_target_interface(object) && parent_children::operation(method).is_some() {
+            return self.parent_node_receiver(receiver);
         }
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
             return self.node_traversal_receiver(receiver);
@@ -4256,7 +4274,7 @@ impl Host for Bridge<'_> {
     }
 
     fn indexed_iteration_owner(&self, object:u32)->Option<u32> {
-        self.node_list_receiver(object).then_some(WINDOW)
+        self.collection_owner_window(object).or_else(||self.node_list_receiver(object).then_some(WINDOW))
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
@@ -4585,6 +4603,9 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(false);}
+        if parent_children::member(property) && self.parent_node_receiver(object) {return Ok(true);}
+
         if self.inert_interface(object).is_some() {
             self.state.work(1)?;
             return Ok(self.inert_owns_property(object, property));
@@ -4880,6 +4901,9 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(Value::Undefined);}
+        if parent_children::member(property) && self.parent_node_receiver(object) {return self.parent_node_get(object,property);}
+
         if property == "innerHTML" && self.template_receiver(object) { return self.template_html(object); }
         if self.inert_interface(object).is_some() { return self.inert_get(object, property); }
         if object == DOCUMENT && property == "implementation" {
@@ -5544,6 +5568,7 @@ impl Host for Bridge<'_> {
             let node = self.dom_node(object)?;
             return self.html_text_reflection_get(node, "name");
         }
+        if let Some(property)=parent_children::operation(method) {return self.parent_node_get(object,property);}
         if let Some(property) = node_traversal_property(method) {
             return self.get(object, property);
         }
@@ -5573,6 +5598,9 @@ impl Host for Bridge<'_> {
         }
         if object==WINDOW && method=="getComputedStyle" {return self.create_computed_style(args);}
         if script_computed_style::index(object).is_some() {return if method=="getPropertyValue" {self.computed_property_value(object,args)} else {Err("Computed style declarations are read-only.".into())};}
+        if method=="\0HTMLCollection.get.length"{return self.tag_collection_get(object,"length");}
+        if method=="\0HTMLCollection.item"{return self.tag_collection_call(object,"item",args);}
+        if method=="\0HTMLCollection.namedItem"{return self.tag_collection_call(object,"namedItem",args);}
         if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_element_selector_receiver(object).map_err(|(_,message)|message)?;

@@ -235,6 +235,11 @@ impl Bridge<'_> {
         self.state.inert_documents.node(object).map(|node| node.children.as_slice())
     }
 
+    pub(super) fn inert_collection_element_source(&self,object:u32)->Option<&Node> {
+        let node=self.state.inert_documents.node(object)?;
+        if let Kind::Parsed{source,..}=node.kind {self.parsed_source(source).map(|(node,_)|node)}else{None}
+    }
+
     pub(super) fn inert_element_attribute(&mut self, object: u32, argument: &Value) -> Result<Value, String> {
         let name = self.text(argument)?;
         let node = self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
