@@ -20,6 +20,9 @@ mod template_identity_storage_tests;
 #[cfg(test)]
 #[path = "script_adopted_storage_tests.rs"]
 mod adopted_storage_tests;
+#[cfg(test)]
+#[path = "script_promoted_child_list_tests.rs"]
+mod promoted_child_list_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
@@ -91,6 +94,7 @@ struct Promotion {
     parent: usize,
     node: Node,
     unsafe_nonce: bool,
+    child_list: Option<u32>,
 }
 
 enum Entry {
@@ -369,7 +373,7 @@ impl Bridge<'_> {
             let extra=copied_payload_extra(&node.kind);self.state.copies(extra)?;retained=retained.saturating_add(extra);
             plan.try_reserve(1).map_err(|_| "Cannot reserve inert promotion plan.")?;
             indices.try_reserve(1).map_err(|_| "Cannot reserve inert promotion identities.")?;
-            plan.push(Promotion { index, parent, node, unsafe_nonce });
+            plan.push(Promotion { index, parent, node, unsafe_nonce, child_list: None });
             indices.push(index);
         }
         self.state.work(self.doc.nodes[parent].children.len())?;
@@ -380,26 +384,47 @@ impl Bridge<'_> {
         self.state.dom.created.try_reserve(plan.len()).map_err(|_| "Cannot reserve promoted node identities.")?;
         self.state.detached_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve detached promotion identities.")?;
         self.state.work(plan.len().saturating_mul(self.state.dom.inert_child_lists.lookup_work()))?;
-        let child_lists = plan.iter().filter(|item|
-            self.state.dom.inert_child_lists.contains_key(&node_handle(item.index))).count();
+        let mut child_lists = 0usize;
+        for item in &mut plan {
+            item.child_list = self.state.dom.inert_child_lists.get(&node_handle(item.index)).copied();
+            if let Some(list) = item.child_list {
+                self.state.work(self.state.dom.child_lists.lookup_work())?;
+                if self.state.dom.child_lists.contains_key(&item.index) {
+                    return Err("Promoted child-list destination identity already exists.".into());
+                }
+                if !queries::node_list_index(list).and_then(|index| self.state.node_lists.get(index))
+                    .is_some_and(|list| matches!(list, queries::NodeList::InertChildren(handle) if *handle==node_handle(item.index)))
+                {
+                    return Err("Promoted child-list source identity is inconsistent.".into());
+                }
+                child_lists += 1;
+            }
+        }
         let available=self.state.retained.checked_sub(released)
             .and_then(|bytes|self.state.retained_limit.checked_sub(bytes))
             .and_then(|bytes|bytes.checked_sub(retained)).ok_or("DOM retained promotion allowance exhausted.")?;
         let (child_map,added)=self.state.dom.child_lists.prepare(child_lists,available)?;
-        // Admit conservative movement for every transferred entry before any
-        // native node or index is published. Both old and new map backing stay
-        // charged; removing entries leaves reusable inert-index capacity.
-        let insert_work=child_lists.saturating_mul(self.state.dom.child_lists.len().saturating_add(child_lists).saturating_add(self.state.dom.child_lists.lookup_work()));
-        let remove_work=child_lists.saturating_mul(self.state.dom.inert_child_lists.len().saturating_add(self.state.dom.inert_child_lists.lookup_work()));
-        self.state.work(insert_work.saturating_add(remove_work))?;
-        let grow_copy=if child_map.is_some(){self.state.dom.child_lists.len()}else{0};
-        self.state.copies(self.state.dom.child_lists.movement_bytes(insert_work.saturating_add(grow_copy)).saturating_add(self.state.dom.inert_child_lists.movement_bytes(remove_work)))?;
+        // Append then sort the destination once. The source index compacts in
+        // one membership scan after all failure points; its backing stays paid.
+        let destination_length = self.state.dom.child_lists.len().checked_add(child_lists)
+            .ok_or("Promoted child-list destination size overflow.")?;
+        let destination_depth = (usize::BITS - destination_length.leading_zeros()) as usize + 1;
+        let destination_sort = if child_lists==0 { 0 } else {
+            destination_length.checked_mul(destination_depth).ok_or("Promoted child-list sort work overflow.")?
+        };
+        self.state.work(destination_sort)?;
+        let grow_copy = if child_map.is_some(){self.state.dom.child_lists.len()}else{0};
+        let copied = destination_sort.checked_mul(3).and_then(|work|work.checked_add(grow_copy))
+            .and_then(|work|work.checked_add(child_lists)).ok_or("Promoted child-list copy work overflow.")?;
+        self.state.copies(self.state.dom.child_lists.movement_bytes(copied))?;
         retained=retained.checked_add(added).ok_or("Promoted child-list storage overflow.")?;
         // One sorted membership set permits one compacting removal scan. It
         // avoids repeatedly shifting the adopted store for each promoted node.
         let search = (usize::BITS - indices.len().leading_zeros()) as usize + 1;
         let sort_work = indices.len().checked_mul(search).ok_or("Promotion index sort work overflow.")?;
-        let scan_work = self.state.inert_documents.adopted.len().checked_mul(search + 3)
+        let scan_work = self.state.inert_documents.adopted.len().checked_add(
+                if child_lists==0 {0}else{self.state.dom.inert_child_lists.len()})
+            .and_then(|length|length.checked_mul(search + 3))
             .and_then(|work| work.checked_mul(2)).and_then(|work| work.checked_add(sort_work))
             .ok_or("Promotion index scan work overflow.")?;
         self.state.work(scan_work)?;
@@ -420,6 +445,12 @@ impl Bridge<'_> {
                 !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
             self.state.work(shifted)?;
             self.state.copies(self.state.inert_documents.adopted.movement_bytes(shifted))?;
+            if child_lists!=0 {
+                let shifted = self.state.dom.inert_child_lists.retention_movement(|handle|
+                    !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
+                self.state.work(shifted)?;
+                self.state.copies(self.state.dom.inert_child_lists.movement_bytes(shifted))?;
+            }
             self.state.replace_storage(released, retained, retained)?;
             Ok::<_, String>(inline)
         })();
@@ -434,15 +465,19 @@ impl Bridge<'_> {
             }
         };
         self.state.dom.child_lists.commit(child_map);
+        self.state.dom.child_lists.append_and_sort(child_lists,
+            plan.iter().filter_map(|item|item.child_list.map(|list|(item.index,list))));
+        if child_lists!=0 {
+            self.state.dom.inert_child_lists.retain(|handle|
+                !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
+        }
         self.state.inert_documents.node_mut(fragment).unwrap().children.clear();
         self.doc.nodes[parent].children.splice(position..position, roots);
         self.state.inert_documents.adopted.retain(|handle|
             !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
         for item in plan {
-            let handle = node_handle(item.index);
-            if let Some(list) = self.state.dom.inert_child_lists.remove(&handle) {
+            if let Some(list) = item.child_list {
                 self.state.node_lists[queries::node_list_index(list).unwrap()] = queries::NodeList::Children(item.index);
-                self.state.dom.child_lists.insert(item.index, list);
             }
             self.state.dom.created.insert(item.index);
             self.state.tree.parents[item.index] = Some(item.parent);
