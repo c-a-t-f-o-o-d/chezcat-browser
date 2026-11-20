@@ -120,7 +120,7 @@ fn document_elements(nodes: &mut Vec<Node>) -> Result<(usize, usize, usize), Str
 
 impl Bridge<'_> {
     pub(in crate::scripting) fn create_dom_parser(&mut self) -> Result<Value, String> {
-        let parser = self.reserve_inert_entries(1, 0)?;
+        let parser = self.reserve_inert_entries(1, 0, 0)?;
         self.state.inert_documents.entries.push(Entry::Parser);
         Ok(Value::Host(parser))
     }
@@ -137,13 +137,7 @@ impl Bridge<'_> {
         }
         self.state.work(markup.len())?;
         self.state.copies(markup.len())?;
-        let available = self
-            .state
-            .limits
-            .host
-            .extra_nodes
-            .min(MAX_ENTRIES)
-            .saturating_sub(self.state.inert_documents.entries.len());
+        let available = self.inert_remaining_entries();
         if available < 5 {
             return Err("Inert DOM identity limit reached.".into());
         }
@@ -282,7 +276,7 @@ impl Bridge<'_> {
             payload = payload
                 .saturating_add(node_bytes(&source))
                 .saturating_add(metadata)
-                .saturating_add(size_of::<GeneratedNode>() + size_of::<Node>())
+                .saturating_add(size_of::<Node>() + 2 * size_of::<usize>())
                 .saturating_add(children.capacity() * size_of::<u32>());
             source.children = Vec::new();
             generated.push(GeneratedNode {
@@ -299,12 +293,7 @@ impl Bridge<'_> {
             ));
         }
         self.state.copies(payload)?;
-        self.state
-            .inert_documents
-            .generated
-            .try_reserve(generated.len())
-            .map_err(|_| "Cannot reserve inert document source storage.")?;
-        let admitted = self.reserve_inert_entries(entries.len(), payload)?;
+        let admitted = self.reserve_inert_entries(entries.len(), payload, generated.len())?;
         debug_assert_eq!(admitted, document);
         self.state.inert_documents.generated.extend(generated);
         self.state.inert_documents.entries.extend(entries);

@@ -8,8 +8,12 @@ pub(super) mod parser;
 
 pub(super) const MAIN_IMPLEMENTATION: u32 = 0x8600_0000;
 const FIRST_ENTRY: u32 = MAIN_IMPLEMENTATION + 1;
-const MAX_ENTRIES: usize = 65_536;
+const ENTRY_END: u32 = 0x8700_0000; // AbortController owns the next typed domain.
 const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+
+#[cfg(test)]
+#[path = "script_inert_storage_tests.rs"]
+mod storage_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
@@ -86,6 +90,11 @@ enum Entry {
 }
 
 impl Arena {
+    pub(super) fn backing_bytes(&self) -> usize {
+        self.entries.capacity() * size_of::<Entry>()
+            + self.generated.capacity() * size_of::<GeneratedNode>()
+    }
+
     fn entry(&self, handle: u32) -> Option<&Entry> {
         let index = handle.checked_sub(FIRST_ENTRY)? as usize;
         self.entries.get(index)
@@ -544,7 +553,7 @@ impl Bridge<'_> {
         } else {
             arena.template_documents.get(&document).copied()
         };
-        let limit = self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len());
+        let limit = self.inert_remaining_entries();
         let first = FIRST_ENTRY + arena.entries.len() as u32;
         let owner_overhead = if existing_owner.is_some() { 0 } else { 2 };
         let owner = existing_owner.unwrap_or(first);
@@ -596,7 +605,7 @@ impl Bridge<'_> {
         if existing_owner.is_none() {
             self.state.inert_documents.template_documents.try_reserve(1).map_err(|_| "Cannot reserve template document identity.")?;
         }
-        let committed = self.reserve_inert_entries(staged.len(), payload)?;
+        let committed = self.reserve_inert_entries(staged.len(), payload, 0)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         arena.entries.extend(staged);
@@ -674,6 +683,7 @@ impl Bridge<'_> {
         let had_fragment = self.state.inert_documents.template_contents.contains_key(&object);
         let had_template_owner = self.state.inert_documents.template_documents.contains_key(&document);
         let starting_entries = self.state.inert_documents.entries.len();
+        let starting_backing = self.state.inert_documents.backing_bytes();
         let starting_bytes = self.state.retained;
         let Value::Host(fragment) = self.template_content(object)? else { unreachable!() };
         let result = self.replace_template_children(fragment, parsed);
@@ -682,7 +692,9 @@ impl Bridge<'_> {
             arena.entries.truncate(starting_entries);
             arena.template_contents.remove(&object);
             if !had_template_owner { arena.template_documents.remove(&document); }
-            self.state.retained = starting_bytes;
+            // Rolled-back payload is gone; reusable backing remains allocated.
+            let backing = arena.backing_bytes();
+            self.state.retained = starting_bytes + (backing - starting_backing);
         }
         result
     }
@@ -692,7 +704,7 @@ impl Bridge<'_> {
         let owner = arena.node(fragment).ok_or("Template fragment is unavailable.")?.owner;
         let fragment_index = (fragment - FIRST_ENTRY) as usize;
         let count = parsed.nodes.len().checked_sub(1).ok_or("Missing checked fragment root.")?;
-        if count > self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len()) {
+        if count > self.inert_remaining_entries() {
             return Err("Inert DOM identity limit reached during template replacement.".into());
         }
         let first = FIRST_ENTRY + arena.entries.len() as u32;
@@ -726,7 +738,7 @@ impl Bridge<'_> {
         let mut parents = Vec::new();
         parents.try_reserve_exact(parsed.nodes.len()).map_err(|_| "Cannot reserve template parent links.")?;
         parents.resize(parsed.nodes.len(), None);
-        let mut payload = count.saturating_mul(std::mem::size_of::<GeneratedNode>() + std::mem::size_of::<Node>());
+        let mut payload = count.saturating_mul(std::mem::size_of::<Node>() + 2 * size_of::<usize>());
         let children_for = |items: &[usize]| -> Result<Vec<u32>, String> {
             let mut children = Vec::new();
             children.try_reserve_exact(items.len()).map_err(|_| "Cannot reserve template child links.")?;
@@ -771,13 +783,12 @@ impl Bridge<'_> {
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
         payload = payload.saturating_add(parked.saturating_mul(size_of::<Node>() + size_of::<(u32, InertNode)>()));
-        self.state.inert_documents.generated.try_reserve(count).map_err(|_| "Cannot reserve inert template source storage.")?;
         self.state.inert_documents.adopted.try_reserve(parked).map_err(|_| "Cannot reserve parked template nodes.")?;
         self.doc.nodes.try_reserve(parked).map_err(|_| "Cannot reserve future template document slots.")?;
         self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
         self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
         self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
-        let committed = self.reserve_inert_entries(entries.len(), payload)?;
+        let committed = self.reserve_inert_entries(entries.len(), payload, generated.len())?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
@@ -831,7 +842,7 @@ impl Bridge<'_> {
         }
 
         let arena = &self.state.inert_documents;
-        let remaining = self.state.limits.host.extra_nodes.min(MAX_ENTRIES).saturating_sub(arena.entries.len());
+        let remaining = self.inert_remaining_entries();
         if remaining == 0 { return Err("Inert DOM identity limit reached during cloning.".into()); }
         let first = FIRST_ENTRY + arena.entries.len() as u32;
         let mut generated = None;
@@ -853,7 +864,7 @@ impl Bridge<'_> {
             let bytes = copied_node_bytes(source).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
             self.state.work(attrs.len().saturating_add(1))?;
             self.state.copies(bytes)?;
-            payload = bytes.saturating_add(size_of::<GeneratedNode>() + size_of::<Node>());
+            payload = bytes.saturating_add(size_of::<Node>() + 2 * size_of::<usize>());
             let generated_index = self.state.inert_documents.generated.len();
             generated = Some(GeneratedNode {
                 node: Rc::new(Node {
@@ -942,10 +953,7 @@ impl Bridge<'_> {
         payload = payload.saturating_add(template_links.len().saturating_mul(size_of::<(u32, u32)>()));
         let arena = &mut self.state.inert_documents;
         arena.template_contents.try_reserve(template_links.len()).map_err(|_| "Cannot reserve cloned template contents.")?;
-        if generated.is_some() {
-            arena.generated.try_reserve(1).map_err(|_| "Cannot reserve a cloned template source.")?;
-        }
-        let committed = self.reserve_inert_entries(staged.len(), payload)?;
+        let committed = self.reserve_inert_entries(staged.len(), payload, usize::from(generated.is_some()))?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         if let Some(source) = generated { arena.generated.push(source); }
@@ -954,18 +962,64 @@ impl Bridge<'_> {
         Ok(Value::Host(first))
     }
 
-    fn reserve_inert_entries(&mut self, count: usize, payload: usize) -> Result<u32, String> {
-        let current = self.state.inert_documents.entries.len();
-        let limit = self.state.limits.host.extra_nodes.min(MAX_ENTRIES);
-        if current.saturating_add(count) > limit {
-            return Err(format!("Inert DOM identity limit reached ({limit} entries)."));
+    fn inert_remaining_entries(&self) -> usize {
+        let arena = &self.state.inert_documents;
+        let representation = (ENTRY_END - FIRST_ENTRY) as usize;
+        let spare = arena.entries.capacity().saturating_sub(arena.entries.len());
+        let available = self.state.retained_limit.saturating_sub(self.state.retained);
+        let remaining = representation.saturating_sub(arena.entries.len())
+            .min(spare.saturating_add(available / size_of::<Entry>()));
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas {
+            return remaining.min(self.state.limits.host.extra_nodes.saturating_sub(arena.entries.len()));
         }
-        self.state.work(count)?;
-        self.state.inert_documents.entries.try_reserve(count)
-            .map_err(|_| "Cannot reserve inert DOM identities.")?;
-        self.state.replace_bytes(0, count.saturating_mul(std::mem::size_of::<Entry>())
-            .saturating_add(payload))?;
-        Ok(FIRST_ENTRY + current as u32)
+        remaining
+    }
+
+    // Entry and generated-source backing grow jointly with the admitted payload.
+    // Prepare both replacements before publishing either capacity or any handle.
+    fn reserve_inert_entries(&mut self, count: usize, payload: usize, generated: usize) -> Result<u32, String> {
+        let arena = &self.state.inert_documents;
+        let current = arena.entries.len();
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas
+            && count > self.state.limits.host.extra_nodes.saturating_sub(current)
+        {
+            return Err(format!("Inert DOM identity limit reached ({} entries).", self.state.limits.host.extra_nodes));
+        }
+        if count > ((ENTRY_END - FIRST_ENTRY) as usize).saturating_sub(current) {
+            return Err("Inert DOM typed identity space exhausted.".into());
+        }
+        if count > self.inert_remaining_entries() {
+            return Err(format!("Inert DOM entry backing allowance exhausted ({} bytes available).",
+                self.state.retained_limit.saturating_sub(self.state.retained)));
+        }
+        let handle = FIRST_ENTRY.checked_add(u32::try_from(current).map_err(|_| "Inert identity index overflow.")?)
+            .ok_or("Inert identity overflow.")?;
+        self.state.work(count.saturating_add(generated))?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained)
+            .checked_sub(payload).ok_or("Inert DOM retained payload allowance exhausted.")?;
+        let arena = &self.state.inert_documents;
+        let minimum = arena.generated.len().checked_add(generated)
+            .and_then(|required| required.saturating_sub(arena.generated.capacity()).checked_mul(size_of::<GeneratedNode>()))
+            .ok_or("Inert source capacity overflow.")?;
+        let (entries, entry_bytes) = retained_storage::grow(&arena.entries, count,
+            available.checked_sub(minimum).ok_or("Inert source backing allowance exhausted.")?)?;
+        let (sources, source_bytes) = retained_storage::grow(&arena.generated, generated, available - entry_bytes)?;
+        let moving = if entries.is_some() { current * size_of::<Entry>() } else { 0 };
+        let moving = moving.checked_add(if sources.is_some() { arena.generated.len() * size_of::<GeneratedNode>() } else { 0 })
+            .ok_or("Inert source movement overflow.")?;
+        let work = count.checked_mul(size_of::<Entry>())
+            .and_then(|bytes| generated.checked_mul(size_of::<GeneratedNode>()).and_then(|sources| bytes.checked_add(sources)))
+            .and_then(|bytes| bytes.checked_add(moving)).and_then(|bytes| bytes.checked_add(payload))
+            .ok_or("Inert identity copy work overflow.")?;
+        let added = payload.checked_add(entry_bytes).and_then(|bytes| bytes.checked_add(source_bytes))
+            .ok_or("Inert retained storage overflow.")?;
+        self.state.replace_storage(0, added, work)?;
+        let arena = &mut self.state.inert_documents;
+        if let Some(mut next) = entries { next.append(&mut arena.entries); arena.entries = next; }
+        if let Some(mut next) = sources { next.append(&mut arena.generated); arena.generated = next; }
+        Ok(handle)
     }
 
     pub(super) fn create_inert_document(&mut self, args: &[Value]) -> Result<Value, String> {
@@ -984,9 +1038,7 @@ impl Bridge<'_> {
             normalized.push_str(word);
         }
         let count = if title.is_some() { 8 } else { 6 };
-        // The fixed element names and child links share the document budget.
-        let payload = title_capacity.saturating_add(normalized.capacity()).saturating_add(64);
-        let document = self.reserve_inert_entries(count, payload)?;
+        let document = FIRST_ENTRY + self.state.inert_documents.entries.len() as u32;
         let implementation = document + 1;
         let doctype = document + 2;
         let html = document + 3;
@@ -998,22 +1050,45 @@ impl Bridge<'_> {
         let node = |kind, parent, children| Entry::Node(InertNode {
             kind, parent, children, owner: document,
         });
-        self.state.inert_documents.entries.extend([
+        let links = |items: &[u32]| -> Result<Vec<u32>, String> {
+            let mut values = Vec::new();
+            values.try_reserve_exact(items.len()).map_err(|_| "Cannot reserve inert document children.")?;
+            values.extend_from_slice(items);
+            Ok(values)
+        };
+        let text_copy = script_clone_node::copy_text;
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(count).map_err(|_| "Cannot stage inert document entries.")?;
+        entries.extend([
             node(Kind::Document(DocumentNodes {
-                implementation, doctype: Some(doctype), url: "about:blank".into(), html, head, body, title: normalized,
-            }), None, vec![doctype, html]),
+                implementation, doctype: Some(doctype), url: text_copy("about:blank")?, html, head, body, title: normalized,
+            }), None, links(&[doctype, html])?),
             Entry::Implementation,
             node(Kind::Doctype, Some(document), Vec::new()),
-            node(Kind::Element("html".into()), Some(document), vec![head, body]),
-            node(Kind::Element("head".into()), Some(html), if has_title { vec![title_element] } else { Vec::new() }),
-            node(Kind::Element("body".into()), Some(html), Vec::new()),
+            node(Kind::Element(text_copy("html")?), Some(document), links(&[head, body])?),
+            node(Kind::Element(text_copy("head")?), Some(html), if has_title { links(&[title_element])? } else { Vec::new() }),
+            node(Kind::Element(text_copy("body")?), Some(html), Vec::new()),
         ]);
         if let Some(title) = title {
-            self.state.inert_documents.entries.extend([
-                node(Kind::Element("title".into()), Some(head), vec![text]),
+            entries.extend([
+                node(Kind::Element(text_copy("title")?), Some(head), links(&[text])?),
                 node(Kind::Text(title), Some(title_element), Vec::new()),
             ]);
         }
+        let payload = entries.iter().try_fold(0usize, |bytes, entry| {
+            let Entry::Node(node) = entry else { return Ok::<_, String>(bytes); };
+            let text = match &node.kind {
+                Kind::Document(doc) => doc.url.capacity().checked_add(doc.title.capacity()),
+                Kind::Element(text) | Kind::Text(text) => Some(text.capacity()),
+                _ => Some(0),
+            }.ok_or("Inert document payload overflow.")?;
+            node.children.capacity().checked_mul(size_of::<u32>())
+                .and_then(|links| bytes.checked_add(links)).and_then(|bytes| bytes.checked_add(text))
+                .ok_or("Inert document payload overflow.".into())
+        })?;
+        let admitted = self.reserve_inert_entries(count, payload, 0)?;
+        debug_assert_eq!(admitted, document);
+        self.state.inert_documents.entries.extend(entries);
         Ok(Value::Host(document))
     }
 
@@ -1053,7 +1128,7 @@ impl Bridge<'_> {
             Kind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             _ => 0,
         };
-        let handle = self.reserve_inert_entries(1, bytes)?;
+        let handle = self.reserve_inert_entries(1, bytes, 0)?;
         self.state.inert_documents.entries.push(Entry::Node(InertNode {
             kind, owner, parent: None, children: Vec::new(),
         }));
