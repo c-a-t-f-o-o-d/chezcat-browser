@@ -12,6 +12,9 @@ const ENTRY_END: u32 = 0x8700_0000; // AbortController owns the next typed domai
 const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 
 #[cfg(test)]
+#[path = "script_inert_attributes_tests.rs"]
+mod attribute_tests;
+#[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
 #[cfg(test)]
@@ -233,6 +236,52 @@ impl Bridge<'_> {
 
     pub(super) fn inert_children(&self, object: u32) -> Option<&[u32]> {
         self.state.inert_documents.node(object).map(|node| node.children.as_slice())
+    }
+
+    pub(super) fn inert_element_attributes(&self,object:u32)->Option<&[crate::html::Attribute]> {
+        let node=self.state.inert_documents.node(object)?;
+        match node.kind {
+            Kind::Element(_)=>Some(&[]),
+            Kind::Parsed{source,..}=>match &self.parsed_source(source)?.0.kind {NodeKind::Element{attrs,..}=>Some(attrs),_=>None},
+            _=>None,
+        }
+    }
+
+    // Attribute removal copies only this element's immutable source. Clones
+    // retain their old source and node/owner/child identities never change.
+    pub(super) fn remove_inert_attribute(&mut self,object:u32,argument:&Value)->Result<Value,String>{
+        let mut name=self.text(argument)?;
+        let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
+        let Kind::Parsed{source,initial_template}=inert.kind else {
+            return if matches!(inert.kind,Kind::Element(_)){Ok(Value::Undefined)}else{Err("removeAttribute requires an Element.".into())};
+        };
+        let (node,unsafe_nonce)=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
+        if node.namespace==crate::html::Namespace::Html{name.make_ascii_lowercase();}
+        let NodeKind::Element{attrs,tag,href,..}=&node.kind else{return Err("removeAttribute requires an Element.".into());};
+        let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));
+        let slot=attrs.iter().position(|attr|attr.name.qualified==name);
+        let minimum=copied_node_bytes(node).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0,String::len))
+            .saturating_add(size_of::<Node>()+2*size_of::<usize>());
+        self.state.work(work)?;
+        let Some(slot)=slot else{return Ok(Value::Undefined);};
+        if minimum>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Inert attribute source copy allowance exhausted.".into());}
+        self.state.copies(minimum)?;
+        let node=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0;
+        let namespace=node.namespace;let mut kind=script_clone_node::copy_node_kind(&node.kind)?;
+        let NodeKind::Element{attrs,id,href,..}=&mut kind else{unreachable!()};
+        let removed=attrs.remove(slot);
+        if removed.name.html_is("id"){*id=None;}
+        if removed.name.html_is("href"){*href=None;}
+        let node=Node{kind,namespace,children:Vec::new()};
+        let NodeKind::Element{tag,href,..}=&node.kind else{unreachable!()};
+        let payload=node_bytes(&node).checked_add(tag.capacity()).and_then(|bytes|bytes.checked_add(href.as_ref().map_or(0,String::capacity)))
+            .and_then(|bytes|bytes.checked_add(size_of::<Node>()+2*size_of::<usize>())).ok_or("Inert attribute copy storage overflow.")?;
+        let generated=GeneratedNode{node:Rc::new(node),unsafe_nonce};
+        let index=self.state.inert_documents.generated.len();
+        self.reserve_inert_entries(0,payload,1)?;
+        let arena=&mut self.state.inert_documents;arena.generated.push(generated);
+        arena.node_mut(object).expect("checked inert Element").kind=Kind::Parsed{source:ParsedSource::Generated(index),initial_template};
+        self.state.dom_committed();Ok(Value::Undefined)
     }
 
     pub(super) fn inert_collection_element_source(&self,object:u32)->Option<&Node> {
@@ -991,7 +1040,7 @@ impl Bridge<'_> {
             let source = &self.doc.nodes[index];
             let NodeKind::Element { tag, href, attrs, .. } = &source.kind else { unreachable!() };
             if attrs.iter().any(|attr| attr.name.namespace.is_none()
-                && (attr.name.qualified.starts_with("on") || attr.name.html_is("is"))) {
+                && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is"))) {
                 return Err("Template cloning cannot transfer active handlers or customized built-ins.".into());
             }
             let bytes = copied_node_bytes(source).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
@@ -1565,7 +1614,7 @@ fn template_node_can_park(node: &Node) -> bool {
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
                 && !attrs.iter().any(|attr| attr.name.namespace.is_some()
-                    || attr.name.qualified.starts_with("on")
+                    || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.
                     || tag != "style" && attr.name.html_is("is"))

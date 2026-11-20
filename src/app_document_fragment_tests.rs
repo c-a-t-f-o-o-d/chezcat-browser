@@ -111,15 +111,18 @@ html,body{margin:0;padding:0;background:#ffffff}
 #copy{position:absolute;left:40px;top:30px;width:160px;height:30px}
 #mount{position:absolute;left:40px;top:100px;width:240px;height:80px;background:#ffffff}
 #copy-link{display:block;position:absolute;left:20px;top:12px;width:100px;height:28px;background:#236144;color:white}
-</style></head><body><template id=seed><a id=copy-link href=#destination>Imported link</a></template>
+</style></head><body><template id=seed><a id=copy-link href=#destination on-click=ordinary onclick="throw 'inert handler ran'">Imported link</a></template>
 <button id=copy type=button>Import template</button><div id=mount></div><div id=destination></div>
 <script>
 var input=document.getElementById('seed').content, sourceView=input.children, source=Array.from(sourceView)[0], mount=document.getElementById('mount'), mountView=mount.children;
 if(input.childElementCount!==1||input.lastElementChild!==source||!source||source.nodeName!=='A')throw 'real inert ParentNode view';
+var sourceNames=source.getAttributeNames();if(sourceNames.join(',')!=='id,href,on-click,onclick'||!source.hasAttribute('onclick'))throw 'ordered inert attribute preparation';
+source.removeAttribute('onclick');if(source.hasAttribute('onclick')||source.getAttribute('on-click')!=='ordinary')throw 'actual handler removal and ordinary data';
 document.getElementById('copy').onclick=function(event){
     if(!event.isTrusted)throw 'actual pointer activation';
     var fragment=document.importNode(input,true), importedView=fragment.children, imported=Array.from(importedView)[0], savedChildren=imported.children;
     if(fragment.childElementCount!==1||fragment.lastElementChild!==imported)throw 'real imported ParentNode view';
+    if(imported.getAttribute('on-click')!=='ordinary'||imported.getAttribute('onclick')!==null)throw 'real prepared attribute transfer';
     if(imported===source||source.ownerDocument===document||imported.ownerDocument!==document||imported.isConnected)
         throw 'real import ownership';
     mount.appendChild(fragment);

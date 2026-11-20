@@ -759,6 +759,7 @@ pub trait Host {
     fn rollback_unpublished_base_event(&mut self,_event:u32)->Result<(),String>{
         Err("No unpublished Event transaction exists.".into())
     }
+    fn attribute_name_snapshot(&mut self,_object:u32)->Result<Vec<String>,String>{Err("Attribute names are unavailable.".into())}
     fn event_path_snapshot(&mut self,_event:u32)->Result<Vec<u32>,String>{
         Err("Event path access is unavailable.".into())
     }
@@ -9129,6 +9130,16 @@ impl Runtime {
                 return Err(Fault::thrown(exception));
             }
             return Err(Fault::exception(kind,message));
+        }
+        if method=="\0Element.getAttributeNames" {
+            let names=host.attribute_name_snapshot(object).map_err(Fault::new)?;
+            if names.len()>self.limits.heap.object_properties{return Err(Fault::new("Attribute names exceed the array/property allowance."));}
+            let output=Value::Object(self.new_object(Some(names.len()))?);
+            for (index,name) in names.into_iter().enumerate(){
+                self.step()?;
+                self.create_data_property(&output,PropertyKey::String(index.to_string()),Value::String(name),host)?;
+            }
+            return Ok(output);
         }
         if method==event_interface::PATH_METHOD {
             return self.event_path_array(object,host);

@@ -111,7 +111,7 @@ impl Bridge<'_> {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if attrs.iter().any(|attr| attr.name.namespace.is_some()
-                            || attr.name.qualified.starts_with("on") || attr.name.html_is("is")) {
+                            || script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
                         }
                         metadata = tag.len().saturating_add(href.as_ref().map_or(0, String::len));
@@ -209,7 +209,7 @@ impl Bridge<'_> {
                 let radio = tag == "input" && self.owned_native_radio(source);
                 if item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio)
                     || attrs.iter().any(|attr| attr.name.namespace.is_none()
-                        && (attr.name.qualified.starts_with("on") || attr.name.html_is("is"))) {
+                        && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is"))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
                 }
                 if textarea || radio {
