@@ -17,6 +17,30 @@
 > HTTP 200, successful parsing, zero startup errors, or one green test does not
 > establish a working website or support for every version of a framework.
 
+### Latest reviewed signed-out homepage checkpoint
+
+The November 20, 2026 owner-supplied YouTube logs and HTML/Elements exports
+identify a clean development build at
+[`cffb9d1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cffb9d1914d28c93378f7a180e9693410aca0513).
+This record summarizes those supplied observations; the documentation review did
+not build or run the browser. Raw captures are not published.
+
+| Stage | Observed result on that source |
+| :--- | :--- |
+| Delivery and decoding | All 15 recorded responses returned HTTP 200 and used gzip. The main application script decoded from 2,616,211 to 10,900,223 bytes. Missing Brotli did not block this run. |
+| Script execution | 42 of 43 executions succeeded. The original escaped failure was `ReferenceError: Range is not defined` at 18966:421; 5966:53 was the application's rethrow. This ratio is not a compatibility percentage. |
+| DOM and visible output | The live body gained `rounded-container`, which was absent from the source HTML. The page still showed a skeleton; the masthead was not usable and search remained hidden. |
+| User journey | A usable shell, query submission, results, watch navigation/Back and real video/audio playback were not demonstrated. |
+
+[PR #359](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/359) subsequently
+integrated genuine live Range boundaries for supported displayed-document nodes
+at `2497be9`. Its focused implementation/App checks do not retest this owner run
+or establish a usable YouTube shell. Range still has explicit unsupported cases
+in [CAPABILITIES.md](CAPABILITIES.md); new site results must retain their actual
+build and input identity. The selected page supplies `webcomponents-all-noPatch`
+with forced ShadyDOM/noPatch behavior, so native custom elements and complete
+Shadow DOM are not established prerequisites for this measured path.
+
 **Earlier source snapshots (November 17–18, 2026).**
 
 This page retains the earlier evidence snapshot through source `a65d37c` on
@@ -41,7 +65,7 @@ retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
 changes after this snapshot require their own rechecks.
 
-[Current scorecard](#current-scorecard) · [Progression](#measured-progression)
+[Latest owner checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Current scorecard](#current-scorecard) · [Progression](#measured-progression)
 · [Method](#measurement-method) · [Historical evidence](#historical-evidence)
 
 ## Current scorecard
@@ -50,10 +74,10 @@ The published 0.82.0-alpha.1 tag is `f2e1823`. The downloaded archives, publicat
 
 | Workload | Observed progress | Remaining boundary | Evidence |
 | :--- | :--- | :--- | :--- |
-| **Signed-out homepage and original script probes** | On clean dev137 (`1aeef14`), the main script decoded to 10,883,200 bytes and entered the engine. The homepage still showed two lines and three gray placeholders without a site header or search box. Forty of 43 scripts completed. On the earlier `ed0491f` offline App, computed opacity, substring selectors and escaped property names passed alongside seven controls. | The dev137 application script stopped on a UTF-16 surrogate escape. Two other scripts stopped on detached STYLE text assignment and the CSS work limit during an opacity read. Live search, navigation and playback remain unverified. | [Tested dev137 source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1aeef14cea5383b0bb8c894720b99a50ec05b836) |
+| **Historical dev137 homepage and original script probes** | On clean dev137 (`1aeef14`), the main script decoded to 10,883,200 bytes and entered the engine. The homepage still showed two lines and three gray placeholders without a site header or search box. Forty of 43 scripts completed. On the earlier `ed0491f` offline App, computed opacity, substring selectors and escaped property names passed alongside seven controls. | On that build the application script stopped on a UTF-16 surrogate escape; two other scripts stopped on detached STYLE text assignment and the CSS work limit during an opacity read. These are historical failures; see the newer owner checkpoint above. | [Tested dev137 source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1aeef14cea5383b0bb8c894720b99a50ec05b836) |
 | **Web Components polyfills 2.8.1** | At `84274f5`, the pinned bundle assigns CSS text to a fresh detached STYLE element. All eleven independent offline controls pass. | The bundle stops at 125:228 when it calls `document.head.insertBefore` with that element. Component startup and its search control remain unverified on this build. | [Tested source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/84274f54738031a57003901caed0e35240975bcc) |
 | **Web Animations 2.3.2** | In the standard build, a trusted seek to 500 ms paints all 576 tested pixels with the expected midpoint color. The next-lite build changes all 3,456 opacity-tile pixels from white to gray to near-black at 0, 500 and 1,000 ms. The edited input survives both workflows. | Offline measurements used `a965b2b`. Public main at `e2dabcf` has the same tracked tree. Live signed-out behavior still needs a retest. | [Functional background colors, PR #141](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/141) · [Group opacity, PR #142](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/142) |
-| **Original compressed-script and Document probes** | On `e66b0ad`, an 8 MiB + 1 byte gzip script compiles and paints its marker. The 27-case script policy suite includes two exact 16 MiB cases covering parser and dynamic TLS loading. On `1ff9c51`, all six Document interface stages and seven App controls pass, including distinct main/child constructors and borrowed getters. | A 16 MiB + 1 byte script remains refused. Live signed-out shell, search and playback remain unverified. | [Document, PR #121](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/121) and [script allowance, PR #122](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/122), merged into `main` at `83385ca`. |
+| **Original compressed-script and Document probes** | On `e66b0ad`, an 8 MiB + 1 byte gzip script compiles and paints its marker. The 27-case script policy suite includes two exact 16 MiB cases covering parser and dynamic TLS loading. On `1ff9c51`, all six Document interface stages and seven App controls pass, including distinct main/child constructors and borrowed getters. | On that tested revision, a 16 MiB + 1 byte script was refused. This is not the current source allowance; see [current capacities](CAPABILITIES.md) and [execution limits](../src/execution_limits.rs). These probes did not establish live shell, search or playback. | [Document, PR #121](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/121) and [script allowance, PR #122](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/122), merged into `main` at `83385ca`. |
 | **Original canvas rectangles and colors** | On `f53ab3e`, the 80×48 App passes all five drawing stages and nine controls for stable `getContext('2d')`, default-black `fillRect`, transparent `clearRect`, same-width reset and saved-context repaint. App pixel controls cover `object-fit: none` and `scale-down`. On `124686e`, all three color App stages pass, including trusted paint, the `#704040` alpha blend and reset. | The same binary's independent App paints and preserves its edited field, then stops at undefined `getImageData` at 28:18. Paths, transforms and export remain outside these measurements. The later signed-out homepage observation is recorded above. | [Rectangles, PR #125](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/125), integrated at `ca845b4`, and [solid colors, `124686e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/124686ee77f4a972a288aa46178cc2553e009dfe), integrated in `main` at `9610baf`. |
 | **Bootstrap 5.3.9 progress meter and action stack** | At 640 and 1280 px on `5298918`, the 240×16 meter matches the literal fill at 25% and 75%, with its caption on one line. At 640 px on `067ac5e`, the two 160×40 action links form one column. A trusted click changes the gap from 8 to 16 px. The second link receives its own trusted click. | In the separate 192 px column on `e11acce`, the fixed 64 px link stayed at the start for center and end. On `b4f35e4`, the focused grid fixture places start, center and end actions at their expected painted and clickable positions. Authored grid tracks and RTL alignment remain open. | [Implicit grid rows, PR #112](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/112) |
 | **jQuery 1.12.4 + Bootstrap 3.4.1** | At 1280×800 on `7608f4c`, W2 loads its pinned assets, paints the initial control and passes the deep radio-clone step. | Both `7608f4c` and `f2e1823` stop during initialization at 4743:4 while assigning the raw `onfocusin` attribute on a DIV. The dropdown, form and async stages remain blocked. | [Native radio clones, PR #115](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/115) |
