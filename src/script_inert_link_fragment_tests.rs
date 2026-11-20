@@ -93,7 +93,7 @@ impl Resources {
             pending,
             removed,
             totals: (
-                sheets.attempts,
+                sheets.pending_storage.load(Ordering::Acquire),
                 sheets.in_flight,
                 sheets.source_bytes,
                 sheets.source_rules,
@@ -279,7 +279,7 @@ fn inert_link_fragment_later_attributes_use_checked_dynamic_stylesheet_path() {
         let (mut doc, mut forms, mut page) = fixture("", &source);
         if detached {
             assert!(page.state.stylesheets.pending.is_empty());
-            assert_eq!(page.state.stylesheets.attempts, 0);
+            assert_eq!(page.state.stylesheets.pending_storage.load(Ordering::Acquire), 0);
             eval(
                 &mut doc,
                 &mut forms,

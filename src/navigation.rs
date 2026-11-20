@@ -17,6 +17,15 @@ pub struct Location {
 }
 
 impl Location {
+    pub(crate) fn payload_bytes(&self) -> usize {
+        self.path.as_ref().map_or(0, |path| path.capacity())
+            .saturating_add(self.root.as_ref().map_or(0, |path| path.capacity()))
+            .saturating_add(self.fragment.capacity())
+            .saturating_add(self.url.as_ref().map_or(0, |url|
+                url.host.capacity().saturating_add(url.path.capacity())
+                    .saturating_add(url.query.as_ref().map_or(0, String::capacity))))
+    }
+
     pub fn home() -> Self {
         Self {
             path: None,

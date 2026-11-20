@@ -86,7 +86,6 @@ impl Default for LoadOptions {
 }
 
 pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
-pub(crate) const MAX_STYLESHEETS: usize = 256;
 const MAX_LOCAL_HTML_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LOCAL_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
 // Decoded backing and optional reuse metadata each have a byte allowance.
@@ -1332,9 +1331,6 @@ fn load_critical_resources(
                 return Err("Empty resource reference.".to_owned());
             }
             if kind == "CSS" {
-                if loaded.styles.len() >= MAX_STYLESHEETS {
-                    return Err(format!("Stylesheet count limit reached ({MAX_STYLESHEETS})."));
-                }
                 let media = loaded.document.attr(node, "media").unwrap_or("").trim();
                 if !media.is_empty()
                     && !media.eq_ignore_ascii_case("all")
@@ -4197,21 +4193,21 @@ mod tests {
     }
 
     #[test]
-    fn stylesheet_fragments_beyond_sixteen_keep_sources_and_cap() {
+    fn stylesheet_fragments_exceed_former_count_limits_under_source_admission() {
         let folder = Folder::new();
         let mut markup = String::new();
-        for i in 0..MAX_STYLESHEETS + 1 {
+        for i in 0..300 {
             let name = format!("fragment-{i}.css");
             folder.file(&name, &format!("p{{color:#{:06x}}}", i));
             markup.push_str(&format!("<link rel=stylesheet href={name}>"));
         }
         markup.push_str("<p>fragments</p>");
         let loaded = local(&folder.page(&markup)).unwrap();
-        assert_eq!(loaded.styles.len(), MAX_STYLESHEETS);
-        assert_eq!(loaded.skipped, 1);
+        assert_eq!(loaded.styles.len(), 300);
+        assert_eq!(loaded.skipped, 0);
         // The bounded event report may omit late repeated resource messages.
         assert!(loaded.styles.values().any(|s| s.contains("#0000ff")));
-        assert!(!loaded.styles.values().any(|s| s.contains("#000100")));
+        assert!(loaded.styles.values().any(|s| s.contains("#00012b")));
     }
 
     #[test]

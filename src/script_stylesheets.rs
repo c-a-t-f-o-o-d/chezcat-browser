@@ -3,13 +3,19 @@
 //! or load event is invented when a request is blocked or canceled.
 use super::*;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-const MAX_STYLESHEET_REQUESTS: usize = crate::loader::MAX_STYLESHEETS;
+pub type DynamicStylesheet = Arc<StylesheetRequest>;
 
-#[derive(Clone, Debug)]
-pub struct DynamicStylesheet {
+#[derive(Debug)]
+struct PendingStorage { used: Arc<AtomicUsize>, bytes: usize }
+impl Drop for PendingStorage {
+    fn drop(&mut self) { self.used.fetch_sub(self.bytes, Ordering::AcqRel); }
+}
+
+#[derive(Debug)]
+pub struct StylesheetRequest {
     pub limits: crate::css::StylesheetLimits,
     pub node: usize,
     pub generation: u64,
@@ -19,8 +25,10 @@ pub struct DynamicStylesheet {
     pub target: crate::navigation::Location,
     pub origin: crate::navigation::Location,
     pub nonce: Option<String>,
-    pub policy: crate::csp::PolicySet,
+    pub policy: Arc<crate::csp::PolicySet>,
     pub error: Option<String>,
+    pub storage_limit: usize,
+    _storage: PendingStorage,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -43,7 +51,8 @@ pub(super) struct StylesheetState {
     pub pending: VecDeque<DynamicStylesheet>,
     pub removed: HashSet<usize>,
     entries: HashMap<usize, SheetEntry>,
-    attempts: usize,
+    pending_storage: Arc<AtomicUsize>,
+    policy: Option<Arc<crate::csp::PolicySet>>,
     pub source_bytes: usize,
     pub source_rules: usize,
     pub in_flight: usize,
@@ -414,14 +423,6 @@ impl Bridge<'_> {
             .in_flight
             .saturating_sub(before - self.state.stylesheets.pending.len());
         let Some(key) = key else { return Ok(()) };
-        if self.state.stylesheets.attempts >= MAX_STYLESHEET_REQUESTS {
-            self.state.error(
-                "Dynamic stylesheet",
-                &format!("Dynamic stylesheet request limit reached ({MAX_STYLESHEET_REQUESTS} per document)."),
-            );
-            return Ok(());
-        }
-        self.state.stylesheets.attempts += 1;
         let origin = self
             .state
             .location
@@ -458,7 +459,29 @@ impl Bridge<'_> {
             Ok(target) => (target, None),
             Err(error) => (origin.clone(), Some(error)),
         };
-        self.state.stylesheets.pending.push_back(DynamicStylesheet {
+        let policy = match &self.state.stylesheets.policy {
+            Some(policy) if policy.as_ref() == &self.state.dynamic.policy => policy.clone(),
+            _ => {
+                let policy = Arc::new(self.state.dynamic.policy.clone());
+                self.state.stylesheets.policy = Some(policy.clone());
+                policy
+            }
+        };
+        let bytes = std::mem::size_of::<StylesheetRequest>()
+            .saturating_add(target.payload_bytes()).saturating_add(origin.payload_bytes())
+            .saturating_add(key.nonce.as_ref().map_or(0, String::capacity))
+            .saturating_add(error.as_ref().map_or(0, String::capacity));
+        let storage_limit = self.state.limits.host.retained_bytes;
+        let in_flight = self.state.stylesheets.in_flight.checked_add(1)
+            .ok_or("Dynamic stylesheet in-flight counter overflow.")?;
+        let used = self.state.stylesheets.pending_storage.clone();
+        used.try_update(Ordering::AcqRel, Ordering::Acquire,
+            |used| used.checked_add(bytes).filter(|used| *used <= storage_limit))
+            .map_err(|_| "Dynamic stylesheet pending-record storage exhausted.")?;
+        let storage = PendingStorage { used, bytes };
+        self.state.stylesheets.pending.try_reserve(1)
+            .map_err(|_| "Cannot reserve dynamic stylesheet requests.")?;
+        self.state.stylesheets.pending.push_back(Arc::new(StylesheetRequest {
             limits: self.doc.stylesheet_limits,
             node,
             generation,
@@ -467,10 +490,12 @@ impl Bridge<'_> {
             target,
             origin,
             nonce: key.nonce,
-            policy: self.state.dynamic.policy.clone(),
+            policy,
             error,
-        });
-        self.state.stylesheets.in_flight += 1;
+            storage_limit,
+            _storage: storage,
+        }));
+        self.state.stylesheets.in_flight = in_flight;
         Ok(())
     }
 }
@@ -482,6 +507,42 @@ mod inert_fragment_tests;
 #[cfg(test)]
 mod inline_connection_tests {
     use super::*;
+
+    #[test]
+    fn stylesheet_request_storage_transfers_through_clones_and_refunds_on_drop() {
+        let mut doc = crate::html::parse("<html><head></head><body></body></html>");
+        doc.scripting_enabled = true;
+        let mut page = Page::for_test();
+        let mut forms = Forms::new(&doc);
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        let outcome = page.console_eval(&mut doc, &mut forms, "var link=document.createElement('link');link.rel='stylesheet';link.href='https://styles.test/sheet.css';document.head.appendChild(link);");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        let used = page.state.stylesheets.pending_storage.clone();
+        let before = used.load(Ordering::Acquire);
+        assert!(before >= std::mem::size_of::<StylesheetRequest>());
+        let requests = page.take_dynamic_stylesheets();
+        let saved = requests.front().unwrap().clone();
+        page.clear_stylesheet_requests();
+        drop(requests);
+        assert_eq!(used.load(Ordering::Acquire), before);
+        drop(saved);
+        assert_eq!(used.load(Ordering::Acquire), 0);
+        let limit = page.state.limits.host.retained_bytes;
+        page.state.limits.host.retained_bytes = 0;
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "var refused=document.createElement('link');refused.rel='stylesheet';refused.href='https://styles.test/first.css';document.head.appendChild(refused);");
+        assert_eq!(outcome.errors, 1);
+        assert!(page.report().contains("pending-record storage exhausted"));
+        assert!(page.state.stylesheets.pending.is_empty());
+        assert_eq!(used.load(Ordering::Acquire), 0);
+        page.state.limits.host.retained_bytes = limit;
+        let outcome = page.console_eval(&mut doc, &mut forms,
+            "refused.href='https://styles.test/recovery.css';");
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        assert!(used.load(Ordering::Acquire) > 0);
+        page.clear_stylesheet_requests();
+        assert_eq!(used.load(Ordering::Acquire), 0);
+    }
 
     #[test]
     fn inline_style_connection_refuses_complete_sheet_before_changing_tree_or_budget() {
