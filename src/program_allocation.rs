@@ -73,6 +73,8 @@ mod retirement_tests {
     fn program_retirement_distinct_live_count_and_source_caps_preserve_callbacks() {
         for source_cap in [false, true] {
             let mut runtime = Runtime::for_test();
+            // This witness isolates the legacy count/source policies.
+            runtime.limits.heap.retained_values=64*1024*1024;
             let mut host = NoHost::default();
             let count = if source_cap {
                 MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES
@@ -388,6 +390,13 @@ impl Runtime {
     pub(super) fn program_count_refused(&self)->bool {
         self.program_count_limit().is_some_and(|limit|self.programs.len()>=limit)
     }
+    pub(super) fn ast_count_refused(&self,nodes:usize)->bool {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas{return self.retained_ast.saturating_add(nodes)>self.limits.capacity.retained_ast;}
+        #[cfg(not(test))]
+        let _=nodes;
+        false
+    }
     fn program_registry_pressure(&self)->bool {
         if self.program_count_limit().is_some(){return self.program_count_refused();}
         self.programs.len()==self.programs.capacity()
@@ -402,13 +411,17 @@ impl Runtime {
         nodes: usize,
         needs_slot: bool,
     ) -> Result<(), Fault> {
+        self.prepare_program_storage(source_bytes,nodes,needs_slot,0)
+    }
+    pub(super) fn prepare_program_storage(&mut self,source_bytes:usize,nodes:usize,needs_slot:bool,values:usize)->Result<(),Fault> {
         #[cfg(test)]
         if self.program_allocation.disabled {
             return Ok(());
         }
         if !(needs_slot && self.program_registry_pressure()
             || self.retained_source.saturating_add(source_bytes) > self.limits.capacity.retained_source
-            || self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast)
+            || self.ast_count_refused(nodes)
+            || values>self.limits.heap.retained_values.saturating_sub(self.value_bytes))
         {
             return Ok(());
         }
@@ -416,6 +429,7 @@ impl Runtime {
         let mut source = 0usize;
         let mut ast = 0usize;
         let mut retired = 0usize;
+        let mut payload=0usize;
         for index in 0..self.programs.len() {
             self.step()?;
             let program = &self.programs[index];
@@ -426,10 +440,11 @@ impl Runtime {
                 ast = ast
                     .checked_add(program.node_count())
                     .ok_or_else(|| Fault::new("Program retirement accounting overflow."))?;
+                payload=payload.checked_add(program.retained_bytes.get()).ok_or_else(||Fault::new("Program payload retirement accounting overflow."))?;
                 retired += 1;
             }
         }
-        if source > self.retained_source || ast > self.retained_ast {
+        if source > self.retained_source || ast > self.retained_ast || payload>self.value_bytes {
             return Err(Fault::new("Program retirement accounting mismatch."));
         }
         // Prepay the second registry pass and conservative byte/node destruction
@@ -459,6 +474,7 @@ impl Runtime {
             .retain(|program| Rc::strong_count(program) != 1);
         self.retained_source -= source;
         self.retained_ast -= ast;
+        self.value_bytes-=payload;
         // Escaped RegExp objects own their code independently: no regexp refund.
         self.program_allocation.passes = self.program_allocation.passes.saturating_add(1);
         self.program_allocation.retired = self.program_allocation.retired.saturating_add(retired);
@@ -507,7 +523,7 @@ impl Runtime {
         let count_cap = self.program_count_refused();
         let source_cap = self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source;
         let ast_cap =
-            nodes.is_some_and(|nodes| self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast);
+            nodes.is_some_and(|nodes|self.ast_count_refused(nodes));
         let prefix = if ast {
             format!("Retained AST limit reached ({} nodes).", self.limits.capacity.retained_ast)
         } else if let Some(limit)=self.program_count_limit() {

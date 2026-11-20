@@ -147,7 +147,7 @@ impl Runtime {
             false, self.eval_depth, self.limits.capacity, self.limits.heap)?;
         let nodes = program.node_count();
         self.prepare_program_capacity(0, nodes, false)?;
-        if self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast {
+        if self.ast_count_refused(nodes) {
             return Err(self.program_limit_fault(source, Some(nodes), "dynamic-validation", Some(false), true));
         }
         self.work_as(nodes.saturating_mul(std::mem::size_of::<usize>()), super::WorkKind::ProgramCompilation)?;
@@ -446,6 +446,8 @@ if(caught!==7||effects!==0)throw 'fragment injection or execution';
             ),
         ] {
             let mut runtime = realm();
+            // Isolate retained source/AST guards from physical Program storage.
+            runtime.limits.heap.retained_values=64*1024*1024;
             let mut reached = false;
             for _ in 0..24 {
                 runtime.begin_job();

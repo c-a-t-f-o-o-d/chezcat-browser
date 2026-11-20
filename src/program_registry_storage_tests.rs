@@ -29,12 +29,13 @@ fn browser_registry_keeps_six_thousand_live_ordinary_and_dynamic_programs_and_re
 #[test]
 fn browser_registry_exact_slot_copy_and_retention_refusal_publish_no_program_or_regexp_charge() {
     let mut runtime=Runtime::new();let baseline=runtime.value_bytes;let limit=runtime.limits.heap.retained_values;
-    let slot=std::mem::size_of::<Rc<Program>>();runtime.limits.heap.retained_values=baseline+slot-1;
-    assert!(runtime.register_program("1;",false).err().unwrap().message.contains("Retained value arena"));
+    let payload=Parser::parse("1;",&mut MAX_REGEXP_WORK.clone()).unwrap().retained_payload_bytes(||Ok(())).unwrap();
+    let slot=std::mem::size_of::<Rc<Program>>();runtime.limits.heap.retained_values=baseline+slot+payload-1;
+    assert!(runtime.register_program("1;",false).err().unwrap().message.contains("Retained value"));
     assert_eq!((runtime.programs.len(),runtime.programs.capacity(),runtime.retained_source,runtime.retained_ast,runtime.retained_regexp,runtime.value_bytes),(0,0,0,0,0,baseline));
     runtime.limits.heap.retained_values+=1;runtime.begin_job();
     let first=runtime.register_program("1;",false).unwrap();
-    assert_eq!((runtime.programs.len(),runtime.programs.capacity(),runtime.value_bytes),(1,1,baseline+slot));
+    assert_eq!((runtime.programs.len(),runtime.programs.capacity(),runtime.value_bytes),(1,1,baseline+slot+payload));
     let before=(runtime.programs.len(),runtime.programs.capacity(),runtime.retained_source,runtime.retained_ast,runtime.retained_regexp,runtime.value_bytes);
     runtime.limits.heap.retained_values=limit;runtime.begin_job();runtime.copy_bytes="/a/;".len()+slot-1;
     assert!(runtime.register_program("/a/;",false).err().unwrap().message.contains("work limit"));
@@ -42,7 +43,7 @@ fn browser_registry_exact_slot_copy_and_retention_refusal_publish_no_program_or_
     assert_eq!(runtime.copy_bytes,0);
     runtime.begin_job();let second=runtime.register_program("/a/;",false).unwrap();
     assert_eq!(runtime.programs.len(),2);assert!(runtime.retained_regexp>before.4);
-    assert_eq!(runtime.value_bytes,baseline+runtime.programs.capacity()*slot);
+    assert_eq!(runtime.value_bytes,baseline+runtime.programs.capacity()*slot+runtime.programs.iter().map(|p|p.retained_bytes.get()).sum::<usize>());
     drop((first,second));
 }
 #[test]
@@ -53,9 +54,12 @@ fn browser_registry_retires_dead_programs_on_backing_pressure_and_reuses_paid_ca
     }
     assert!(runtime.program_allocation.retired>=5996);
     assert!(runtime.programs.len()<=runtime.programs.capacity());assert!(runtime.programs.capacity()<=4);
+    runtime.begin_job();
+    runtime.prepare_program_storage(0,0,false,runtime.limits.heap.retained_values).unwrap();
+    assert!(runtime.programs.is_empty());
     assert_eq!(runtime.value_bytes,baseline+runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>());
     let capacity=runtime.programs.capacity();let before=runtime.value_bytes;
     runtime.begin_job();let live=runtime.register_program("42;",false).unwrap();
-    assert_eq!(runtime.programs.capacity(),capacity);assert_eq!(runtime.value_bytes,before);
+    assert_eq!(runtime.programs.capacity(),capacity);assert_eq!(runtime.value_bytes,before+live.retained_bytes.get());
     drop(live);
 }

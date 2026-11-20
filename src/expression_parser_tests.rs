@@ -293,6 +293,7 @@ fn scratch_parser(source: &str, enclosing: usize) -> Parser {
         capacity: limits::REGRESSION_CAPACITIES,
         heap: limits::REGRESSION_HEAP,
         program: Program {
+            retained_bytes:std::cell::Cell::new(0),
             source: source.into(), strict: false, exprs: Vec::new(), stmts: Vec::new(),
             templates: Vec::new(), classes: Vec::new(), class_members: 0, patterns: Vec::new(), body: Vec::new(), chain_steps: 0, resumption_plan_nodes: 0,
         },

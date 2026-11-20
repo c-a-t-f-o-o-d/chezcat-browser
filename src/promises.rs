@@ -2044,7 +2044,7 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert_eq!(data.reactions.len(),3);
         let released=data.reaction_storage_bytes();
         assert!(released>data.reactions.capacity()*std::mem::size_of::<Reaction>());
-        let before=runtime.value_bytes;
+        let before=runtime.value_bytes-runtime.retained_arena_bytes();
         let limit=runtime.limits.capacity.promises;
         runtime.limits.capacity.promises=1;
         let error=runtime.execute("gate(1);",&mut NoHost).unwrap_err();
@@ -2052,7 +2052,7 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert!(!runtime.has_microtasks());
         assert_eq!(runtime.promises.reactions,0);
         assert_eq!(runtime.objects[parent].promise.as_ref().unwrap().reactions.capacity(),0);
-        assert_eq!(runtime.value_bytes,before-released);
+        assert_eq!(runtime.value_bytes-runtime.retained_arena_bytes(),before-released);
         runtime.limits.capacity.promises=limit;
         runtime.begin_job();
         runtime.execute("if(hits!==0)throw 'abandoned await ran';wait();",&mut NoHost).unwrap();
