@@ -392,7 +392,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_stylesheet(&self, node: usize) -> bool {
-        tag(self.doc, node) == "link" && self.state.dom.created.contains(&node)
+        self.doc.nodes.get(node).is_some_and(|entry|
+            entry.namespace == crate::html::Namespace::Html
+                && matches!(&entry.kind, NodeKind::Element { tag, .. } if tag == "link"))
     }
 
     pub(super) fn created_html_style(&self, node: usize) -> bool {

@@ -220,7 +220,7 @@ fn fetch(
     let filter = |target: &crate::url::HttpUrl| {
         job.blocking.check(target)?;
         job.request.policy.allows_external_style(
-            job.request.node,
+            usize::MAX,
             job.request.nonce.as_deref(),
             &Location {
                 url: Some(target.clone()),
@@ -479,6 +479,8 @@ mod tests {
                         let mut status = "200 OK";
                         let mut headers = String::new();
                         let body = match path.as_str() {
+                            "/initial-meta" => "<head><link rel=stylesheet href=/sheet.css><meta http-equiv=Content-Security-Policy content=\"style-src 'none'\"></head><body><div id=target>Original target</div></body>".into(),
+                            "/initial-small" => "<head><link rel=stylesheet href=/sheet.css></head><body><div id=target>Original target</div></body>".into(),
                             "/refused-font"=>format!("<style>#target{{font-family:RefusedFace}}</style><style>/*{}*/@font-face{{font-family:RefusedFace;src:url('/forbidden.woff')}}</style><div id=target>Used family</div>","x".repeat(200)),
                             "/initial-large"=>"<head><link rel=stylesheet href=/large.css><link rel=stylesheet href=/large.css></head><body><div id=target>Tail target</div>".to_owned(),
                             "/initial-latin"=>"<head><link rel=stylesheet href=/latin.css></head><body><div id=target>Tail target</div>".to_owned(),
@@ -626,6 +628,38 @@ document.head.appendChild(sheet);
             app.reflow();
         }
         app.poll_load();
+    }
+
+    #[test]
+    fn inline_stylesheet_detach_reinsert_and_parser_link_retirement_reuse_live_allowance() {
+        let site = Site::new();
+        let mut app = open(&site, "/initial-small");
+        wait(&mut app, |app| !app.is_loading());
+        app.document.stylesheet_limits = crate::css::StylesheetLimits { sheet_bytes: 128, document_bytes: 192, rules: 1 };
+        eval(&mut app, "var initial=document.querySelector('link');initial.disabled=true;");
+        assert!(app.styles.is_empty(), "parsed source was not retired");
+        eval(&mut app, "var inline=document.createElement('style');inline.textContent='#target{width:44px}';for(var index=0;index<8;index++){document.head.appendChild(inline);if(document.getElementById('target').clientWidth!==44)throw 'inline geometry';document.head.removeChild(inline);}document.head.appendChild(inline);");
+        let node = (0..app.document.nodes.len()).find(|&node| app.document.attr(node,"id")==Some("target")).unwrap();
+        assert_eq!(app.page.border_rects[node].unwrap().width, 44);
+        assert!(app.styles.is_empty());
+        eval(&mut app, "document.head.removeChild(inline);initial.disabled=false;");
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.styles.len(), 1);
+        assert_eq!(app.page.border_rects[node].unwrap().width, 123);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0);
+    }
+
+    #[test]
+    fn parsed_link_mutation_checks_current_meta_policy_before_network() {
+        let site = Site::new();
+        let mut app = open(&site, "/initial-meta");
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.styles.len(), 1);
+        eval(&mut app, "var parsed=document.querySelector('link');var denied=0;parsed.onerror=function(){denied++;};parsed.href='/next.css';");
+        wait(&mut app, |app| !app.is_loading());
+        assert!(app.styles.is_empty());
+        eval(&mut app, "if(denied!==1)throw 'missing policy error';");
+        assert!(!site.requests.lock().unwrap().iter().any(|path| path=="/next.css"));
     }
 
     #[test]

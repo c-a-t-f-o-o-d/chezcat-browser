@@ -1340,6 +1340,9 @@ impl Page {
         let resource_base = self.state.dynamic.base.take();
         let stylesheet_bytes = self.state.stylesheets.source_bytes;
         let stylesheet_rules = self.state.stylesheets.source_rules;
+        let stylesheet_sources = std::mem::take(&mut self.state.stylesheets.sources);
+        let stylesheet_sources_prepared = self.state.stylesheets.sources_prepared;
+        let stylesheet_source_error = self.state.stylesheets.source_setup_error.take();
         let images = std::mem::take(&mut self.state.images);
         let history = std::mem::take(&mut self.state.history);
         let navigation_timing=self.state.navigation_timing;
@@ -1354,6 +1357,9 @@ impl Page {
         self.state.dynamic.base = resource_base;
         self.state.stylesheets.source_bytes = stylesheet_bytes;
         self.state.stylesheets.source_rules = stylesheet_rules;
+        self.state.stylesheets.sources = stylesheet_sources;
+        self.state.stylesheets.sources_prepared = stylesheet_sources_prepared;
+        self.state.stylesheets.source_setup_error = stylesheet_source_error;
         self.state.images = images;
         self.state.history = history;
         self.state.dynamic.policy = policy.clone();
@@ -1363,7 +1369,18 @@ impl Page {
         self.state.enabled = doc.scripting_enabled;
         self.state.eval_allowed = policy.allows_eval().is_ok();
         if !doc.scripting_enabled {
+            self.state.stylesheets.sources_prepared = false;
             return Outcome::default();
+        }
+        if !self.state.stylesheets.sources_prepared {
+            let geometry = self.state.geometry.take();
+            self.set_stylesheet_sources(doc, geometry.as_ref().map(|geometry| geometry.stylesheet_sources()).unwrap_or(&HashMap::new()));
+            self.state.geometry = geometry;
+        }
+        self.state.stylesheets.sources_prepared = false;
+        if let Some(error) = self.state.stylesheets.source_setup_error.take() {
+            self.state.error("Stylesheet source ownership", &error);
+            return Outcome { errors: 1, ..Outcome::default() };
         }
         self.state.ready = "interactive";
         self.state.node_limit = doc.nodes.len().saturating_add(self.state.limits.host.extra_nodes);
@@ -1376,6 +1393,7 @@ impl Page {
         }
         self.state.retained = document_bytes(doc);
         self.state.retained_limit = self.state.retained.saturating_add(self.state.limits.host.retained_bytes);
+        self.state.retained += self.state.stylesheets.source_metadata_bytes();
         if let Err(error) = self.state.rebuild(doc) {
             self.state.error("JavaScript startup", &error);
             return Outcome {
@@ -1639,8 +1657,8 @@ impl Page {
             "submit" | "reset" => tag(doc, target) == "form",
             "load" | "error" => {
                 tag(doc, target) == "img" && self.state.images.entries.contains_key(&target)
-                    || matches!(tag(doc, target), "script" | "link")
-                    && self.state.dom.created.contains(&target)
+                    || tag(doc, target) == "script" && self.state.dom.created.contains(&target)
+                    || tag(doc, target) == "link" && doc.nodes[target].namespace == crate::html::Namespace::Html
             }
             _ => false,
         };
@@ -2407,8 +2425,7 @@ impl Bridge<'_> {
             || matches!(event, "load" | "error")
                 && node_index(handle).is_some_and(|node| {
                     tag(self.doc, node) == "img"
-                        || matches!(tag(self.doc, node), "script" | "link")
-                            && self.state.dom.created.contains(&node)
+                        || self.dom_script(node) || self.dom_stylesheet(node)
                 });
         if !allowed {
             return Err(format!("Event {event:?} is not supported on this target."));
@@ -4432,8 +4449,7 @@ impl Host for Bridge<'_> {
                 Ok(self.handler_target(object, event) == WINDOW
                     || node_index(object).is_some_and(|node| {
                         tag(self.doc, node) == "img"
-                            || matches!(tag(self.doc, node), "script" | "link")
-                                && self.state.dom.created.contains(&node)
+                            || self.dom_script(node) || self.dom_stylesheet(node)
                     }))
             } else {
                 self.handler_event_target(object, event)?;

@@ -73,7 +73,7 @@ fn computed_overflow_original_real_sheet_axes_live_readonly_detached_and_shared_
     .unwrap();
     page.set_location(&location);
     page.set_resource_base(&location);
-    page.set_stylesheet_usage(crate::css::stylesheet_usage(&doc, &sheets));
+    page.set_stylesheet_sources(&doc, &sheets);
     page.set_geometry(crate::script_geometry::Geometry::new(
         800,
         600,

@@ -58,6 +58,8 @@ pub struct Geometry {
 }
 
 impl Geometry {
+    pub(super) fn stylesheet_sources(&self) -> &HashMap<usize, String> { &self.styles }
+
     pub fn new(
         width: i32,
         height: i32,
