@@ -30,6 +30,19 @@ impl<K:Ord+Copy,V> IdentityMap<K,V> {
     pub(super) fn retain(&mut self,mut keep:impl FnMut(&K)->bool){
         self.entries.retain(|entry|keep(&entry.0));
     }
+    // The caller admits record writes, sorting and any required backing, and
+    // validates that every incoming key is distinct from the existing keys.
+    pub(super) fn append_and_sort(&mut self, additional:usize, entries:impl IntoIterator<Item=(K,V)>){
+        assert!(self.len().checked_add(additional).is_some_and(|length|length<=self.entries.capacity()),
+            "Batched identity insertion requires admitted backing");
+        let mut inserted=0usize;
+        for entry in entries {
+            assert!(inserted<additional,"Batched identity count must match its admission");
+            self.entries.push(entry);inserted+=1;
+        }
+        assert_eq!(inserted,additional,"Batched identity count must match its admission");
+        if additional!=0{self.entries.sort_unstable_by_key(|entry|entry.0);}
+    }
     pub(super) fn contains_key(&self,key:&K)->bool{self.get(key).is_some()}
     pub(super) fn insert_work(&self,key:&K)->usize {
         let shifted=match self.entries.binary_search_by_key(key,|entry|entry.0){Ok(_)=>0,Err(index)=>self.len()-index};
