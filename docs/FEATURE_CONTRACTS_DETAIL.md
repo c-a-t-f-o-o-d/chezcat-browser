@@ -257,12 +257,15 @@ Explicit small profiles retain refusal/rollback/recovery witnesses. The original
 1000-update semantic cases retain their workloads and verify fresh Text and
 preserved old data within the normal budgets.
 
-The HTML tokenizer still omits parsed comments and DocumentType nodes. CP2 adds
-native-created Comments separately; no full Document/template-content model is
-implied.
-Template childNodes explicitly declines rather than exposing inert AST input as
-a fabricated fragment. Hidden child Documents keep their existing unsupported
-collection boundary; ordinary list reads do not activate inert queries/resources.
+The tokenizer retains real parsed Comments in loaded, inert and checked fragment
+paths. Template content has a real inert DocumentFragment with stable childNodes
+and owner-document identity. Inert-owner fragment factories and same-owner
+Element/fragment appendChild/removeChild preserve actual mixed-node topology,
+saved aliases and donor emptying under atomic storage/copy/work admission.
+Cross-document inert adoption, insertBefore/replaceChild and inert observation
+remain outside that mutation slice; ancestry/resource refusals retain the existing
+escaped host-error path. Hidden child Documents keep their existing collection
+boundaries; ordinary list reads do not activate inert queries/resources.
 Parsed, executed script Text is inspectable, while its forbidden content/removal/
 move/non-noop normalize mutations remain refused without source/DOM/queue changes.
 

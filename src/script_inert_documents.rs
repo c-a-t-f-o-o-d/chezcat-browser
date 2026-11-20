@@ -3,6 +3,9 @@
 use super::*;
 use std::rc::Rc;
 
+#[path = "script_inert_mutation.rs"]
+mod mutation;
+
 #[path = "script_dom_parser.rs"]
 pub(super) mod parser;
 
@@ -208,6 +211,7 @@ impl Bridge<'_> {
             "createElement" => Some("createElement"),
             "createElementNS" => Some("createElementNS"),
             "createTextNode" => Some("createTextNode"),
+            "createDocumentFragment" => Some("createDocumentFragment"),
             _ => None,
         }
     }
@@ -1404,7 +1408,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
-        let kind = if method == "createTextNode" {
+        let kind = if method == "createDocumentFragment" {
+            Kind::Fragment { template: None }
+        } else if method == "createTextNode" {
             Kind::Text(self.text(args.first().ok_or("createTextNode requires a value.")?)?)
         } else {
             let namespace_aware = method == "createElementNS";
