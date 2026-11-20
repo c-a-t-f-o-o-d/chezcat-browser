@@ -109,7 +109,6 @@ if(a.getAttribute('href')!=='initial.html'||a.getAttribute('download')!=='origin
         "other.setAttribute('href','other.html');",
         "other.setAttribute('download','other.bin');",
         "resource.setAttribute('src','replacement.js');",
-        "sheet.setAttribute('href','replacement.css');",
         "foreign.setAttribute('href','foreign-replacement.html');",
         "foreign.setAttribute('download','foreign-replacement.bin');",
         "a.attributes.setNamedItem(unsupportedIncoming);",
@@ -132,7 +131,7 @@ if(a.getAttribute('href')!=='initial.html'||a.getAttribute('download')!=='origin
             "if(a.getAttributeNode('href')!==originalHref||originalHref.value!=='initial.html'||originalHref.ownerElement!==a||unsupportedIncoming.ownerElement!==null)throw 'rejected job changed Attr identity';");
         assert_eq!(outcome.errors, 0, "{}", page.report());
     }
-    assert_eq!(refused, 7);
+    assert_eq!(refused, 6);
     assert_eq!(doc.attr(node(&doc, "a"), "href"), Some("initial.html"));
     assert_eq!(doc.attr(node(&doc, "foreign"), "href"), Some("foreign.html"));
     assert_eq!(doc.attr(node(&doc, "foreign"), "download"), Some("foreign.bin"));
@@ -141,4 +140,12 @@ if(a.getAttribute('href')!=='initial.html'||a.getAttribute('download')!=='origin
     assert!(!page.has_navigation_request());
     assert!(page.take_dynamic_scripts().is_empty());
     assert!(page.take_dynamic_stylesheets().is_empty());
+    let outcome=page.console_eval(&mut doc,&mut forms,"var sheetHref=sheet.getAttributeNode('href');sheet.setAttribute('href','replacement.css');if(sheet.getAttributeNode('href')!==sheetHref||sheetHref.value!=='replacement.css'||sheetHref.ownerElement!==sheet)throw 'stylesheet Attr identity';");
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let request=page.state.stylesheets.pending.front().unwrap();
+    assert_eq!(request.target.display(),"https://anchor-attributes.test/replacement.css");
+    assert!(request.error.is_none());
+    assert!(!page.has_navigation_request());
+    assert!(page.take_dynamic_scripts().is_empty());
+
 }

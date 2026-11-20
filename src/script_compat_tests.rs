@@ -135,8 +135,8 @@ fn detached_style_type_limits_and_foreign_owner_fail_before_effects(){
 }
 
 #[test]
-fn parsed_link_href_reflects_real_url_without_resource_or_mutation_authority(){
-    let (mut doc,mut forms,mut page,outcome)=page("<link id=relative rel=stylesheet href='../original.css?q=1#section'><link id=absolute href='https://other.test/read-only.css'><link id=missing><link id=empty href=''><link id=invalid href='http://[broken'>",&[]);assert_eq!(outcome.errors,0);
+fn parsed_link_href_reflection_and_mutation_use_checked_stylesheet_lifecycle(){
+    let (mut doc,mut forms,mut page,outcome)=page("<html><body><div id=holder><link id=relative rel=stylesheet href='../original.css?q=1#section'><link id=absolute href='https://other.test/read-only.css'><link id=missing><link id=empty href=''><link id=invalid href='http://[broken'></div></body></html>",&[]);assert_eq!(outcome.errors,0);
     page.set_resource_base(&crate::navigation::address("https://base.test/assets/index.html",&crate::navigation::Location::home()).unwrap());
     let commits=page.state.dom_commits;
     let out=page.console_eval(&mut doc,&mut forms,r#"
@@ -144,9 +144,27 @@ var relative=document.getElementById('relative'),missing=document.getElementById
 if(!('href' in relative)||!('href' in missing)||document.querySelectorAll('link[rel~="stylesheet"]')[0]!==relative||relative.href!=='https://base.test/original.css?q=1#section'||relative.getAttribute('href')!=='../original.css?q=1#section')throw 'real stylesheet URL';
 if(document.getElementById('absolute').href!=='https://other.test/read-only.css'||missing.href!==''||empty.href!=='https://base.test/assets/index.html'||document.getElementById('invalid').href!=='http://[broken')throw 'URL reflection states';
 "#);assert_eq!(out.errors,0,"{}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(page.take_dynamic_stylesheets().is_empty());assert!(!page.has_host_tasks());
-    for operation in ["relative.href='/must-not-fetch.css';","relative.setAttribute('href','/must-not-fetch.css');","relative.removeAttribute('href');","relative.parentNode.removeChild(relative);"]{
-        let out=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(out.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert!(!page.has_host_tasks());
-    }
+    let out=page.console_eval(&mut doc,&mut forms,"relative.href='/first.css';");
+    assert_eq!(out.errors,0,"{}",page.report());
+    let first=page.state.stylesheets.pending.front().unwrap().clone();
+    assert_eq!(first.target.display(),"https://base.test/first.css");
+    assert!(first.error.is_none());
+    assert!(!first.same_origin_only);
+    let out=page.console_eval(&mut doc,&mut forms,"relative.setAttribute('href','/second.css');");
+    assert_eq!(out.errors,0,"{}",page.report());
+    assert!(first.cancel.load(std::sync::atomic::Ordering::Acquire));
+    assert_eq!(page.state.stylesheets.pending.len(),1);
+    let second=page.state.stylesheets.pending.front().unwrap().clone();
+    assert_eq!(second.target.display(),"https://base.test/second.css");
+    let out=page.console_eval(&mut doc,&mut forms,"relative.removeAttribute('href');relative.parentNode.removeChild(relative);relative.href='../original.css?q=1#section';if(relative.isConnected)throw 'link detach';");
+    assert_eq!(out.errors,0,"{}",page.report());
+    assert!(second.cancel.load(std::sync::atomic::Ordering::Acquire));
+    assert!(page.take_dynamic_stylesheets().is_empty());
+    let removed=page.take_stylesheet_removals();
+    assert_eq!(removed.len(),1);
+    assert!(removed.contains(&first.node));
+    assert_eq!(page.state.stylesheets.in_flight,0);
+    assert!(!page.has_host_tasks());
     page.set_resource_base(&crate::navigation::address("https://base.test/new/",&crate::navigation::Location::home()).unwrap());
     let out=page.console_eval(&mut doc,&mut forms,"if(relative.href!=='https://base.test/original.css?q=1#section'||empty.href!=='https://base.test/new/')throw 'live base';missing.setAttributeNS('urn:metadata','href','/inert.css');if(missing.href!=='')throw 'namespace metadata';var created=document.createElement('link');created.href='';if(created.href!=='https://base.test/new/')throw 'created empty';");assert_eq!(out.errors,0,"{}",page.report());assert!(!page.has_host_tasks());
 }
@@ -2611,7 +2629,7 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let nodes: Vec<_> = ["p", "image", "link", "inert"].iter().map(|id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(*id)).unwrap()).collect();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    for (node, name) in [(nodes[0], "type"), (nodes[0], "onclick"), (nodes[1], "src"), (nodes[2], "href")] {
+    for (node, name) in [(nodes[0], "type"), (nodes[0], "onclick"), (nodes[1], "src")] {
         let value = bridge.call(node_handle(node), "getAttributeNode", &[Value::String(name.into())]).unwrap();
         let Value::Host(handle) = value else { panic!("expected real Attr") };
         let original = bridge.doc.attr(node, name).unwrap().to_owned();
@@ -2632,6 +2650,22 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
     assert_eq!(bridge.doc.attr(nodes[0], "value"), None);
     assert_eq!(bridge.forms.controls[&nodes[0]].value.text(), "on");
     assert_eq!(bridge.state.attributes[script_attr::index(value).unwrap()].owner, None);
+    let link=node_handle(nodes[2]);
+    let Value::Host(href)=bridge.call(link,"getAttributeNode",&[Value::String("href".into())]).unwrap() else {panic!("missing stylesheet Attr")};
+    bridge.set(href,"value",Value::String("https://example.test/changed.css".into())).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[2],"href"),Some("https://example.test/changed.css"));
+    assert_eq!(bridge.state.attributes[script_attr::index(href).unwrap()].owner,Some(nodes[2]));
+    assert_eq!(bridge.state.stylesheets.pending.len(),1);
+    let request=bridge.state.stylesheets.pending.front().unwrap().clone();
+    assert_eq!(request.target.display(),"https://example.test/changed.css");
+    assert!(request.error.is_none());
+    bridge.call(link,"removeAttributeNode",&[Value::Host(href)]).unwrap();
+    assert_eq!(bridge.doc.attr(nodes[2],"href"),None);
+    assert_eq!(bridge.state.attributes[script_attr::index(href).unwrap()].owner,None);
+    assert!(request.cancel.load(std::sync::atomic::Ordering::Acquire));
+    assert!(bridge.state.stylesheets.pending.is_empty());
+    assert_eq!(bridge.state.stylesheets.in_flight,0);
+
 }
 
 #[test]
