@@ -21,6 +21,53 @@ fn reflect_get_real_window_and_native_element_receiver() {
     assert_eq!(doc.title, "Window reflection passed");
 }
 
+
+#[test]
+fn image_script_interfaces_use_real_nodes_and_canonical_owner_prototypes() {
+    let (doc, _, page, outcome) = page(
+        "<html><body><img id='image' src='pixel.png'><script id='script' src='app.js'></script><div id='other'></div><svg><script id='foreign'></script></svg></body></html>",
+        &[r#"
+var image=document.getElementById('image'),script=document.getElementById('script');
+var I=HTMLImageElement,S=HTMLScriptElement,F=Image;
+if(document.getElementById('foreign') instanceof S)throw 'foreign namespace brand';
+if(I===F||I.prototype!==F.prototype||I.prototype.constructor!==I)throw 'legacy factory prototype';
+for(var pair of [[image,I,'HTMLImageElement'],[script,S,'HTMLScriptElement']]){
+    var node=pair[0],C=pair[1],name=pair[2];
+    if(Object.getPrototypeOf(C)!==HTMLElement||Object.getPrototypeOf(C.prototype)!==HTMLElement.prototype||
+       Object.getPrototypeOf(node)!==C.prototype||node.constructor!==C||!(node instanceof C)||
+       !(node instanceof HTMLElement)||Object.prototype.toString.call(node)!=='[object '+name+']')throw 'native interface ancestry';
+    var pd=Object.getOwnPropertyDescriptor(C,'prototype'),gd=Object.getOwnPropertyDescriptor(window,name);
+    if(pd.writable||pd.configurable||pd.enumerable||!gd.writable||!gd.configurable||gd.enumerable)throw 'interface descriptors';
+    var rejected=0;for(var call of [function(){new C();},function(){C();}]){
+        try{call();}catch(e){if(!(e instanceof TypeError))throw e;rejected++;}
+    }
+    if(rejected!==2||document.getElementById('other') instanceof C)throw 'illegal constructor or false brand';
+}
+var made=new F(9,11),created=document.createElement('script');
+if(!(made instanceof I)||!(made instanceof F)||made.width!==9||made.height!==11||!made.complete||
+   made.isConnected||!(created instanceof S)||created.isConnected)throw 'real factories';
+if(image.src!=='https://www.google.com/pixel.png'||script.src!=='https://www.google.com/app.js')throw 'native resource URL';
+I.prototype.interfaceProbe=17;S.prototype.interfaceProbe=23;
+if(image.interfaceProbe!==17||made.interfaceProbe!==17||created.interfaceProbe!==23)throw 'prototype inheritance';
+image.interfaceProbe=31;if(image.interfaceProbe!==31||!delete image.interfaceProbe||image.interfaceProbe!==17)throw 'own override';
+var owner=document.implementation.createHTMLDocument('inert');
+for(var pair of [['img',I],['script',S]]){
+    var inert=owner.createElement(pair[0]);
+    if(!(inert instanceof pair[1])||Object.getPrototypeOf(inert)!==pair[1].prototype||inert.ownerDocument!==owner||inert.isConnected)throw 'inert owner interface';
+    var copy=inert.cloneNode(true);if(!(copy instanceof pair[1])||copy.ownerDocument!==owner||copy===inert)throw 'inert clone identity';
+}
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow;
+if(w.HTMLImageElement===I||w.HTMLScriptElement===S||image instanceof w.HTMLImageElement||
+   Object.getPrototypeOf(w.HTMLImageElement.prototype)!==w.HTMLElement.prototype)throw 'owner realm';
+delete window.HTMLImageElement;window.HTMLScriptElement=17;
+if(!(image instanceof I)||!(made instanceof F)||!(created instanceof S)||new F(3).width!==3)throw 'saved canonical constructors';
+document.title='image-script-interfaces-ok';
+"#],
+    );
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(doc.title, "image-script-interfaces-ok");
+}
+
 #[test]
 fn base_node_interfaces_link_real_ancestry_and_author_element_polyfills() {
     let(doc,_,page,outcome)=page("<html><body><div id='base'>Text</div><svg id='vector'></svg></body></html>",&[r#"
@@ -1856,11 +1903,11 @@ fn class_list_handle_band_never_collides_with_last_event_identity() {
 #[test]
 fn absent_attribute_removal_observes_ordered_qualified_and_expanded_names() {
     let (mut doc, mut forms, mut page, outcome) = page(
-        "<body><div id=p stable-marker=keep></div><svg><rect id='shape' width='18'/></svg><input id=edit value=seed></body>",
+        "<body><div id=p stablemarker=keep></div><svg><rect id='shape' width='18'/></svg><input id=edit value=seed></body>",
         &[r#"
 var p=document.getElementById('p'), edit=document.getElementById('edit'), shape=document.getElementById('shape');
 var detached=document.createElement('div');
-var protectedAttr=p.getAttributeNode('stable-marker');edit.value='edited';
+var protectedAttr=p.getAttributeNode('stablemarker');edit.value='edited';
 p.setAttributeNS('urn:first','m:flag','one');p.setAttributeNS('urn:second','m:flag','two');
 p.setAttributeNS(null,'MixedCase','exact');
 var first=p.getAttributeNodeNS('urn:first','flag'), second=p.getAttributeNodeNS('urn:second','flag');
@@ -1878,7 +1925,7 @@ if(shape.getAttribute('WIDTH')!==null||shape.hasAttribute('WIDTH')||shape.remove
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let commits = page.state.dom_commits;
     let retained = page.state.retained;
-    for source in ["p.removeAttribute('STABLE-MARKER');", "p.removeAttributeNS(null,'stable-marker');"] {
+    for source in ["p.removeAttribute('STABLEMARKER');", "p.removeAttributeNS(null,'stablemarker');"] {
         let result = page.console_eval(&mut doc, &mut forms, source);
         assert_eq!(result.errors, 1, "{source}: {}", page.report());
     }
@@ -1886,7 +1933,7 @@ if(shape.getAttribute('WIDTH')!==null||shape.hasAttribute('WIDTH')||shape.remove
 if(p.removeAttribute('pending-state')!==undefined||p.removeAttribute('')!==undefined||
    p.removeAttribute('not an attribute')!==undefined||p.removeAttributeNS(null,'pending-state')!==undefined)throw 'missing result';
 if(detached.removeAttribute('pending-state')!==undefined||detached.parentNode!==null||detached.ownerDocument!==document)throw 'detached receiver';
-if(protectedAttr.ownerElement!==p||protectedAttr.value!=='keep'||p.getAttributeNode('stable-marker')!==protectedAttr||
+if(protectedAttr.ownerElement!==p||protectedAttr.value!=='keep'||p.getAttributeNode('stablemarker')!==protectedAttr||
    mixed.ownerElement!==p||edit.value!=='edited'||edit.defaultValue!=='seed'||edit.ownerDocument!==document)throw 'state or ownership';
 "#);
     assert_eq!(result.errors, 0, "{}", page.report());
@@ -3671,9 +3718,9 @@ fn connected_created_scripts_queue_once_and_completion_keeps_native_receivers() 
         "<html><head></head><body><div id=root></div></body></html>",
         &[r#"
 var first=document.createElement('script'),second=document.createElement('script'),phases='';
-window.addEventListener('load',function(e){if(e.target===first){if(e.eventPhase!==1||e.bubbles)throw 'capture phase';phases+='capture,';}},true);
+window.addEventListener('load',function(e){if(e.target===first){if(!(e.target instanceof HTMLScriptElement)||e.eventPhase!==1||e.bubbles)throw 'capture phase';phases+='capture,';}},true);
 first.src='/one.js';first.async=false;
-first.onload=function(e){if(this!==first||e.target!==first||e.currentTarget!==first||e.eventPhase!==2||e.bubbles||window.loadedValue!==17||document.currentScript!==null)throw 'load receiver';phases+='target';document.title=phases;};
+first.onload=function(e){if(!(this instanceof HTMLScriptElement)||this!==first||e.target!==first||e.currentTarget!==first||e.eventPhase!==2||e.bubbles||window.loadedValue!==17||document.currentScript!==null)throw 'load receiver';phases+='target';document.title=phases;};
 document.head.appendChild(first);document.head.appendChild(first);
 document.head.appendChild(second);second.src='/two.js';
 second.onerror=function(e){if(this!==second||e.target!==second||e.bubbles||this.isConnected||this.parentNode!==null)throw 'detached error receiver';document.title+=' + error';};

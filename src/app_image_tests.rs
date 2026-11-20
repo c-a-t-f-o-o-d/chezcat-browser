@@ -96,8 +96,8 @@ impl Site {
                             let window_check = if denied { "if(loads||errors!==1||windows!==1||!img.complete||img.naturalWidth)throw Error('resource denial');document.title+='-window-'+windows;" } else { "" };
                             format!(r#"<html><head><title>Waiting</title>{base}</head><body><img id=picture src='{source}'>{meta}{history_content}<script>
 var img=document.getElementById('picture'),loads=0,errors=0,windows=0,order='';
-img.onload=function(event){{if(this!==img||event.target!==img||event.type!=='load'||!img.complete||!img.naturalWidth)throw Error('image completion');loads++;order+='L';document.title='loaded-'+loads;}};
-img.onerror=function(event){{if(this!==img||event.target!==img||!img.complete||img.naturalWidth!==0)throw Error('broken image');errors++;order+='E';document.title='error-'+errors;}};
+img.onload=function(event){{if(!(this instanceof HTMLImageElement)||!(this instanceof Image)||this!==img||event.target!==img||event.type!=='load'||!img.complete||!img.naturalWidth)throw Error('image completion');loads++;order+='L';document.title='loaded-'+loads;}};
+img.onerror=function(event){{if(!(event.target instanceof HTMLImageElement)||this!==img||event.target!==img||!img.complete||img.naturalWidth!==0)throw Error('broken image');errors++;order+='E';document.title='error-'+errors;}};
 window.onload=function(){{windows++;order+='W';{window_check}}};
 {action}
 </script></body></html>"#).into_bytes()

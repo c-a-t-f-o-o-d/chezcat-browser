@@ -1526,3 +1526,22 @@ traversal methods remain separate unfinished behavior; no complete History or
 website-navigation conformance is claimed.
 
 See the [History API](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-history-interface).
+
+
+## Image and script interface identity
+
+The per-owner HTML interface registry includes `HTMLImageElement` and
+`HTMLScriptElement`. Parsed, created and supported inert HTML nodes use those
+canonical prototypes, with the actual HTMLElement ancestry and class tags.
+The legacy `Image` factory is a distinct constructor sharing
+`HTMLImageElement.prototype`; that prototype's constructor is
+`HTMLImageElement`. Direct interface calls/construction throw TypeError.
+Saved canonical constructors remain anchored after writable interface globals
+are replaced or deleted. Child realms have distinct interface objects; existing
+owner/origin and blank-frame factory boundaries still apply.
+
+Existing native image dimensions, source reflection, resource queues and decoded
+pixels, and actual script load/error event targets remain authoritative. This
+slice adds interface identity over those implementations, not the full image or
+script IDL, image decode promises, module execution or resource activation in
+inert documents. Prototype additions do not create new loading permission.
