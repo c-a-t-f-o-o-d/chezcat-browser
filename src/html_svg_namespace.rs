@@ -32,12 +32,16 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
     if tag.duplicate_attributes{return Some(("duplicate attributes on element",&tag.name));}
     if !tag.clean_syntax{return Some(("malformed element",&tag.name));}
     tag.attrs.iter().find_map(|(key, value)| (!match key.as_str() {
-        "id" | "class" | "style" | "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
+        "id" | "class" | "style" | "role" | "focusable" | "tabindex" | "viewbox" | "preserveaspectratio" | "pathlength" |
+        "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
         "fill" | "stroke" => value.strip_prefix('#').map_or_else(
             || !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphabetic()),
             |digits| matches!(digits.len(), 3 | 4 | 6 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit())),
         "xmlns" => tag.name == "svg" && Some(value.as_str()) == Namespace::Svg.element_uri(),
+        // These ordinary null-namespace data/accessibility names do not bind
+        // event handlers, external resources or graphics/focus APIs.
+        _ if key.starts_with("aria-") || key.starts_with("data-") => true,
         _ => false,
     }).then_some(("attribute",key.as_str())))
 }

@@ -4031,11 +4031,12 @@ document.title='checked SVG attached';
 #[test]
 fn template_svg_style_preserves_actual_attribute_aliases_and_activation_guards() {
     let(mut doc,mut forms,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r#"
-var seed=document.createElement('template');seed.innerHTML='<svg id="styled" style="display:none; width:24px"><rect width="2" height="3"/></svg>';
-var content=seed.content,svg=content.firstChild,style=svg.getAttributeNode('style'),map=svg.attributes,children=svg.childNodes;
+var seed=document.createElement('template');seed.innerHTML='<svg id="styled" style="display:none; width:24px" aria-hidden="true" role="img" viewBox="0 0 24 24" data-href="/ordinary"><rect width="2" height="3"/></svg>';
+var content=seed.content,svg=content.firstChild,style=svg.getAttributeNode('style'),aria=svg.getAttributeNode('aria-hidden'),map=svg.attributes,children=svg.childNodes;
 if(map.getNamedItem('style')!==style||style.ownerElement!==svg)throw 'real inert SVG style Attr';
 document.getElementById('mount').appendChild(content);
 if(!svg.isConnected||svg.ownerDocument!==document||style.ownerDocument!==document||style.ownerElement!==svg||style.value!=='display:none; width:24px'||svg.childNodes!==children||svg.namespaceURI!=='http://www.w3.org/2000/svg'||content.childNodes.length!==0)throw 'genuine SVG style transfer';
+if(aria.ownerElement!==svg||aria.ownerDocument!==document||aria.value!=='true'||svg.getAttribute('viewBox')!=='0 0 24 24'||svg.getAttribute('viewbox')!==null||svg.getAttribute('data-href')!=='/ordinary')throw 'real SVG metadata ownership and adjusted names';
 var blocked=document.createElement('template');blocked.innerHTML='<svg style="color:url(/guard)"><rect width="1" height="1"/></svg>';
 var donor=blocked.content,unsafe=donor.firstChild,owner=unsafe.ownerDocument,mount=document.getElementById('mount'),view=mount.childNodes;
 "#]);
@@ -4052,17 +4053,18 @@ var donor=blocked.content,unsafe=donor.firstChild,owner=unsafe.ownerDocument,mou
 fn template_svg_keeps_checked_inert_namespaces_and_rolls_back_unsafe_markup() {
     let (mut doc, mut forms, mut page, result) = page("<html><body><main id=app></main></body></html>", &[r#"
 var template=document.createElement('template'), uri='http://www.w3.org/2000/svg';
-template.innerHTML='<fixture-atlas><svg xmlns="http://www.w3.org/2000/svg" style="display: none; width: 24px"><defs><g id="mark"><path d="M1 2 L3 4"/></g><g id="next"><rect x="1" y="2" width="3" height="4"/></g></defs></svg><span id="tail"></span></fixture-atlas>';
+template.innerHTML='<fixture-atlas><svg xmlns="http://www.w3.org/2000/svg" style="display: none; width: 24px" aria-hidden="true" role="img" focusable="false" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" data-href="/ordinary"><defs><g id="mark"><path d="M1 2 L3 4" pathLength="20"/></g><g id="next"><rect x="1" y="2" width="3" height="4"/></g></defs></svg><span id="tail"></span></fixture-atlas>';
 var content=template.content, host=content.firstChild, svg=host.firstChild, defs=svg.firstChild;
 var mark=defs.firstChild, path=mark.firstChild, owner=content.ownerDocument;
 if(svg.nodeName!=='svg'||!(svg instanceof SVGElement)||svg.namespaceURI!==uri||
    defs.namespaceURI!==uri||mark.namespaceURI!==uri||path.namespaceURI!==uri||
-   path.getAttribute('d')!=='M1 2 L3 4'||svg.getAttribute('style')!=='display: none; width: 24px'||mark.nextSibling.getAttribute('id')!=='next'||
+   path.getAttribute('d')!=='M1 2 L3 4'||path.getAttribute('pathLength')!=='20'||svg.getAttribute('style')!=='display: none; width: 24px'||mark.nextSibling.getAttribute('id')!=='next'||
    host.lastChild.namespaceURI!=='http://www.w3.org/1999/xhtml'||path.ownerDocument!==owner||
    owner.defaultView!==null||path.isConnected||document.querySelector('svg')!==null)
     throw 'actual private SVG topology';
+if(svg.getAttributeNames().join(',')!=='xmlns,style,aria-hidden,role,focusable,viewBox,preserveAspectRatio,data-href'||svg.getAttribute('aria-hidden')!=='true'||svg.getAttribute('role')!=='img'||svg.getAttribute('focusable')!=='false'||svg.getAttribute('data-href')!=='/ordinary')throw 'real ordered SVG declarative attributes';
 var copy=content.cloneNode(true).firstChild.firstChild;
-if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttribute('style')||copy.firstChild.firstChild.firstChild===path||
+if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttribute('style')||copy.getAttribute('aria-hidden')!=='true'||copy.getAttribute('viewBox')!=='0 0 24 24'||copy.getAttribute('preserveAspectRatio')!=='xMidYMid meet'||copy.firstChild.firstChild.firstChild===path||
    template.innerHTML.indexOf('<defs><g id="mark"><path')<0)
     throw 'retained SVG serialization or clone';
 "#]);
@@ -4071,6 +4073,9 @@ if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttr
     for markup in [
         "<svg><foreignObject><div></div></foreignObject></svg>",
         "<svg><path onclick='trigger()'/></svg>",
+        "<svg aria-hidden='true' data-href='/ordinary' onclick='trigger()'></svg>",
+        "<svg role='img' href='/guard'></svg>",
+        "<svg aria-hidden='true' xlink:href='/guard'></svg>",
         "<svg><path fill='url(#foreign)'/></svg>",
         "<svg><image href='/guard'/></svg>",
         "<svg><g></svg>",
