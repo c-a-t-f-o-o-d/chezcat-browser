@@ -584,7 +584,7 @@ var first=setTimeout(receive,0,raw,'plain',token,marker,17,true);
 
 #[test]
 fn timer_utf16_arguments_native_payload_and_copy_boundaries_are_exact_and_atomic() {
-    let (mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    let (mut doc,mut forms,mut page,start)=page_with_policy(&["function callback(){}"],crate::javascript::limits::CAPACITY_REGRESSION);
     assert_eq!(start.errors,0,"{}",page.report());
     let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
     let arguments=[callback.clone(),Value::Number(0.0),Value::StringUnits(vec![0xd800,0xd800,0xd800]),Value::String("ok".into())];
@@ -619,11 +619,11 @@ fn timer_utf16_arguments_native_payload_and_copy_boundaries_are_exact_and_atomic
 
 #[test]
 fn timer_utf16_arguments_public_quota_refusal_preserves_an_existing_native_callback() {
-    let (mut doc,mut forms,mut page,start)=page(&[r#"
+    let (mut doc,mut forms,mut page,start)=page_with_policy(&[r#"
 var count=0;
 function callback(value){if(value!=='safe')throw 'unchanged ordinary payload';count++;document.title='existing callback survived';}
 var original=setTimeout(callback,0,'safe');
-"#]);
+"#],crate::javascript::limits::CAPACITY_REGRESSION);
     assert_eq!(start.errors,0,"{}",page.report());
     let kept=page.state.timer_bytes;let next=page.state.next_timer;
     page.state.limits.host.timer_bytes=kept+std::mem::size_of::<Value>()+2;
@@ -635,4 +635,183 @@ var original=setTimeout(callback,0,'safe');
     poll(&mut page,&mut doc,&mut forms);
     assert_eq!(doc.title,"existing callback survived");assert!(page.state.timers.is_empty());assert_eq!(page.state.timer_bytes,0);
     assert_eq!(execute(&mut page,&mut doc,&mut forms,"count;").unwrap().to_number(),1.0);
+}
+
+#[test]
+fn browser_timer_pending_queue_exceeds_former_count_and_dispatches_ordered_after_cancellation() {
+    let(mut doc,mut forms,mut page,start)=page(&["var next=0,hits=0;function observed(value){while(next%7===0)next++;if(value!==next++)throw 'timer order';hits++;}var ids=[];for(var i=0;i<1500;i++)ids.push(setTimeout(observed,0,i));for(var i=0;i<1500;i+=7)clearTimeout(ids[i]);"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let pending=1500usize-(0..1500).step_by(7).count();
+    assert_eq!(page.state.timers.len(),pending);
+    assert!(pending>1024);
+    let now=Instant::now()+Duration::from_secs(1);
+    for _ in 0..pending {assert_eq!(page.poll_timer_at(&mut doc,&mut forms,now).unwrap().errors,0,"{}",page.report());}
+    assert!(page.poll_timer_at(&mut doc,&mut forms,now).is_none());
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),pending as f64);
+    page.state.timer_callbacks=65536;
+    execute(&mut page,&mut doc,&mut forms,"setTimeout(function(){document.title='past old callback count';},0);").unwrap();
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"past old callback count");
+    assert_eq!(page.state.timer_callbacks,65537);
+}
+
+#[test]
+fn browser_timer_shared_payload_exceeds_former_timer_only_budget_and_teardown_refunds_backing() {
+    let(mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let baseline=page.state.retained;
+    let arguments=[callback,Value::Number(60000.0),Value::String("q".repeat(4*1024*1024))];
+    for _ in 0..9 {page.state.set_timeout(&arguments).unwrap();}
+    assert!(page.state.timer_bytes>32*1024*1024);
+    assert_eq!(page.state.retained,baseline+page.state.timer_bytes+page.state.timers.storage_bytes());
+    page.stop_timers("test owner teardown");
+    assert_eq!(page.state.retained,baseline);
+    assert_eq!(page.state.timers.storage_bytes(),0);
+    assert_eq!(page.state.timer_bytes,0);
+}
+
+#[test]
+fn browser_timer_queue_storage_and_growth_work_refusal_are_atomic_and_reusable() {
+    let(mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let args=[callback,Value::Number(60000.0)];
+    let before=(page.state.retained,page.state.next_timer);
+    let limit=page.state.retained_limit;
+    let slot=std::mem::size_of::<Timer>();
+    page.state.retained_limit=before.0+slot-1;
+    assert!(page.state.set_timeout(&args).unwrap_err().contains("retained timer storage"));
+    assert_eq!((page.state.retained,page.state.next_timer),before);
+    assert_eq!(page.state.timers.storage_bytes(),0);
+    page.state.retained_limit=before.0+slot;
+    let first=page.state.set_timeout(&args).unwrap();
+    assert_eq!(page.state.retained,before.0+slot);
+    assert_eq!(page.state.timers.storage_bytes(),slot);
+    let kept=(page.state.retained,page.state.next_timer,page.state.timers.deadline());
+    page.state.retained_limit=before.0+2*slot;
+    page.state.copy_work=slot-1;
+    assert!(page.state.set_timeout(&args).unwrap_err().contains("string work limit"));
+    assert_eq!(page.state.copy_work,0);
+    assert_eq!((page.state.retained,page.state.next_timer,page.state.timers.deadline()),kept);
+    page.state.clear_timeout(&[first]).unwrap();
+    assert_eq!(page.state.retained,before.0+slot);
+    page.state.set_timeout(&args).unwrap();
+    assert_eq!(page.state.timers.len(),1);
+    page.state.clear_timers();
+    assert_eq!(page.state.retained,before.0);
+    page.state.retained_limit=limit;
+}
+
+#[test]
+fn browser_timer_arguments_stay_charged_during_native_callback_growth_and_release_after_failure() {
+    let(mut doc,mut forms,mut page,start)=page(&[]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    page.runtime.define_global("candidate",Value::String("t".repeat(12000))).unwrap();
+    let callback=execute(&mut page,&mut doc,&mut forms,"function copy(){document.title=candidate;}copy();document.title='waiting';copy;").unwrap();
+    page.state.set_timeout(&[callback.clone(),Value::Number(0.0),Value::String("p".repeat(16000))]).unwrap();
+    let before=page.state.retained;
+    let payload=page.state.timer_bytes;
+    let limit=page.state.retained_limit;
+    page.state.retained_limit=before+8000;
+    let out=page.poll_timer_at(&mut doc,&mut forms,Instant::now()+Duration::from_secs(1)).unwrap();
+    assert_eq!(out.errors,1,"{}",page.report());
+    assert_eq!(doc.title,"waiting");
+    assert_eq!(page.state.retained,before-payload);
+    assert_eq!(page.state.timer_bytes,0);
+    page.state.set_timeout(&[callback,Value::Number(0.0)]).unwrap();
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title.len(),12000);
+    page.state.retained_limit=limit;
+}
+
+#[test]
+fn browser_timer_cancellation_work_refusal_preserves_callbacks_and_dispatch_work_failure_releases_storage() {
+    let(mut doc,mut forms,mut page,start)=page(&["var hits=0;function callback(){hits++;}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let baseline=page.state.retained;
+    let args=[callback,Value::Number(0.0),Value::String("retained".into())];
+    let id=page.state.set_timeout(&args).unwrap();
+    page.state.set_timeout(&args).unwrap();
+    let kept=(page.state.retained,page.state.timer_bytes,page.state.next_timer,page.state.timers.deadline());
+    page.state.host_work=page.state.timers.len()+page.state.timers.maintenance_work()-1;
+    assert!(page.state.clear_timeout(&[id]).unwrap_err().contains("DOM work limit"));
+    assert_eq!(page.state.host_work,0);
+    assert_eq!((page.state.retained,page.state.timer_bytes,page.state.next_timer,page.state.timers.deadline()),kept);
+    assert_eq!(page.state.timers.len(),2);
+    let work=page.state.limits.host_work;
+    page.state.limits.host_work=0;
+    let out=page.poll_timer_at(&mut doc,&mut forms,Instant::now()+Duration::from_secs(1)).unwrap();
+    assert_eq!(out.errors,1);
+    assert_eq!(page.state.retained,baseline);
+    assert_eq!(page.state.timer_bytes,0);
+    assert_eq!(page.state.timers.storage_bytes(),0);
+    page.state.limits.host_work=work;
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),0.0);
+    execute(&mut page,&mut doc,&mut forms,"setTimeout(callback,0);").unwrap();
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),1.0);
+}
+
+#[test]
+fn browser_timer_identifier_reuse_preserves_live_and_active_ids_and_diagnostic_saturation() {
+    let(mut doc,mut forms,mut page,start)=page(&["var hits=0;function callback(){hits++;}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let args=[callback,Value::Number(0.0)];
+    let first=page.state.set_timeout(&args).unwrap();
+    assert_eq!(first.to_number(),1.0);
+    page.state.next_timer=i32::MAX as u32;
+    page.state.active_timer=Some(2);
+    let before=page.state.retained;
+    let reused=page.state.set_timeout(&args).unwrap();
+    assert_eq!(reused.to_number(),3.0);
+    assert_eq!(page.state.retained,before);
+    assert!(page.state.timer_ids_reused);
+    page.state.active_timer=None;
+    page.state.clear_timeout(&[first]).unwrap();
+    let another=page.state.set_timeout(&args).unwrap();
+    assert_eq!(another.to_number(),1.0);
+    page.state.timer_callbacks=usize::MAX;
+    poll(&mut page,&mut doc,&mut forms);
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(page.state.timer_callbacks,usize::MAX);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),2.0);
+}
+
+#[test]
+fn browser_timer_identifier_scratch_refusal_leaves_queue_and_counter_unchanged() {
+    let(mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let args=[callback,Value::Number(0.0)];
+    page.state.set_timeout(&args).unwrap();
+    page.state.next_timer=i32::MAX as u32;
+    let before=(page.state.retained,page.state.next_timer,page.state.timers.deadline());
+    let limit=page.state.retained_limit;
+    page.state.retained_limit=page.state.retained+7;
+    assert!(page.state.set_timeout(&args).unwrap_err().contains("identity scratch allowance"));
+    assert_eq!((page.state.retained,page.state.next_timer,page.state.timers.deadline()),before);
+    assert!(!page.state.timer_ids_reused);
+    assert_eq!(page.state.timers.len(),1);
+    page.state.retained_limit=limit;
+    assert_eq!(page.state.set_timeout(&args).unwrap().to_number(),2.0);
+    assert_eq!(page.state.timers.len(),2);
+}
+
+#[test]
+fn browser_timer_reuse_during_a_real_callback_cannot_cancel_the_new_timeout_by_the_active_id() {
+    let(mut doc,mut forms,mut page,start)=page(&["var active=setTimeout(function(){var fresh=setTimeout(function(){document.title='new timeout survived';},60000);if(fresh===active)throw 'active ID reused';clearTimeout(active);},0);"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    page.state.next_timer=i32::MAX as u32;
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"waiting");
+    assert_eq!(page.state.timers.len(),1);
+    assert_eq!(page.state.timers[0].id,2);
+    assert_eq!(page.state.active_timer,None);
+    assert!(page.state.timer_ids_reused);
+    let out=page.poll_timer_at(&mut doc,&mut forms,Instant::now()+Duration::from_secs(61)).unwrap();
+    assert_eq!(out.errors,0,"{}",page.report());
+    assert_eq!(doc.title,"new timeout survived");
 }
