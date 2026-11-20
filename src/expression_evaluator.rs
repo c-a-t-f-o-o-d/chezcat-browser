@@ -8,7 +8,7 @@
 use super::optional_chaining::{CallTarget, Completion, Step};
 use super::{
     logical_short_circuits, Argument, ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference,
-    Runtime, Value, MAX_EVAL_DEPTH,
+    Runtime, Value,
 };
 #[cfg(test)]
 use super::MAX_EVALUATION_FRAME_SLOTS;
@@ -475,9 +475,7 @@ impl Runtime {
         this: &Value, host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        self.check_native_evaluation_stack()?;
         self.eval_depth += 1;
         self.transient_roots.owned_eval_depth += 1;
         let result = self.eval_heap_continuations(program, id, Some(&mut expression), env, this, host);

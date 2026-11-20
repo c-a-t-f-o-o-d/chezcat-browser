@@ -3,6 +3,29 @@
 use super::{Fault, Runtime};
 
 impl Runtime {
+    pub(super) fn check_native_evaluation_stack(&self) -> Result<(), Fault> {
+        #[cfg(test)]
+        if let Some(limit) = self.limits.test_native_evaluation_depth {
+            return if self.eval_depth >= limit {
+                Err(Fault::new(format!("Evaluation nesting limit reached ({limit}).")))
+            } else {
+                Ok(())
+            };
+        }
+
+        #[cfg(windows)]
+        {
+            check_windows_stack("evaluator entry")
+        }
+        #[cfg(not(windows))]
+        {
+            if self.eval_depth >= super::MAX_EVAL_DEPTH {
+                return Err(Fault::new(format!("Evaluation nesting limit reached on an unmeasured native stack ({}).", super::MAX_EVAL_DEPTH)));
+            }
+            Ok(())
+        }
+    }
+
     pub(super) fn check_native_call_stack(&self, operation: &'static str) -> Result<(), Fault> {
         #[cfg(test)]
         if let Some(limit) = self.limits.test_call_depth {

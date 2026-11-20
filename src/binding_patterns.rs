@@ -6,7 +6,7 @@
 
 use super::{
     ExprId, ExprKind, Fault, Host, Ordinary, Parser, Program, PropertyKey, Reference, Runtime,
-    TokenKind, Value, MAX_EVAL_DEPTH,
+    TokenKind, Value,
 };
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -374,9 +374,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         self.step()?;
-        if self.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        self.check_native_evaluation_stack()?;
         self.eval_depth += 1;
         let result = (|| {
             if let Some(reference) =

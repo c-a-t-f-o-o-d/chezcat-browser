@@ -129,6 +129,8 @@ pub struct Limits {
     pub(crate) test_call_depth: Option<usize>,
     #[cfg(test)]
     pub(crate) test_evaluation_frames: Option<usize>,
+    #[cfg(test)]
+    pub(crate) test_native_evaluation_depth: Option<usize>,
     pub capacity: Capacities,
     pub host: HostCapacities,
     pub heap: HeapLimits,
@@ -155,6 +157,8 @@ pub const BROWSER: Limits = Limits {
     test_call_depth: None,
     #[cfg(test)]
     test_evaluation_frames: None,
+    #[cfg(test)]
+    test_native_evaluation_depth: None,
     capacity: BROWSER_CAPACITIES,
     host: BROWSER_HOST,
     heap: BROWSER_HEAP,
@@ -176,6 +180,7 @@ pub const BROWSER: Limits = Limits {
 pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),
+    test_native_evaluation_depth: Some(super::MAX_EVAL_DEPTH),
     capacity: REGRESSION_CAPACITIES,
     host: REGRESSION_HOST,
     steps: 50_000_000,
@@ -198,6 +203,7 @@ pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
 pub(crate) const REGRESSION: Limits = Limits {
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),
+    test_native_evaluation_depth: Some(super::MAX_EVAL_DEPTH),
     capacity: REGRESSION_CAPACITIES,
     host: REGRESSION_HOST,
     heap: REGRESSION_HEAP,
