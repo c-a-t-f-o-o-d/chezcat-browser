@@ -253,7 +253,7 @@ var budgetEvent=document.createEvent('Event');budgetEvent.initEvent('budget');b.
     fn synchronous_dispatch_event_validation_scan_is_charged_before_publication() {
         let(mut doc,mut forms,mut page,outcome)=start("var b=document.getElementById('b');for(var i=0;i<32;i++){document.createEvent('Event');}var last=document.createEvent('Event');last.initEvent('small-profile');");
         assert_eq!(outcome.errors, 0, "{}", page.report());
-        page.state.limits.host_work = 100;
+        page.state.limits.host_work = page.state.event_lookup_work(5)-1;
         let outcome = page.console_eval(&mut doc, &mut forms, "b.dispatchEvent(last);");
         assert_eq!(outcome.errors, 1);
         assert!(page.state.synthetic_dispatches.is_empty());
@@ -264,7 +264,7 @@ var budgetEvent=document.createEvent('Event');budgetEvent.initEvent('budget');b.
 
 impl Bridge<'_> {
     pub(super) fn copy_event_path(&mut self,handle:u32)->Result<Vec<u32>,String> {
-        let scans=self.state.created_events.len().checked_add(self.state.synthetic_dispatches.len())
+        let scans=self.state.event_lookup_work(1).checked_add(self.state.synthetic_dispatches.len())
             .and_then(|n|n.checked_add(1)).ok_or("Event path lookup work overflow.")?;
         self.state.work(scans)?;
         let (native,frame)=if let Some(id)=self.created_event_index(handle) {

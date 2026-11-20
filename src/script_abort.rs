@@ -146,31 +146,26 @@ impl Bridge<'_> {
         }
         let owner = record.owner;
         let signal = controller - CONTROLLER_BASE + SIGNAL_BASE;
-        let bytes = reason.bytes();
-        self.state
-            .retained
-            .checked_add(bytes)
-            .and_then(|size| size.checked_add("abort".len()))
-            .filter(|n| *n <= self.state.retained_limit)
+        let bytes=retained_storage::value_bytes(&reason);
+        let retained=self.state.retained.checked_add(bytes).filter(|bytes|*bytes<=self.state.retained_limit)
             .ok_or("AbortSignal reason retention limit reached.")?;
-        self.state.copies(bytes)?;
-        let Value::Host(event) =
-            self.construct_base_event(owner, &[Value::String("abort".into())], None)?
-        else {
-            unreachable!()
-        };
-        let token = match self.begin_synthetic_dispatch(signal, &[Value::Host(event)]) {
-            Ok(token) => token,
-            Err(error) => {
-                self.rollback_base_event(event)?;
-                return Err(error);
-            }
-        };
-        self.state.abort_signals[(controller - CONTROLLER_BASE) as usize].reason = reason;
-        self.state.retained += bytes;
-        let entry = self.created_event_index(event).unwrap();
-        self.state.created_events[entry].trusted = true;
-        Ok(token)
+        self.state.copies(reason.bytes())?;
+        // Hold the reason across Event construction and dispatch preparation;
+        // those reservations must not spend the same remaining allowance.
+        self.state.retained=retained;
+        let result=(|| {
+            let Value::Host(event)=self.construct_base_event(owner,&[Value::String("abort".into())],None)? else {unreachable!()};
+            let token=match self.begin_synthetic_dispatch(signal,&[Value::Host(event)]) {
+                Ok(token)=>token,
+                Err(error)=>{self.rollback_base_event(event)?;return Err(error);}
+            };
+            self.state.abort_signals[(controller-CONTROLLER_BASE) as usize].reason=reason;
+            let entry=self.created_event_index(event).unwrap();
+            self.state.created_events[entry].trusted=true;
+            Ok(token)
+        })();
+        if result.is_err(){self.state.retained-=bytes;}
+        result
     }
 }
 

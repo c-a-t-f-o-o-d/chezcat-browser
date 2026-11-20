@@ -774,11 +774,7 @@ impl State {
             copied.push(value);
         }
         let actual=copied.iter().try_fold(copied.capacity()*std::mem::size_of::<Value>(),|total,value| {
-            total.checked_add(match value {
-                Value::String(text)=>text.capacity(),
-                Value::StringUnits(units)=>units.capacity().saturating_mul(2),
-                _=>0,
-            })
+            total.checked_add(retained_storage::value_bytes(value))
         }).ok_or("Timer payload storage overflow.")?;
         let retained=retained.checked_add(actual-bytes).ok_or("Timer payload accounting overflow.")?;
         #[cfg(test)]
@@ -972,6 +968,38 @@ impl State {
         snapshot.extend(self.listeners.iter().filter(|listener|listener.target==target&&listener.event==event&&listener.options.capture==capture).map(|listener|listener.serial));
         self.retained+=snapshot.capacity()*std::mem::size_of::<usize>();
         Ok(snapshot)
+    }
+
+    fn event_type_allowance(&self)->usize {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas{return self.limits.host.string_bytes.min(self.limits.host.event_type_bytes);}
+        self.limits.host.string_bytes
+    }
+
+    fn event_type_refused(&self,bytes:usize)->bool {bytes>self.event_type_allowance()}
+
+    fn created_event_limit_reached(&self)->bool {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas&&self.created_events.len()>=self.limits.host.created_events{return true;}
+        false
+    }
+
+    fn event_lookup_work(&self,lookups:usize)->usize {
+        ((usize::BITS-self.created_events.len().leading_zeros()) as usize+1).saturating_mul(lookups)
+    }
+
+    fn prepare_created_event_storage(&mut self,payload:usize)->Result<(Option<Vec<script_created_events::CreatedEvent>>,usize),String> {
+        let available=self.retained_limit.saturating_sub(self.retained).checked_sub(payload)
+            .ok_or("Event retained payload allowance exceeded.")?;
+        let before=self.created_events.capacity();
+        if self.created_events.len()<before{return Ok((None,0));}
+        let slot=std::mem::size_of::<script_created_events::CreatedEvent>();
+        let growth=before.max(4).min(available/slot);
+        if growth==0{return Err("DOM retained Event record allowance exhausted.".into());}
+        let capacity=before.checked_add(growth).ok_or("Event record capacity overflow.")?;
+        let reservation=retained_storage::capacity(&self.created_events,capacity,available)?;
+        self.copies(self.created_events.len().saturating_mul(slot))?;
+        Ok(reservation)
     }
 
     fn listener_limit_reached(&self)->bool {
@@ -2591,8 +2619,8 @@ impl Bridge<'_> {
     fn listener_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
         // Event types are case-sensitive DOM strings, including custom and
         // empty names. Registering one does not create a native event source.
-        if event.len() > self.state.limits.host.event_type_bytes {
-            return Err("Event type exceeds the 256-byte limit.".into());
+        if self.state.event_type_refused(event.len()) {
+            return Err(format!("Event type exceeds the {}-byte limit.",self.state.event_type_allowance()));
         }
         if !self.dispatch_receiver(handle) {return Err("Listener receiver is not a supported EventTarget.".into());}
         Ok(())
@@ -4323,7 +4351,7 @@ impl Host for Bridge<'_> {
     fn new_aborted_signal(&mut self, owner: u32, reason: Value) -> Result<u32, String> {
         self.create_abort_record(owner, false, reason)
     }
-    fn prepare_event_dispatch(&mut self)->Result<(),String>{self.state.work(self.state.created_events.len().checked_mul(5).ok_or("Event validation work overflow.")?)}
+    fn prepare_event_dispatch(&mut self)->Result<(),String>{self.state.work(self.state.event_lookup_work(5))}
     fn begin_event_dispatch(&mut self,object:u32,args:&[Value])->Result<usize,String>{self.begin_synthetic_dispatch(object,args)}
     fn next_event_callback(&mut self,token:usize)->Result<Option<crate::javascript::EventCallback>,String>{self.next_synthetic_callback(token)}
     fn event_callback_result(&mut self,token:usize,returned_false:bool){self.synthetic_callback_result(token,returned_false);}
