@@ -194,6 +194,7 @@ fn weak_set_api_constructor_closes_invalid_values_and_adder_throw() {
 #[test]
 fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
     let mut runtime = Runtime::for_test();
+    runtime.limits.heap.retained_values = super::super::limits::BROWSER_HEAP.retained_values;
     let set = runtime
         .construct_collection(Kind::WeakSet, &[], None, &mut NoHost)
         .unwrap();
@@ -220,9 +221,10 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
             &mut NoHost,
         )
         .unwrap();
+    let metadata = runtime.collection(id, Kind::WeakSet).unwrap().storage_bytes();
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (1, baseline)
+        (1, baseline + metadata)
     );
     assert!(runtime.objects[id]
         .collection
@@ -231,6 +233,7 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
         .ordered
         .values()
         .all(|entry| matches!(entry.value, Value::Undefined)));
+    runtime.begin_job();
     runtime
         .weak_collection_method(
             Kind::WeakSet,
@@ -242,7 +245,7 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
         .unwrap();
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (0, baseline)
+        (0, baseline + metadata)
     );
     for kind in [Kind::WeakSet, Kind::Map, Kind::WeakMap, Kind::Set] {
         runtime.begin_job();
@@ -313,7 +316,7 @@ fn weak_set_api_stores_undefined_and_shares_exact_entry_budgets() {
         )
         .unwrap();
     assert_eq!(runtime.collection_entries, MAX_DOCUMENT_ENTRIES);
-    assert_eq!(runtime.value_bytes, baseline);
+    assert_eq!(runtime.value_bytes, baseline + runtime.objects.iter().filter_map(|object| object.collection.as_ref()).map(Data::storage_bytes).sum::<usize>());
 }
 
 #[test]

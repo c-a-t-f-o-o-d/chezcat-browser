@@ -1,14 +1,15 @@
 //! Original insertion-ordered Map/Set and native iterator support. Hash lookup
 //! preserves identity/SameValueZero; monotonically ordered live entries keep
 //! deletion/reinsertion observable to active iterators without tombstone growth.
-//! Collection entries share the runtime's retained-string and execution budgets.
+//! Entry payload and owned order/lookup capacity share retained-value storage.
+//! Deletion compacts live order slots; clear releases the owned backing stores.
 
 #[cfg(test)]
 use super::MAX_STRING_BYTES;
 use super::{
     Builtin, Declaration, Fault, Host, NativeGetter, Ordinary, Runtime, Value,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 #[path = "weak_map.rs"]
 mod weak_map;
@@ -20,7 +21,9 @@ mod weak_map_api_tests;
 #[path = "weak_set_api_tests.rs"]
 mod weak_set_api_tests;
 
+#[cfg(test)]
 const MAX_ENTRIES: usize = 4096;
+#[cfg(test)]
 const MAX_DOCUMENT_ENTRIES: usize = 16384;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -66,10 +69,40 @@ struct Entry {
     key: Value,
     value: Value,
 }
+// Sequence numbers stay monotonic while deleted slots are compacted. Native
+// iterators seek by sequence, so compaction never skips a later insertion.
+#[derive(Default)]
+struct OrderedEntries(Vec<(usize, Entry)>);
+impl OrderedEntries {
+    fn len(&self) -> usize { self.0.len() }
+    #[cfg(test)]
+    fn is_empty(&self) -> bool { self.0.is_empty() }
+    fn values(&self) -> impl Iterator<Item=&Entry> { self.0.iter().map(|(_, entry)| entry) }
+    fn get_mut(&mut self, order: &usize) -> Option<&mut Entry> {
+        self.0.binary_search_by_key(order, |(order, _)| *order).ok().map(|index| &mut self.0[index].1)
+    }
+    fn remove(&mut self, order: &usize) -> Option<Entry> {
+        self.0.binary_search_by_key(order, |(order, _)| *order).ok().map(|index| self.0.remove(index).1)
+    }
+    fn insert(&mut self, order: usize, entry: Entry) { self.0.push((order, entry)); }
+    fn retain(&mut self, mut keep: impl FnMut(&usize, &Entry)->bool) { self.0.retain(|(order, entry)| keep(order, entry)); }
+    fn range(&self, range: std::ops::RangeFrom<usize>) -> impl Iterator<Item=(&usize, &Entry)> {
+        let index = self.0.partition_point(|(order, _)| *order < range.start);
+        self.0[index..].iter().map(|(order, entry)| (order, entry))
+    }
+}
+impl std::ops::Index<&usize> for OrderedEntries {
+    type Output = Entry;
+    fn index(&self, order: &usize) -> &Entry {
+        &self.0[self.0.binary_search_by_key(order, |(order, _)| *order).expect("live collection sequence")].1
+    }
+}
+
 pub(super) struct Data {
     pub kind: Kind,
     lookup: HashMap<Key, usize>,
-    ordered: BTreeMap<usize, Entry>,
+    lookup_storage_capacity: usize,
+    ordered: OrderedEntries,
     sequence: usize,
 }
 impl Data {
@@ -89,10 +122,54 @@ impl Data {
         Self {
             kind,
             lookup: HashMap::new(),
-            ordered: BTreeMap::new(),
+            lookup_storage_capacity: 0,
+            ordered: OrderedEntries::default(),
             sequence: 0,
         }
     }
+    fn storage_bytes(&self) -> usize {
+        self.lookup_storage_capacity * std::mem::size_of::<(Key, usize)>()
+            + self.ordered.0.capacity() * std::mem::size_of::<(usize, Entry)>()
+    }
+
+    /// Prepare both replacements before moving either live store. Refusal
+    /// leaves entries, capacities and sequence ownership unchanged.
+    fn reserve_entry(&mut self, available: usize) -> Result<usize, Fault> {
+        let mut lookup = None;
+        let mut ordered = None;
+        if self.lookup.len() == self.lookup.capacity() {
+            let mut replacement = HashMap::new();
+            let before = self.lookup_storage_capacity;
+            let capacity = if self.lookup.len() < before { before } else {
+                let growth = before.max(4).min(available / std::mem::size_of::<(Key, usize)>());
+                if growth == 0 { return Err(Fault::new("Collection retained storage exhausted.")); }
+                before.checked_add(growth).ok_or_else(|| Fault::new("Collection storage size overflow."))?
+            };
+            replacement.try_reserve(capacity)
+                .map_err(|_| Fault::new("Cannot allocate collection lookup storage."))?;
+            lookup = Some(replacement);
+        }
+        if self.ordered.len() == self.ordered.0.capacity() {
+            let mut replacement = Vec::new();
+            let before = self.ordered.0.capacity();
+            let growth = before.max(4).min(available / std::mem::size_of::<(usize, Entry)>());
+            if growth == 0 { return Err(Fault::new("Collection retained storage exhausted.")); }
+            replacement.try_reserve_exact(before.checked_add(growth)
+                .ok_or_else(|| Fault::new("Collection storage size overflow."))?)
+                .map_err(|_| Fault::new("Cannot allocate collection order storage."))?;
+            ordered = Some(replacement);
+        }
+        let added_lookup = lookup.as_ref().map_or(0, |next| next.capacity() - self.lookup_storage_capacity)
+            .checked_mul(std::mem::size_of::<(Key, usize)>()).ok_or_else(|| Fault::new("Collection storage size overflow."))?;
+        let added_ordered = ordered.as_ref().map_or(0, |next| next.capacity() - self.ordered.0.capacity())
+            .checked_mul(std::mem::size_of::<(usize, Entry)>()).ok_or_else(|| Fault::new("Collection storage size overflow."))?;
+        let added = added_lookup.checked_add(added_ordered).filter(|added| *added <= available)
+            .ok_or_else(|| Fault::new("Collection retained storage exhausted."))?;
+        if let Some(mut next) = lookup { next.extend(self.lookup.drain()); self.lookup_storage_capacity = next.capacity(); self.lookup = next; }
+        if let Some(mut next) = ordered { next.append(&mut self.ordered.0); self.ordered.0 = next; }
+        Ok(added)
+    }
+
     pub(super) fn tag(&self) -> &'static str {
         // Weak collection branding comes from ordinary @@toStringTag descriptors.
         // Deleting that descriptor restores Object.prototype.toString's tag.
@@ -392,7 +469,10 @@ impl Runtime {
         } else {
             0
         };
-        let retained = self.value_bytes - old_bytes + key_bytes + value.bytes();
+        let mut retained = self.value_bytes.checked_sub(old_bytes)
+            .and_then(|bytes| bytes.checked_add(key_bytes))
+            .and_then(|bytes| bytes.checked_add(value.bytes()))
+            .ok_or_else(|| Fault::new("Collection retained storage size overflow."))?;
         if key.bytes() > self.limits.capacity.string_bytes || value.bytes() > self.limits.capacity.string_bytes {
             return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
@@ -409,8 +489,9 @@ impl Runtime {
                 .unwrap()
                 .value = value;
         } else {
-            if self.collection(id, kind)?.ordered.len() >= MAX_ENTRIES
-                || self.collection_entries >= MAX_DOCUMENT_ENTRIES
+            #[cfg(test)]
+            if self.limits.test_collection_entries.is_some_and(|(single, document)|
+                self.collection(id, kind).unwrap().ordered.len() >= single || self.collection_entries >= document)
             {
                 return Err(Fault::new(
                     "Collection entry limit reached (4096 per collection / 16384 per document).",
@@ -420,21 +501,27 @@ impl Runtime {
                 Value::Number(number) if *number == 0.0 => Value::Number(0.0),
                 _ => self.copy_value(key)?,
             };
-            let data = self.objects[id].collection.as_mut().unwrap();
+            let data = self.collection(id, kind)?;
             let order = data.sequence;
-            data.sequence = order
-                .checked_add(1)
-                .ok_or_else(|| Fault::new("Collection insertion order limit reached."))?;
+            let sequence = order.checked_add(1).ok_or_else(|| Fault::new("Collection insertion order limit reached."))?;
+            let count = self.collection_entries.checked_add(1).ok_or_else(|| Fault::new("Collection entry counter overflow."))?;
+            if data.lookup.len() == data.lookup.capacity() || data.ordered.len() == data.ordered.0.capacity() {
+                self.work(data.lookup_storage_capacity.saturating_add(data.ordered.len().saturating_mul(4)))?;
+            }
+            let data = self.objects[id].collection.as_mut().unwrap();
+            retained += data.reserve_entry(self.limits.heap.retained_values - retained)?;
+            data.sequence = sequence;
             data.lookup.insert(lookup, order);
             data.ordered.insert(order, Entry { key, value });
-            self.collection_entries += 1;
+            self.collection_entries = count;
         }
         self.value_bytes = retained;
         Ok(())
     }
     fn collection_delete(&mut self, id: usize, kind: Kind, key: &Value) -> Result<Value, Fault> {
         let key = self.collection_key(key)?;
-        self.collection(id, kind)?;
+        let data = self.collection(id, kind)?;
+        if data.lookup.contains_key(&key) { self.work(data.ordered.len())?; }
         let data = self.objects[id].collection.as_mut().unwrap();
         if let Some(order) = data.lookup.remove(&key) {
             let entry = data.ordered.remove(&order).unwrap();
@@ -448,7 +535,7 @@ impl Runtime {
     fn collection_clear(&mut self, id: usize, kind: Kind) -> Result<Value, Fault> {
         let data = self.collection(id, kind)?;
         let length = data.ordered.len();
-        self.work(length.saturating_mul(8))?;
+        self.work(length.saturating_mul(8).saturating_add(data.lookup_storage_capacity))?;
         let data = self.objects[id].collection.as_mut().unwrap();
         self.value_bytes -= data
             .ordered
@@ -456,8 +543,10 @@ impl Runtime {
             .map(|entry| entry.key.bytes() * 2 + entry.value.bytes())
             .sum::<usize>();
         self.collection_entries -= length;
-        data.lookup.clear();
-        data.ordered.clear();
+        self.value_bytes -= data.storage_bytes();
+        data.lookup = HashMap::new();
+        data.lookup_storage_capacity = 0;
+        data.ordered = OrderedEntries::default();
         // Do not reset sequence: an existing iterator must see later additions.
         Ok(Value::Undefined)
     }
@@ -898,6 +987,51 @@ mod tests {
         id
     }
     #[test]
+    fn collection_metadata_refusal_is_atomic_and_delete_clear_recover_storage() {
+        let mut runtime = Runtime::new();
+        let id = new_map(&mut runtime);
+        let baseline = runtime.value_bytes;
+        for key in 0..8 {
+            runtime.collection_put(id, Kind::Map, &Value::Number(key as f64), &Value::Null).unwrap();
+        }
+        let before = runtime.value_bytes;
+        let capacity = runtime.collection(id, Kind::Map).unwrap().storage_bytes();
+        assert_eq!(before, baseline + capacity);
+        let limit = runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values = before;
+        let error = runtime.collection_put(id, Kind::Map, &Value::Number(8.0), &Value::Null).unwrap_err();
+        assert!(error.display().contains("Collection retained storage exhausted"));
+        assert_eq!(runtime.value_bytes, before);
+        assert_eq!(runtime.collection_entries, 8);
+        assert_eq!(runtime.collection(id, Kind::Map).unwrap().storage_bytes(), capacity);
+        runtime.collection_delete(id, Kind::Map, &Value::Number(0.0)).unwrap();
+        runtime.collection_put(id, Kind::Map, &Value::Number(8.0), &Value::Null).unwrap();
+        assert_eq!(runtime.value_bytes, before);
+        runtime.limits.heap.retained_values = limit;
+        runtime.collection_put(id, Kind::Map, &Value::Number(9.0), &Value::Null).unwrap();
+        assert!(runtime.value_bytes > before);
+        runtime.collection_clear(id, Kind::Map).unwrap();
+        assert_eq!(runtime.value_bytes, baseline);
+        assert_eq!(runtime.collection_entries, 0);
+    }
+
+    #[test]
+    fn collection_delete_reinsert_churn_keeps_backing_reservation_stable() {
+        let mut runtime = Runtime::new();
+        let id = new_map(&mut runtime);
+        for key in 0..256 { runtime.collection_put(id, Kind::Map, &Value::Number(key as f64), &Value::Null).unwrap(); }
+        let before = runtime.value_bytes;
+        runtime.limits.heap.retained_values = before;
+        for key in 0..10_000 {
+            runtime.collection_delete(id, Kind::Map, &Value::Number(key as f64)).unwrap();
+            runtime.collection_put(id, Kind::Map, &Value::Number((key + 256) as f64), &Value::Null).unwrap();
+        }
+        assert_eq!(runtime.collection_entries, 256);
+        assert_eq!(runtime.value_bytes, before);
+        assert!(matches!(runtime.next_collection_entry(id, 0).unwrap().unwrap().1, Value::Number(value) if value == 10_000.0));
+    }
+
+    #[test]
     fn collection_entry_and_retained_string_budgets_release_on_delete_and_clear() {
         let mut runtime = Runtime::for_test();
         let id = new_map(&mut runtime);
@@ -910,7 +1044,8 @@ mod tests {
                 &Value::String("value".into()),
             )
             .unwrap();
-        assert_eq!(runtime.value_bytes, baseline + 11);
+        let metadata = runtime.collection(id, Kind::Map).unwrap().storage_bytes();
+        assert_eq!(runtime.value_bytes, baseline + metadata + 11);
         assert_eq!(runtime.collection_entries, 1);
         runtime
             .collection_put(
@@ -920,15 +1055,15 @@ mod tests {
                 &Value::String("v".into()),
             )
             .unwrap();
-        assert_eq!(runtime.value_bytes, baseline + 7);
+        assert_eq!(runtime.value_bytes, baseline + metadata + 7);
         runtime
             .collection_delete(id, Kind::Map, &Value::String("key".into()))
             .unwrap();
-        assert_eq!(runtime.value_bytes, baseline);
+        assert_eq!(runtime.value_bytes, baseline + metadata);
         assert_eq!(runtime.collection_entries, 0);
         let text = Value::String("x".repeat(MAX_STRING_BYTES));
         runtime.collection_put(id, Kind::Map, &text, &text).unwrap();
-        assert_eq!(runtime.value_bytes, baseline + 3 * MAX_STRING_BYTES);
+        assert_eq!(runtime.value_bytes, baseline + metadata + 3 * MAX_STRING_BYTES);
         runtime.collection_clear(id, Kind::Map).unwrap();
         assert_eq!(runtime.value_bytes, baseline);
         assert_eq!(runtime.collection_entries, 0);
@@ -982,6 +1117,7 @@ mod tests {
     #[test]
     fn all_collections_share_one_document_entry_cap() {
         let mut runtime = Runtime::for_test();
+        runtime.limits.heap.retained_values = super::super::limits::BROWSER_HEAP.retained_values;
         for _ in 0..MAX_DOCUMENT_ENTRIES / MAX_ENTRIES {
             runtime.begin_job();
             let id = new_map(&mut runtime);
