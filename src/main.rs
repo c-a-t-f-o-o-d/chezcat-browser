@@ -60,6 +60,7 @@ mod script_geometry;
 mod scripting;
 mod script_storage;
 mod search;
+mod svg_reference;
 mod text;
 mod tls;
 mod tls_crypto;

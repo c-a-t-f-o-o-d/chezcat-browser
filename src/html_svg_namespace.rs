@@ -17,7 +17,7 @@ pub(super) fn flow_context(name: &str) -> bool {
 }
 
 pub(super) fn shape_element(name: &str) -> bool {
-    matches!(name, "svg" | "defs" | "g" | "mask" | "clippath" | "lineargradient" | "radialgradient" | "stop" | "symbol"
+    matches!(name, "svg" | "defs" | "g" | "mask" | "clippath" | "lineargradient" | "radialgradient" | "stop" | "symbol" | "use"
         | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
 }
 
@@ -26,6 +26,8 @@ pub(super) fn supported_tag(tag: &Tag) -> bool {
     // attribute has no rendering support. Do not use the fragment transfer
     // allowlist as evidence about the initial document's namespace.
     tag.clean_syntax && shape_element(&tag.name)
+        && (!matches!(tag.name.as_str(),"use"|"lineargradient"|"radialgradient")
+            || tag.attrs.iter().all(|(key,value)|!matches!(key.as_str(),"href"|"xlink:href")||crate::svg_reference::fragment(value).is_some()))
 }
 
 pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
@@ -39,10 +41,13 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
         "opacity" | "fill-opacity" | "stroke-opacity" | "fill-rule" | "clip-rule" | "transform" | "display" | "visibility" | "fx" | "fy" | "fr" |
         "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
-        "fill" | "stroke" => value.strip_prefix('#').map_or_else(
+        "href" | "xlink:href" => matches!(tag.name.as_str(),"use"|"lineargradient"|"radialgradient")&&crate::svg_reference::fragment(value).is_some(),
+        "mask" | "clip-path" => crate::svg_reference::effect(value).is_ok(),
+        "fill" | "stroke" => crate::svg_reference::effect(value).is_ok()||value.strip_prefix('#').map_or_else(
             || !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphabetic()),
             |digits| matches!(digits.len(), 3 | 4 | 6 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit())),
-        "xmlns" => tag.name == "svg" && Some(value.as_str()) == Namespace::Svg.element_uri(),
+        "xmlns" => Some(value.as_str()) == Namespace::Svg.element_uri(),
+        "xmlns:xlink" => value=="http://www.w3.org/1999/xlink",
         // These ordinary null-namespace data/accessibility names do not bind
         // event handlers, external resources or graphics/focus APIs.
         _ if key.starts_with("aria-") || key.starts_with("data-") => true,
@@ -79,6 +84,10 @@ pub(super) fn publish(nodes: &mut [Node]) {
                     attr.name.namespace = Some(AttributeNamespace {
                         uri: "http://www.w3.org/2000/xmlns/".into(), prefix: None, local: "xmlns".into(),
                     });
+                }else if attr.name.html_is("xmlns:xlink"){
+                    attr.name.namespace=Some(AttributeNamespace{uri:"http://www.w3.org/2000/xmlns/".into(),prefix:Some("xmlns".into()),local:"xlink".into()});
+                }else if attr.name.html_is("xlink:href"){
+                    attr.name.namespace=Some(AttributeNamespace{uri:"http://www.w3.org/1999/xlink".into(),prefix:Some("xlink".into()),local:"href".into()});
                 }
             }
         }
@@ -97,9 +106,9 @@ mod tests {
     #[test]
     fn svg_namespace_balanced_islands_publish_only_scoped_elements() {
         let doc = parse("<html><body><circle id=outside></circle><svg id=root xmlns='http://www.w3.org/2000/svg'>\n\
-            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g><defs><mask id=mask maskUnits=userSpaceOnUse><rect id='mask-rect'/></mask><clipPath id=clip clipPathUnits=userSpaceOnUse><path id='clip-path'/></clipPath></defs></svg>\
+            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g><defs><mask id=mask maskUnits=userSpaceOnUse><rect id='mask-rect'/></mask><clipPath id=clip clipPathUnits=userSpaceOnUse><path id='clip-path'/></clipPath></defs><use id='linked-use' xlink:href='#group'/><use id='empty-use'/></svg>\
             <svg id='empty'/><div id=after xmlns='http://www.w3.org/2000/svg'></div></body></html>");
-        for id in ["root", "group", "a", "b", "nested", "p", "empty", "mask", "mask-rect", "clip", "clip-path"] {
+        for id in ["root", "group", "a", "b", "nested", "p", "empty", "mask", "mask-rect", "clip", "clip-path", "linked-use", "empty-use"] {
             assert_eq!(node(&doc, id).namespace, Namespace::Svg, "{id}");
         }
         for id in ["outside", "after"] { assert_eq!(node(&doc, id).namespace, Namespace::Html); }
@@ -111,6 +120,8 @@ mod tests {
         assert!(attrs.iter().any(|attr|attr.name.html_is("maskUnits")&&attr.value=="userSpaceOnUse"));
         let NodeKind::Element{tag,attrs,..}=&node(&doc,"clip").kind else{panic!("SVG clipPath")};
         assert_eq!(tag,"clipPath");assert!(attrs.iter().any(|attr|attr.name.html_is("clipPathUnits")&&attr.value=="userSpaceOnUse"));
+        let NodeKind::Element{attrs,..}=&node(&doc,"linked-use").kind else{panic!("SVG use")};
+        assert!(attrs.iter().any(|attr|attr.name.matches(Some("http://www.w3.org/1999/xlink"),"href")&&attr.value=="#group"));
         assert!(doc.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Text(_))).all(|n| n.namespace == Namespace::None));
         assert_eq!(Namespace::Svg.element_uri(), Some("http://www.w3.org/2000/svg"));
         assert!(Namespace::Svg.is_foreign() && Namespace::UnknownForeign.is_foreign());
@@ -119,7 +130,7 @@ mod tests {
 
     #[test]
     fn svg_namespace_uncertain_content_cannot_publish_an_earlier_valid_prefix() {
-        for bad in ["<foreignObject></foreignObject>", "<use></use>", "<script></script>", "<math></math>",
+        for bad in ["<foreignObject></foreignObject>", "<use href='/guard'></use>", "<use xlink:href='/guard'></use>", "<linearGradient href='/guard'></linearGradient>", "<script></script>", "<math></math>",
             "<g><circle></g>",
             "<g id='a'id='b'></g>", "<g//>", "<g></g/>", "</missing>", "<![CDATA[x]]>"] {
             let doc = parse(&format!("<body><svg id=root><circle id='first'/>{bad}</svg><p id=next></p></body>"));

@@ -697,8 +697,7 @@ fn paint(text: &str) -> ImageResult<Paint> {
                 .ok_or("Invalid SVG paint URL.")?
                 .trim()
                 .trim_matches(['\'', '"']);
-            let id = inner
-                .strip_prefix('#')
+            let id = crate::svg_reference::fragment(inner)
                 .filter(|v| !v.is_empty() && !v.contains(char::is_whitespace))
                 .ok_or("SVG paint servers must be local fragment references.")?;
             Ok(Paint::Server(id.into()))
@@ -708,29 +707,7 @@ fn paint(text: &str) -> ImageResult<Paint> {
 }
 
 fn local_effect(text: &str) -> ImageResult<Option<Arc<str>>> {
-    let value = text.trim();
-    if value == "none" {
-        return Ok(None);
-    }
-    let mut inner = value
-        .strip_prefix("url(")
-        .and_then(|v| v.strip_suffix(')'))
-        .ok_or("SVG clipping and masking support one local url(#id) reference only.")?
-        .trim();
-    if inner.starts_with(['\'', '"']) {
-        let quote = inner.as_bytes()[0] as char;
-        inner = inner[1..]
-            .strip_suffix(quote)
-            .ok_or("Unclosed quoted SVG effect reference.")?;
-    }
-    let id = inner
-        .strip_prefix('#')
-        .filter(|v| {
-            !v.is_empty()
-                && !v.contains(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '(' | ')'))
-        })
-        .ok_or("SVG clipping and masking cannot fetch external references.")?;
-    Ok(Some(id.into()))
+    crate::svg_reference::effect(text).map(|id|id.map(Into::into)).map_err(Into::into)
 }
 
 fn declarations(text: &str) -> ImageResult<Vec<(String, String)>> {
@@ -2071,8 +2048,7 @@ impl Renderer<'_> {
             .attr("href")
             .or_else(|| node.attr("xlink:href"))
             .ok_or("SVG use needs a local fragment reference.")?;
-        let id = href
-            .strip_prefix('#')
+        let id = crate::svg_reference::fragment(href)
             .ok_or("SVG use cannot fetch external resources.")?;
         let target = *self.ids.get(id).ok_or("SVG use target was not found.")?;
         if matches!(self.nodes[target].name.as_str(), "svg" | "symbol") {
@@ -2511,8 +2487,7 @@ impl Renderer<'_> {
                 }
             }
             if let Some(href) = node.attr("href").or_else(|| node.attr("xlink:href")) {
-                let id = href
-                    .strip_prefix('#')
+                let id = crate::svg_reference::fragment(href)
                     .ok_or("SVG gradients cannot fetch external references.")?;
                 index = *self
                     .ids
