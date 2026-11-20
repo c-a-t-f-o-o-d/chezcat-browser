@@ -152,7 +152,8 @@ impl Bridge<'_> {
         if retained_after>self.state.retained_limit {return Err("DOM retained attribute growth allowance reached.".into());}
         let input=self.prepare_input_attribute(node,&element_name,Some(&value))?;
         let native_bytes=input.as_ref().map_or(0,forms::InputPlan::retained_bytes);
-        let occupied=retained_after.checked_add(native_bytes).ok_or("Attr/native INPUT retained storage overflow.")?;
+        let dom_backing=if slot.is_none(){let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};if attrs.len()==attrs.capacity(){size_of::<crate::html::Attribute>()}else{0}}else{0};
+        let occupied=retained_after.checked_add(native_bytes).and_then(|bytes|bytes.checked_add(dom_backing)).ok_or("Attr/native INPUT/element retained storage overflow.")?;
         let reservation=self.prepare_attribute_storage(usize::from(new_old_identity),usize::from(old_id.is_none()),occupied)?;
         let backing=reservation.added;
         self.state.copies(self.state.attached_attributes.len().saturating_mul(2*size_of::<usize>()))?;

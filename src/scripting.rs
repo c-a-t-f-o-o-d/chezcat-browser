@@ -2394,8 +2394,9 @@ impl Bridge<'_> {
         self.state.work(attrs.len())?;
         self.state.copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
         let slot = attrs.iter().position(|attr| attr.name.same_expanded_name(&name));
-        if attrs.len() >= 4096 && value.is_some() && slot.is_none() {
-            return Err("Element attribute limit reached (4096).".into());
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&attrs.len()>=self.state.limits.host.element_attributes&&value.is_some()&&slot.is_none(){
+            return Err(format!("Element attribute limit reached ({}).",self.state.limits.host.element_attributes));
         }
         if name.html_is("id") && self.doc.attr(node, "id") != value.as_deref() {
             self.state.work(self.forms.controls.len())?;
@@ -2424,8 +2425,7 @@ impl Bridge<'_> {
         let canvas_resize = if slot.is_some() || value.is_some() {
             self.prepare_canvas_resize(node, &name, value.as_deref())?
         } else { None };
-        let NodeKind::Element { attrs, .. } = &mut self.doc.nodes[node].kind else { unreachable!() };
-        if slot.is_none() && value.is_some() { attrs.try_reserve(1).map_err(|_| "Attribute storage reservation failed.")?; }
+        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
         let factor = if name.html_is("id") { 2 } else { 1 };
         let old = slot.map_or(0, |slot| attrs[slot].name.bytes() + attrs[slot].value.len() * factor);
         // Existing expanded names retain the original QName/prefix and order.
@@ -2437,16 +2437,24 @@ impl Bridge<'_> {
             position.map(|position|(position,self.state.attached_attributes[position]))
         } else { None };
         let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.capacity()) } else { 0 };
-        if name.html_is("id") { self.state.copies(value.as_ref().map_or(0, String::len))?; }
+        let copied_id=if name.html_is("id") {
+            self.state.copies(value.as_ref().map_or(0,String::len))?;
+            value.as_deref().map(script_clone_node::copy_text).transpose()?
+        } else {None};
         let native_bytes = input.as_ref().map_or(0, forms::InputPlan::retained_bytes);
         let new_bytes = new.checked_add(retained_value).and_then(|bytes|bytes.checked_add(native_bytes))
             .ok_or("Attribute/native INPUT retained payload overflow.")?;
-        self.state.replace_bytes(old, new_bytes)?;
+        let occupied=self.state.retained.saturating_sub(old).checked_add(new_bytes).ok_or("Attribute retained payload overflow.")?;
+        let available=self.state.retained_limit.checked_sub(occupied).ok_or("DOM retained attribute backing allowance exhausted.")?;
+        let (replacement,backing)=if slot.is_none()&&value.is_some(){retained_storage::grow(attrs,1,available)?}else{(None,0)};
+        if replacement.is_some(){self.state.copies(attrs.len()*size_of::<crate::html::Attribute>())?;}
+        self.state.replace_bytes(old,new_bytes.checked_add(backing).ok_or("Attribute retained backing overflow.")?)?;
         let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
+        if let Some(mut next)=replacement{next.append(attrs);*attrs=next;}
         if name.html_is("id") {
-            *id = value.clone();
+            *id = copied_id;
             self.state.dirty = true;
         }
         let disabled = name.html_is("disabled");
@@ -6008,9 +6016,17 @@ fn node_bytes(node: &Node) -> usize {
         NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::len)
+                + attrs.capacity()*size_of::<crate::html::Attribute>()
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
         }
     }
+}
+fn copied_node_bytes(node:&Node)->usize{
+    let bytes=node_bytes(node);
+    if let NodeKind::Element{attrs,..}=&node.kind {bytes-(attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()}else{bytes}
+}
+fn copied_attribute_extra(kind:&NodeKind)->usize{
+    if let NodeKind::Element{attrs,..}=kind {(attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()}else{0}
 }
 fn document_bytes(doc: &Document) -> usize {
     doc.title.len() + doc.nodes.iter().map(node_bytes).sum::<usize>()
@@ -7862,3 +7878,7 @@ mod canvas_dimension_tests;
 #[cfg(test)]
 #[path = "script_canvas_protocol_tests.rs"]
 mod canvas_protocol_tests;
+
+#[cfg(test)]
+#[path="script_element_attribute_storage_tests.rs"]
+mod element_attribute_storage_tests;

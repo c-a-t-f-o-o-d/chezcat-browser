@@ -195,6 +195,8 @@ pub struct HostCapacities {
     pub media_tasks: usize,
     #[cfg(test)]
     pub attribute_identities: usize,
+    #[cfg(test)]
+    pub element_attributes:usize,
     pub node_lists: usize,
     pub node_list_references: usize,
 }
@@ -203,7 +205,7 @@ pub struct HostCapacities {
 pub const REGRESSION_HOST: HostCapacities = HostCapacities {
     string_bytes: 32 * 1024, extra_nodes: 256, retained_bytes: 1024 * 1024,
     listeners: 64, event_type_bytes: 256, timers: 64, timer_arguments: 30,
-    timer_bytes: 256 * 1024, timer_callbacks: 4096, created_events: 256, event_targets: 256, animation_frames: 64, media_tasks: 64, attribute_identities: 256, node_lists: 128, node_list_references: 16_384,
+    timer_bytes: 256 * 1024, timer_callbacks: 4096, created_events: 256, event_targets: 256, animation_frames: 64, media_tasks: 64, attribute_identities: 256, element_attributes:4096, node_lists: 128, node_list_references: 16_384,
 };
 pub const BROWSER_HOST: HostCapacities = HostCapacities {
     string_bytes: BROWSER_CAPACITIES.string_bytes, extra_nodes: 16_384,
@@ -212,6 +214,8 @@ pub const BROWSER_HOST: HostCapacities = HostCapacities {
     timer_bytes: 32 * 1024 * 1024, timer_callbacks: 65_536, created_events: 65_536, event_targets: 65_536, animation_frames: 65_536, media_tasks: 65_536,
     #[cfg(test)]
     attribute_identities: 65_536,
+    #[cfg(test)]
+    element_attributes:4096,
     node_lists: 65_536, node_list_references: 1_048_576,
 };
 

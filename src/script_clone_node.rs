@@ -13,21 +13,27 @@ pub(super) fn ordinary_clone_element(name: &str) -> bool {
             | "tr" | "td" | "th" | "hr" | "time")
 }
 
-pub(super) fn copy_node_kind(kind: &NodeKind) -> NodeKind {
-    match kind {
-        NodeKind::Element { tag, id, href, attrs } => NodeKind::Element {
-            tag: tag.clone(), id: id.clone(), href: href.clone(),
-            attrs: attrs.iter().map(|attr| crate::html::Attribute {
-                name: attr.name.copy(), value: attr.value.clone(),
-            }).collect(),
+pub(super) fn copy_text(text:&str)->Result<String,String>{
+    let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Cannot reserve copied DOM text.")?;
+    copied.push_str(text);Ok(copied)
+}
+pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
+    Ok(match kind {
+        NodeKind::Element { tag, id, href, attrs } => {
+            let mut copied=Vec::new();copied.try_reserve_exact(attrs.len()).map_err(|_|"Cannot reserve copied element attributes.")?;
+            for attr in attrs {
+                let namespace=attr.name.namespace.as_ref().map(|ns|Ok::<_,String>(crate::html::AttributeNamespace{
+                    uri:copy_text(&ns.uri)?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?
+                })).transpose()?;
+                copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:copy_text(&attr.name.qualified)?,namespace},value:copy_text(&attr.value)?});
+            }
+            NodeKind::Element{tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },
-        NodeKind::Text(text) => NodeKind::Text(text.clone()),
-        NodeKind::Comment(text) => NodeKind::Comment(text.clone()),
-        NodeKind::ProcessingInstruction { target, data } => NodeKind::ProcessingInstruction {
-            target: target.clone(), data: data.clone(),
-        },
-        NodeKind::DocumentFragment => NodeKind::DocumentFragment,
-    }
+        NodeKind::Text(text)=>NodeKind::Text(copy_text(text)?),
+        NodeKind::Comment(text)=>NodeKind::Comment(copy_text(text)?),
+        NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:copy_text(data)?},
+        NodeKind::DocumentFragment=>NodeKind::DocumentFragment,
+    })
 }
 
 struct DetachedCopy {
@@ -110,7 +116,7 @@ impl Bridge<'_> {
                         }
                         metadata = tag.len().saturating_add(href.as_ref().map_or(0, String::len));
                     }
-                    node_bytes(node).saturating_add(metadata)
+                    copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
                     if !ordinary_clone_element(tag) {
@@ -129,7 +135,7 @@ impl Bridge<'_> {
             self.state.copies(cost)?;
             let source = self.inert_import_source(handle).ok_or("Inert import source is unavailable.")?;
             let (kind, namespace, unsafe_nonce) = match source {
-                ImportSource::Parsed { node, unsafe_nonce } => (copy_node_kind(&node.kind), node.namespace, unsafe_nonce),
+                ImportSource::Parsed { node, unsafe_nonce } => (copy_node_kind(&node.kind)?, node.namespace, unsafe_nonce),
                 ImportSource::Element(tag) => (NodeKind::Element {
                     tag: tag.into(), id: None, href: None, attrs: Vec::new(),
                 }, crate::html::Namespace::Html, false),
@@ -139,6 +145,9 @@ impl Bridge<'_> {
                 }, crate::html::Namespace::None, false),
                 ImportSource::Fragment => (NodeKind::DocumentFragment, crate::html::Namespace::None, false),
             };
+            let extra=copied_attribute_extra(&kind);
+            bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Imported element attribute backing exceeds allowance.")?;
+            self.state.copies(extra)?;
             let start = base + pending.len();
             let index = base + staged.len();
             pending.try_reserve(count).map_err(|_| "Cannot reserve DOM import traversal.")?;
@@ -209,13 +218,16 @@ impl Bridge<'_> {
                 }
                 metadata_bytes = tag.len() + href.as_ref().map_or(0, String::len);
             }
-            let size = node_bytes(item) + metadata_bytes;
+            let size = copied_node_bytes(item) + metadata_bytes;
             bytes = bytes.checked_add(size).ok_or("DOM clone size overflow.")?;
             if bytes > self.state.retained_limit.saturating_sub(self.state.retained) {
                 return Err("DOM retained text/attribute growth limit reached during cloning.".into());
             }
             self.state.copies(size)?;
-            let kind = copy_node_kind(&item.kind);
+            let kind = copy_node_kind(&item.kind)?;
+            let extra=copied_attribute_extra(&kind);
+            bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Copied element attribute backing exceeds allowance.")?;
+            self.state.copies(extra)?;
             let unsafe_nonce = self.doc.nonce_unsafe_nodes.contains(&source);
             staged.push(DetachedCopy {
                 node: Node { kind, namespace: item.namespace, children: (first..first + children.len()).collect() },

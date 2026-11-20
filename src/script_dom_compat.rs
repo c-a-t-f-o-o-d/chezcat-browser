@@ -214,7 +214,7 @@ impl Bridge<'_> {
                 attrs.push(crate::html::Attribute::unqualified((*name).into(), dimension.to_string()));
             }
         }
-        let bytes = 3 + attrs
+        let bytes = 3 + attrs.capacity()*size_of::<crate::html::Attribute>() + attrs
             .iter()
             .map(crate::html::Attribute::bytes)
             .sum::<usize>();

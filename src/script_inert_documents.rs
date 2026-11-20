@@ -304,7 +304,7 @@ impl Bridge<'_> {
                 .ok_or("Inert fragment contains unsupported active markup.")?;
             let raw = Rc::clone(&source.node);
             let unsafe_nonce = source.unsafe_nonce;
-            let mut bytes = node_bytes(&raw);
+            let mut bytes = copied_node_bytes(&raw);
             if let NodeKind::Element { tag, href, attrs, id } = &raw.kind {
                 if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
                     self.state.work(self.forms.controls.len())?;
@@ -338,9 +338,10 @@ impl Bridge<'_> {
             }
             let node = Node {
                 namespace: raw.namespace,
-                kind: script_clone_node::copy_node_kind(&raw.kind),
+                kind: script_clone_node::copy_node_kind(&raw.kind)?,
                 children: node_children,
             };
+            let extra=copied_attribute_extra(&node.kind);self.state.copies(extra)?;retained=retained.saturating_add(extra);
             plan.try_reserve(1).map_err(|_| "Cannot reserve inert promotion plan.")?;
             indices.try_reserve(1).map_err(|_| "Cannot reserve inert promotion identities.")?;
             plan.push(Promotion { index, parent, node, unsafe_nonce });
@@ -849,18 +850,19 @@ impl Bridge<'_> {
                 && (attr.name.qualified.starts_with("on") || attr.name.html_is("is"))) {
                 return Err("Template cloning cannot transfer active handlers or customized built-ins.".into());
             }
-            let bytes = node_bytes(source).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
+            let bytes = copied_node_bytes(source).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
             self.state.work(attrs.len().saturating_add(1))?;
             self.state.copies(bytes)?;
             payload = bytes.saturating_add(size_of::<GeneratedNode>() + size_of::<Node>());
             let generated_index = self.state.inert_documents.generated.len();
             generated = Some(GeneratedNode {
                 node: Rc::new(Node {
-                    kind: script_clone_node::copy_node_kind(&source.kind),
+                    kind: script_clone_node::copy_node_kind(&source.kind)?,
                     namespace: source.namespace, children: Vec::new(),
                 }),
                 unsafe_nonce: self.doc.nonce_unsafe_nodes.contains(&index),
             });
+            let extra=copied_attribute_extra(&generated.as_ref().unwrap().node.kind);self.state.copies(extra)?;payload=payload.saturating_add(extra);
             (owner, Some(Kind::Parsed {
                 source: ParsedSource::Generated(generated_index),
                 initial_template: if deep { initial } else { None },
