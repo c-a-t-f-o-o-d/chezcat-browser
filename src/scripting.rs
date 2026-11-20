@@ -3035,6 +3035,7 @@ impl Host for Bridge<'_> {
         self.media_interface_receiver(object).then(||script_media::interface_setter(method)).flatten()
     }
     fn finish_native_microtask(&mut self,ticket:u64)->bool{self.finish_media_microtask(ticket)}
+    fn cancel_native_microtask(&mut self,ticket:u64){self.cancel_media_microtask(ticket)}
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {

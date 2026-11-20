@@ -29,10 +29,12 @@ impl Runtime {
     }
 
     pub(crate) fn process_native_promise_effects(&mut self,host:&mut dyn Host)->Result<usize,String> {
+        self.flush_native_microtask_cancellations(host);
         let result=self.drain_native_promise_effects(host);
         if result.as_ref().is_err_and(|fault|fault.exception.is_none()) {
             self.job_failed_fatally=true;self.cancel_microtasks();
         }
+        self.flush_native_microtask_cancellations(host);
         result.map_err(|fault|self.display_fault(fault))
     }
 
