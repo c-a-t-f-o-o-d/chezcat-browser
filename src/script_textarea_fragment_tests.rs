@@ -388,7 +388,6 @@ fn textarea_fragment_native_interiors_associations_and_contexts_remain_guarded()
         "area.firstChild.data='new default';",
         "area.firstChild.nodeValue='new default';",
         "area.firstChild.textContent='new default';",
-        "document.getElementById('inert').innerHTML='<textarea>text</textarea>';",
         "document.getElementById('foreign').innerHTML='<textarea>text</textarea>';",
         "host.innerHTML='<textarea form=a>text</textarea>';",
         "host.innerHTML='<textarea>unclosed';",
@@ -399,6 +398,11 @@ fn textarea_fragment_native_interiors_associations_and_contexts_remain_guarded()
         assert_eq!(Snapshot::capture(&doc, &forms, &page), before, "{source}");
         no_effects(&mut page);
     }
+    let controls=forms.controls.len();
+    eval(&mut doc,&mut forms,&mut page,"document.getElementById('inert').innerHTML='<textarea id=inactive name=ghost>text</textarea>';if(document.getElementById('inactive')!==null||area.value!=='edited'||neighbor.value!=='neighbor edited')throw 'template activated native control';");
+    assert_eq!(forms.controls.len(),controls);
+    no_effects(&mut page);
+
 }
 
 #[test]
