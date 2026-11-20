@@ -110,7 +110,8 @@ fn document_fragment_imported_template_renders_real_pixels_and_link_hits() {
 html,body{margin:0;padding:0;background:#ffffff}
 #copy{position:absolute;left:40px;top:30px;width:160px;height:30px}
 #mount{position:absolute;left:40px;top:100px;width:240px;height:80px;background:#ffffff}
-#copy-link{display:block;position:absolute;left:20px;top:12px;width:100px;height:28px;background:#236144;color:white}
+#copy-link{display:block;position:absolute;left:20px;top:12px;width:100px;height:28px;background:#ffffff;color:white}
+#mount[panel-ready] #copy-link{background:#236144}
 </style></head><body><template id=seed><a id=copy-link href=#destination on-click=ordinary onclick="throw 'inert handler ran'">Imported link</a><!--stamp <img src=/never.ppm>--></template>
 <button id=copy type=button>Import template</button><div id=mount></div><div id=destination></div>
 <script>
@@ -145,6 +146,8 @@ document.getElementById('copy').onclick=function(event){
     if(!match.call(imported,'a')||closest.call(imported,'#mount')!==mount)throw 'real imported canonical matching';
     var selected=[];for(var child of mount.children){if(match.call(child,'a'))selected.push(child);}
     if(selected.length!==1||selected[0]!==imported)throw 'real saved matching over imported live children';
+    mount.setAttribute('PANEL-READY','');
+    if(!mount.matches('[panel-ready]')||mount.getAttributeNode('panel-ready').ownerElement!==mount)throw 'real custom attribute selector';
     document.title='Template imported';
 };
 </script></body></html>"#).unwrap();

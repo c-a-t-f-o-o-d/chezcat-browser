@@ -500,13 +500,19 @@ impl Bridge<'_> {
         let content_editable = key == "contenteditable" && self.content_editable_receiver(node_handle(node));
         let canvas_attribute = matches!(key, "width" | "height") && crate::html_canvas::element(self.doc, node);
         let slot_name = key == "name" && self.html_slot_receiver(node_handle(node));
+        // Custom hyphenated HTML names are ordinary DOM data, including names
+        // used by attribute selectors. The standard hyphenated native names
+        // retain their explicit policy; foreign attributes retain their paths.
+        // https://html.spec.whatwg.org/multipage/indices.html#attributes-3
+        let custom_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
+            && key.contains('-') && !matches!(key,"accept-charset"|"http-equiv");
         // Nonce text follows existing CSP snapshots/queues; changing metadata
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
-            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name {
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
@@ -539,3 +545,7 @@ mod hidden_input_tests;
 #[cfg(test)]
 #[path="script_attr_storage_tests.rs"]
 mod storage_tests;
+
+#[cfg(test)]
+#[path="script_custom_attribute_tests.rs"]
+mod custom_attribute_tests;
