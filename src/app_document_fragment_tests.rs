@@ -117,7 +117,9 @@ html,body{margin:0;padding:0;background:#ffffff}
 var input=document.getElementById('seed').content, sourceView=input.children, source=Array.from(sourceView)[0], mount=document.getElementById('mount'), mountView=mount.children;
 if(input.childElementCount!==1||input.lastElementChild!==source||!source||source.nodeName!=='A')throw 'real inert ParentNode view';
 var sourceNames=source.getAttributeNames();if(sourceNames.join(',')!=='id,href,on-click,onclick'||!source.hasAttribute('onclick'))throw 'ordered inert attribute preparation';
+var sourceMap=source.attributes,handler=sourceMap.getNamedItem('onclick');if(Array.from(sourceMap)[3]!==handler||handler.value!=="throw 'inert handler ran'"||handler.ownerElement!==source)throw 'real inert Attr preparation';
 source.removeAttribute('onclick');if(source.hasAttribute('onclick')||source.getAttribute('on-click')!=='ordinary')throw 'actual handler removal and ordinary data';
+if(source.attributes!==sourceMap||sourceMap.length!==3||handler.ownerElement!==null||handler.ownerDocument!==source.ownerDocument||handler.value!=="throw 'inert handler ran'")throw 'real saved removed Attr';
 document.getElementById('copy').onclick=function(event){
     if(!event.isTrusted)throw 'actual pointer activation';
     var fragment=document.importNode(input,true), importedView=fragment.children, imported=Array.from(importedView)[0], savedChildren=imported.children;

@@ -2515,6 +2515,7 @@ impl Bridge<'_> {
                 if let Some((position,attr)) = detached_attr {
                     self.state.attached_attributes.remove(position);
                     self.state.attributes[attr].owner = None;
+                    self.state.attributes[attr].document = DOCUMENT;
                     self.state.attributes[attr].value = removed;
                 }
             }
@@ -2943,7 +2944,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        matches!(property,"getAttributeNames"|"hasAttribute"|"removeAttribute") && self.attribute_names_receiver(object)
+        matches!(property,"getAttributeNames"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.attribute_names_receiver(object)
             || parent_children::member(property) && self.parent_node_receiver(object)
             || property == "style" && self.html_element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -3035,6 +3036,7 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
+        if self.named_map_receiver(object){return Some(WINDOW);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.inert_adopted_node(object) && self.inert_interface(object)
             .is_some_and(|interface| interface.starts_with("HTML") || interface == "SVGElement")
@@ -3053,7 +3055,7 @@ impl Host for Bridge<'_> {
             || self.abort_instance(object).is_some() || self.message_instance(object).is_some()
             || self.canvas_context_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
-            || self.node_list_receiver(object) || self.collection_receiver(object) || self.concrete_html_interface(object).is_some()
+            || self.node_list_receiver(object) || self.collection_receiver(object) || self.named_map_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
             || self.comment_receiver(object)
             || self.processing_instruction_receiver(object)
@@ -3086,6 +3088,7 @@ impl Host for Bridge<'_> {
             return Some(crate::javascript::NativeAncestry { window: WINDOW, constructor: Some((WINDOW, "CanvasRenderingContext2D")) });
         }
         if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
+        if self.named_map_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"NamedNodeMap"))});}
         if let Some(window)=self.collection_owner_window(object){return Some(crate::javascript::NativeAncestry{window,constructor:Some((window,"HTMLCollection"))});}
         if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
         if let Some(window)=self.event_owner(object) {
@@ -3169,6 +3172,7 @@ impl Host for Bridge<'_> {
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
         if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
         if self.frame_document_prototype_lookup(object,property) {return false;}
+        if self.named_map_receiver(object){return !script_named_map::prototype_member(property);}
         if self.collection_receiver(object){return !self.collection_prototype_member(property);}
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
@@ -3262,6 +3266,8 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if property=="attributes"&&self.inert_node_type(object)==Some(1){return true;}
+        if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return false;}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return false;}
         if parent_children::member(property) && self.parent_node_receiver(object) {return true;}
         if script_inline_style::handle(object) && (property == "length" || collection_index(property).is_some()) { return true; }
@@ -3363,7 +3369,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
         }
-        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
+        if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
             return &[(0, true)];
         }
         if let Some(operation) = CanvasOperation::parse(method) {
@@ -3393,6 +3399,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
+            let method=script_named_map::operation(method).unwrap_or(method);
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
         }
         if self.class_list_receiver(object) {
@@ -3498,6 +3505,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
         if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
         if object == WINDOW && crate::javascript::message_channel_interface::operation(method) { return Some(WINDOW); }
         if object == WINDOW && matches!(method, script_inert_documents::parser::CONSTRUCTOR | script_inert_documents::parser::PARSE) {
@@ -3514,7 +3522,7 @@ impl Host for Bridge<'_> {
             return Some(object);
         }
         if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
-        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
+        if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -3568,7 +3576,7 @@ impl Host for Bridge<'_> {
         if (object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS")
             || self.inert_document(object) && method=="createElementNS") && index==0 {return true;}
         if object == HISTORY && method == "replaceState" && index == 2 { return true; }
-        if self.named_map_receiver(object) { return method == "getNamedItemNS" && index == 0; }
+        if self.named_map_receiver(object) { return script_named_map::operation(method).unwrap_or(method) == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attr_element_receiver(object)
     }
@@ -3604,6 +3612,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if let Some(method)=script_named_map::operation(method){return match method{"item"|"getNamedItem"=>1,"getNamedItemNS"=>2,_=>0};}
         if method == script_inert_documents::parser::PARSE { return 2; }
         if method == "appendChild" && self.template_fragment_receiver(object) { return 1; }
         if method == DOCUMENT_IMPORT_NODE { return 1; }
@@ -3612,7 +3621,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { 2 } else { 1 };
         }
-        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) { return 1; }
+        if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) { return 1; }
         if script_inline_style::handle(object) && method == "item" { return 1; }
         if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
@@ -3743,9 +3752,10 @@ impl Host for Bridge<'_> {
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if matches!(method,"NodeList"|"HTMLCollection"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"NodeList"|"HTMLCollection"|"NamedNodeMap"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&!self.collection_receiver(object){return Err(("TypeError","HTMLCollection operation requires a genuine native collection.".into()));}
         if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
+        if script_named_map::operation(method).is_some()&&!self.named_map_receiver(object){return Err(("TypeError","NamedNodeMap operation requires a genuine map.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
         if parent_children::operation(method).is_some() && !self.parent_node_receiver(object) {
             return Err(("TypeError","ParentNode getter requires a genuine accessible parent node.".into()));
@@ -4031,7 +4041,7 @@ impl Host for Bridge<'_> {
         if matches!(property,"addEventListener"|"removeEventListener"|"dispatchEvent") && self.form_named_control(object,property) {return None;}
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
-        if script_named_map::element(object).is_some() { return self.named_map_receiver(object).then(|| script_named_map::method(property)).flatten(); }
+        if self.named_map_receiver(object){return None;}
         if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
@@ -4103,7 +4113,7 @@ impl Host for Bridge<'_> {
             }
         }
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
-        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") {
+        if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") {
             return (self.event_target_interface(object) || self.attr_element_receiver(object))
                 && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
         }
@@ -4139,6 +4149,7 @@ impl Host for Bridge<'_> {
         }
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return self.collection_receiver(receiver);}
+        if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return self.named_map_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
         if self.event_target_interface(object) {
@@ -4278,7 +4289,7 @@ impl Host for Bridge<'_> {
     }
 
     fn indexed_iteration_owner(&self, object:u32)->Option<u32> {
-        self.collection_owner_window(object).or_else(||self.node_list_receiver(object).then_some(WINDOW))
+        self.collection_owner_window(object).or_else(||(self.node_list_receiver(object)||self.named_map_receiver(object)).then_some(WINDOW))
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
@@ -4607,6 +4618,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(false);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(false);}
         if parent_children::member(property) && self.parent_node_receiver(object) {return Ok(true);}
 
@@ -4905,6 +4917,7 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(Value::Undefined);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(Value::Undefined);}
         if parent_children::member(property) && self.parent_node_receiver(object) {return self.parent_node_get(object,property);}
 
@@ -5562,8 +5575,9 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
-        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
+        if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
             let argument=args.first().ok_or("Attribute operation requires one argument.")?;
+            if method=="getAttributeNode"{return self.get_attribute_node(object,args);}
             if method=="removeAttribute"{return self.remove_inert_attribute(object,argument);}
             let value=self.inert_element_attribute(object,argument)?;
             return Ok(if method=="hasAttribute"{Value::Bool(!matches!(value,Value::Null))}else{value});
@@ -5605,6 +5619,7 @@ impl Host for Bridge<'_> {
         }
         if object==WINDOW && method=="getComputedStyle" {return self.create_computed_style(args);}
         if script_computed_style::index(object).is_some() {return if method=="getPropertyValue" {self.computed_property_value(object,args)} else {Err("Computed style declarations are read-only.".into())};}
+        if let Some(operation)=script_named_map::operation(method){return if operation=="length"{self.named_map_get(object,"length")}else{self.named_map_call(object,operation,args)};}
         if method=="\0HTMLCollection.get.length"{return self.tag_collection_get(object,"length");}
         if method=="\0HTMLCollection.item"{return self.tag_collection_call(object,"item",args);}
         if method=="\0HTMLCollection.namedItem"{return self.tag_collection_call(object,"namedItem",args);}

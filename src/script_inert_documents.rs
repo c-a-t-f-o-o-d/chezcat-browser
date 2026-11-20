@@ -8,7 +8,7 @@ pub(super) mod parser;
 
 pub(super) const MAIN_IMPLEMENTATION: u32 = 0x8600_0000;
 const FIRST_ENTRY: u32 = MAIN_IMPLEMENTATION + 1;
-const ENTRY_END: u32 = 0x8700_0000; // AbortController owns the next typed domain.
+pub(super) const ENTRY_END: u32 = 0x8700_0000; // AbortController owns the next typed domain.
 const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 
 #[cfg(test)]
@@ -222,10 +222,10 @@ impl Bridge<'_> {
             Kind::Document(_) | Kind::TemplateDocument { .. } => matches!(name, "URL" | "documentURI" | "defaultView" | "contentType"
                 | "compatMode" | "characterSet" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
             Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
-            Kind::Element(_) => matches!(name, "localName" | "tagName" | "namespaceURI" | "prefix"),
+            Kind::Element(_) => matches!(name, "attributes" | "localName" | "tagName" | "namespaceURI" | "prefix"),
             Kind::Fragment { .. } => false,
             Kind::Parsed { source, .. } => match self.parsed_source(source).map(|(node, _)| &node.kind) {
-                Some(NodeKind::Element { .. }) => matches!(name, "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
+                Some(NodeKind::Element { .. }) => matches!(name, "attributes" | "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
                 Some(NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }) =>
                     matches!(name, "data" | "length"),
                 _ => false,
@@ -255,15 +255,21 @@ impl Bridge<'_> {
         let Kind::Parsed{source,initial_template}=inert.kind else {
             return if matches!(inert.kind,Kind::Element(_)){Ok(Value::Undefined)}else{Err("removeAttribute requires an Element.".into())};
         };
+        let owner_document=inert.owner;
         let (node,unsafe_nonce)=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
         if node.namespace==crate::html::Namespace::Html{name.make_ascii_lowercase();}
         let NodeKind::Element{attrs,tag,href,..}=&node.kind else{return Err("removeAttribute requires an Element.".into());};
         let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));
-        let slot=attrs.iter().position(|attr|attr.name.qualified==name);
         let minimum=copied_node_bytes(node).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0,String::len))
             .saturating_add(size_of::<Node>()+2*size_of::<usize>());
         self.state.work(work)?;
-        let Some(slot)=slot else{return Ok(Value::Undefined);};
+        let NodeKind::Element{attrs,..}=&self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0.kind else{unreachable!()};
+        let Some(slot)=attrs.iter().position(|attr|attr.name.qualified==name) else{return Ok(Value::Undefined);};
+        self.state.attribute_lookup_work()?;
+        let NodeKind::Element{attrs,..}=&self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0.kind else{unreachable!()};
+        let attached=self.state.attribute_owner_position(object,&attrs[slot].name).ok().map(|position|(position,self.state.attached_attributes[position]));
+        if let Some((position,_))=attached{self.state.copies((self.state.attached_attributes.len()-position-1)*size_of::<usize>())?;}
+
         if minimum>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Inert attribute source copy allowance exhausted.".into());}
         self.state.copies(minimum)?;
         let node=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0;
@@ -276,11 +282,17 @@ impl Bridge<'_> {
         let NodeKind::Element{tag,href,..}=&node.kind else{unreachable!()};
         let payload=node_bytes(&node).checked_add(tag.capacity()).and_then(|bytes|bytes.checked_add(href.as_ref().map_or(0,String::capacity)))
             .and_then(|bytes|bytes.checked_add(size_of::<Node>()+2*size_of::<usize>())).ok_or("Inert attribute copy storage overflow.")?;
+        let payload=payload.checked_add(if attached.is_some(){removed.value.capacity()}else{0}).ok_or("Detached inert Attr value storage overflow.")?;
         let generated=GeneratedNode{node:Rc::new(node),unsafe_nonce};
         let index=self.state.inert_documents.generated.len();
         self.reserve_inert_entries(0,payload,1)?;
         let arena=&mut self.state.inert_documents;arena.generated.push(generated);
         arena.node_mut(object).expect("checked inert Element").kind=Kind::Parsed{source:ParsedSource::Generated(index),initial_template};
+        if let Some((position,id))=attached{
+            self.state.attached_attributes.remove(position);
+            let attr=&mut self.state.attributes[id];attr.owner=None;attr.document=owner_document;attr.value=removed.value;
+        }
+
         self.state.dom_committed();Ok(Value::Undefined)
     }
 
@@ -1450,6 +1462,7 @@ impl Bridge<'_> {
         self.state.work(1)?;
         if self.inert_implementation(object) || self.inert_parser(object) { return Ok(Value::Undefined); }
         if property == "childNodes" { return self.create_inert_child_list(object); }
+        if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Parsed { source, .. } = node.kind {
             let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;

@@ -437,7 +437,7 @@ impl Bridge<'_> {
             .and_then(|i| self.state.attributes.get(i))
             .is_some_and(|attr| {
                 attr.name.html_is("src")
-                    && attr.owner != node_index(script_named_map::element(object).unwrap_or(object))
+                    && attr.owner != Some(script_named_map::element(object).unwrap_or(object))
             })
         };
         if setter {
@@ -451,7 +451,7 @@ impl Bridge<'_> {
                         attr.name.html_is("src")
                             && attr
                                 .owner
-                                .is_some_and(|node| self.media_element_receiver(node_handle(node)))
+                                .is_some_and(|node| self.media_element_receiver(node))
                     });
         }
         let target = script_named_map::element(object).unwrap_or(object);
