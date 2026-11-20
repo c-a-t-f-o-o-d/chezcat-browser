@@ -1,5 +1,9 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>ChezCat</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChezCat</title>
 <link rel="stylesheet" href="styles.css">
 <style>
 body { margin:0; color:#233747; background:#f2f5f7; font-size:16px; line-height:1.5; }
@@ -7,68 +11,157 @@ main { max-width:1100px; margin:0 auto; padding:24px; }
 .hero { background:#0b153c; color:#fff3dc; padding:22px; margin-bottom:20px; }
 .brand { display:flex; align-items:center; flex-wrap:wrap; gap:18px; }
 .brand-logo { width:96px; height:96px; flex-shrink:0; }
-.brand-copy { flex:1; min-width:260px; }
+.brand-copy { flex:1 1 240px; min-width:0; }
 h1 { font-size:40px; margin:6px 0 8px; }
-h2 { font-size:22px; margin:0 0 12px; }
+h2 { font-size:24px; margin:0 0 12px; }
+h3 { font-size:20px; margin:0 0 10px; }
 p { margin:8px 0 14px; }
 .eyebrow { color:#42c7bc; font-weight:bold; font-size:14px; }
 .sites { display:flex; flex-wrap:wrap; gap:16px; }
-.site-group { flex:1; min-width:250px; padding:18px; background:white; border:1px solid #d4e0e6; }
+.site-group { flex:1 1 280px; min-width:0; box-sizing:border-box; padding:18px; background:white; border:1px solid #d4e0e6; }
 a { color:#176e89; }
 .site-link { display:block; padding:9px 10px; margin:0 0 8px; background:#e7f0f4; border:1px solid #b4cbd7; }
-.small { color:#516878; font-size:13px; }
+.small { color:#516878; font-size:14px; }
 .card { background:white; border:1px solid #d4e0e6; padding:20px; margin:20px 0; }
-.workshops a { display:inline-block; margin:4px 14px 4px 0; }
+.section-title { margin:28px 0 12px; }
+.quick-links a, .workshops a { display:inline-block; margin:4px 14px 4px 0; }
+.scenarios { padding-left:24px; }
+.scenarios li { margin:0 0 14px; }
 </style>
-</head><body><main>
+</head>
+<body><main id="top">
 <div class="hero">
 <div class="brand">
 <img class="brand-logo" src="images/chezcat-icon.png" width="96" height="96" alt="ChezCat">
 <div class="brand-copy">
-<p class="eyebrow">BUILD 0.79.0-alpha.1</p>
+<p class="eyebrow">BROWSE AND TEST</p>
 <h1>ChezCat</h1>
-<p>A browser you can change.</p>
+<p>A browser you can change. Pick a site, try a journey, and see what works.</p>
 </div>
 </div>
 </div>
+
+<nav class="quick-links" aria-label="Start page sections">
+<a href="#websites">Test websites</a>
+<a href="#scenarios">Test scenarios</a>
+<a href="#workshops">Local workshops</a>
+<a href="#connections">Local connections</a>
+<a href="#keys">Useful keys</a>
+</nav>
+
+<h2 class="section-title" id="websites">Test websites</h2>
+<p>Start with a simple page, then try search, richer interfaces, media and browser checks. These are test targets; support and results vary by site and build.</p>
 <div class="sites">
 <section class="site-group">
-<h2>Search and reading</h2>
+<h3>Search</h3>
 <a class="site-link" href="https://www.google.com/">Google</a>
-<a class="site-link" href="https://www.google.com/search?q=browser+engine">Google test search</a>
+<a class="site-link" href="https://www.google.com/search?q=browser+engine">Google: browser engine</a>
+<a class="site-link" href="https://www.bing.com/">Bing</a>
+<a class="site-link" href="https://duckduckgo.com/">DuckDuckGo</a>
 <a class="site-link" href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite</a>
-<a class="site-link" href="https://news.ycombinator.com/">Hacker News</a>
-<p class="small"><a href="http://www.google.com/">Google over HTTP</a> is also available for comparing the unencrypted page.</p>
+<p class="small">Type a query, open a result, go Back, then submit a different query.</p>
 </section>
 <section class="site-group">
-<h2>Browser checks</h2>
+<h3>Reading and documents</h3>
+<a class="site-link" href="https://en.wikipedia.org/wiki/Web_browser">Wikipedia: Web browser</a>
+<a class="site-link" href="https://news.ycombinator.com/">Hacker News</a>
+<a class="site-link" href="https://developer.mozilla.org/en-US/">MDN Web Docs</a>
+<a class="site-link" href="https://www.gutenberg.org/ebooks/11">Project Gutenberg: Alice in Wonderland</a>
+<p class="small">Follow article links, jump to headings, find a word, resize the window and change zoom.</p>
+</section>
+<section class="site-group">
+<h3>Modern interfaces</h3>
+<a class="site-link" href="https://www.youtube.com/">YouTube</a>
+<a class="site-link" href="https://github.com/c-a-t-f-o-o-d/chezcat-browser">ChezCat on GitHub</a>
+<a class="site-link" href="https://www.openstreetmap.org/">OpenStreetMap</a>
+<p class="small">Try menus, search fields, scrolling and navigation. On the map, search for a place, then pan and zoom.</p>
+</section>
+<section class="site-group">
+<h3>Media and games</h3>
+<a class="site-link" href="https://play2048.co/">2048: keyboard game</a>
+<a class="site-link" href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/video">MDN: video examples</a>
+<a class="site-link" href="https://webglsamples.org/aquarium/aquarium.html">WebGL Aquarium</a>
+<p class="small">Check keyboard response, animation and actual media output. The aquarium exercises advanced graphics that may be unavailable.</p>
+</section>
+<section class="site-group">
+<h3>Forms and HTTP</h3>
+<a class="site-link" href="https://httpbin.org/forms/post">httpbin: POST form</a>
+<a class="site-link" href="https://httpbin.org/headers">httpbin: request headers</a>
+<a class="site-link" href="https://httpbin.org/redirect/2">httpbin: two redirects</a>
+<a class="site-link" href="https://httpbin.org/status/404">httpbin: expected 404</a>
+<p class="small">Use made-up form values. Inspect the submitted response, final address and request status in F12 &gt; Network.</p>
+</section>
+<section class="site-group">
+<h3>Browser reports</h3>
 <a class="site-link" href="https://coveryourtracks.eff.org/fingerprint-nojs">EFF header report</a>
 <a class="site-link" href="https://coveryourtracks.eff.org/">Cover Your Tracks</a>
-<a class="site-link" href="https://www.grc.com/shieldsup">GRC ShieldsUP!</a>
 <a class="site-link" href="https://browserleaks.com/javascript">BrowserLeaks JavaScript</a>
-<p class="small">The EFF header report works without its full JavaScript test. <a href="browser-tests.html">About these checks</a></p>
+<a class="site-link" href="https://www.grc.com/shieldsup">GRC ShieldsUP!</a>
+<p class="small">Check which report sections actually finish. <a href="browser-tests.html">About these checks</a></p>
 </section>
 <section class="site-group">
-<h2>Simple pages</h2>
+<h3>Simple navigation</h3>
 <a class="site-link" href="https://example.com/">Example Domain</a>
-<a class="site-link" href="http://info.cern.ch/">CERN website</a>
-<a class="site-link" href="http://info.cern.ch/hypertext/WWW/TheProject.html">The first website</a>
-<a class="site-link" href="http://neverssl.com/">NeverSSL</a>
-<p class="small">Useful for checking basic loading, text, links and navigation. NeverSSL may be unavailable on your connection.</p>
+<a class="site-link" href="http://info.cern.ch/">CERN website (HTTP)</a>
+<a class="site-link" href="http://info.cern.ch/hypertext/WWW/TheProject.html">The first website (HTTP)</a>
+<a class="site-link" href="http://neverssl.com/">NeverSSL (HTTP)</a>
+<p class="small">Check text, links and Back/Forward. <a href="http://www.google.com/">Google over HTTP</a> can also show redirect behavior.</p>
+</section>
+<section class="site-group">
+<h3>Layout and rendering</h3>
+<a class="site-link" href="https://www.w3.org/Style/CSS/Test/CSS3/Selectors/current/html/index.html">W3C CSS selector tests</a>
+<a class="site-link" href="https://www.wikipedia.org/">Wikipedia: languages and text</a>
+<a class="site-link" href="image-workshop.html">Local image formats and animation</a>
+<a class="site-link" href="flex-demo.html">Local flex layout</a>
+<p class="small">Compare text, colors, alignment and images at wide and narrow window sizes. Follow each test's expected result.</p>
+</section>
+<section class="site-group">
+<h3>Connection checks</h3>
+<a class="site-link" href="https://badssl.com/">badssl: test directory</a>
+<a class="site-link" href="https://expired.badssl.com/">Expired certificate: expect rejection</a>
+<a class="site-link" href="https://wrong.host.badssl.com/">Wrong hostname: expect rejection</a>
+<a class="site-link" href="https://self-signed.badssl.com/">Self-signed certificate: expect rejection</a>
+<p class="small">Compare a normal HTTPS site with these deliberate certificate failures. Keep certificate validation enabled.</p>
 </section>
 </div>
-<p class="small">Website support is still growing. Ctrl+I shows skipped resources and script errors. A page opening does not mean its interactive features or browser tests completed.</p>
-<div class="card workshops">
-<h2>New in this pass</h2>
-<p><a href="browser-controls.html">Browser compatibility</a><a href="download-sample.txt" download="ChezCat-sample.txt">Try a download</a><a href="image-presentation.html">Image selection and presentation</a><a href="image-workshop.html">Image formats and animation</a></p>
-<p>Reduced images keep fine detail, and the compatibility workshop includes more ways for scripts to find and inspect page elements. Settings keeps unfinished edits when you open Downloads, and the two link colors work independently.</p>
-<p>Make the browser yours: dark colors, custom link colors, bookmark folders and a Downloads folder in Settings. Drag links or the address bookmark icon onto the bookmarks bar.</p>
-<p class="small">F12 > Network shows a request table and a matching timing graph. Click a request to highlight its timing. Detach opens the same tools in their own window; Dock returns them below the page.</p>
+
+<section class="card" id="scenarios">
+<h2>Repeatable test scenarios</h2>
+<p>Try the same steps after a change. Record the step that works or fails, together with the build shown in About and any Ctrl+I error.</p>
+<ol class="scenarios">
+<li><strong>Search and return.</strong> On <a href="https://www.google.com/">Google</a> or <a href="https://lite.duckduckgo.com/lite/">DuckDuckGo Lite</a>, search for browser engine, open a result, use Back, then search for Rust programming. Check the address, query and result links.</li>
+<li><strong>YouTube journey.</strong> Open <a href="https://www.youtube.com/">YouTube</a> signed out. Check the header, guide and search field; enter a query; open a result; try play, pause, seek and sound; go Back and change the query. Record shell, results, navigation and playback separately.</li>
+<li><strong>Read, find and resize.</strong> Open the <a href="https://en.wikipedia.org/wiki/Web_browser">Wikipedia article</a>, use a contents link, find browser with Ctrl+F, zoom in, then narrow the window. Check wrapping, scroll position and link hit targets.</li>
+<li><strong>Keyboard and forms.</strong> In <a href="forms.html">local forms</a>, move between controls with Tab and Shift+Tab, edit text, change checkboxes and radio buttons, and reset. Use the <a href="https://httpbin.org/forms/post">httpbin POST form</a> for a remote submission with made-up values.</li>
+<li><strong>JavaScript and animation.</strong> In the <a href="javascript-demo.html">JavaScript workshop</a>, change the counter, type into the greeting field and hide/show the preview. Play <a href="game-demo.html">Cat Courier</a> or <a href="https://play2048.co/">2048</a> to check keyboard input and updates.</li>
+<li><strong>Images and layout.</strong> Compare the <a href="image-workshop.html">image workshop</a>, <a href="image-presentation.html">image presentation</a> and <a href="flex-demo.html">flex layout</a> at two window sizes and zoom levels. Check transparency, animation, clipping and fine detail.</li>
+<li><strong>Tabs, bookmarks and history.</strong> Open two different sites in separate tabs, switch between them, bookmark one with Ctrl+D and reopen it. Follow a few links, then use Back and Forward. If history recording is enabled, check Ctrl+H.</li>
+<li><strong>Download a known file.</strong> <a href="download-sample.txt" download="ChezCat-sample.txt">Download the local text sample</a>, open Downloads and verify its name and contents. Try Alt+click on <a href="download-sample.txt">the same file</a> as a second route.</li>
+<li><strong>Redirect, stop and recover.</strong> Start the <a href="#connections">local HTTP demo</a>, then try its redirect chain and slow response. Press Esc during the slow load and open another page. Check the final address and activity record.</li>
+<li><strong>Certificate errors.</strong> Load a normal HTTPS site, then try an <a href="https://expired.badssl.com/">expired certificate</a> and a <a href="https://wrong.host.badssl.com/">wrong hostname</a>. Expect a certificate rejection, then check that a normal site still loads.</li>
+</ol>
+<p class="small">A visible page, a completed report and a working interaction are separate results. Ctrl+I shows resource activity and script errors; F12 opens Elements, Sources, Console and Network.</p>
+</section>
+
+<section class="card workshops" id="workshops">
 <h2>Local workshops</h2>
-<p><a href="game-demo.html">Cat Courier game</a><a href="binary-demo.html">Binary data and collections</a><a href="blocking-demo.html">Request blocking</a><a href="javascript-demo.html">JavaScript</a><a href="compat-demo.html">Layout compatibility</a><a href="forms.html">Forms</a><a href="browser-post-demo.html">POST and image forms</a><a href="flex-demo.html">Flex layout</a><a href="position-demo.html">Positioning</a><a href="jpeg-demo.html">JPEG images</a><a href="gif-demo.html">GIF images</a><a href="gallery.html">Image formats</a><a href="fonts.html">Page fonts</a><a href="text-demo.html">Text and symbols</a><a href="second.html">Second page</a></p>
-<p class="small"><a href="http://127.0.0.1:8765/">Local HTTP demo</a> uses Run-Http-Demo.cmd. Run-Https-Demo.cmd starts the HTTPS server; Run-Https-Browser.cmd opens the browser with its separate test trust file.</p>
-</div>
-<div class="card">
+<p>These pages ship with ChezCat and provide small, repeatable examples.</p>
+<h3>Scripts, controls and browser behavior</h3>
+<p><a href="javascript-demo.html">JavaScript</a><a href="browser-controls.html">Browser objects</a><a href="binary-demo.html">Binary data and collections</a><a href="game-demo.html">Cat Courier game</a><a href="forms.html">Forms</a><a href="browser-post-demo.html">POST and image forms</a><a href="blocking-demo.html">Request blocking</a><a href="browser-tests.html">Browser checks</a></p>
+<h3>Layout, text and images</h3>
+<p><a href="compat-demo.html">Layout compatibility</a><a href="flex-demo.html">Flex layout</a><a href="position-demo.html">Positioning</a><a href="fonts.html">Page fonts</a><a href="text-demo.html">Text and symbols</a><a href="image-presentation.html">Image selection and presentation</a><a href="image-workshop.html">Image formats and animation</a><a href="gallery.html">Image gallery</a><a href="jpeg-demo.html">JPEG images</a><a href="gif-demo.html">GIF images</a></p>
+<h3>Navigation and files</h3>
+<p><a href="second.html">Second page</a><a href="notes/notes.html">Nested notes page</a><a href="download-sample.txt" download="ChezCat-sample.txt">Download sample</a></p>
+</section>
+
+<section class="card workshops" id="connections">
+<h2>Local connection scenarios</h2>
+<p>Start Run-Http-Demo.cmd, then open the <a href="http://127.0.0.1:8765/">local HTTP demo</a>. The following links use that server:</p>
+<p><a href="http://127.0.0.1:8765/redirect-chain/3">Three redirects</a><a href="http://127.0.0.1:8765/slow?seconds=3">Slow response: try Esc</a><a href="http://127.0.0.1:8765/chunked">Chunked response</a><a href="http://127.0.0.1:8765/gzip">Gzip response</a><a href="http://127.0.0.1:8765/status/404">404 with a page body</a><a href="http://127.0.0.1:8765/browser-report">Request headers</a></p>
+<p class="small">Run-Https-Demo.cmd starts the HTTPS server; Run-Https-Browser.cmd opens ChezCat with its separate test trust file. These servers are only needed for the connection examples.</p>
+</section>
+
+<section class="card" id="keys">
 <h2>Useful keys</h2>
 <p>Ctrl+L: address &nbsp; F5: reload &nbsp; Ctrl+F5: full reload &nbsp; Esc: stop loading</p>
 <p>Ctrl+F: find &nbsp; Ctrl+U: page source &nbsp; Ctrl+I: activity &nbsp; F12: inspector &nbsp; Ctrl+J: toggle JavaScript</p>
@@ -76,5 +169,7 @@ a { color:#176e89; }
 <p>Ctrl+S: download page file &nbsp; Alt+click a link: download its file &nbsp; Download icon: recent downloads</p>
 <p class="small">The Menu icon or Alt+F opens Bookmarks, History and Settings. History starts off; enable recording and choose automatic cleanup in History settings. Saved data stays on this computer.</p>
 <p class="small">Alt+Left/Right or mouse side buttons move through history. Ctrl+plus/minus changes zoom; Ctrl+0 restores your default. Edit pages/start.html to change these links.</p>
-</div>
-</main></body></html>
+<p><a href="#top">Back to top</a></p>
+</section>
+</main></body>
+</html>
