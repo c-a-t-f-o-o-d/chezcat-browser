@@ -15,20 +15,28 @@ impl Runtime {
 
         #[cfg(windows)]
         {
-            let (available, headroom) = current_stack().ok_or_else(||
-                Fault::new("Native Windows stack bounds are unavailable for this execution thread."))?;
-            if available < headroom {
-                return Err(Fault::new(format!(
-                    "Native stack headroom exhausted during {operation}: {available} bytes available; {headroom} bytes reserved for guarded evaluator work and unwind."
-                )));
-            }
+            check_windows_stack(operation)
         }
         #[cfg(not(windows))]
-        if self.call_depth >= super::MAX_CALL_DEPTH {
-            return Err(Fault::new(format!("{operation} limit reached on an unmeasured native stack ({}).", super::MAX_CALL_DEPTH)));
+        {
+            if self.call_depth >= super::MAX_CALL_DEPTH {
+                return Err(Fault::new(format!("{operation} limit reached on an unmeasured native stack ({}).", super::MAX_CALL_DEPTH)));
+            }
+            Ok(())
         }
-        Ok(())
     }
+}
+
+#[cfg(windows)]
+pub(super) fn check_windows_stack(operation: &'static str) -> Result<(), Fault> {
+    let (available, headroom) = current_stack().ok_or_else(||
+        Fault::new("Native Windows stack bounds are unavailable for this execution thread."))?;
+    if available < headroom {
+        return Err(Fault::new(format!(
+            "Native stack headroom exhausted during {operation}: {available} bytes available; {headroom} bytes reserved for guarded evaluator work and unwind."
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
