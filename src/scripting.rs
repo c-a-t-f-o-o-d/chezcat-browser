@@ -3589,7 +3589,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
-        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) { return &[0]; }
+        if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{&[0,1]}else{&[0]}; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
         if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
@@ -3615,7 +3615,7 @@ impl Host for Bridge<'_> {
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if let Some(method)=script_named_map::operation(method){return match method{"item"|"getNamedItem"=>1,"getNamedItemNS"=>2,_=>0};}
         if method == script_inert_documents::parser::PARSE { return 2; }
-        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) { return 1; }
+        if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{2}else{1}; }
         if method == DOCUMENT_IMPORT_NODE { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
@@ -3709,7 +3709,7 @@ impl Host for Bridge<'_> {
         if crate::javascript::message_channel_interface::operation(method) {
             return self.validate_message_call(object, method, args);
         }
-        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) {
+        if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) {
             return self.validate_inert_mutation(object,method,args);
         }
         if method == script_inert_documents::parser::PARSE {
@@ -4164,7 +4164,7 @@ impl Host for Bridge<'_> {
         if dom_tree::node_mutation_method(method) {
             if self.event_target_interface(object) {
                 return self.node_mutation_receiver(receiver)
-                    || matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(receiver);
+                    || matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(receiver);
             }
             let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
@@ -5559,7 +5559,7 @@ impl Host for Bridge<'_> {
         if crate::javascript::message_channel_interface::operation(method) {
             return self.message_call(object, method, args);
         }
-        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) {
+        if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) {
             return self.mutate_inert_children(object,method,args);
         }
         if crate::javascript::abort_interface::operation(method) {

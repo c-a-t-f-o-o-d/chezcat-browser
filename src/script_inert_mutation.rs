@@ -13,6 +13,18 @@ impl Bridge<'_> {
     pub(in crate::scripting) fn validate_inert_mutation(&self, parent:u32, method:&str, args:&[Value])->Result<(),(&'static str,String)> {
         let Some(Value::Host(child))=args.first() else{return Err(("TypeError","Inert child mutation requires a genuine Node.".into()));};
         let arena=&self.state.inert_documents;
+        if method=="insertBefore" {
+            match args.get(1) {
+                Some(Value::Null|Value::Undefined)=>{},
+                Some(Value::Host(reference))=>{
+                    if !self.get_root_receiver(*reference){return Err(("TypeError","Inert insertion reference requires a genuine Node.".into()));}
+                    if arena.node(*reference).is_none_or(|node|node.parent!=Some(parent)){
+                        return Err(("NotFoundError","The reference is not a child of this inert parent.".into()));
+                    }
+                },
+                _=>return Err(("TypeError","Inert insertBefore requires a Node or null reference.".into())),
+            }
+        }
         let Some(source)=arena.node(*child) else {
             if method=="appendChild" && self.template_fragment_receiver(parent){return self.validate_template_append(parent,args);}
             return Err(("NotSupportedError","Inert child mutation requires a node in the same inert owner document.".into()));
@@ -43,6 +55,8 @@ impl Bridge<'_> {
         let source=self.state.inert_documents.node(child).unwrap();
         let old_parent=source.parent;
         let fragment=matches!(source.kind,Kind::Fragment{..});
+        let reference=if method=="insertBefore"{if let Some(Value::Host(handle))=args.get(1){Some(*handle)}else{None}}else{None};
+        if reference==Some(child){return Ok(Value::Host(child));}
         if method=="removeChild" {
             let children=&self.state.inert_documents.node(parent).unwrap().children;
             self.state.work(children.len())?;
@@ -75,28 +89,37 @@ impl Bridge<'_> {
             self.state.work(children.len())?;
             Some(self.state.inert_documents.node(old).unwrap().children.iter().position(|&handle|handle==child).ok_or("Inert source child link is unavailable.")?)
         }else{None};
+        if reference.is_some(){self.state.work(self.state.inert_documents.node(parent).unwrap().children.len())?;}
         let children=&self.state.inert_documents.node(parent).unwrap().children;
-        if old_parent==Some(parent) && old_slot==children.len().checked_sub(1){return Ok(Value::Host(child));}
+        if reference.is_none() && old_parent==Some(parent) && old_slot==children.len().checked_sub(1){return Ok(Value::Host(child));}
+        let insertion=if let Some(reference)=reference{children.iter().position(|&handle|handle==reference).ok_or("Inert reference child link is unavailable.")?}else{children.len()};
+        let insertion=insertion-usize::from(old_parent==Some(parent)&&old_slot.unwrap()<insertion);
+        let tail=children.len()-usize::from(old_parent==Some(parent))-insertion;
         let added=count.checked_sub(usize::from(old_parent==Some(parent))).ok_or("Inert child count overflow.")?;
         let (replacement,bytes)=retained_storage::grow(children,added,self.state.retained_limit.saturating_sub(self.state.retained))?;
         let moved=if replacement.is_some(){children.len()}else{0};
         let removed=old_parent.map_or(0,|old|self.state.inert_documents.node(old).unwrap().children.len()-old_slot.unwrap()-1);
-        self.state.work(moved.saturating_add(removed).saturating_add(count))?;
-        let copies=moved.checked_add(removed).and_then(|n|n.checked_add(count)).and_then(|n|n.checked_mul(size_of::<u32>())).ok_or("Inert child move copy overflow.")?;
+        let writes=count.checked_mul(2).ok_or("Inert insertion initialization overflow.")?;
+        self.state.work(moved.saturating_add(removed).saturating_add(writes).saturating_add(tail))?;
+        let copies=moved.checked_add(removed).and_then(|n|n.checked_add(writes)).and_then(|n|n.checked_add(tail)).and_then(|n|n.checked_mul(size_of::<u32>())).ok_or("Inert child move copy overflow.")?;
         self.state.replace_storage(0,bytes,copies)?;
         let arena=&mut self.state.inert_documents;
         if let Some(mut next)=replacement{let children=&mut arena.node_mut(parent).unwrap().children;next.append(children);*children=next;}
         if let Some(old)=old_parent{arena.node_mut(old).unwrap().children.remove(old_slot.unwrap());}
+        // Growth is already admitted. Shift the destination tail once, rather
+        // than repeating a vector insert for every incoming fragment child.
+        let children=&mut arena.node_mut(parent).unwrap().children;
+        let length=children.len();children.resize(length+count,0);children.copy_within(insertion..length,insertion+count);
         if fragment {
             for index in 0..count {
                 let handle=arena.node(child).unwrap().children[index];
                 arena.node_mut(handle).unwrap().parent=Some(parent);
-                arena.node_mut(parent).unwrap().children.push(handle);
+                arena.node_mut(parent).unwrap().children[insertion+index]=handle;
             }
             arena.node_mut(child).unwrap().children.clear();
         }else{
             arena.node_mut(child).unwrap().parent=Some(parent);
-            arena.node_mut(parent).unwrap().children.push(child);
+            arena.node_mut(parent).unwrap().children[insertion]=child;
         }
         self.state.dom_committed();Ok(Value::Host(child))
     }
