@@ -65,3 +65,43 @@ fn program_payload_scan_failure_keeps_shared_parsed_program_unpublished() {
     runtime.begin_job();let admitted=runtime.retain_parsed_program(parsed.clone()).unwrap();
     assert!(Rc::ptr_eq(&admitted,&parsed));assert!(parsed.retained_bytes.get()>0);
 }
+
+#[test]
+fn completed_compilation_rejects_literal_backing_omitted_by_incremental_estimate_and_recovers() {
+    let source=format!("var effect='{}';effect.length;","x".repeat(65536));
+    let capacity=limits::REGRESSION_CAPACITIES;
+    let (_,tokens)=tokenize_for_parse(&source,&mut MAX_REGEXP_WORK.clone(),capacity,None).unwrap();
+    let parsed=Parser::parse(&source,&mut MAX_REGEXP_WORK.clone()).unwrap();
+    let actual=tokens+parsed.retained_payload_bytes(||Ok(())).unwrap();
+    let estimate=tokens+parsed.compilation_ast_bytes();
+    assert!(actual>estimate+60000,"{actual} versus {estimate}");
+    let mut runtime=Runtime::for_test();let limit=runtime.limits.capacity.compilation_bytes;
+    runtime.limits.capacity.compilation_bytes=actual-1;
+    let before=(runtime.value_bytes,runtime.retained_source,runtime.retained_ast,runtime.retained_regexp);
+    let error=runtime.execute(&source,&mut NoHost).unwrap_err();
+    assert!(error.contains("Completed Program and parser backing"),"{error}");
+    assert!(runtime.programs.is_empty());assert!(runtime.lookup(0,"effect").unwrap().is_none());
+    assert_eq!((runtime.value_bytes,runtime.retained_source,runtime.retained_ast,runtime.retained_regexp),before);
+    runtime.limits.capacity.compilation_bytes=actual;runtime.begin_job();
+    assert_eq!(runtime.execute(&source,&mut NoHost).unwrap().to_number(),65536.0);
+    runtime.limits.capacity.compilation_bytes=limit;runtime.begin_job();
+    assert_eq!(runtime.execute("effect.length;",&mut NoHost).unwrap().to_number(),65536.0);
+}
+#[test]
+fn completed_compilation_charges_live_parser_backing_and_deadline_without_double_counting_child_vectors() {
+    let source="while(false){label:for(;;){break label;}} function f(a){return obj?.method?.(a,1,2);}";
+    let mut parser=super::super::expression_parser_tests::scratch_parser_for_storage(source);
+    let mut directives=true;
+    while !matches!(parser.token().kind,TokenKind::End) {
+        let statement=parser.statement().unwrap();parser.directive(statement,&mut directives);parser.program.body.push(statement);
+    }
+    parser.parse_deferred_bodies(0).unwrap();
+    assert!(parser.loops.capacity()>0 && parser.breakables.capacity()>0 && parser.labels.capacity()>0 && parser.deferred_bodies.capacity()>0);
+    let expected=parser.token_storage_bytes+parser.program.retained_payload_bytes(||Ok(())).unwrap()+arena(&parser.loops)+arena(&parser.breakables)+arena(&parser.labels)+arena(&parser.deferred_bodies);
+    assert_eq!(parser.finished_compilation_bytes().unwrap(),expected);
+    parser.capacity.compilation_bytes=expected;parser.check_finished_compilation_storage().unwrap();
+    parser.capacity.compilation_bytes-=1;
+    assert!(parser.check_finished_compilation_storage().unwrap_err().message.contains("Completed Program"));
+    parser.compilation_deadline=Some(Instant::now()-Duration::from_millis(1));
+    assert_eq!(parser.check_finished_compilation_storage().unwrap_err().message,"Script compilation deadline reached.");
+}

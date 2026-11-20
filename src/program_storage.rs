@@ -56,6 +56,34 @@ impl Program {
     }
 }
 
+impl Parser {
+    // Incremental reservations remain responsible for admission while parsing.
+    // Reconcile the completed immutable representation before returning it:
+    // the per-node estimate does not describe every nested vector or string.
+    pub(super) fn finished_compilation_bytes(&self) -> Result<usize, Fault> {
+        let payload=self.program.retained_payload_bytes(||check_compilation_deadline(self.compilation_deadline))?;
+        let mut bytes=payload.saturating_add(self.token_storage_bytes);
+        for backing in [arena(&self.deferred_bodies),arena(&self.loops),arena(&self.breakables),arena(&self.labels)] {
+            bytes=bytes.saturating_add(backing);
+        }
+        for (name,_,_) in &self.labels {
+            check_compilation_deadline(self.compilation_deadline)?;
+            bytes=bytes.saturating_add(name.capacity());
+        }
+        // Completed expressions have released their temporary continuation
+        // frames. Persistent child vectors/text are already in the payload.
+        Ok(bytes)
+    }
+    pub(super) fn check_finished_compilation_storage(&self) -> Result<(), Fault> {
+        check_compilation_deadline(self.compilation_deadline)?;
+        let bytes=self.finished_compilation_bytes()?;
+        if bytes>self.capacity.compilation_bytes {
+            return Err(Fault::new(format!("{} Completed Program and parser backing require {bytes} bytes.",compilation_storage_limit(self.capacity).message)).at(&self.program.source,self.at()));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path="program_storage_tests.rs"]
 mod tests;

@@ -2206,6 +2206,7 @@ impl Parser {
         parser.program.strict = parser.strict;
         parser.parse_deferred_bodies(active_depth)?;
         parser.check_compilation_progress()?;
+        parser.check_finished_compilation_storage()?;
         validate_program(&parser.program)?;
         check_compilation_deadline(compilation_deadline)?;
         Ok(parser.program)

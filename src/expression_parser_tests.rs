@@ -559,3 +559,12 @@ fn continuation_call_frame_repair_preserves_reference_and_spread_semantics() {
         assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
     });
 }
+
+// Share the original parser fixture for completed-storage accounting tests.
+pub(super) fn scratch_parser_for_storage(source:&str)->Parser {
+    let mut parser=scratch_parser(source,0);
+    let (_,bytes)=tokenize_for_parse(source,&mut MAX_REGEXP_WORK.clone(),parser.capacity,None).unwrap();
+    parser.token_storage_bytes=bytes;
+    index_token_delimiters(&mut parser.tokens);
+    parser
+}
