@@ -35,8 +35,8 @@ pub(super) struct DomState {
     pub(super) connected: Vec<bool>,
     pub(super) pending_focus: Option<usize>,
     pub(super) collections: Vec<dom_collections::TagCollection>,
-    pub(super) child_lists: HashMap<usize, u32>,
-    pub(super) inert_child_lists: HashMap<u32, u32>,
+    pub(super) child_lists: identity_map::IdentityMap<usize>,
+    pub(super) inert_child_lists: identity_map::IdentityMap<u32>,
     pub(super) fragment_scripts: HashSet<usize>,
     force_async: HashSet<usize>,
 }

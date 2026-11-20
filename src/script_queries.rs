@@ -68,10 +68,16 @@ impl Bridge<'_> {
         let root = if object == DOCUMENT { 0 } else { self.dom_node(object)? };
         self.check_iframe_child_topology(root)?;
         self.state.work(1)?;
+        self.state.work(self.state.dom.child_lists.lookup_work())?;
         if let Some(&handle) = self.state.dom.child_lists.get(&root) { return Ok(Value::Host(handle)); }
-        let payload=size_of::<usize>()+size_of::<u32>();
+        let record=if self.state.node_lists.len()==self.state.node_lists.capacity(){size_of::<NodeList>()}else{0};
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(record).ok_or("DOM retained NodeList record allowance exhausted.")?;
+        let (map,payload)=self.state.dom.child_lists.prepare(1,available)?;
+        let work=self.state.dom.child_lists.insert_work(&root);
+        self.state.work(work)?;
+        let copied=work.saturating_add(if map.is_some(){self.state.dom.child_lists.len()}else{0});
+        self.state.copies(self.state.dom.child_lists.movement_bytes(copied))?;
         let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
-        self.state.dom.child_lists.try_reserve(1).map_err(|_| "DOM childNodes identity reservation failed.")?;
         let list = if self.template_receiver(object) {
             // Parsed template members are exposed only through content.
             NodeList::Snapshot(Vec::new())
@@ -79,6 +85,7 @@ impl Bridge<'_> {
             NodeList::Children(root)
         };
         self.commit_node_list(list,replacement,added,payload);
+        self.state.dom.child_lists.commit(map);
         self.state.dom.child_lists.insert(root, handle);
         Ok(Value::Host(handle))
     }
@@ -86,13 +93,20 @@ impl Bridge<'_> {
     pub(super) fn create_inert_child_list(&mut self, object: u32) -> Result<Value, String> {
         if self.inert_children(object).is_none() { return Err("Invalid inert childNodes owner.".into()); }
         self.state.work(1)?;
+        self.state.work(self.state.dom.inert_child_lists.lookup_work())?;
         if let Some(&handle) = self.state.dom.inert_child_lists.get(&object) {
             return Ok(Value::Host(handle));
         }
-        let payload=size_of::<(u32,u32)>();
+        let record=if self.state.node_lists.len()==self.state.node_lists.capacity(){size_of::<NodeList>()}else{0};
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(record).ok_or("DOM retained NodeList record allowance exhausted.")?;
+        let (map,payload)=self.state.dom.inert_child_lists.prepare(1,available)?;
+        let work=self.state.dom.inert_child_lists.insert_work(&object);
+        self.state.work(work)?;
+        let copied=work.saturating_add(if map.is_some(){self.state.dom.inert_child_lists.len()}else{0});
+        self.state.copies(self.state.dom.inert_child_lists.movement_bytes(copied))?;
         let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
-        self.state.dom.inert_child_lists.try_reserve(1).map_err(|_| "Inert childNodes identity reservation failed.")?;
         self.commit_node_list(NodeList::InertChildren(object),replacement,added,payload);
+        self.state.dom.inert_child_lists.commit(map);
         self.state.dom.inert_child_lists.insert(object, handle);
         Ok(Value::Host(handle))
     }
