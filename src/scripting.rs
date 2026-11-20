@@ -268,6 +268,9 @@ mod listener_store;
 #[cfg(test)]
 #[path = "script_listener_storage_tests.rs"]
 mod listener_storage_tests;
+#[cfg(test)]
+#[path = "script_event_target_storage_tests.rs"]
+mod event_target_storage_tests;
 
 #[derive(Clone)]
 struct Listener {

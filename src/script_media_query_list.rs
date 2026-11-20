@@ -18,7 +18,7 @@ impl Bridge<'_> {
 
     pub(super) fn create_media_query(&mut self, args: &[Value]) -> Result<Value, String> {
         let Some(Value::String(query)) = args.first() else { return Err("matchMedia requires a CSS media query string.".into()); };
-        if self.event_target_count() >= self.state.limits.host.event_targets {
+        if self.event_target_count_refused(1) {
             return Err("MediaQueryList target allowance exceeded.".into());
         }
         let index = u32::try_from(self.state.media_queries.len()).map_err(|_| "MediaQueryList identity overflow.")?;
@@ -28,9 +28,15 @@ impl Bridge<'_> {
         if query.len() > self.state.limits.host.string_bytes { return Err("Media query exceeds the host string bound.".into()); }
         let serialized = crate::css::serialize_media_query_list(query);
         if serialized.len() > self.state.limits.host.string_bytes { return Err("Serialized media query exceeds the host string bound.".into()); }
-        self.state.media_queries.try_reserve(1).map_err(|_| "Could not reserve MediaQueryList state.")?;
-        self.state.replace_bytes(0, size_of::<String>().saturating_add(serialized.capacity()))?;
+        let payload=serialized.capacity();
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("MediaQueryList retained payload allowance exhausted.")?;
+        let (replacement,added)=retained_storage::grow(&self.state.media_queries,1,available)?;
+        if let Some(mut queries)=replacement {
+            self.state.copies(self.state.media_queries.len()*size_of::<String>())?;
+            queries.append(&mut self.state.media_queries);self.state.media_queries=queries;
+        }
         self.state.media_queries.push(serialized);
+        self.state.retained+=payload+added;
         Ok(Value::Host(handle))
     }
 

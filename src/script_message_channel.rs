@@ -30,6 +30,11 @@ struct Message {
 impl State {
     pub(super) fn port_count(&self) -> usize { self.channels.len() * 2 }
 
+    #[cfg(test)]
+    pub(super) fn registry_storage(&self)->(usize,usize,usize) {
+        (self.channels.len(),self.channels.capacity(),size_of::<[Port;2]>())
+    }
+
     fn channel_index(&self, channel: u32) -> Option<usize> {
         channel.checked_sub(CHANNEL_BASE).filter(|&index| index < ARENA)
             .map(|index| index as usize).filter(|&index| index < self.channels.len())
@@ -176,13 +181,17 @@ impl Bridge<'_> {
         }
         let channels = &self.state.message_channels;
         let count = channels.port_count();
-        let occupied = self.event_target_count();
-        if occupied.saturating_add(2) > self.state.limits.host.event_targets || count >= ARENA as usize {
+        if self.event_target_count_refused(2) || count >= ARENA as usize {
             return Err("MessagePort target limit reached.".into());
         }
-        self.state.message_channels.channels.try_reserve(1).map_err(|_| "Could not reserve channel endpoints.")?;
-        self.state.replace_bytes(0, size_of::<[Port; 2]>())?;
-        self.state.message_channels.channels.push([Port::default(), Port::default()]);
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let (replacement,added)=retained_storage::grow(&self.state.message_channels.channels,1,available)?;
+        if let Some(mut channels)=replacement {
+            self.state.copies(self.state.message_channels.channels.len()*size_of::<[Port;2]>())?;
+            channels.append(&mut self.state.message_channels.channels);self.state.message_channels.channels=channels;
+        }
+        self.state.message_channels.channels.push([Port::default(),Port::default()]);
+        self.state.retained+=added;
         Ok(Value::Host(CHANNEL_BASE + (count / 2) as u32))
     }
 
