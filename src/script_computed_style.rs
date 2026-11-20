@@ -307,13 +307,13 @@ impl Bridge<'_> {
             .and_then(|index| BASE.checked_add(index))
             .filter(|&handle| handle < END)
             .ok_or("Computed declaration identity space exhausted.")?;
-        self.state
-            .computed_styles
-            .try_reserve(1)
-            .map_err(|_| "Computed declaration storage reservation failed.")?;
         self.state.work(1)?;
-        self.state
-            .replace_bytes(0, std::mem::size_of::<Declaration>())?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let (replacement,added)=retained_storage::grow(&self.state.computed_styles,1,available)?;
+        let copied=if replacement.is_some(){length}else{0};
+        self.state.copies(copied.checked_add(1).and_then(|records|records.checked_mul(size_of::<Declaration>())).ok_or("Computed declaration copy accounting overflow.")?)?;
+        if let Some(mut next)=replacement{next.append(&mut self.state.computed_styles);self.state.computed_styles=next;}
+        self.state.retained+=added;
         self.state.computed_styles.push(Declaration {
             node,
             owner: WINDOW,
@@ -481,3 +481,7 @@ impl Bridge<'_> {
         Ok(Value::String(value))
     }
 }
+
+#[cfg(test)]
+#[path="script_computed_storage_tests.rs"]
+mod storage_tests;
