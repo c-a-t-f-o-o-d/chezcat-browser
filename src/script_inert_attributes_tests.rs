@@ -124,3 +124,61 @@ var original=P.item;P.item=function(){return 17;};if(map.item(0)!==17)throw 'map
 var iterator=P[Symbol.iterator];P[Symbol.iterator]=function(){return {next:function(){return {done:true};}};};if(Array.from(map).length!==0)throw 'map iterator replacement';P[Symbol.iterator]=iterator;if(Array.from(map)[0]!==map[0])throw 'map iterator restoration';
 "#);
 }
+
+#[test]
+fn inert_attribute_writes_keep_aliases_order_clones_owners_and_real_imported_values(){
+    let(mut doc,mut forms,mut page)=page();
+    execute(&mut doc,&mut forms,&mut page,r#"
+var content=document.getElementById('seed').content,e=content.children[0],map=e.attributes,note=e.getAttributeNode('data-note'),identity=e.getAttributeNode('id'),clone=e.cloneNode(true),children=e.children;
+e.setAttribute('DATA-NOTE','two');if(note.value!=='two'||map.getNamedItem('data-note')!==note||e.attributes!==map)throw 'real attached Attr alias';
+var calls=0;note.value={toString:function(){calls++;return 'three';}};e.setAttribute('id','renamed');e.setAttribute('data-added',null);
+if(calls!==1||note.value!=='three'||e.getAttribute('data-note')!=='three'||e.id!=='renamed'||identity.value!=='renamed'||identity.ownerElement!==e||content.children.namedItem('renamed')!==e||e.getAttribute('data-added')!=='null'||map[map.length-1].name!=='data-added'||e.children!==children)throw 'actual source update and identity';
+if(clone.getAttribute('data-note')!=='one'||clone.id!=='item'||clone.hasAttribute('data-added')||note.ownerDocument!==content.ownerDocument)throw 'immutable clone source and owner';
+e.removeAttribute('onclick');var imported=document.importNode(content,true),copy=imported.children[0];document.getElementById('mount').appendChild(imported);
+if(copy.getAttribute('data-note')!=='three'||copy.id!=='renamed'||copy.getAttribute('data-added')!=='null'||!copy.isConnected||e.isConnected||e.ownerDocument===document||note.ownerElement!==e)throw 'real import after preparation';
+"#);
+}
+#[test]
+fn inert_attribute_writes_fresh_elements_brands_conversions_and_ordinary_methods_are_real(){
+    let(mut doc,mut forms,mut page)=page();
+    execute(&mut doc,&mut forms,&mut page,r#"
+var owner=document.getElementById('seed').content.ownerDocument,e=owner.createElement('div'),map=e.attributes,name=e.nodeName,P=Element.prototype,d=Object.getOwnPropertyDescriptor(P,'setAttribute'),native=d.value;
+if(native.length!==2||native.name!=='setAttribute'||!d.enumerable||!d.writable||!d.configurable)throw 'canonical setter method';
+e.setAttribute('DATA-NOTE','value');if(e.attributes!==map||map.length!==1||map[0].name!=='data-note'||e.getAttribute('data-note')!=='value'||e.nodeName!==name||e.nodeType!==1||e.ownerDocument!==owner||!(e instanceof Element))throw 'fresh Element source transition';
+var order='',caught=false;try{e.setAttribute({toString:function(){order+='name';return 'invalid name';}},{toString:function(){order+='value';return 'x';}});}catch(error){caught=error.name==='InvalidCharacterError';}if(!caught||order!=='namevalue'||map.length!==1)throw 'conversion before name validation';
+order='';caught=false;try{native.call({},{toString:function(){order+='bad';return 'name';}},{toString:function(){order+='bad';return 'value';}});}catch(error){caught=error instanceof TypeError;}if(!caught||order!=='')throw 'brand before conversion';
+P.setAttribute=function(key,value){order+='wrapper';return native.call(this,key,value);};e.setAttribute('data-note','wrapped');if(order!=='wrapper'||map[0].value!=='wrapped')throw 'ordinary method replacement';delete P.setAttribute;if(e.setAttribute!==undefined||'setAttribute' in e)throw 'deleted setter resurrected';Object.defineProperty(P,'setAttribute',d);
+var get=P.getAttribute;P.getAttribute=function(){return 'replacement';};if(e.getAttribute('data-note')!=='replacement')throw 'ordinary getter method replacement';P.getAttribute=get;if(e.getAttribute('data-note')!=='wrapped')throw 'restored real read';
+"#);
+}
+#[test]
+fn inert_attribute_writes_refusal_preserves_cached_values_sources_indexes_and_recovers(){
+    let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,"var inspected=document.getElementById('seed').content.children[0],cached=inspected.getAttributeNode('data-note');");
+    let Value::Host(owner)=page.runtime.execute("inspected",&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap()else{panic!("owner")};
+    page.begin_job();let retained=page.state.retained;let limit=page.state.retained_limit;let generated=page.state.inert_documents.generated.len();let attached=page.state.attached_attributes.clone();let generation=page.state.dom_commits;
+    page.state.retained_limit=retained;
+    assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.set_inert_attribute(owner,&[Value::String("data-note".into()),Value::String("new".into())]).is_err());
+    assert_eq!(page.state.retained,retained);assert_eq!(page.state.inert_documents.generated.len(),generated);assert_eq!(page.state.attached_attributes,attached);assert_eq!(page.state.dom_commits,generation);
+    page.state.retained_limit=limit;page.begin_job();page.state.copy_work=0;
+    assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.set_inert_attribute(owner,&[Value::String("data-note".into()),Value::String("new".into())]).is_err());assert_eq!(page.state.inert_documents.generated.len(),generated);
+    page.begin_job();execute(&mut doc,&mut forms,&mut page,"if(cached.value!=='one'||inspected.getAttribute('data-note')!=='one')throw 'refusal changed source';inspected.setAttribute('data-note','new');cached.value='last';if(inspected.getAttribute('data-note')!=='last'||inspected.getAttributeNode('data-note')!==cached)throw 'write recovery';");
+}
+#[test]
+fn inert_attribute_writes_revalidate_mutated_parked_sources_before_activation_and_keep_foreign_guards(){
+    let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
+var seed=document.createElement('template');seed.innerHTML='<span data-note="kept"><b></b></span>';var donor=seed.content,parked=donor.children[0],saved=parked.attributes;parked.setAttribute('onclick','unrequested()');
+var svgSeed=document.createElement('template');svgSeed.innerHTML='<svg><rect width="2" height="3"/></svg>';var width=svgSeed.content.children[0].children[0].getAttributeNode('width');
+"#);
+    let Value::Host(donor)=page.runtime.execute("donor",&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap()else{panic!("donor")};
+    let Value::Host(width)=page.runtime.execute("width",&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap()else{panic!("Attr")};
+    page.begin_job();let mount=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("mount")).unwrap();let children=doc.nodes[mount].children.clone();let before=doc.nodes.len();let retained=page.state.retained;let generation=page.state.dom_commits;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    assert!(bridge.splice_checked_inert_fragment(mount,donor,None).unwrap_err().contains("active capabilities"));assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.state.retained,retained);assert_eq!(bridge.state.dom_commits,generation);assert!(!bridge.state.images.has_changes());
+    assert!(bridge.attr_set(width,"value",Value::String("9".into())).unwrap_err().contains("foreign-element"));assert_eq!(bridge.state.retained,retained);
+    page.begin_job();execute(&mut doc,&mut forms,&mut page,"if(donor.children[0]!==parked||parked.isConnected||width.value!=='2')throw 'protected refusal';parked.removeAttribute('onclick');document.getElementById('mount').appendChild(donor);if(!parked.isConnected||parked.attributes!==saved||parked.getAttribute('data-note')!=='kept'||donor.children.length!==0)throw 'safe activation recovery';");
+}
+#[test]
+fn inert_attribute_writes_canonical_main_methods_preserve_native_form_named_precedence(){
+    let mut doc=crate::html::parse_loaded_document("<html><body><form id=f><input id=named name=setAttribute value=kept></form><p id=plain></p></body></html>",&||Ok(())).unwrap();doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
+    execute(&mut doc,&mut forms,&mut page,"var f=document.getElementById('f'),input=document.getElementById('named'),p=document.getElementById('plain'),native=Element.prototype.setAttribute;if(f.setAttribute!==input)throw 'native form named precedence';native.call(f,'data-note','form');p.setAttribute('data-note','plain');if(f.getAttribute('data-note')!=='form'||p.getAttribute('data-note')!=='plain'||input.value!=='kept')throw 'canonical main attributes';");
+}

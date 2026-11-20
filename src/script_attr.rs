@@ -322,9 +322,9 @@ impl Bridge<'_> {
         let value = self.text(&value)?;
         if let Some(owner) = self.state.attributes[id].owner {
             self.state.copies(self.state.attributes[id].name.bytes())?;
-            let name = self.state.attributes[id].name.copy();
-            let owner=node_index(owner).filter(|_|self.inert_node_type(owner).is_none()).ok_or("Inert Attr value assignment is unavailable.")?;
-            self.public_attribute(owner, name, Some(value))?;
+            let name=copy_name(&self.state.attributes[id].name)?;
+            if self.inert_node_type(owner)==Some(1){self.write_inert_attribute(owner,name,Some(value),true)?;}
+            else{let node=node_index(owner).ok_or("Attr owner is unavailable.")?;self.public_attribute(node,name,Some(value))?;}
         } else {
             self.state.replace_storage(self.state.attributes[id].value.capacity(), value.capacity(),value.len())?;
             self.state.attributes[id].value = value;

@@ -121,12 +121,15 @@ var sourceNames=source.getAttributeNames();if(sourceNames.join(',')!=='id,href,o
 var sourceMap=source.attributes,handler=sourceMap.getNamedItem('onclick');if(Array.from(sourceMap)[3]!==handler||handler.value!=="throw 'inert handler ran'"||handler.ownerElement!==source)throw 'real inert Attr preparation';
 source.removeAttribute('onclick');if(source.hasAttribute('onclick')||source.getAttribute('on-click')!=='ordinary')throw 'actual handler removal and ordinary data';
 if(source.attributes!==sourceMap||sourceMap.length!==3||handler.ownerElement!==null||handler.ownerDocument!==source.ownerDocument||handler.value!=="throw 'inert handler ran'")throw 'real saved removed Attr';
+source.setAttribute('data-note','prepared');var note=sourceMap.getNamedItem('data-note');note.value='ready';
+if(source.attributes!==sourceMap||sourceMap.length!==4||source.getAttribute('data-note')!=='ready'||note.ownerElement!==source||note.ownerDocument!==source.ownerDocument)throw 'real saved inert Attr assignment';
 document.getElementById('copy').onclick=function(event){
     if(!event.isTrusted)throw 'actual pointer activation';
     var fragment=document.importNode(input,true), importedView=fragment.children, imported=Array.from(importedView)[0], savedChildren=imported.children;
     if(fragment.childElementCount!==1||fragment.lastElementChild!==imported)throw 'real imported ParentNode view';
     var marker=fragment.childNodes[1];if(marker===sourceMarker||marker.nodeType!==8||marker.data!==sourceMarker.data||marker.ownerDocument!==document)throw 'real imported Comment';
     if(imported.getAttribute('on-click')!=='ordinary'||imported.getAttribute('onclick')!==null)throw 'real prepared attribute transfer';
+    if(imported.getAttribute('data-note')!=='ready'||imported.getAttributeNode('data-note')===note||note.ownerElement!==source||note.value!=='ready')throw 'real written attribute import';
     if(imported===source||source.ownerDocument===document||imported.ownerDocument!==document||imported.isConnected)
         throw 'real import ownership';
     mount.appendChild(fragment);

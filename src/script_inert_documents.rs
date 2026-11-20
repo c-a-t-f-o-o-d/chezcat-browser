@@ -247,53 +247,72 @@ impl Bridge<'_> {
         }
     }
 
-    // Attribute removal copies only this element's immutable source. Clones
-    // retain their old source and node/owner/child identities never change.
+    // Writes replace one immutable element source. Clones retain their prior
+    // source; node, owner, child and live-map identities do not change.
     pub(super) fn remove_inert_attribute(&mut self,object:u32,argument:&Value)->Result<Value,String>{
-        let mut name=self.text(argument)?;
+        let name=crate::html::AttributeName::unqualified(self.text(argument)?);
+        self.write_inert_attribute(object,name,None,false)?;Ok(Value::Undefined)
+    }
+    pub(super) fn set_inert_attribute(&mut self,object:u32,args:&[Value])->Result<Value,String>{
+        let name=crate::html::AttributeName::unqualified(self.text(args.first().ok_or("setAttribute requires a name.")?)?);
+        let value=self.text(args.get(1).ok_or("setAttribute requires a value.")?)?;
+        self.write_inert_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
+    }
+    pub(super) fn write_inert_attribute(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
-        let Kind::Parsed{source,initial_template}=inert.kind else {
-            return if matches!(inert.kind,Kind::Element(_)){Ok(Value::Undefined)}else{Err("removeAttribute requires an Element.".into())};
-        };
         let owner_document=inert.owner;
-        let (node,unsafe_nonce)=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
-        if node.namespace==crate::html::Namespace::Html{name.make_ascii_lowercase();}
-        let NodeKind::Element{attrs,tag,href,..}=&node.kind else{return Err("removeAttribute requires an Element.".into());};
-        let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));
-        let minimum=copied_node_bytes(node).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0,String::len))
-            .saturating_add(size_of::<Node>()+2*size_of::<usize>());
-        self.state.work(work)?;
-        let NodeKind::Element{attrs,..}=&self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0.kind else{unreachable!()};
-        let Some(slot)=attrs.iter().position(|attr|attr.name.qualified==name) else{return Ok(Value::Undefined);};
-        self.state.attribute_lookup_work()?;
-        let NodeKind::Element{attrs,..}=&self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0.kind else{unreachable!()};
-        let attached=self.state.attribute_owner_position(object,&attrs[slot].name).ok().map(|position|(position,self.state.attached_attributes[position]));
+        let (source,initial_template)=match inert.kind{
+            Kind::Parsed{source,initial_template}=>(Some(source),initial_template),
+            Kind::Element(_)=>(None,None),_=>return Err("Attribute writes require an Element.".into()),
+        };
+        let (namespace,minimum,unsafe_nonce)=if let Some(source)=source{
+            let(node,unsafe_nonce)=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
+            let NodeKind::Element{tag,href,..}=&node.kind else{return Err("Attribute writes require an Element.".into());};
+            (node.namespace,copied_node_bytes(node).saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0,String::len)).saturating_add(size_of::<Node>()+2*size_of::<usize>()),unsafe_nonce)
+        }else{
+            let Kind::Element(tag)=&inert.kind else{unreachable!()};
+            (crate::html::Namespace::Html,tag.len().saturating_add(size_of::<Node>()+2*size_of::<usize>()),false)
+        };
+        if value.is_some()&&namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}
+        if namespace==crate::html::Namespace::Html&&!expanded{name.qualified.make_ascii_lowercase();}
+        let attrs=self.inert_element_attributes(object).ok_or("Inert Element attributes are unavailable.")?;
+        let work=attrs.iter().fold(attrs.len().saturating_add(1),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;
+        let slot=self.inert_element_attributes(object).unwrap().iter().position(|attr|if expanded{attr.name.same_expanded_name(&name)}else{attr.name.qualified==name.qualified});
+        if slot.is_none()&&value.is_none(){return Ok(());}
+        if expanded&&slot.is_none(){return Err("Attached inert Attr is missing from its owner.".into());}
+        let attached=if value.is_none(){
+            self.state.attribute_lookup_work()?;
+            let actual=&self.inert_element_attributes(object).unwrap()[slot.unwrap()].name;
+            self.state.attribute_owner_position(object,actual).ok().map(|position|(position,self.state.attached_attributes[position]))
+        }else{None};
         if let Some((position,_))=attached{self.state.copies((self.state.attached_attributes.len()-position-1)*size_of::<usize>())?;}
-
-        if minimum>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Inert attribute source copy allowance exhausted.".into());}
-        self.state.copies(minimum)?;
-        let node=self.parsed_source(source).ok_or("Inert Element source is unavailable.")?.0;
-        let namespace=node.namespace;let mut kind=script_clone_node::copy_node_kind(&node.kind)?;
+        let actual=slot.map_or(&name,|slot|&self.inert_element_attributes(object).unwrap()[slot].name);
+        let mirror=usize::from(actual.html_is("id")||actual.html_is("href"));
+        let input=name.owned_bytes().checked_add(value.as_ref().map_or(0,String::capacity)).ok_or("Inert attribute input storage overflow.")?;
+        let added=if value.is_some(){input.checked_add(if slot.is_none(){size_of::<crate::html::Attribute>()}else{0}).and_then(|bytes|bytes.checked_add(value.as_ref().map_or(0,String::len).saturating_mul(mirror))).ok_or("Inert attribute staging storage overflow.")?}else{0};
+        if minimum.checked_add(added).is_none_or(|bytes|bytes>self.state.retained_limit.saturating_sub(self.state.retained)){return Err("Inert attribute source copy allowance exhausted.".into());}
+        self.state.copies(minimum.saturating_add(added))?;
+        let mut kind=if let Some(source)=source{script_clone_node::copy_node_kind(&self.parsed_source(source).unwrap().0.kind)?}else{
+            let Kind::Element(tag)=&self.state.inert_documents.node(object).unwrap().kind else{unreachable!()};
+            NodeKind::Element{tag:script_clone_node::copy_text(tag)?,id:None,href:None,attrs:Vec::new()}
+        };
         let NodeKind::Element{attrs,id,href,..}=&mut kind else{unreachable!()};
-        let removed=attrs.remove(slot);
-        if removed.name.html_is("id"){*id=None;}
-        if removed.name.html_is("href"){*href=None;}
-        let node=Node{kind,namespace,children:Vec::new()};
-        let NodeKind::Element{tag,href,..}=&node.kind else{unreachable!()};
+        let actual_name=slot.map_or(&name,|slot|&attrs[slot].name);let changes_id=actual_name.html_is("id");let changes_href=actual_name.html_is("href");
+        if changes_id{*id=value.as_deref().map(script_clone_node::copy_text).transpose()?;}
+        if changes_href{*href=value.as_deref().map(script_clone_node::copy_text).transpose()?;}
+        let removed=match(slot,value){
+            (Some(slot),Some(value))=>{attrs[slot].value=value;None},
+            (None,Some(value))=>{attrs.try_reserve_exact(1).map_err(|_|"Could not reserve inert attribute entry.")?;attrs.push(crate::html::Attribute{name,value});None},
+            (Some(slot),None)=>Some(attrs.remove(slot)),(None,None)=>unreachable!(),
+        };
+        let node=Node{kind,namespace,children:Vec::new()};let NodeKind::Element{tag,href,..}=&node.kind else{unreachable!()};
         let payload=node_bytes(&node).checked_add(tag.capacity()).and_then(|bytes|bytes.checked_add(href.as_ref().map_or(0,String::capacity)))
-            .and_then(|bytes|bytes.checked_add(size_of::<Node>()+2*size_of::<usize>())).ok_or("Inert attribute copy storage overflow.")?;
-        let payload=payload.checked_add(if attached.is_some(){removed.value.capacity()}else{0}).ok_or("Detached inert Attr value storage overflow.")?;
-        let generated=GeneratedNode{node:Rc::new(node),unsafe_nonce};
-        let index=self.state.inert_documents.generated.len();
-        self.reserve_inert_entries(0,payload,1)?;
+            .and_then(|bytes|bytes.checked_add(size_of::<Node>()+2*size_of::<usize>())).and_then(|bytes|bytes.checked_add(if attached.is_some(){removed.as_ref().unwrap().value.capacity()}else{0})).ok_or("Inert attribute copy storage overflow.")?;
+        let generated=GeneratedNode{node:Rc::new(node),unsafe_nonce};let index=self.state.inert_documents.generated.len();self.reserve_inert_entries(0,payload,1)?;
         let arena=&mut self.state.inert_documents;arena.generated.push(generated);
         arena.node_mut(object).expect("checked inert Element").kind=Kind::Parsed{source:ParsedSource::Generated(index),initial_template};
-        if let Some((position,id))=attached{
-            self.state.attached_attributes.remove(position);
-            let attr=&mut self.state.attributes[id];attr.owner=None;attr.document=owner_document;attr.value=removed.value;
-        }
-
-        self.state.dom_committed();Ok(Value::Undefined)
+        if let Some((position,id))=attached{self.state.attached_attributes.remove(position);let attr=&mut self.state.attributes[id];attr.owner=None;attr.document=owner_document;attr.value=removed.unwrap().value;}
+        self.state.dom_committed();Ok(())
     }
 
     pub(super) fn inert_collection_element_source(&self,object:u32)->Option<&Node> {
@@ -411,6 +430,7 @@ impl Bridge<'_> {
                     }
                 }
                 self.state.work(attrs.len())?;
+                if !template_node_can_park(&raw){return Err("Inert fragment current attributes require unsupported active capabilities.".into());}
                 if let Some(attr) = attrs.iter().find(|attr| attr.name.html_is("style")) {
                     validate_style(&attr.value, self.state.limits.host.string_bytes)?;
                 }
