@@ -119,24 +119,21 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
-    fn name_list_nodes(&mut self, index: usize) -> Result<Vec<usize>,String> {
-        let NodeList::Name(name) = &self.state.node_lists[index] else { unreachable!() };
-        self.state.copies(name.len())?;
-        let NodeList::Name(name) = &self.state.node_lists[index] else { unreachable!() };
-        let name = name.clone();
-        let candidates = self.query_candidates(0)?;
-        let mut found = Vec::new();
-        for node in candidates {
-            self.state.work(1)?;
-            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { continue; }
-            let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else { unreachable!() };
-            self.state.work(attrs.len())?;
-            self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
-            let value = self.doc.attr(node,"name");
-            self.state.copies(value.map_or(0,str::len))?;
-            if value == Some(name.as_str()) { found.push(node); }
+    fn name_list_nodes(&mut self,index:usize)->Result<Vec<usize>,String> {
+        let mut nodes=self.query_candidates(0)?;let mut kept=0;
+        for position in 0..nodes.len() {
+            let node=nodes[position];self.state.work(1)?;
+            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html{continue;}
+            let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};
+            self.state.work(attrs.len())?;self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
+            let value=self.doc.attr(node,"name");self.state.copies(value.map_or(0,str::len))?;
+            let NodeList::Name(name)=&self.state.node_lists[index] else{unreachable!()};
+            if value==Some(name.as_str()) {
+                if kept!=position{self.state.copies(size_of::<usize>())?;nodes[kept]=node;}
+                kept+=1;
+            }
         }
-        Ok(found)
+        nodes.truncate(kept);Ok(nodes)
     }
 
     pub(super) fn node_list_get(&mut self, handle: u32, property: &str) -> Result<Value, String> {
@@ -194,35 +191,64 @@ impl Bridge<'_> {
         self.state.index_keys(length)
     }
 
-    pub(super) fn query_candidates(&mut self, root: usize) -> Result<Vec<usize>, String> {
+    fn query_push(&mut self,values:&mut Vec<usize>,node:usize,available:usize)->Result<(),String> {
+        let used=values.capacity()*size_of::<usize>();
+        let (replacement,_)=retained_storage::grow(values,1,available.saturating_sub(used))?;
+        if let Some(mut next)=replacement {
+            self.state.copies(values.len()*size_of::<usize>())?;
+            next.append(values);*values=next;
+        }
+        values.push(node);Ok(())
+    }
+
+    pub(super) fn query_candidates(&mut self,root:usize)->Result<Vec<usize>,String> {
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        self.query_candidates_with_storage(root,available)
+    }
+    fn query_candidates_with_storage(&mut self,root:usize,available:usize)->Result<Vec<usize>,String> {
         self.state.rebuild(self.doc)?;
-        let mut candidates = Vec::new();
-        let mut stack = self.doc.nodes[root]
-            .children
-            .iter()
-            .rev()
-            .copied()
-            .collect::<Vec<_>>();
-        while let Some(node) = stack.pop() {
+        let mut candidates=Vec::new();
+        let mut current=self.doc.nodes[root].children.first().copied();
+        while let Some(node)=current {
             self.state.work(1)?;
-            let name = tag(self.doc, node);
-            let inert_children = dom_tree::inert_dom_tag(name, self.doc.scripting_enabled);
-            if inert_children && !dom_tree::exposes_inert_host(name, self.doc.nodes[node].namespace) {
-                continue;
+            let name=tag(self.doc,node);
+            let inert=dom_tree::inert_dom_tag(name,self.doc.scripting_enabled);
+            let visible=(!inert||dom_tree::exposes_inert_host(name,self.doc.nodes[node].namespace))
+                &&(self.state.tree.active.get(node).copied().unwrap_or(false)||self.state.detached_nodes.contains(&node));
+            if visible&&matches!(self.doc.nodes[node].kind,NodeKind::Element{..}){self.query_push(&mut candidates,node,available)?;}
+            if visible&&!inert {
+                if let Some(&child)=self.doc.nodes[node].children.first(){current=Some(child);continue;}
             }
-            if !self.state.tree.active.get(node).copied().unwrap_or(false)
-                && !self.state.detached_nodes.contains(&node)
-            {
-                continue;
-            }
-            if matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
-                candidates.push(node);
-            }
-            if !inert_children {
-                stack.extend(self.doc.nodes[node].children.iter().rev().copied());
-            }
+            // Checked parent and sibling slots let DFS climb without a second
+            // traversal stack, including detached ordinary subtrees.
+            let mut cursor=node;
+            current=loop {
+                self.state.work(1)?;
+                if cursor==root{break None;}
+                let Some(parent)=self.state.tree.parents.get(cursor).copied().flatten() else{break None;};
+                let slot=self.state.tree.sibling_slots[cursor];
+                if let Some(&next)=slot.checked_add(1).and_then(|slot|self.doc.nodes[parent].children.get(slot)){break Some(next);}
+                cursor=parent;
+            };
         }
         Ok(candidates)
+    }
+
+    // Optional retained-result compaction: sparse snapshots should not keep a
+    // document-wide candidate allocation when scratch/copy work permits a
+    // smaller replacement. Refusal to optimize keeps the already admitted Vec.
+    fn compact_query_snapshot(&mut self,mut nodes:Vec<usize>,available:usize)->Result<Vec<usize>,String> {
+        if nodes.len()>=nodes.capacity()/2{return Ok(nodes);}
+        let bytes=nodes.len()*size_of::<usize>();
+        let old=nodes.capacity()*size_of::<usize>();
+        let spare=available.saturating_sub(old);
+        if bytes>spare||bytes>self.state.copy_work||nodes.len()>self.state.host_work{return Ok(nodes);}
+        let mut compact=Vec::new();
+        if compact.try_reserve_exact(nodes.len()).is_err()||compact.capacity()*size_of::<usize>()>spare{return Ok(nodes);}
+        // Prepay both counters before copying. Deadline refusals unwind both
+        // staged buffers; no author callback can change the allowance here.
+        self.state.work(nodes.len())?;self.state.copies(bytes)?;
+        compact.append(&mut nodes);Ok(compact)
     }
 
     pub(super) fn selector_query(
@@ -237,19 +263,21 @@ impl Bridge<'_> {
         } else {
             self.node(object)?
         };
+        let record=if method=="querySelectorAll"&&self.state.node_lists.len()==self.state.node_lists.capacity(){size_of::<NodeList>()}else{0};
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(record).ok_or("DOM retained NodeList record allowance exhausted.")?;
         let candidates = match method {
-            "matches" => vec![root],
+            "matches" => {let mut candidates=Vec::new();self.query_push(&mut candidates,root,available)?;candidates},
             "closest" => {
                 let mut candidates = Vec::new();
                 let mut current = Some(root);
                 while let Some(node) = current.filter(|&node| node != 0) {
                     self.state.work(1)?;
-                    candidates.push(node);
+                    self.query_push(&mut candidates,node,available)?;
                     current = self.state.tree.parents[node];
                 }
                 candidates
             }
-            _ => self.query_candidates(root)?,
+            _ => self.query_candidates_with_storage(root,available)?,
         };
         let checked = |node| {
             self.forms
@@ -258,24 +286,11 @@ impl Bridge<'_> {
                 .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
                 .map(|control| control.checked)
         };
+        let nodes=crate::css::query_with_topology(self.doc,source,candidates,Some(&checked),&mut self.state.host_work,&self.state.tree.parents,&self.state.tree.sibling_slots,method!="querySelectorAll",&mut self.state.copy_work)?;
         if method=="querySelectorAll" {
-            // Leave room for one complete registry slot if backing must grow.
-            // Result growth may use the remainder without forcing a geometric
-            // record increment that would reject an otherwise fitting snapshot.
-            let record=if self.state.node_lists.len()==self.state.node_lists.capacity(){size_of::<NodeList>()}else{0};
-            let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(record).ok_or("DOM retained NodeList record allowance exhausted.")?;
+            let nodes=self.compact_query_snapshot(nodes,available)?;
             #[cfg(test)]
-            let result_limit=self.state.limits.test_entry_arenas.then_some(4096);
-            #[cfg(not(test))]
-            let result_limit=None;
-            let nodes = crate::css::query_all_with_storage(
-                self.doc,
-                source,
-                &candidates,
-                Some(&checked),
-                &mut self.state.host_work,
-                available,result_limit,&mut self.state.copy_work,
-            )?;
+            if self.state.limits.test_entry_arenas&&nodes.len()>4096{return Err("DOM selector result limit reached (4096 elements).".into());}
             let references = self.state.node_list_references.checked_add(nodes.len())
                 .ok_or("DOM NodeList retained-reference accounting overflow.")?;
             #[cfg(test)]
@@ -290,13 +305,7 @@ impl Bridge<'_> {
             self.state.node_list_references = references;
             Ok(Value::Host(handle))
         } else {
-            let found = crate::css::query_first(
-                self.doc,
-                source,
-                &candidates,
-                Some(&checked),
-                &mut self.state.host_work,
-            )?;
+            let found=nodes.first().copied();
             if method == "matches" {
                 Ok(Value::Bool(found.is_some()))
             } else {
@@ -309,3 +318,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_node_list_storage_tests.rs"]
 mod storage_tests;
+
+#[cfg(test)]
+#[path = "script_query_traversal_tests.rs"]
+mod traversal_tests;

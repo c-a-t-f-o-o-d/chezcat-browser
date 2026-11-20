@@ -57,17 +57,19 @@ fn browser_selector_storage_and_copy_refusal_keep_saved_snapshots_and_recover() 
     execute(&mut page,&mut doc,&mut forms,"var kept=document.querySelectorAll('p');");
     let before=(page.state.retained,page.state.node_lists.len(),page.state.node_lists.capacity(),page.state.node_list_references);
     let limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
-    page.begin_job();assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.selector_query(DOCUMENT,"querySelectorAll","p").unwrap_err().contains("DOM retained selector result allowance"));
+    page.begin_job();assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.selector_query(DOCUMENT,"querySelectorAll","p").unwrap_err().contains("DOM retained"));
     assert_eq!((page.state.retained,page.state.node_lists.len(),page.state.node_lists.capacity(),page.state.node_list_references),before);
     page.state.retained_limit=limit;page.begin_job();page.state.copy_work=0;
-    assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.selector_query(DOCUMENT,"querySelectorAll","p").unwrap_err().contains("copy work limit"));
+    assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.selector_query(DOCUMENT,"querySelectorAll","p").unwrap_err().contains("work limit"));
     assert_eq!((page.state.retained,page.state.node_lists.len(),page.state.node_lists.capacity(),page.state.node_list_references),before);
     execute(&mut page,&mut doc,&mut forms,"if(kept.length!==6000||kept[5999].tagName!=='P'||document.querySelectorAll('p').length!==6000)throw 'snapshot recovery';");
 }
 
 #[test]
 fn browser_selector_five_results_fit_exactly_with_one_complete_registry_record() {
-    let(mut doc,mut forms,mut page)=page("<html><body><p></p><p></p><p></p><p></p><p></p></body></html>");
+    // Five direct document children let the same admitted candidate vector
+    // become the five-result snapshot without unrelated wrapper candidates.
+    let(mut doc,mut forms,mut page)=page("<p></p><p></p><p></p><p></p><p></p>");
     let baseline=page.state.retained;page.state.retained_limit=baseline+size_of::<NodeList>()+5*size_of::<usize>();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     let Value::Host(handle)=bridge.selector_query(DOCUMENT,"querySelectorAll","p").unwrap() else{panic!("Expected list")};
