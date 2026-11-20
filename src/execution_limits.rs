@@ -119,9 +119,10 @@ pub struct Capacities {
     #[cfg(test)]
     pub(crate) test_native_parser_depth: Option<usize>,
     pub functions: usize,
-    // Parser/dynamic loading still use this profile until their storage slice.
-    // Runtime program identities use retained backing, with test-only counts.
+    #[cfg(test)]
     pub programs: usize,
+    #[cfg(test)]
+    pub(crate) test_loader_program_count:Option<usize>,
     pub environments: usize,
     pub bindings: usize,
     pub arguments: usize,
@@ -131,6 +132,8 @@ pub struct Capacities {
     pub ast_nodes: usize,
     pub compilation_bytes: usize,
     pub retained_source: usize,
+    /// Owned loader records, source/label capacity and transport storage.
+    pub script_storage_bytes:usize,
     pub retained_ast: usize,
     pub retained_regexp: usize,
     pub property_bytes: usize,
@@ -143,10 +146,11 @@ pub const REGRESSION_CAPACITIES: Capacities = Capacities {
     test_expression_frames: Some(super::MAX_EXPRESSION_FRAMES),
     test_function_syntax_depth: Some(super::MAX_PARSE_DEPTH),
     test_native_parser_depth: Some(super::MAX_PARSE_DEPTH),
-    functions: 1024, programs: 128, environments: 4096, bindings: 4096,
+    functions: 1024, programs: 128, test_loader_program_count:Some(128), environments: 4096, bindings: 4096,
     arguments: 256, source_bytes: 512 * 1024, string_bytes: 128 * 1024,
     tokens: 131_072, ast_nodes: 131_072, retained_source: 2 * 1024 * 1024,
     compilation_bytes: 64 * 1024 * 1024,
+    script_storage_bytes:REGRESSION_HEAP.retained_values,
     retained_ast: 262_144, retained_regexp: 2 * 1024 * 1024,
     property_bytes: 256, promises: 1024, promise_jobs: 4096,
 };
@@ -160,10 +164,16 @@ pub const BROWSER_CAPACITIES: Capacities = Capacities {
     test_function_syntax_depth: None,
     #[cfg(test)]
     test_native_parser_depth: None,
-    functions: 65_536, programs: 4096, environments: 65_536, bindings: 1_048_576,
+    functions: 65_536,
+    #[cfg(test)]
+    programs:4096,
+    #[cfg(test)]
+    test_loader_program_count:None,
+    environments: 65_536, bindings: 1_048_576,
     arguments: 65_536, source_bytes: 32 * 1024 * 1024, string_bytes: 8 * 1024 * 1024,
     tokens: BROWSER_TOKEN_RECORD_BYTES / std::mem::size_of::<super::Token>() - 1,
     ast_nodes: 6_291_456, compilation_bytes: 768 * 1024 * 1024,
+    script_storage_bytes:BROWSER_HEAP.retained_values,
     retained_source: 256 * 1024 * 1024, retained_ast: 16_777_216, retained_regexp: 16 * 1024 * 1024,
     property_bytes: 8192, promises: 65_536, promise_jobs: 262_144,
 };

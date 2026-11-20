@@ -58,6 +58,7 @@ mod public_suffix;
 mod random;
 mod script_geometry;
 mod scripting;
+mod script_storage;
 mod search;
 mod text;
 mod tls;

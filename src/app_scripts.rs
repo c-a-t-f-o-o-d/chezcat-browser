@@ -5,7 +5,8 @@
 use super::*;
 use crate::scripting::DynamicScript;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool,AtomicUsize, Ordering};
+use crate::script_storage::Lease;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,31 +16,57 @@ struct Job {
     blocking: Arc<crate::blocking::Policy>,
     network: crate::network_trace::Trace,
     cancel: Arc<AtomicBool>,
+    _storage:Option<Lease>,
 }
 
 struct Completion {
     epoch: u64,
     request: DynamicScript,
-    result: Result<loader::Script, String>,
+    result: Result<loader::Script,ScriptFailure>,
     events: Vec<String>,
+    _storage:Option<Lease>,
 }
 
 struct Shared {
     queue: VecDeque<Job>,
     completed: VecDeque<Completion>,
-    completed_bytes: usize,
+    payload_used:Arc<AtomicUsize>,
     active: Option<Arc<AtomicBool>>,
     stopping: bool,
     wake: loader::Wake,
 }
 
+#[derive(Debug)]
+enum ScriptFailure {Message(String),Storage}
+impl ScriptFailure {
+    fn into_message(self)->String{match self{Self::Message(error)=>error,Self::Storage=>"Dynamic script completion storage exhausted.".into()}}
+}
+fn worker_storage(state:&Shared)->usize {
+    state.queue.capacity().saturating_mul(std::mem::size_of::<Job>())
+        .saturating_add(state.completed.capacity().saturating_mul(std::mem::size_of::<Completion>()))
+        .saturating_add(state.payload_used.load(Ordering::Acquire))
+}
+fn completion_payload(completion:&Completion)->usize {
+    let result=match &completion.result{Ok(script)=>script.payload_bytes(),Err(ScriptFailure::Message(error))=>error.capacity(),Err(ScriptFailure::Storage)=>0};
+    completion.events.iter().fold(result.saturating_add(completion.events.capacity()*std::mem::size_of::<String>()),|bytes,event|bytes.saturating_add(event.capacity()))
+}
+fn reserve_worker_queue<T>(queue:&mut VecDeque<T>,needed:usize,available:usize)->Result<(),String> {
+    let before=queue.capacity();if needed<=before{return Ok(());}
+    let slot=std::mem::size_of::<T>();let growth=before.max(4).max(needed-before).min(available/slot);
+    let capacity=before.checked_add(growth).filter(|capacity|*capacity>=needed).ok_or("Dynamic script worker storage exhausted.")?;
+    let mut next=VecDeque::new();next.try_reserve_exact(capacity).map_err(|_|"Could not reserve dynamic script worker queue.")?;
+    if next.capacity().saturating_sub(before).saturating_mul(slot)>available{return Err("Allocated script worker backing exceeds allowance.".into());}
+    next.append(queue);*queue=next;Ok(())
+}
 impl Shared {
-    fn complete(&mut self, mut completion: Completion, limit: usize) {
-        let bytes = completion.result.as_ref().map_or(0, |script| script.source.len());
-        if bytes > limit.saturating_sub(self.completed_bytes) {
-            completion.result = Err(format!("Dynamic script completion source budget reached ({limit} bytes)."));
-        } else {
-            self.completed_bytes += bytes;
+    fn complete(&mut self,mut completion:Completion,limit:usize) {
+        // Submit reserves every future completion slot. Storage refusal uses an
+        // inline typed fault, requiring no allocation when the budget is full.
+        assert!(self.completed.len()<self.completed.capacity(),"Admitted script completion requires a reserved slot");
+        let metadata=self.queue.capacity()*std::mem::size_of::<Job>()+self.completed.capacity()*std::mem::size_of::<Completion>();
+        match Lease::new(self.payload_used.clone(),completion_payload(&completion),limit.saturating_sub(metadata)) {
+            Ok(storage)=>completion._storage=Some(storage),
+            Err(_)=>{completion.result=Err(ScriptFailure::Storage);completion.events=Vec::new();}
         }
         self.completed.push_back(completion);
     }
@@ -59,7 +86,7 @@ impl Worker {
             Mutex::new(Shared {
                 queue: VecDeque::new(),
                 completed: VecDeque::new(),
-                completed_bytes: 0,
+                payload_used:Arc::new(AtomicUsize::new(0)),
                 active: None,
                 stopping: false,
                 wake,
@@ -80,8 +107,7 @@ impl Worker {
                     }
                     let job = guard.queue.pop_front().unwrap();
                     guard.active = Some(job.cancel.clone());
-                    let remaining = crate::javascript::limits::BROWSER_CAPACITIES.retained_source
-                        .saturating_sub(guard.completed_bytes);
+                    let remaining=job.request.storage_limit.saturating_sub(worker_storage(&guard));
                     let source_limit = job.request.source_limit.min(remaining);
                     (job, source_limit)
                 };
@@ -94,12 +120,14 @@ impl Worker {
                         return;
                     }
                     if !job.cancel.load(Ordering::Relaxed) {
+                        let limit=job.request.storage_limit;
                         guard.complete(Completion {
                             epoch: job.epoch,
                             request: job.request,
-                            result,
+                            result:result.map_err(ScriptFailure::Message),
                             events,
-                        }, crate::javascript::limits::BROWSER_CAPACITIES.retained_source);
+                            _storage:None,
+                        }, limit);
                     }
                     guard.wake.clone()
                 };
@@ -109,11 +137,20 @@ impl Worker {
         Ok(Self { state })
     }
 
-    fn submit(&self, job: Job) -> Result<(), String> {
+    fn submit(&self,mut job:Job)->Result<(),String> {
         let mut state = self.state.0.lock().unwrap();
-        if state.stopping || state.queue.len() + state.completed.len() >= loader::MAX_SCRIPTS {
-            return Err(format!("Dynamic script worker queue limit reached ({}).", loader::MAX_SCRIPTS));
-        }
+        if state.stopping{return Err("Dynamic script worker is stopping.".into());}
+        let limit=job.request.storage_limit;
+        let metadata=state.queue.capacity()*std::mem::size_of::<Job>()+state.completed.capacity()*std::mem::size_of::<Completion>();
+        let payload=job.blocking.owned_bytes().saturating_add(4*std::mem::size_of::<usize>()+std::mem::size_of::<AtomicBool>());
+        job._storage=Some(Lease::new(state.payload_used.clone(),payload,limit.saturating_sub(metadata))?);
+        let completions=state.completed.len().checked_add(state.queue.len()).and_then(|count|count.checked_add(usize::from(state.active.is_some()))).and_then(|count|count.checked_add(1)).ok_or("Dynamic script completion size overflow.")?;
+        let minimum=completions.saturating_sub(state.completed.capacity()).checked_mul(std::mem::size_of::<Completion>()).ok_or("Dynamic script completion storage overflow.")?;
+        let available=limit.saturating_sub(worker_storage(&state)).checked_sub(minimum).ok_or("Dynamic script completion backing exhausted.")?;
+        let needed=state.queue.len().checked_add(1).ok_or("Dynamic script queue size overflow.")?;
+        reserve_worker_queue(&mut state.queue,needed,available)?;
+        let available=limit.saturating_sub(worker_storage(&state));
+        reserve_worker_queue(&mut state.completed,completions,available)?;
         state.queue.push_back(job);
         self.state.1.notify_one();
         Ok(())
@@ -127,9 +164,6 @@ impl Worker {
         let (result, wake) = {
             let mut state = self.state.0.lock().unwrap();
             let result = state.completed.pop_front();
-            if let Some(completion) = &result {
-                state.completed_bytes -= completion.result.as_ref().map_or(0, |script| script.source.len());
-            }
             let wake = (!state.completed.is_empty()).then(|| state.wake.clone());
             (result, wake)
         };
@@ -141,12 +175,9 @@ impl Worker {
 
     fn cancel(&self) {
         let mut state = self.state.0.lock().unwrap();
-        if let Some(cancel) = &state.active {
-            cancel.store(true, Ordering::Relaxed);
-        }
-        state.queue.clear();
-        state.completed.clear();
-        state.completed_bytes = 0;
+        if let Some(cancel)=state.active.take(){cancel.store(true,Ordering::Relaxed);}
+        state.queue=VecDeque::new();
+        state.completed=VecDeque::new();
     }
 }
 
@@ -169,38 +200,60 @@ impl Drop for Worker {
 #[cfg(test)]
 mod completion_tests {
     use super::*;
-
-    fn completion(source: &str) -> Completion {
-        Completion { epoch: 1, request: DynamicScript {
-            node: 1, target: Location::home(), origin: Location::home(), nonce: None,
-            policy: crate::csp::PolicySet::default(), same_origin_only: false,
-            source_limit: crate::javascript::limits::BROWSER_CAPACITIES.source_bytes, error: None,
-        }, result: Ok(loader::Script { node: 1, source: source.into(), label: "bounded completion".into() }), events: Vec::new() }
+    fn request()->DynamicScript {
+        Arc::new(crate::scripting::ScriptRequest{node:1,target:Location::home(),origin:Location::home(),nonce:None,
+            policy:Arc::new(crate::csp::PolicySet::default()),same_origin_only:false,
+            source_limit:crate::javascript::limits::BROWSER_CAPACITIES.source_bytes,error:None,
+            storage_limit:crate::javascript::limits::BROWSER_CAPACITIES.script_storage_bytes,
+            _storage:Lease::default(),_policy_storage:Arc::new(Lease::default())})
     }
-
+    fn completion(source:&str)->Completion {
+        Completion{epoch:1,request:request(),result:Ok(loader::Script{node:1,source:source.into(),label:"bounded completion".into()}),events:Vec::new(),_storage:None}
+    }
     #[test]
-    fn completed_script_payload_is_bounded_before_ui_poll_and_released_on_poll_or_cancel() {
-        let worker = Worker { state: Arc::new((Mutex::new(Shared {
-            queue: VecDeque::new(), completed: VecDeque::new(), completed_bytes: 0,
-            active: None, stopping: false, wake: Arc::new(|| {}),
-        }), Condvar::new())) };
-        {
-            let mut state = worker.state.0.lock().unwrap();
-            state.complete(completion("abc"), 8);
-            state.complete(completion("12345"), 8);
-            state.complete(completion("overflow"), 8);
-            assert_eq!(state.completed_bytes, 8);
-            assert_eq!(state.completed.len(), 3);
-            assert!(matches!(&state.completed[2].result, Err(error) if error.contains("source budget")));
-        }
-        assert_eq!(worker.poll().unwrap().result.unwrap().source, "abc");
-        assert_eq!(worker.state.0.lock().unwrap().completed_bytes, 5);
-        worker.state.0.lock().unwrap().complete(completion("xyz"), 8);
-        assert_eq!(worker.state.0.lock().unwrap().completed_bytes, 8);
-        worker.cancel();
-        let state = worker.state.0.lock().unwrap();
-        assert!(state.completed.is_empty());
-        assert_eq!(state.completed_bytes, 0);
+    fn completed_script_payload_is_bounded_and_stays_charged_across_ui_poll_and_cancel() {
+        let worker=Worker{state:Arc::new((Mutex::new(Shared{queue:VecDeque::new(),completed:VecDeque::with_capacity(4),payload_used:Arc::new(AtomicUsize::new(0)),active:None,stopping:false,wake:Arc::new(||{})}),Condvar::new()))};
+        let first=completion("abc");let first_bytes=completion_payload(&first);let second=completion("12345");let second_bytes=completion_payload(&second);
+        let limit={let mut state=worker.state.0.lock().unwrap();let limit=worker_storage(&state)+first_bytes+second_bytes;
+            state.complete(first,limit);state.complete(second,limit);state.complete(completion("overflow"),limit);
+            assert_eq!(state.payload_used.load(Ordering::Acquire),first_bytes+second_bytes);assert_eq!(state.completed.len(),3);
+            assert!(matches!(state.completed[2].result,Err(ScriptFailure::Storage)));limit};
+        let active=worker.poll().unwrap();assert_eq!(active.result.as_ref().unwrap().source,"abc");
+        assert_eq!(worker.state.0.lock().unwrap().payload_used.load(Ordering::Acquire),first_bytes+second_bytes);
+        worker.cancel();assert_eq!(worker.state.0.lock().unwrap().payload_used.load(Ordering::Acquire),first_bytes);
+        drop(active);assert_eq!(worker.state.0.lock().unwrap().payload_used.load(Ordering::Acquire),0);
+        let mut state=worker.state.0.lock().unwrap();let available=limit.saturating_sub(worker_storage(&state));reserve_worker_queue(&mut state.completed,1,available).unwrap();
+        state.complete(completion("recovered"),limit);assert!(state.completed[0].result.is_ok());
+    }
+    fn worker()->Worker {
+        Worker{state:Arc::new((Mutex::new(Shared{queue:VecDeque::new(),completed:VecDeque::new(),payload_used:Arc::new(AtomicUsize::new(0)),active:None,stopping:false,wake:Arc::new(||{})}),Condvar::new()))}
+    }
+    fn job(request:DynamicScript,epoch:u64)->Job {
+        Job{epoch,request,blocking:Arc::new(crate::blocking::Policy::default()),network:crate::network_trace::Trace::default(),cancel:Arc::new(AtomicBool::new(false)),_storage:None}
+    }
+    #[test]
+    fn dynamic_script_worker_exceeds_old_queue_count_and_preserves_fifo_with_actual_owned_storage() {
+        let worker=worker();let request=request();let limit=request.storage_limit;
+        for epoch in 0..6000{worker.submit(job(request.clone(),epoch)).unwrap();}
+        {let mut state=worker.state.0.lock().unwrap();assert_eq!(state.queue.len(),6000);assert!(state.completed.capacity()>=6000);
+            while let Some(job)=state.queue.pop_front(){let source=job.epoch.to_string();state.complete(Completion{epoch:job.epoch,request:job.request,result:Ok(loader::Script{node:1,source,label:String::new()}),events:Vec::new(),_storage:None},limit);}
+            assert!(worker_storage(&state)<=limit);}
+        for epoch in 0..6000{let completion=worker.poll().unwrap();assert_eq!(completion.epoch,epoch);assert_eq!(completion.result.as_ref().unwrap().source,epoch.to_string());}
+        assert_eq!(worker.state.0.lock().unwrap().payload_used.load(Ordering::Acquire),0);
+        worker.cancel();assert_eq!(worker_storage(&worker.state.0.lock().unwrap()),0);
+    }
+    #[test]
+    fn dynamic_script_worker_one_complete_job_and_completion_fit_exactly_and_refusal_keeps_admitted_job() {
+        let worker=worker();let mut request=request();let candidate=job(request.clone(),1);
+        let payload=candidate.blocking.owned_bytes()+4*std::mem::size_of::<usize>()+std::mem::size_of::<AtomicBool>();drop(candidate);
+        let exact=payload+std::mem::size_of::<Job>()+std::mem::size_of::<Completion>();
+        Arc::get_mut(&mut request).unwrap().storage_limit=exact-1;
+        assert!(worker.submit(job(request.clone(),1)).is_err());assert_eq!(worker_storage(&worker.state.0.lock().unwrap()),0);
+        Arc::get_mut(&mut request).unwrap().storage_limit=exact;
+        worker.submit(job(request.clone(),1)).unwrap();
+        {let state=worker.state.0.lock().unwrap();assert_eq!(state.queue.len(),1);assert_eq!(state.queue.capacity(),1);assert_eq!(state.completed.capacity(),1);assert_eq!(worker_storage(&state),exact);}
+        assert!(worker.submit(job(request.clone(),2)).is_err());assert_eq!(worker.state.0.lock().unwrap().queue.len(),1);
+        worker.cancel();assert_eq!(worker_storage(&worker.state.0.lock().unwrap()),0);
     }
 }
 
@@ -391,6 +444,7 @@ impl App {
                 )),
                 network: self.network.clone(),
                 cancel: Arc::new(AtomicBool::new(false)),
+                _storage:None,
             };
             match self.dynamic_scripts.as_ref().unwrap().submit(job) {
                 Ok(()) => self.dynamic_pending += 1,
@@ -411,8 +465,9 @@ impl App {
             return false;
         }
         self.dynamic_pending = self.dynamic_pending.saturating_sub(1);
+        let _active_storage=completion._storage;
         self.events.extend(completion.events);
-        self.finish_dynamic_script(&completion.request, completion.result);
+        self.finish_dynamic_script(&completion.request,completion.result.map_err(ScriptFailure::into_message));
         true
     }
 

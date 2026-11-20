@@ -241,6 +241,11 @@ impl Default for Policy {
 }
 
 impl Policy {
+    pub(crate) fn owned_bytes(&self)->usize {
+        self.rules.iter().fold(std::mem::size_of::<Self>()+self.rules.capacity()*std::mem::size_of::<Rule>()+self.invalid.as_ref().map_or(0,String::capacity),|bytes,rule|{
+            bytes.saturating_add(rule.label.capacity()).saturating_add(match &rule.matcher{Matcher::Host(text)|Matcher::Path(text)=>text.capacity(),Matcher::Url(url)=>url.host.capacity()+url.path.capacity()})
+        })
+    }
     pub fn new(config: &Config) -> Self {
         let mut normalized = config.clone();
         let invalid = normalized.normalize().err();
