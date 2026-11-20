@@ -1,0 +1,9 @@
+//! Fallible unpublished reservations for original host metadata vectors.
+pub(super) fn capacity<T>(values:&Vec<T>,capacity:usize,available:usize)->Result<(Option<Vec<T>>,usize),String> {
+    if capacity<=values.capacity(){return Ok((None,0));}
+    let mut next=Vec::new();
+    next.try_reserve_exact(capacity).map_err(|_|"Could not reserve host metadata storage.")?;
+    let bytes=next.capacity().checked_sub(values.capacity()).and_then(|slots|slots.checked_mul(std::mem::size_of::<T>()))
+        .filter(|bytes|*bytes<=available).ok_or("DOM retained host metadata allocation exceeds allowance.")?;
+    Ok((Some(next),bytes))
+}

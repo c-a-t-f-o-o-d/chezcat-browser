@@ -260,9 +260,18 @@ pub struct Outcome {
     pub errors: usize,
 }
 
+#[path = "script_retained_storage.rs"]
+mod retained_storage;
+
+#[path = "script_listeners.rs"]
+mod listener_store;
+#[cfg(test)]
+#[path = "script_listener_storage_tests.rs"]
+mod listener_storage_tests;
+
 #[derive(Clone)]
 struct Listener {
-    serial: u32,
+    serial: usize,
     target: u32,
     event: String,
     callback: Value,
@@ -447,7 +456,7 @@ struct State {
     stylesheets: StylesheetState,
     images: ImagesState,
     history: HistoryState,
-    listeners: Vec<Listener>,
+    listeners: listener_store::Store,
     native_functions: HashMap<&'static str, Value>,
     native_methods: Vec<(u32, &'static str, Value)>,
     detached_images: HashSet<usize>,
@@ -481,7 +490,6 @@ struct State {
     timer_bytes: usize,
     timer_callbacks: usize,
     timer_nesting: u32,
-    next_listener: u32,
     next_event: u32,
     event: Option<Event>,
     created_events: Vec<script_created_events::CreatedEvent>,
@@ -535,7 +543,7 @@ impl State {
             stylesheets: StylesheetState::default(),
             images: ImagesState::default(),
             history: HistoryState::default(),
-            listeners: Vec::new(),
+            listeners: listener_store::Store::default(),
             native_functions: HashMap::new(),
             native_methods: Vec::new(),
             detached_images: HashSet::new(),
@@ -569,7 +577,6 @@ impl State {
             timer_bytes: 0,
             timer_callbacks: 0,
             timer_nesting: 0,
-            next_listener: 0,
             next_event: EVENT_BASE,
             event: None,
             created_events: Vec::new(),
@@ -928,6 +935,51 @@ impl State {
         self.rebuild_dom_tree(doc)
     }
 
+    fn reserve_dispatch_temporary<T>(&mut self,values:&mut Vec<T>,capacity:usize,other:usize)->Result<(),String> {
+        let slot=std::mem::size_of::<T>();
+        let old=values.capacity().checked_mul(slot).ok_or("Dispatch metadata size overflow.")?;
+        let available=self.retained_limit.saturating_sub(self.retained).checked_sub(other)
+            .and_then(|available|available.checked_sub(old)).ok_or("DOM retained dispatch metadata allowance exhausted.")?;
+        let (next,_)=retained_storage::capacity(values,capacity,available)?;
+        if let Some(mut next)=next {
+            self.copies(values.len().saturating_mul(slot))?;
+            next.append(values);*values=next;
+        }
+        Ok(())
+    }
+
+    fn push_dispatch_temporary<T>(&mut self,values:&mut Vec<T>,value:T,other:usize)->Result<(),String> {
+        let slot=std::mem::size_of::<T>();
+        if values.len()==values.capacity() {
+            let available=self.retained_limit.saturating_sub(self.retained).saturating_sub(other)
+                .saturating_sub(values.capacity().saturating_mul(slot));
+            let growth=values.capacity().max(4).min(available/slot);
+            if growth==0{return Err("DOM retained dispatch metadata allowance exhausted.".into());}
+            let capacity=values.capacity().checked_add(growth).ok_or("Dispatch metadata capacity overflow.")?;
+            self.reserve_dispatch_temporary(values,capacity,other)?;
+        }
+        self.copies(slot)?;
+        values.push(value);
+        Ok(())
+    }
+
+    fn listener_snapshot(&mut self,target:u32,event:&str,capture:bool)->Result<Vec<usize>,String> {
+        self.work(self.listeners.len().saturating_mul(2))?;
+        let count=self.listeners.iter().filter(|listener|listener.target==target&&listener.event==event&&listener.options.capture==capture).count();
+        let mut snapshot=Vec::new();
+        self.reserve_dispatch_temporary(&mut snapshot,count,0)?;
+        self.copies(count.saturating_mul(std::mem::size_of::<usize>()))?;
+        snapshot.extend(self.listeners.iter().filter(|listener|listener.target==target&&listener.event==event&&listener.options.capture==capture).map(|listener|listener.serial));
+        self.retained+=snapshot.capacity()*std::mem::size_of::<usize>();
+        Ok(snapshot)
+    }
+
+    fn listener_limit_reached(&self)->bool {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.listeners.len()>=self.limits.host.listeners {return true;}
+        false
+    }
+
     fn add_listener(
         &mut self,
         target: u32,
@@ -936,6 +988,7 @@ impl State {
         property: bool,
         options: ListenerOptions,
     ) -> Result<(), String> {
+        self.work(self.listeners.len())?;
         if property {
             if let Some(old) = self
                 .listeners
@@ -954,28 +1007,30 @@ impl State {
         }) {
             return Ok(());
         }
-        if self.listeners.len() >= self.limits.host.listeners {
+        if self.listener_limit_reached() {
             return Err("Event listener limit reached (64 per document).".into());
         }
-        let serial = self
-            .next_listener
-            .checked_add(1)
-            .ok_or("Event listener identity limit reached.")?;
+        let available=self.retained_limit.saturating_sub(self.retained);
+        if event.len()>available{return Err("DOM retained listener name allowance exhausted.".into());}
         let mut name=String::new();
         name.try_reserve_exact(event.len()).map_err(|_|"Could not reserve event listener name.")?;
         name.push_str(event);
-        self.listeners.try_reserve(1).map_err(|_|"Could not reserve event listener storage.")?;
-        self.listeners.push(Listener {
-            serial,
-            target,
-            event: name,
-            callback,
-            property,
-            options,
+        let available=available.checked_sub(name.capacity()).ok_or("DOM retained listener name allocation exceeds allowance.")?;
+        let growth=self.listeners.prepare(available,self.event.is_none()&&self.synthetic_dispatches.is_empty())?;
+        self.copies(name.capacity().saturating_add(growth.copies))?;
+        let added=growth.added+name.capacity();
+        growth.commit(&mut self.listeners,Listener {
+            serial:0,target,event:name,callback,property,options,
         });
-        self.next_listener=serial;
+        self.retained+=added;
         Ok(())
     }
+    fn retain_listeners(&mut self,keep:impl FnMut(&Listener)->bool)->Result<(),String> {
+        self.work(self.listeners.len())?;
+        self.retained-=self.listeners.retain(keep);
+        Ok(())
+    }
+
 }
 
 pub struct Page {
@@ -1573,7 +1628,7 @@ impl Page {
                     self.state.error(&label, &error);
                     continue;
                 }
-                if self.state.listeners.len() >= self.state.limits.host.listeners {
+                if self.state.listener_limit_reached() {
                     self.state
                         .error(&label, "Event listener limit reached (64 per document).");
                     break 'handlers;
@@ -1857,43 +1912,41 @@ impl Page {
             self.state.error(event, "Event identity limit reached.");
             return (false, false);
         };
-        let handle = self.state.next_event;
-        self.state.next_event = next;
-        self.state.event = Some(Event {
-            composed,
-            path: Vec::new(),
-            handle,
-            // HTML's Window load event uses the legacy target override:
-            // target is Document while currentTarget and callback this are Window.
-            target: if target == WINDOW && event == "load" {
-                DOCUMENT
-            } else {
-                target
-            },
-            current: target,
-            name: event.into(),
-            cancelable,
-            bubbles,
-            prevented: false,
-            stopped: false,
-            immediate: false,
-            phase: 0,
-            passive: false,
-            keyboard: self.state.pending_keyboard.take(),
-            mouse,
-            timestamp: self.state.clock_ms(Instant::now()),
+        let prepared=(||->Result<(String,Vec<(u32,bool,u8)>,usize),String> {
+            let path_bytes=path.capacity()*std::mem::size_of::<u32>();
+            let keyboard_bytes=self.state.pending_keyboard.as_ref().map_or(0,|input|input.key.capacity()+input.code.capacity());
+            let available=self.state.retained_limit.saturating_sub(self.state.retained)
+                .checked_sub(path_bytes).and_then(|bytes|bytes.checked_sub(keyboard_bytes))
+                .filter(|bytes|*bytes>=event.len()).ok_or("DOM retained native event payload allowance exhausted.")?;
+            let mut name=String::new();
+            name.try_reserve_exact(event.len()).map_err(|_|"Could not reserve native event name.")?;
+            if name.capacity()>available{return Err("DOM retained native event name allocation exceeds allowance.".into());}
+            self.state.copies(name.capacity())?;name.push_str(event);
+            let visit_count=path.len().checked_add(1).and_then(|count|count.checked_add(if bubbles {path.len()-1}else{0})).ok_or("Native event phase count overflow.")?;
+            self.state.work(visit_count)?;
+            let mut visits=Vec::new();
+            self.state.reserve_dispatch_temporary(&mut visits,visit_count,path_bytes+keyboard_bytes+name.capacity())?;
+            self.state.copies(visit_count.saturating_mul(std::mem::size_of::<(u32,bool,u8)>()))?;
+            visits.extend(path.iter().skip(1).rev().map(|&node|(node,true,1)));
+            visits.extend([(target,true,2),(target,false,2)]);
+            if bubbles {visits.extend(path.iter().skip(1).map(|&node|(node,false,3)));}
+            let bytes=path_bytes+keyboard_bytes+name.capacity()+visits.capacity()*std::mem::size_of::<(u32,bool,u8)>();
+            Ok((name,visits,bytes))
+        })();
+        let (name,visits,native_storage)=match prepared {
+            Ok(prepared)=>prepared,
+            Err(error)=>{self.state.error(event,&error);self.runtime.cancel_microtasks();self.cancel_media_selection();return (false,false);}
+        };
+        self.state.retained+=native_storage;
+        let handle=self.state.next_event;
+        self.state.next_event=next;
+        self.state.event=Some(Event {
+            composed,path,handle,
+            target:if target==WINDOW&&event=="load"{DOCUMENT}else{target},
+            current:target,name,cancelable,bubbles,prevented:false,stopped:false,immediate:false,
+            phase:0,passive:false,keyboard:self.state.pending_keyboard.take(),mouse,
+            timestamp:self.state.clock_ms(Instant::now()),
         });
-        let mut visits: Vec<_> = path
-            .iter()
-            .skip(1)
-            .rev()
-            .map(|&node| (node, true, 1))
-            .collect();
-        visits.extend([(target, true, 2), (target, false, 2)]);
-        if bubbles {
-            visits.extend(path.iter().skip(1).map(|&node| (node, false, 3)));
-        }
-        if let Some(active)=&mut self.state.event {active.path=path;}
         let mut complete = true;
         'visits: for (current, capture, phase) in visits {
             if self
@@ -1911,31 +1964,35 @@ impl Page {
             // DOM snapshots each current target/phase separately. A removed
             // listener stays removed, and a listener added during this phase
             // waits for a subsequent phase or dispatch.
-            let snapshot: Vec<_> = self
-                .state
-                .listeners
-                .iter()
-                .filter(|l| l.event == event && l.target == current && l.options.capture == capture)
-                .map(|l| l.serial)
-                .collect();
+            let snapshot=match self.state.listener_snapshot(current,event,capture) {
+                Ok(snapshot)=>snapshot,
+                Err(error)=>{self.state.error(event,&error);self.runtime.cancel_microtasks();self.cancel_media_selection();complete=false;break 'visits;}
+            };
             for serial in &snapshot {
-                let Some(listener) = self
+                if let Err(error)=self.state.work(1) {
+                    self.state.error(event,&error);self.runtime.cancel_microtasks();self.cancel_media_selection();complete=false;break;
+                }
+                let Some((callback,options,property)) = self
                     .state
                     .listeners
-                    .iter()
-                    .find(|l| l.serial == *serial && l.target == current)
-                    .cloned()
+                    .get(*serial)
+                    .filter(|l| l.target == current)
+                    .map(|l|(l.callback.clone(),l.options,l.property))
                 else {
                     continue;
                 };
-                if listener.options.once {
-                    self.state.listeners.retain(|l| l.serial != *serial);
+                if options.once {
+                    if let Err(error)=self.state.retain_listeners(|l|l.serial!=*serial) {
+                        self.state.error(event,&error);
+                        self.runtime.cancel_microtasks();self.cancel_media_selection();
+                        complete=false;break;
+                    }
                 }
                 if let Some(active) = &mut self.state.event {
-                    active.passive = listener.options.passive;
+                    active.passive = options.passive;
                 }
                 let result = self.runtime.invoke_event_listener(
-                    listener.callback,
+                    callback,
                     &[Value::Host(handle)],
                     Value::Host(current),
                     &mut Bridge {
@@ -1945,7 +2002,7 @@ impl Page {
                     },
                 );
                 match result {
-                    Ok(Value::Bool(false)) if listener.property && cancelable => {
+                    Ok(Value::Bool(false)) if property && cancelable => {
                         if let Some(active) = &mut self.state.event {
                             active.prevented = true;
                         }
@@ -1965,16 +2022,20 @@ impl Page {
                     self.runtime.cancel_microtasks();
                     self.cancel_media_selection();
                     complete = false;
-                    break 'visits;
+                    break;
                 }
                 if self.state.event.as_ref().is_some_and(|e| e.immediate) {
                     break;
                 }
             }
+            self.state.retained-=snapshot.capacity()*std::mem::size_of::<usize>();
+            drop(snapshot);
+            if !complete {break 'visits;}
         }
         // Handles expire instead of being reused: retained JS event references
         // can never mutate a later event's cancellation state.
         let prevented = self.state.event.take().is_some_and(|event| event.prevented);
+        self.state.retained-=native_storage;
         (prevented, complete && !self.runtime.invocation_failed_fatally())
     }
 
@@ -1982,10 +2043,10 @@ impl Page {
         self.state.work(1)?;
         self.state.rebuild(doc)?;
         if target == WINDOW {
-            return Ok(vec![WINDOW]);
+            let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,WINDOW,0)?;return Ok(path);
         }
         if target == DOCUMENT {
-            return Ok(vec![DOCUMENT, WINDOW]);
+            let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,DOCUMENT,0)?;self.state.push_dispatch_temporary(&mut path,WINDOW,0)?;return Ok(path);
         }
         let node = node_index(target).ok_or("Unknown event target.")?;
         if !self.state.tree.active.get(node).copied().unwrap_or(false)
@@ -1994,18 +2055,18 @@ impl Page {
         {
             return Err("Event target is no longer connected.".into());
         }
-        let mut path = vec![target];
+        let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,target,0)?;
         {
             let mut parent = self.state.tree.parents[node];
             while let Some(node) = parent {
                 self.state.work(1)?;
                 if node != 0 {
-                    path.push(node_handle(node));
+                    self.state.push_dispatch_temporary(&mut path,node_handle(node),0)?;
                 }
                 parent = self.state.tree.parents[node];
             }
             if self.state.dom.connected.get(node).copied().unwrap_or(false) {
-                path.extend([DOCUMENT, WINDOW]);
+                self.state.push_dispatch_temporary(&mut path,DOCUMENT,0)?;self.state.push_dispatch_temporary(&mut path,WINDOW,0)?;
             }
         }
         Ok(path)
@@ -2566,6 +2627,7 @@ impl Bridge<'_> {
         };
         let object = self.handler_target(object, event);
         self.handler_event_target(object, event)?;
+        self.state.work(self.state.listeners.len())?;
         Ok(Some(
             self.state
                 .listeners
@@ -2588,10 +2650,7 @@ impl Bridge<'_> {
                 self.state
                     .add_listener(object, event, value, true, ListenerOptions::default())?
             }
-            Value::Null | Value::Undefined => self
-                .state
-                .listeners
-                .retain(|l| !(l.target == object && l.event == event && l.property)),
+            Value::Null | Value::Undefined => self.state.retain_listeners(|l| !(l.target == object && l.event == event && l.property))?,
             _ => return Err("Event handler properties accept a function or null.".into()),
         }
         Ok(true)
@@ -2649,13 +2708,13 @@ impl Bridge<'_> {
             self.state
                 .add_listener(object, &event, args[1].clone(), false, options)?;
         } else {
-            self.state.listeners.retain(|l| {
+            self.state.retain_listeners(|l| {
                 !(l.target == object
                     && l.event == event
                     && !l.property
                     && l.options.capture == options.capture
                     && same_event_listener(&l.callback, &args[1]))
-            });
+            })?;
         }
         Ok(Value::Undefined)
     }
