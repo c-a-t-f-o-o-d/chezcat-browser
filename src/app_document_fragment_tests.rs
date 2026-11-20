@@ -123,6 +123,9 @@ source.removeAttribute('onclick');if(source.hasAttribute('onclick')||source.getA
 if(source.attributes!==sourceMap||sourceMap.length!==3||handler.ownerElement!==null||handler.ownerDocument!==source.ownerDocument||handler.value!=="throw 'inert handler ran'")throw 'real saved removed Attr';
 source.setAttribute('data-note','prepared');var note=sourceMap.getNamedItem('data-note');note.value='ready';
 if(source.attributes!==sourceMap||sourceMap.length!==4||source.getAttribute('data-note')!=='ready'||note.ownerElement!==source||note.ownerDocument!==source.ownerDocument)throw 'real saved inert Attr assignment';
+var prepared=input.ownerDocument.createDocumentFragment();prepared.appendChild(input);
+if(input.childNodes.length!==0||sourceView.length!==0||prepared.firstChild!==source||prepared.childNodes[1]!==sourceMarker||source.parentNode!==prepared||sourceMarker.parentNode!==prepared)throw 'real inert fragment preparation';
+input=prepared;sourceView=input.children;
 document.getElementById('copy').onclick=function(event){
     if(!event.isTrusted)throw 'actual pointer activation';
     var fragment=document.importNode(input,true), importedView=fragment.children, imported=Array.from(importedView)[0], savedChildren=imported.children;

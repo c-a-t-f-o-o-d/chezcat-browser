@@ -3367,7 +3367,7 @@ impl Host for Bridge<'_> {
             return if matches!(args.first(), None | Some(Value::Undefined)) { &[] } else { &[(0, true)] };
         }
         if self.inert_factory(object, method).is_some() {
-            return if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
+            return if method == "createDocumentFragment" { &[] } else if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
         }
         if method=="setAttribute"&&self.inert_node_type(object)==Some(1){return &[(0,true),(1,true)];}
         if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
@@ -3471,7 +3471,7 @@ impl Host for Bridge<'_> {
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
         if self.inert_factory(object, method).is_some() {
-            return Some(if method == "createElementNS" { 2 } else { 1 });
+            return Some(if method == "createDocumentFragment" { 0 } else if method == "createElementNS" { 2 } else { 1 });
         }
         if script_inline_style::handle(object) && method == "item" { return Some(1); }
         if let Some(operation) = CanvasOperation::parse(method) { return Some(operation.arity()); }
@@ -3479,7 +3479,7 @@ impl Host for Bridge<'_> {
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "getPropertyValue" | "removeProperty" => Some(1), "setProperty" => Some(2), _ => None };
         }
-        if object==DOCUMENT && method=="createDocumentFragment" {return Some(0);}
+        if method=="createDocumentFragment" && (object==DOCUMENT || self.inert_document(object)) {return Some(0);}
         if method==script_node_root::ROOT_METHOD && self.get_root_receiver(object) {return Some(0);}
         if method == script_clone_node::CLONE_METHOD { return Some(0); }
         if method == script_node_contains::CONTAINS_METHOD { return Some(1); }
@@ -3589,7 +3589,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
-        if method == "appendChild" && self.template_fragment_receiver(object) { return &[0]; }
+        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) { return &[0]; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
         if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
@@ -3615,12 +3615,12 @@ impl Host for Bridge<'_> {
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         if let Some(method)=script_named_map::operation(method){return match method{"item"|"getNamedItem"=>1,"getNamedItemNS"=>2,_=>0};}
         if method == script_inert_documents::parser::PARSE { return 2; }
-        if method == "appendChild" && self.template_fragment_receiver(object) { return 1; }
+        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) { return 1; }
         if method == DOCUMENT_IMPORT_NODE { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
         if self.inert_factory(object, method).is_some() {
-            return if method == "createElementNS" { 2 } else { 1 };
+            return if method == "createDocumentFragment" { 0 } else if method == "createElementNS" { 2 } else { 1 };
         }
         if method=="setAttribute"&&self.inert_node_type(object)==Some(1){return 2;}
         if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) { return 1; }
@@ -3709,8 +3709,8 @@ impl Host for Bridge<'_> {
         if crate::javascript::message_channel_interface::operation(method) {
             return self.validate_message_call(object, method, args);
         }
-        if method == "appendChild" && self.template_fragment_receiver(object) {
-            return self.validate_template_append(object, args);
+        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) {
+            return self.validate_inert_mutation(object,method,args);
         }
         if method == script_inert_documents::parser::PARSE {
             return match args.get(1) {
@@ -4116,7 +4116,7 @@ impl Host for Bridge<'_> {
                 return self.inert_implementation(receiver);
             }
         }
-        if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
+        if self.inert_factory(object, method).is_some() { return self.inert_document(receiver) || method=="createDocumentFragment" && receiver==DOCUMENT; }
         if matches!(method,"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") {
             return (self.event_target_interface(object) || self.attr_element_receiver(object))
                 && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
@@ -4160,11 +4160,11 @@ impl Host for Bridge<'_> {
             if let Some(interface) = Slottable::getter(method) {return self.slottable(receiver) == Some(interface);}
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
         }
-        if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT;}
+        if object==DOCUMENT && method=="createDocumentFragment" {return receiver==DOCUMENT || self.inert_document(receiver);}
         if dom_tree::node_mutation_method(method) {
             if self.event_target_interface(object) {
                 return self.node_mutation_receiver(receiver)
-                    || method == "appendChild" && self.template_fragment_receiver(receiver);
+                    || matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(receiver);
             }
             let parent=|handle|node_index(handle).is_some_and(|node|self.dom_accessible(node)
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
@@ -5559,8 +5559,8 @@ impl Host for Bridge<'_> {
         if crate::javascript::message_channel_interface::operation(method) {
             return self.message_call(object, method, args);
         }
-        if method == "appendChild" && self.template_fragment_receiver(object) {
-            return self.append_template_child(object, args);
+        if matches!(method,"appendChild"|"removeChild") && self.inert_mutation_receiver(object) {
+            return self.mutate_inert_children(object,method,args);
         }
         if crate::javascript::abort_interface::operation(method) {
             return self.abort_call(object, method, args);

@@ -1,0 +1,103 @@
+//! Atomic child movement within one genuine inert owner document.
+use super::*;
+
+#[cfg(test)]
+#[path = "script_inert_mutation_tests.rs"]
+mod tests;
+
+impl Bridge<'_> {
+    pub(in crate::scripting) fn inert_mutation_receiver(&self, object:u32)->bool {
+        matches!(self.inert_node_type(object),Some(1|11))
+    }
+
+    pub(in crate::scripting) fn validate_inert_mutation(&self, parent:u32, method:&str, args:&[Value])->Result<(),(&'static str,String)> {
+        let Some(Value::Host(child))=args.first() else{return Err(("TypeError","Inert child mutation requires a genuine Node.".into()));};
+        let arena=&self.state.inert_documents;
+        let Some(source)=arena.node(*child) else {
+            if method=="appendChild" && self.template_fragment_receiver(parent){return self.validate_template_append(parent,args);}
+            return Err(("NotSupportedError","Inert child mutation requires a node in the same inert owner document.".into()));
+        };
+        // DocumentNodes retains these actual structural identities. Moving one
+        // needs the separate Document getter/root update transaction.
+        if arena.node(source.owner).is_some_and(|owner|matches!(&owner.kind,
+            Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(child))) {
+            return Err(("NotSupportedError","Moving inert document structure nodes is not implemented.".into()));
+        }
+        if method=="removeChild" {
+            if source.parent!=Some(parent){return Err(("NotFoundError","The Node is not a child of this inert parent.".into()));}
+        }else{
+            if !matches!(self.inert_node_type(*child),Some(1|3|7|8|11)) {
+                return Err(("HierarchyRequestError","This inert Node cannot be inserted as a child.".into()));
+            }
+            if source.owner!=arena.node(parent).ok_or(("TypeError","Missing inert parent.".into()))?.owner {
+                return Err(("NotSupportedError","Cross-document inert adoption is not implemented.".into()));
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::scripting) fn mutate_inert_children(&mut self,parent:u32,method:&str,args:&[Value])->Result<Value,String> {
+        self.validate_inert_mutation(parent,method,args).map_err(|(_,message)|message)?;
+        let Value::Host(child)=args[0] else{unreachable!()};
+        if self.state.inert_documents.node(child).is_none(){return self.append_template_child(parent,args);}
+        let source=self.state.inert_documents.node(child).unwrap();
+        let old_parent=source.parent;
+        let fragment=matches!(source.kind,Kind::Fragment{..});
+        if method=="removeChild" {
+            let children=&self.state.inert_documents.node(parent).unwrap().children;
+            self.state.work(children.len())?;
+            let slot=self.state.inert_documents.node(parent).unwrap().children.iter().position(|&node|node==child).ok_or("Inert child link is unavailable.")?;
+            let moved=self.state.inert_documents.node(parent).unwrap().children.len()-slot-1;
+            self.state.copies(moved.checked_mul(size_of::<u32>()).ok_or("Inert removal copy overflow.")?)?;
+            self.state.inert_documents.node_mut(parent).unwrap().children.remove(slot);
+            self.state.inert_documents.node_mut(child).unwrap().parent=None;
+            self.state.dom_committed();return Ok(Value::Host(child));
+        }
+        let mut ancestor=Some(parent);
+        while let Some(handle)=ancestor {
+            self.state.work(1)?;
+            if handle==child{return Err("HierarchyRequestError: Inert insertion would create a cycle.".into());}
+            // A template content's host can still live in the main arena.
+            ancestor=self.state.inert_documents.node(handle).and_then(|node|
+                node.parent.or_else(||if let Kind::Fragment{template}=node.kind{template}else{None}));
+        }
+        let count=if fragment{self.state.inert_documents.node(child).unwrap().children.len()}else{1};
+        self.state.work(count)?;
+        if fragment {
+            let source=self.state.inert_documents.node(child).unwrap();
+            if old_parent.is_some() || source.children.iter().any(|handle|self.state.inert_documents.node(*handle).is_none_or(|node|node.parent!=Some(child)||node.owner!=source.owner)){
+                return Err("Inert fragment child ownership is inconsistent.".into());
+            }
+            if count==0{return Ok(Value::Host(child));}
+        }
+        let old_slot=if let Some(old)=old_parent {
+            let children=&self.state.inert_documents.node(old).ok_or("Inert source parent is unavailable.")?.children;
+            self.state.work(children.len())?;
+            Some(self.state.inert_documents.node(old).unwrap().children.iter().position(|&handle|handle==child).ok_or("Inert source child link is unavailable.")?)
+        }else{None};
+        let children=&self.state.inert_documents.node(parent).unwrap().children;
+        if old_parent==Some(parent) && old_slot==children.len().checked_sub(1){return Ok(Value::Host(child));}
+        let added=count.checked_sub(usize::from(old_parent==Some(parent))).ok_or("Inert child count overflow.")?;
+        let (replacement,bytes)=retained_storage::grow(children,added,self.state.retained_limit.saturating_sub(self.state.retained))?;
+        let moved=if replacement.is_some(){children.len()}else{0};
+        let removed=old_parent.map_or(0,|old|self.state.inert_documents.node(old).unwrap().children.len()-old_slot.unwrap()-1);
+        self.state.work(moved.saturating_add(removed).saturating_add(count))?;
+        let copies=moved.checked_add(removed).and_then(|n|n.checked_add(count)).and_then(|n|n.checked_mul(size_of::<u32>())).ok_or("Inert child move copy overflow.")?;
+        self.state.replace_storage(0,bytes,copies)?;
+        let arena=&mut self.state.inert_documents;
+        if let Some(mut next)=replacement{let children=&mut arena.node_mut(parent).unwrap().children;next.append(children);*children=next;}
+        if let Some(old)=old_parent{arena.node_mut(old).unwrap().children.remove(old_slot.unwrap());}
+        if fragment {
+            for index in 0..count {
+                let handle=arena.node(child).unwrap().children[index];
+                arena.node_mut(handle).unwrap().parent=Some(parent);
+                arena.node_mut(parent).unwrap().children.push(handle);
+            }
+            arena.node_mut(child).unwrap().children.clear();
+        }else{
+            arena.node_mut(child).unwrap().parent=Some(parent);
+            arena.node_mut(parent).unwrap().children.push(child);
+        }
+        self.state.dom_committed();Ok(Value::Host(child))
+    }
+}
