@@ -277,8 +277,12 @@ struct ListenerOptions {
     passive: bool,
 }
 
+#[path = "script_timer_queue.rs"]
+mod timer_queue;
+
 struct Timer {
     id: u32,
+    order: usize,
     due: Instant,
     callback: Value,
     arguments: Vec<Value>,
@@ -452,7 +456,7 @@ struct State {
     declined_images: usize,
     declined_beacons: usize,
     eval_allowed: bool,
-    timers: Vec<Timer>,
+    timers: timer_queue::Queue,
     animation_frames: VecDeque<AnimationFrame>,
     next_animation_frame: u32,
     animation_due: Option<Instant>,
@@ -466,6 +470,8 @@ struct State {
     media_play_fault:Option<String>,
     pending_keyboard: Option<KeyboardInput>,
     next_timer: u32,
+    timer_ids_reused: bool,
+    active_timer: Option<u32>,
     timer_bytes: usize,
     timer_callbacks: usize,
     timer_nesting: u32,
@@ -536,7 +542,7 @@ impl State {
             declined_images: 0,
             declined_beacons: 0,
             eval_allowed: false,
-            timers: Vec::new(),
+            timers: timer_queue::Queue::default(),
             animation_frames: VecDeque::new(),
             next_animation_frame: 0,
             animation_due: None,
@@ -550,6 +556,8 @@ impl State {
             media_play_fault:None,
             pending_keyboard: None,
             next_timer: 0,
+            timer_ids_reused: false,
+            active_timer: None,
             timer_bytes: 0,
             timer_callbacks: 0,
             timer_nesting: 0,
@@ -636,23 +644,60 @@ impl State {
         Ok(())
     }
 
+    fn prepare_timer_id(&mut self)->Result<(u32,bool),String> {
+        if !self.timer_ids_reused {
+            if let Some(id)=self.next_timer.checked_add(1).filter(|id|*id<=i32::MAX as u32) {
+                return Ok((id,false));
+            }
+        }
+        // After the native positive-ID range wraps, the pigeonhole bound gives
+        // a free ID among live-count + 1 candidates. This scratch bitmap avoids
+        // probing the entire ID domain or repeatedly scanning the timer heap.
+        let candidates=self.timers.len().checked_add(usize::from(self.active_timer.is_some()))
+            .and_then(|count|count.checked_add(1)).filter(|count|*count<=i32::MAX as usize)
+            .ok_or("Timer positive identifier space exhausted.")?;
+        let words=candidates.div_ceil(64);
+        let available=self.retained_limit.saturating_sub(self.retained);
+        if words*8>available{return Err("DOM retained timer identity scratch allowance exhausted.".into());}
+        self.work(self.timers.len().saturating_add(words.saturating_mul(2)).saturating_add(1))?;
+        let mut used=Vec::<u64>::new();
+        used.try_reserve_exact(words).map_err(|_|"Could not reserve timer identity scratch.")?;
+        let bytes=used.capacity()*8;
+        if bytes>available{return Err("DOM retained timer identity scratch allocation exceeds allowance.".into());}
+        self.retained+=bytes;
+        used.resize(words,0);
+        for id in self.timers.iter().map(|timer|timer.id).chain(self.active_timer) {
+            if id>0&&(id as usize)<=candidates {let bit=id as usize-1;used[bit/64]|=1u64<<(bit%64);}
+        }
+        let id=used.iter().enumerate().find_map(|(word,bits)| {
+            let bit=word*64+(!bits).trailing_zeros() as usize;
+            (bits!=&u64::MAX&&bit<candidates).then_some((bit+1) as u32)
+        });
+        drop(used);
+        self.retained-=bytes;
+        id.map(|id|(id,true)).ok_or_else(||"Timer positive identifier space exhausted.".into())
+    }
+
     fn set_timeout(&mut self, arguments: &[Value]) -> Result<Value, String> {
         let Some(callback @ Value::Function(_)) = arguments.first() else {
             return Err(
                 "setTimeout requires a function; string/eval timers are not supported.".into(),
             );
         };
-        if self.timers.len() >= self.limits.host.timers {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.timers.len() >= self.limits.host.timers {
             return Err("Timer limit reached (64 pending callbacks per document).".into());
         }
-        if self.timer_callbacks >= self.limits.host.timer_callbacks {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.timer_callbacks >= self.limits.host.timer_callbacks {
             return Err(
                 "Timer callback limit reached (4096 per document). Reload starts a new allowance."
                     .into(),
             );
         }
         let extra = arguments.get(2..).unwrap_or(&[]);
-        if extra.len() > self.limits.host.timer_arguments {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && extra.len() > self.limits.host.timer_arguments {
             return Err("Timer argument limit reached (30).".into());
         }
         let slots = extra.len().checked_mul(std::mem::size_of::<Value>())
@@ -660,8 +705,12 @@ impl State {
         let bytes = extra.iter().try_fold(slots, |total, value| total.checked_add(value.bytes()))
             .ok_or("Timer argument size overflow.")?;
         let retained = self.timer_bytes.checked_add(bytes).ok_or("Timer argument size overflow.")?;
-        if retained > self.limits.host.timer_bytes {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && retained > self.limits.host.timer_bytes {
             return Err("Timer argument memory limit reached (256 KiB per document).".into());
+        }
+        if bytes > self.retained_limit.saturating_sub(self.retained) {
+            return Err("DOM retained timer payload allowance exhausted.".into());
         }
         self.copies(bytes)?;
         let delay_value = arguments.get(1).unwrap_or(&Value::Undefined);
@@ -677,11 +726,7 @@ impl State {
         let due = Instant::now()
             .checked_add(Duration::from_millis(delay))
             .ok_or("Timer deadline overflow.")?;
-        let id = self
-            .next_timer
-            .checked_add(1)
-            .filter(|id| *id <= i32::MAX as u32)
-            .ok_or("Timer identifier limit reached.")?;
+        let (id,reused_id) = self.prepare_timer_id()?;
         let mut copied = Vec::new();
         copied.try_reserve_exact(extra.len()).map_err(|_| "Could not reserve timer argument slots.")?;
         for value in extra {
@@ -704,15 +749,39 @@ impl State {
             };
             copied.push(value);
         }
-        self.timers.try_reserve(1).map_err(|_| "Could not reserve a timer slot.")?;
+        let actual=copied.iter().try_fold(copied.capacity()*std::mem::size_of::<Value>(),|total,value| {
+            total.checked_add(match value {
+                Value::String(text)=>text.capacity(),
+                Value::StringUnits(units)=>units.capacity().saturating_mul(2),
+                _=>0,
+            })
+        }).ok_or("Timer payload storage overflow.")?;
+        let retained=retained.checked_add(actual-bytes).ok_or("Timer payload accounting overflow.")?;
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && retained>self.limits.host.timer_bytes {
+            return Err("Timer argument memory limit reached (256 KiB per document).".into());
+        }
+        let available=self.retained_limit.saturating_sub(self.retained).checked_sub(actual)
+            .ok_or("DOM retained timer payload allowance exhausted.")?;
+        let (growth,added)=self.timers.prepare_growth(available)?;
+        self.work(self.timers.maintenance_work().saturating_add(self.timers.order_work()))?;
+        if self.timers.order_work()>0 {self.copies(self.timers.len()*std::mem::size_of::<usize>())?;}
+        if growth.is_some(){self.copies(self.timers.len()*std::mem::size_of::<Timer>())?;}
+        self.copies(actual.saturating_sub(bytes))?;
+        let order=self.timers.prepare_order(available-added)?;
+        self.timers.commit_order(order);
+        self.timers.commit_growth(growth);
         self.next_timer = id;
+        self.timer_ids_reused = reused_id;
         self.timer_bytes = retained;
-        self.timers.push(Timer {
+        self.retained += added+actual;
+        self.timers.push_reserved(Timer {
             id,
+            order: 0,
             due,
             callback: callback.clone(),
             arguments: copied,
-            bytes,
+            bytes: actual,
             nesting: self.timer_nesting.saturating_add(1),
         });
         Ok(Value::Number(f64::from(id)))
@@ -724,6 +793,7 @@ impl State {
             self.copies(text.len().saturating_mul(3))?;
         }
         let id = timer_integer(id_value)?;
+        self.work(self.timers.len().saturating_add(self.timers.maintenance_work()))?;
         if let Some(index) = self
             .timers
             .iter()
@@ -731,8 +801,15 @@ impl State {
         {
             let timer = self.timers.remove(index);
             self.timer_bytes -= timer.bytes;
+            self.retained -= timer.bytes;
         }
         Ok(Value::Undefined)
+    }
+
+    fn clear_timers(&mut self) {
+        self.retained -= self.timer_bytes+self.timers.storage_bytes();
+        self.timer_bytes=0;
+        self.timers=timer_queue::Queue::default();
     }
 
     fn clock_ms(&self, now: Instant) -> f64 {
@@ -1091,8 +1168,8 @@ impl Page {
         }
         self.state
             .timers
-            .iter()
-            .map(|timer| timer.due)
+            .deadline()
+            .into_iter()
             .chain(self.state.animation_due)
             .chain(self.state.message_channels.next_deadline())
             .min()
@@ -1113,7 +1190,7 @@ impl Page {
         if !self.state.enabled || !doc.scripting_enabled {
             return None;
         }
-        let timer_due = self.state.timers.iter().map(|timer| timer.due).min();
+        let timer_due = self.state.timers.deadline();
         if self.state.message_channels.next_deadline().is_some_and(|due|
             due <= now && timer_due.is_none_or(|timer| due <= timer)
                 && self.state.animation_due.is_none_or(|frame| due <= frame))
@@ -1127,16 +1204,10 @@ impl Page {
         {
             return Some(self.poll_animation_frames(doc, forms, now));
         }
-        let (index, _) = self
-            .state
-            .timers
-            .iter()
-            .enumerate()
-            .filter(|(_, timer)| timer.due <= now)
-            .min_by_key(|(_, timer)| (timer.due, timer.id))?;
-        if self.state.timer_callbacks >= self.state.limits.host.timer_callbacks {
-            self.state.timers.clear();
-            self.state.timer_bytes = 0;
+        if !timer_due.is_some_and(|due|due<=now){return None;}
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas && self.state.timer_callbacks >= self.state.limits.host.timer_callbacks {
+            self.state.clear_timers();
             self.state.error(
                 "setTimeout",
                 "Timer callback limit reached (4096 per document). Reload starts a new allowance.",
@@ -1146,11 +1217,18 @@ impl Page {
                 ..Outcome::default()
             });
         }
-        let timer = self.state.timers.remove(index);
-        self.state.timer_bytes -= timer.bytes;
         self.begin_job();
+        if let Err(error)=self.state.work(self.state.timers.maintenance_work()) {
+            self.state.clear_timers();
+            self.runtime.cancel_microtasks();
+            self.cancel_media_selection();
+            self.state.error("setTimeout",&error);
+            return Some(Outcome {errors:1,..Outcome::default()});
+        }
+        let timer = self.state.timers.remove(0);
+        self.state.active_timer = Some(timer.id);
         self.state.timer_nesting = timer.nesting;
-        self.state.timer_callbacks += 1;
+        self.state.timer_callbacks = self.state.timer_callbacks.saturating_add(1);
         let before = self.state.errors;
         if let Err(error) = self.runtime.invoke(
             timer.callback,
@@ -1165,6 +1243,10 @@ impl Page {
             self.state
                 .error(&format!("setTimeout callback {}", timer.id), &error);
         }
+        drop(timer.arguments);
+        self.state.active_timer = None;
+        self.state.retained -= timer.bytes;
+        self.state.timer_bytes -= timer.bytes;
         self.state.timer_nesting = 0;
         self.microtask_checkpoint(doc, forms);
         Some(Outcome {
@@ -1178,10 +1260,9 @@ impl Page {
         self.runtime.cancel_microtasks();
         self.cancel_media_selection();
         self.clear_message_tasks();
-        self.state.timers.clear();
+        self.state.clear_timers();
         self.state.animation_frames.clear();
         self.state.animation_due = None;
-        self.state.timer_bytes = 0;
         self.state.error("setTimeout", reason);
     }
 
