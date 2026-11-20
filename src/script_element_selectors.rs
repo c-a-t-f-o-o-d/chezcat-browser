@@ -9,9 +9,13 @@ pub(super) fn operation(method: &str) -> Option<&'static str> {
     match method {
         "\0Element.querySelector" => Some("querySelector"),
         "\0Element.querySelectorAll" => Some("querySelectorAll"),
+        "\0Element.matches" => Some("matches"),
+        "\0Element.closest" => Some("closest"),
         _ => None,
     }
 }
+
+pub(super) fn member(property:&str)->bool{matches!(property,"querySelector"|"querySelectorAll"|"matches"|"closest")}
 
 impl Bridge<'_> {
     pub(super) fn element_selector_receiver(&self, object: u32) -> bool {
@@ -21,15 +25,19 @@ impl Bridge<'_> {
     }
 
     pub(super) fn element_selector_member(&self, object: u32, property: &str) -> bool {
-        matches!(property, "querySelector" | "querySelectorAll")
-            && self.element_selector_receiver(object)
+        member(property)
+            && self.canonical_selector_receiver(object)
             && !self.form_named_control(object, property)
+    }
+
+    pub(super) fn canonical_selector_receiver(&self,object:u32)->bool{
+        self.element_selector_receiver(object)||self.inert_node_type(object)==Some(1)
     }
 
     pub(super) fn validate_element_selector_receiver(&self, object: u32)
         -> Result<(), (&'static str, String)>
     {
-        if !self.element_selector_receiver(object) {
+        if !self.canonical_selector_receiver(object) {
             return Err(("TypeError", "Element selector operation requires a genuine accessible Element.".into()));
         }
         // Existing child contexts expose an immutable initial blank tree but
@@ -38,6 +46,7 @@ impl Bridge<'_> {
         if self.is_frame_handle(object) {
             return Err(("NotSupportedError", "Blank child Element queries are not implemented.".into()));
         }
+        if self.inert_node_type(object)==Some(1){return Err(("NotSupportedError","Inert Element selector operations are not implemented.".into()));}
         Ok(())
     }
 }

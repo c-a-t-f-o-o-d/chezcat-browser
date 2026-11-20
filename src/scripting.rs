@@ -3392,8 +3392,8 @@ impl Host for Bridge<'_> {
             };
         }
         if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>&[(0,true)],"setProperty"=>&[(0,true),(1,true),(2,true)],_=>&[]};}
-        if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {
-            return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
+        if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {
+            return if self.is_frame_handle(object)||self.inert_node_type(object).is_some() {&[]} else {&[(0,true)]};
         }
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) {return &[(0,true)];}
@@ -3633,7 +3633,7 @@ impl Host for Bridge<'_> {
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
         }
-        if script_element_selectors::operation(method).is_some() && self.element_selector_receiver(object) {return 1;}
+        if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {return 1;}
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
@@ -4038,7 +4038,7 @@ impl Host for Bridge<'_> {
         // Named form controls use the native field path; other genuine
         // Elements use the canonical prototype. Neither may fall through to
         // the old per-instance selector method factory below.
-        if matches!(property,"querySelector"|"querySelectorAll") && self.element_selector_receiver(object) {return None;}
+        if script_element_selectors::member(property) && self.canonical_selector_receiver(object) {return None;}
         if object==DOCUMENT && property=="createDocumentFragment" {return Some("createDocumentFragment");}
         if self.node_tree_method_member(object,property) {return None;}
         if self.media_element_receiver(object) {match property {"load"=>return Some("load"),"pause"=>return Some("pause"),"play"=>return Some("play"),_=>{}}}
@@ -4155,7 +4155,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return self.collection_receiver(receiver);}
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return self.named_map_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
-        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.element_selector_receiver(receiver);}
+        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.canonical_selector_receiver(receiver);}
         if self.event_target_interface(object) {
             if let Some(interface) = Slottable::getter(method) {return self.slottable(receiver) == Some(interface);}
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}

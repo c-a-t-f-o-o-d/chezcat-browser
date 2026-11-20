@@ -354,6 +354,8 @@ impl Runtime {
                     for (key, operation) in [
                         ("querySelector", "\0Element.querySelector"),
                         ("querySelectorAll", "\0Element.querySelectorAll"),
+                        ("matches", "\0Element.matches"),
+                        ("closest", "\0Element.closest"),
                         ("getAttribute", "getAttribute"),
                         ("setAttribute", "setAttribute"),
                         ("getAttributeNode", "getAttributeNode"),
