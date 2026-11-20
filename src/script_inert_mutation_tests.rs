@@ -6,13 +6,57 @@ fn page()->(Document,Forms,Page){
 }
 fn execute(doc:&mut Document,forms:&mut Forms,page:&mut Page,script:&str){assert_eq!(page.console_eval(doc,forms,script).errors,0,"{}",page.report());}
 #[test]
-fn inert_owner_fragment_insert_before_refusal_identifies_actual_operation_and_receiver(){
+fn inert_node_insert_before_refusal_identifies_actual_operation_and_receiver(){
     let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
-var owner=document.getElementById('seed').content.ownerDocument,f=owner.createDocumentFragment(),effects=0,caught=false;
-try{Node.prototype.insertBefore.call(f,owner.createDocumentFragment(),null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('Operation "insertBefore"')>=0&&error.message.indexOf('DocumentFragment (native handle 0x86')>=0;}
-if(!caught||f.childNodes.length!==0)throw 'actual inert fragment refusal diagnostic';
+var owner=document.getElementById('seed').content.ownerDocument,f=owner.createTextNode('leaf'),effects=0,caught=false;
+try{Node.prototype.insertBefore.call(f,owner.createDocumentFragment(),null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('Operation "insertBefore"')>=0&&error.message.indexOf('Text (native handle 0x86')>=0;}
+if(!caught||f.childNodes.length!==0||f.data!=='leaf')throw 'actual inert leaf refusal diagnostic';
 caught=false;try{Node.prototype.insertBefore.call({toString:function(){effects++;throw 'coerced';}},f,null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('actual receiver: object.')>=0;}if(!caught||effects!==0)throw 'diagnostic must not coerce receiver';
 "#);
+}
+#[test]
+fn inert_owner_fragment_insert_before_splices_mixed_nodes_and_reorders_same_parent(){
+    let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
+var content=document.getElementById('seed').content,owner=content.ownerDocument,source=content.firstChild,f=owner.createDocumentFragment(),donor=owner.createDocumentFragment(),ref=owner.createElement('em'),text=source.childNodes[0],marker=source.childNodes[1];
+f.appendChild(ref);donor.appendChild(text);donor.appendChild(marker);var list=f.childNodes,donorList=donor.childNodes,view=f.children;
+if(Node.prototype.insertBefore.call(f,donor,ref)!==donor||donorList.length!==0||donor.parentNode!==null||list.length!==3||list[0]!==text||list[1]!==marker||list[2]!==ref||text.parentNode!==f||marker.parentNode!==f||view.length!==1||view[0]!==ref)throw 'real fragment insertion before reference';
+f.insertBefore(ref,text);if(list[0]!==ref||list[1]!==text||list[2]!==marker)throw 'same parent backward move';
+f.insertBefore(ref,marker);if(list[0]!==text||list[1]!==ref||list[2]!==marker)throw 'same parent forward reference adjustment';
+f.insertBefore(text,null);if(list[0]!==ref||list[1]!==marker||list[2]!==text)throw 'null append reference';
+f.insertBefore(marker,marker);f.insertBefore(donor,ref);if(list[1]!==marker||list.length!==3||f.childNodes!==list||f.children!==view||source.childNodes.length!==1||marker.data!=='marker'||marker.ownerDocument!==owner)throw 'same-node and empty-donor noops';
+var pending=owner.createElement('p'),caught=false;try{f.insertBefore(pending,source);}catch(error){caught=error.name==='NotFoundError';}if(!caught||pending.parentNode!==null||list.length!==3||source.parentNode!==content)throw 'reference not child atomic';
+caught=false;try{f.insertBefore(pending);}catch(error){caught=error instanceof TypeError;}if(!caught||pending.parentNode!==null)throw 'required nullable reference argument';
+caught=false;try{f.insertBefore(pending,window);}catch(error){caught=error instanceof TypeError;}if(!caught||pending.parentNode!==null)throw 'native reference brand';
+"#);
+}
+#[test]
+fn inert_owner_fragment_insert_before_growth_and_tail_copy_refusal_keep_both_trees(){
+    let(mut doc,mut forms,mut page)=page();let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let Value::Host(owner)=bridge.create_inert_document(&[]).unwrap()else{panic!("owner")};
+    let Value::Host(parent)=bridge.inert_create_node(owner,"createDocumentFragment",&[]).unwrap()else{panic!("parent")};
+    let Value::Host(donor)=bridge.inert_create_node(owner,"createDocumentFragment",&[]).unwrap()else{panic!("donor")};
+    let Value::Host(reference)=bridge.inert_create_node(owner,"createElement",&[Value::String("b".into())]).unwrap()else{panic!("reference")};
+    let Value::Host(child)=bridge.inert_create_node(owner,"createTextNode",&[Value::String("kept".into())]).unwrap()else{panic!("child")};
+    bridge.mutate_inert_children(parent,"appendChild",&[Value::Host(reference)]).unwrap();bridge.mutate_inert_children(donor,"appendChild",&[Value::Host(child)]).unwrap();
+    // Fill actual paid spare backing before requiring new child-link growth.
+    while {let children=&bridge.state.inert_documents.node(parent).unwrap().children;children.len()<children.capacity()} {
+        let Value::Host(filler)=bridge.inert_create_node(owner,"createTextNode",&[Value::String("spare".into())]).unwrap()else{panic!("filler")};
+        bridge.mutate_inert_children(parent,"appendChild",&[Value::Host(filler)]).unwrap();
+    }
+    let original=bridge.state.inert_documents.node(parent).unwrap().children.clone();
+    let retained=bridge.state.retained;let limit=bridge.state.retained_limit;let generation=bridge.state.dom_commits;let copy_work=bridge.state.copy_work;
+    let args=[Value::Host(donor),Value::Host(reference)];
+    for storage in [true,false]{
+        if storage{bridge.state.retained_limit=retained;}else{bridge.state.copy_work=0;}
+        assert!(bridge.mutate_inert_children(parent,"insertBefore",&args).is_err());
+        assert_eq!(bridge.state.retained,retained);assert_eq!(bridge.state.dom_commits,generation);
+        assert_eq!(bridge.state.inert_documents.node(parent).unwrap().children,original);assert_eq!(bridge.state.inert_documents.node(donor).unwrap().children,[child]);
+        assert_eq!(bridge.state.inert_documents.node(child).unwrap().parent,Some(donor));assert_eq!(bridge.state.inert_documents.node(reference).unwrap().parent,Some(parent));
+        bridge.state.retained_limit=limit;bridge.state.copy_work=copy_work;
+    }
+    bridge.mutate_inert_children(parent,"insertBefore",&args).unwrap();
+    let mut expected=vec![child];expected.extend(original);
+    assert_eq!(bridge.state.inert_documents.node(parent).unwrap().children,expected);assert!(bridge.state.inert_documents.node(donor).unwrap().children.is_empty());assert_eq!(bridge.state.inert_documents.node(child).unwrap().parent,Some(parent));
 }
 #[test]
 fn inert_owner_fragment_moves_real_mixed_children_live_views_and_imports(){

@@ -260,9 +260,9 @@ preserved old data within the normal budgets.
 The tokenizer retains real parsed Comments in loaded, inert and checked fragment
 paths. Template content has a real inert DocumentFragment with stable childNodes
 and owner-document identity. Inert-owner fragment factories and same-owner
-Element/fragment appendChild/removeChild preserve actual mixed-node topology,
+Element/fragment appendChild/insertBefore/removeChild preserve actual mixed-node topology,
 saved aliases and donor emptying under atomic storage/copy/work admission.
-Cross-document inert adoption, insertBefore/replaceChild and inert observation
+Cross-document inert adoption, replaceChild and inert observation
 remain outside that mutation slice; ancestry/resource refusals retain the existing
 escaped host-error path. Hidden child Documents keep their existing collection
 boundaries; ordinary list reads do not activate inert queries/resources.

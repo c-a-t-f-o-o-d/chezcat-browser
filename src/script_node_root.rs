@@ -21,7 +21,7 @@ impl Bridge<'_> {
             // rechecks the incumbent before accessing either document.
             "contains" => self.root_node_receiver(object) || self.frame_contains_node(object).is_some(),
             "appendChild" if self.template_fragment_receiver(object) => true,
-            "appendChild" | "removeChild" if self.inert_mutation_receiver(object) => true,
+            "appendChild" | "insertBefore" | "removeChild" if self.inert_mutation_receiver(object) => true,
             _ if dom_tree::node_mutation_method(name) => self.node_mutation_receiver(object),
             _ => return false,
         };
