@@ -101,12 +101,12 @@ fn environment_lifetime_fatal_exit_releases_bindings_without_refunding_work() {
     let mut runtime = Runtime::for_test();
     runtime.execute("var caught=false,finished=false;", &mut NoHost).unwrap();
     let bindings = runtime.bindings;
-    let bytes = runtime.value_bytes;
+    let bytes = runtime.value_bytes - runtime.retained_arena_bytes();
     runtime.begin_job();
     let error = runtime.execute("try{while(true){let local='temporary';}}catch(e){caught=true;}finally{finished=true;}", &mut NoHost).unwrap_err();
     assert!(error.contains("limit"), "{error}");
     assert!(!error.contains("Environment limit"), "transient environments still accumulated: {error}");
-    assert_eq!((runtime.bindings, runtime.value_bytes), (bindings, bytes));
+    assert_eq!((runtime.bindings, runtime.value_bytes - runtime.retained_arena_bytes()), (bindings, bytes));
     assert!(runtime.job_usage().0 != 0 || runtime.job_usage().1 != 0);
     assert_accounting(&runtime);
     runtime.begin_job();

@@ -12,23 +12,23 @@ impl Host for NoHost {
 #[test]
 fn conditional_storage_exceeds_old_count_and_refunds_reentrant_failure() {
     let mut runtime = Runtime::new();
-    let before = runtime.value_bytes;
+    let before = runtime.value_bytes - runtime.retained_arena_bytes();
     let source = format!("{}42;", "if(false);else ".repeat(6000));
     assert_eq!(runtime.execute(&source, &mut NoHost).unwrap().to_number(), 42.0);
-    assert_eq!(runtime.value_bytes, before);
+    assert_eq!(runtime.value_bytes - runtime.retained_arena_bytes(), before);
     let branch = "if(false);else ".repeat(2000);
     runtime.execute(&format!("function inner(){{{branch}return 7;}}function outer(){{{branch}return inner();}}"), &mut NoHost).unwrap();
-    let before = runtime.value_bytes;
+    let before = runtime.value_bytes - runtime.retained_arena_bytes();
     let limit = runtime.limits.heap.retained_values;
-    runtime.limits.heap.retained_values = before + 24_000;
+    runtime.limits.heap.retained_values = runtime.value_bytes + 24_000;
     let error = runtime.execute("outer();", &mut NoHost).unwrap_err();
     assert!(error.contains("Retained value"), "{error}");
-    assert_eq!(runtime.value_bytes, before);
+    assert_eq!(runtime.value_bytes - runtime.retained_arena_bytes(), before);
     assert!(runtime.transient_registration_is_empty());
     runtime.limits.heap.retained_values = limit;
     runtime.begin_job();
     assert_eq!(runtime.execute("outer();", &mut NoHost).unwrap().to_number(), 7.0);
-    assert_eq!(runtime.value_bytes, before);
+    assert_eq!(runtime.value_bytes - runtime.retained_arena_bytes(), before);
 }
 
 #[test]

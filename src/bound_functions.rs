@@ -37,7 +37,7 @@ impl Runtime {
         if !self.function_is_occupied(target) {
             return Err(Fault::new("Invalid function handle."));
         }
-        if self.function_arena.occupied >= self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             return Err(self.function_limit_fault("bound"));
         }
         let receiver = args.first().unwrap_or(&Value::Undefined);
@@ -91,9 +91,10 @@ impl Runtime {
             self.append_string(&mut bound_name, &name)?;
         }
         // User callbacks above may allocate functions or retain values.
-        if self.function_arena.occupied >= self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             return Err(self.function_limit_fault("bound"));
         }
+        self.prepare_function_slot_storage()?;
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
