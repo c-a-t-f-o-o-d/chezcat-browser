@@ -91,6 +91,9 @@ mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
 #[cfg(test)]
+#[path = "script_id_index_tests.rs"]
+mod script_id_index_tests;
+#[cfg(test)]
 #[path = "script_node_handle_tests.rs"]
 mod script_node_handle_tests;
 #[cfg(test)]
@@ -352,7 +355,7 @@ struct Tree {
     parents: Vec<Option<usize>>,
     sibling_slots: Vec<usize>,
     order: Vec<usize>,
-    ids: HashMap<String, usize>,
+    ids: Vec<(usize, usize)>,
     body: Option<usize>,
     head: Option<usize>,
     document_element: Option<usize>,
@@ -5836,12 +5839,7 @@ impl Host for Bridge<'_> {
             }
             let id = self.text(&args[0])?;
             self.state.rebuild(self.doc)?;
-            return Ok(self
-                .state
-                .tree
-                .ids
-                .get(&id)
-                .copied()
+            return Ok(self.state.document_id(self.doc, &id)?
                 .map_or(Value::Null, |node| Value::Host(node_handle(node))));
         }
         if object >= STYLE_BASE {

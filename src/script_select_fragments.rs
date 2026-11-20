@@ -188,7 +188,7 @@ impl Bridge<'_> {
                 ancestor = parents[index];
             }
             let owner = if let Some(id) = view.attr(node, "form") {
-                if connected { self.state.tree.ids.get(id).copied().filter(|&owner| tag(self.doc, owner) == "form") } else { None }
+                if connected { self.state.document_id(self.doc, id)?.filter(|&owner| tag(self.doc, owner) == "form") } else { None }
             } else { nearest_form };
             plan.metadata.push((node, owner, disabled, root));
         }

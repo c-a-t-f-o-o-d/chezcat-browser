@@ -89,6 +89,91 @@ fn boolean_script_attribute(name: &str) -> bool {
 }
 
 impl State {
+    fn id_storage_available(&self) -> Result<usize, String> {
+        let old=self.tree.ids.capacity().checked_mul(size_of::<(usize,usize)>())
+            .ok_or("DOM ID index backing overflow.")?;
+        self.retained_limit.checked_add(old).and_then(|limit|limit.checked_sub(self.retained))
+            .ok_or("DOM retained ID index replacement allowance exhausted.".into())
+    }
+
+    fn push_document_id(&mut self, ids: &mut Vec<(usize, usize)>, node: usize, order: usize) -> Result<(), String> {
+        let old = ids.capacity().checked_mul(size_of::<(usize, usize)>()).ok_or("DOM ID index backing overflow.")?;
+        let available = self.id_storage_available()?.checked_sub(old).ok_or("DOM retained ID index allowance exhausted.")?;
+        let (growth, _) = retained_storage::grow(ids, 1, available)?;
+        self.work(1)?;
+        let records = 1usize.checked_add(if growth.is_some(){ids.len()}else{0}).ok_or("DOM ID index movement overflow.")?;
+        self.copies(records.checked_mul(size_of::<(usize, usize)>()).ok_or("DOM ID index copy overflow.")?)?;
+        if let Some(mut next) = growth {next.append(ids);*ids=next;}
+        ids.push((node,order));
+        Ok(())
+    }
+
+    fn index_id_text<'a>(&mut self, doc: &'a Document, node: usize) -> Result<Option<&'a str>,String> {
+        let fields=match &doc.nodes.get(node).ok_or("DOM ID index owner disappeared.")?.kind {
+            NodeKind::Element{attrs,..}=>attrs.len(), _=>0,
+        };
+        self.work(fields.saturating_add(1))?;
+        Ok(doc.attr(node,"id"))
+    }
+
+    fn compare_document_ids(&mut self, doc: &Document, a: (usize,usize), b: (usize,usize)) -> Result<std::cmp::Ordering,String> {
+        let left=self.index_id_text(doc,a.0)?.ok_or("DOM ID index owner lost its ID.")?;
+        let right=self.index_id_text(doc,b.0)?.ok_or("DOM ID index owner lost its ID.")?;
+        self.work(left.len().min(right.len()).saturating_add(1))?;
+        Ok(left.cmp(right).then(a.1.cmp(&b.1)))
+    }
+
+    fn sift_document_ids(&mut self, doc: &Document, ids: &mut [(usize,usize)], mut root: usize) -> Result<(),String> {
+        while let Some(left)=root.checked_mul(2).and_then(|value|value.checked_add(1)).filter(|&child|child<ids.len()) {
+            let mut child=left;
+            if left+1<ids.len() && self.compare_document_ids(doc,ids[left],ids[left+1])?.is_lt() {child+=1;}
+            if !self.compare_document_ids(doc,ids[root],ids[child])?.is_lt() {break;}
+            self.copies(3*size_of::<(usize,usize)>())?;
+            ids.swap(root,child);root=child;
+        }
+        Ok(())
+    }
+
+    fn sort_document_ids(&mut self, doc: &Document, ids: &mut Vec<(usize,usize)>) -> Result<(),String> {
+        // Fallible in-place heap sort: every comparison and move is admitted,
+        // and failure only changes this unpublished replacement index.
+        for root in (0..ids.len()/2).rev() {self.sift_document_ids(doc,ids,root)?;}
+        for end in (1..ids.len()).rev() {
+            self.copies(3*size_of::<(usize,usize)>())?;
+            ids.swap(0,end);self.sift_document_ids(doc,&mut ids[..end],0)?;
+        }
+        let mut kept=0;
+        for read in 0..ids.len() {
+            self.work(1)?;
+            if kept!=0 {
+                let a=self.index_id_text(doc,ids[kept-1].0)?.ok_or("DOM ID index owner lost its ID.")?;
+                let b=self.index_id_text(doc,ids[read].0)?.ok_or("DOM ID index owner lost its ID.")?;
+                self.work(a.len().min(b.len()).saturating_add(1))?;
+                if a==b {continue;}
+            }
+            if kept!=read {self.copies(size_of::<(usize,usize)>())?;ids[kept]=ids[read];}
+            kept+=1;
+        }
+        ids.truncate(kept);
+        Ok(())
+    }
+
+    pub(super) fn document_id(&mut self, doc: &Document, id: &str) -> Result<Option<usize>,String> {
+        let(mut low,mut high)=(0,self.tree.ids.len());
+        while low<high {
+            let middle=low+(high-low)/2;
+            let node=self.tree.ids[middle].0;
+            let candidate=self.index_id_text(doc,node)?.ok_or("DOM ID index owner lost its ID.")?;
+            self.work(candidate.len().min(id.len()).saturating_add(1))?;
+            match candidate.cmp(id) {
+                std::cmp::Ordering::Less=>low=middle+1,
+                std::cmp::Ordering::Greater=>high=middle,
+                std::cmp::Ordering::Equal=>return Ok(Some(node)),
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn rebuild_dom_tree(&mut self, doc: &Document) -> Result<(), String> {
         if !self.dirty {
             return Ok(());
@@ -138,12 +223,9 @@ impl State {
                 {
                     tree.document_element = Some(node);
                 }
-                if let Some(id) = doc
-                    .attr(node, "id")
-                    .filter(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes)
-                {
-                    self.copies(id.len())?;
-                    tree.ids.entry(id.to_owned()).or_insert(node);
+                if self.index_id_text(doc,node)?.is_some_and(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes) {
+                    // The index reads document-owned text; it retains no ID copy.
+                    self.push_document_id(&mut tree.ids, node, tree.order.len() - 1)?;
                 }
             }
             stack.extend(
@@ -172,6 +254,11 @@ impl State {
                 }
             }
         }
+        self.sort_document_ids(doc, &mut tree.ids)?;
+        let old_ids = self.tree.ids.capacity() * size_of::<(usize, usize)>();
+        let new_ids = tree.ids.capacity() * size_of::<(usize, usize)>();
+        self.retained = self.retained.checked_sub(old_ids).and_then(|bytes|bytes.checked_add(new_ids))
+            .ok_or("DOM ID index retained accounting overflow.")?;
         self.tree = tree;
         self.dom.connected = connected;
         self.dirty = false;
