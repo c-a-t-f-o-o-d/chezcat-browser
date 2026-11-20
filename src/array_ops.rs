@@ -63,6 +63,10 @@ impl Runtime {
         if self.active_array_joins.contains(&id) {
             return Ok(String::new());
         }
+        #[cfg(test)]
+        if self.limits.test_call_depth.is_some_and(|limit| self.active_array_joins.len() >= limit) {
+            return Err(Fault::new("Array string conversion nesting limit reached in explicit regression profile."));
+        }
         self.check_native_call_stack("Array string conversion nesting")?;
         self.active_array_joins.try_reserve(1)
             .map_err(|_| Fault::new("Unable to reserve an active Array join identity."))?;
@@ -167,8 +171,8 @@ impl Runtime {
         // OrdinaryToPrimitive's string-hint order, retaining the captured
         // callable and reading valueOf only if toString did not yield a
         // primitive. The genuine native Array toString/join pair recurses
-        // directly, preserving the original 32-array nesting allowance rather
-        // than spending several script-call frames for each plain nested array.
+        // directly, checking the actual stack at each array without spending
+        // several script-call frames for each plain nested array.
         for name in ["toString", "valueOf"] {
             let method = self.get_property_with_host(id, name, host)?;
             let Value::Function(function) = method else {
@@ -1200,6 +1204,15 @@ broken[0]=1;if(broken.join('|')!=='1|second'||later!==1)throw 'cycle guard clean
 "#, &mut NoHost).unwrap().to_text(), "ok");
         assert!(runtime.active_array_joins.is_empty());
         assert_eq!(runtime.call_depth, 0);
+    }
+
+    #[test]
+    fn browser_array_join_exceeds_regression_nesting_with_real_conversion() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let mut runtime = Runtime::new();
+            assert_eq!(runtime.execute("var a=['leaf'];for(var i=0;i<48;i++)a=[a];a.join();", &mut NoHost).unwrap().to_text(), "leaf");
+            assert!(runtime.active_array_joins.is_empty());
+        }).unwrap().join().unwrap();
     }
 
     #[test]

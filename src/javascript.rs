@@ -2373,11 +2373,9 @@ impl Parser {
         self.depth += 1;
         #[cfg(test)]
         if let Some(limit) = self.capacity.test_native_parser_depth {
-            return if self.depth > limit {
-                Err(self.unsupported(format!("Parser nesting limit reached ({limit}).")))
-            } else {
-                Ok(())
-            };
+            if self.depth > limit {
+                return Err(self.unsupported(format!("Parser nesting limit reached ({limit}).")));
+            }
         }
         #[cfg(windows)]
         {

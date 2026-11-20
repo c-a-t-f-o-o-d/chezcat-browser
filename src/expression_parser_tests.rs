@@ -211,7 +211,7 @@ fn continuation_recursive_boundaries_remain_native_and_atomic() {
             );
             let (mut runtime, mut host) = runtime();
             let error = runtime.execute(&source, &mut host).unwrap_err();
-            assert!(error.contains("Parser nesting limit"), "{error}");
+            assert!(error.contains("Parser nesting limit") || error.contains("Native stack headroom exhausted during parser entry"), "{error}");
             assert!(host.records.is_empty());
             assert!(runtime.programs.is_empty());
         }

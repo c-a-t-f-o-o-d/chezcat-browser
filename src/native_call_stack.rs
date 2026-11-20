@@ -6,11 +6,9 @@ impl Runtime {
     pub(super) fn check_native_evaluation_stack(&self) -> Result<(), Fault> {
         #[cfg(test)]
         if let Some(limit) = self.limits.test_native_evaluation_depth {
-            return if self.eval_depth >= limit {
-                Err(Fault::new(format!("Evaluation nesting limit reached ({limit}).")))
-            } else {
-                Ok(())
-            };
+            if self.eval_depth >= limit {
+                return Err(Fault::new(format!("Evaluation nesting limit reached ({limit}).")));
+            }
         }
 
         #[cfg(windows)]
@@ -29,11 +27,9 @@ impl Runtime {
     pub(super) fn check_native_call_stack(&self, operation: &'static str) -> Result<(), Fault> {
         #[cfg(test)]
         if let Some(limit) = self.limits.test_call_depth {
-            return if self.call_depth >= limit {
-                Err(Fault::new(format!("{operation} limit reached ({limit}).")))
-            } else {
-                Ok(())
-            };
+            if self.call_depth >= limit {
+                return Err(Fault::new(format!("{operation} limit reached ({limit}).")));
+            }
         }
 
         #[cfg(windows)]
@@ -56,7 +52,7 @@ pub(super) fn check_windows_stack(operation: &'static str) -> Result<(), Fault> 
         Fault::new("Native Windows stack bounds are unavailable for this execution thread."))?;
     if available < headroom {
         return Err(Fault::new(format!(
-            "Native stack headroom exhausted during {operation}: {available} bytes available; {headroom} bytes reserved for guarded evaluator work and unwind."
+            "Native stack headroom exhausted during {operation}: {available} bytes available; {headroom} bytes reserved for guarded evaluator work and unwind (native stack limit)."
         )));
     }
     Ok(())
@@ -105,6 +101,19 @@ mod tests {
         };
         std::hint::black_box(&frame);
         result
+    }
+
+    #[test]
+    fn explicit_regression_depth_also_checks_the_real_stack_floor() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let runtime = Runtime::for_test();
+            // This fixture consumes stack without increasing script depth.
+            let (entered, fault) = toward_floor(&runtime, 0);
+            assert!(entered > 8);
+            assert_eq!(runtime.call_depth, 0);
+            assert!(fault.message.contains("Native stack headroom exhausted"), "{}", fault.message);
+            assert!(runtime.check_native_call_stack("after unwind").is_ok());
+        }).unwrap().join().unwrap();
     }
 
     #[test]
