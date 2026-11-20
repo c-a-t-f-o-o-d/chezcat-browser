@@ -28,6 +28,38 @@ struct Shared {
     active: Option<Arc<AtomicBool>>,
     stopping: bool,
     wake: loader::Wake,
+    completed_payload: usize,
+}
+
+// Every admitted future completion reserves room for a storage-fault message.
+const COMPLETION_ERROR_BYTES: usize = 64;
+fn worker_storage(state: &Shared) -> usize {
+    state.queue.capacity().saturating_mul(std::mem::size_of::<Job>())
+        .saturating_add(state.completed.capacity().saturating_mul(std::mem::size_of::<Completion>() + COMPLETION_ERROR_BYTES))
+        .saturating_add(state.completed_payload)
+}
+fn completion_payload(completion: &Completion) -> usize {
+    let result = match &completion.result {
+        Ok((source, base)) => source.capacity().saturating_add(base.payload_bytes()),
+        Err(error) => error.capacity(),
+    };
+    completion.events.iter().fold(result.saturating_add(completion.events.capacity() * std::mem::size_of::<String>()),
+        |bytes, event| bytes.saturating_add(event.capacity())).saturating_sub(COMPLETION_ERROR_BYTES)
+}
+fn reserve_worker_queue<T>(queue: &mut VecDeque<T>, needed: usize, slot: usize, available: usize) -> Result<(), String> {
+    let before = queue.capacity();
+    if needed <= before { return Ok(()); }
+    let growth = before.max(4).max(needed - before).min(available / slot);
+    let capacity = before.checked_add(growth).filter(|capacity| *capacity >= needed)
+        .ok_or("Dynamic stylesheet worker storage exhausted.")?;
+    let mut replacement = VecDeque::new();
+    replacement.try_reserve_exact(capacity).map_err(|_| "Cannot allocate stylesheet worker storage.")?;
+    if (replacement.capacity() - before).saturating_mul(slot) > available {
+        return Err("Allocated stylesheet worker capacity exceeds its byte allowance.".into());
+    }
+    replacement.append(queue);
+    *queue = replacement;
+    Ok(())
 }
 
 pub(super) struct Worker {
@@ -47,6 +79,7 @@ impl Worker {
                 active: None,
                 stopping: false,
                 wake,
+                completed_payload: 0,
             }),
             Condvar::new(),
         ));
@@ -79,12 +112,19 @@ impl Worker {
                         return;
                     }
                     if publish {
-                        guard.completed.push_back(Completion {
+                        let mut completion = Completion {
                             epoch: job.epoch,
                             request: job.request,
                             result,
                             events,
-                        });
+                        };
+                        let bytes = completion_payload(&completion);
+                        if bytes > completion.request.storage_limit.saturating_sub(worker_storage(&guard)) {
+                            completion.result = Err("Dynamic stylesheet completion storage exhausted.".into());
+                            completion.events = Vec::new();
+                        }
+                        guard.completed_payload += completion_payload(&completion);
+                        guard.completed.push_back(completion);
                     }
                     guard.wake.clone()
                 };
@@ -96,9 +136,15 @@ impl Worker {
 
     fn submit(&self, job: Job) -> Result<(), String> {
         let mut state = self.state.0.lock().unwrap();
-        if state.stopping || state.queue.len() + state.completed.len() >= loader::MAX_STYLESHEETS {
-            return Err(format!("Dynamic stylesheet worker queue limit reached ({}).", loader::MAX_STYLESHEETS));
-        }
+        if state.stopping { return Err("Dynamic stylesheet worker is stopping.".into()); }
+        let limit = job.request.storage_limit;
+        let available = limit.saturating_sub(worker_storage(&state));
+        let needed = state.queue.len().checked_add(1).ok_or("Stylesheet queue size overflow.")?;
+        reserve_worker_queue(&mut state.queue, needed, std::mem::size_of::<Job>(), available)?;
+        let available = limit.saturating_sub(worker_storage(&state));
+        let needed = state.completed.len().checked_add(state.queue.len())
+            .and_then(|count| count.checked_add(2)).ok_or("Stylesheet completion size overflow.")?;
+        reserve_worker_queue(&mut state.completed, needed, std::mem::size_of::<Completion>() + COMPLETION_ERROR_BYTES, available)?;
         state.queue.push_back(job);
         self.state.1.notify_one();
         Ok(())
@@ -112,6 +158,7 @@ impl Worker {
         let (result, wake) = {
             let mut state = self.state.0.lock().unwrap();
             let result = state.completed.pop_front();
+            if let Some(completion) = &result { state.completed_payload -= completion_payload(completion); }
             let wake = (!state.completed.is_empty()).then(|| state.wake.clone());
             (result, wake)
         };
@@ -128,6 +175,7 @@ impl Worker {
         }
         state.queue.clear();
         state.completed.clear();
+        state.completed_payload = 0;
     }
 }
 
@@ -578,6 +626,63 @@ document.head.appendChild(sheet);
             app.reflow();
         }
         app.poll_load();
+    }
+
+    #[test]
+    fn dynamic_stylesheet_queue_and_lifetime_exceed_former_count_limit() {
+        let site = Site::new();
+        let mut app = open(&site, "/home");
+        wait(&mut app, |app| !app.is_loading());
+        eval(&mut app, "var manyLoads=0;for(var index=0;index<300;index++){var link=document.createElement('link');link.rel='stylesheet';link.href='/sheet.css';link.onload=function(){manyLoads++;};document.head.appendChild(link);}");
+        wait(&mut app, |app| !app.is_loading());
+        assert_eq!(app.styles.len(), 301);
+        assert_eq!(app.pending_stylesheets, 0);
+        eval(&mut app, "if(manyLoads!==300)throw 'missing stylesheet completion';");
+        assert_eq!(site.requests.lock().unwrap().iter().filter(|path| path.as_str()=="/sheet.css").count(), 301);
+    }
+
+    #[test]
+    fn stylesheet_worker_completion_byte_refusal_recovers_for_next_real_response() {
+        let site = Site::new();
+        let mut app = open(&site, "/home");
+        wait(&mut app, |app| !app.is_loading());
+        let worker = Worker::new(app.wake.clone(), app.trust.clone(), app.cookies.clone()).unwrap();
+        for (path, refused) in [("/large.css", true), ("/sheet.css", false)] {
+            let page = app.scripting.as_mut().unwrap();
+            let outcome = page.console_eval(&mut app.document, &mut app.forms,
+                &format!("sheet.onload=null;sheet.href='{path}';"));
+            assert_eq!(outcome.errors, 0, "{}", page.report());
+            let mut requests = page.take_dynamic_stylesheets();
+            assert_eq!(requests.len(), 1);
+            let mut request = requests.pop_front().unwrap();
+            Arc::get_mut(&mut request).unwrap().storage_limit = 16 * 1024;
+            worker.submit(Job { epoch: app.script_epoch, request: request.clone(),
+                blocking: Arc::new(crate::blocking::Policy::new(&app.profile.data().settings.blocking)),
+                network: app.network.clone(), cancel: request.cancel.clone() }).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(6);
+            let completion = loop {
+                if let Some(completion) = worker.poll() { break completion; }
+                assert!(Instant::now() < deadline, "bounded stylesheet response timed out");
+                std::thread::sleep(Duration::from_millis(1));
+            };
+            if refused {
+                assert!(completion.result.unwrap_err().contains("completion storage exhausted"));
+            } else {
+                assert!(completion.result.unwrap().0.contains("width:123px"));
+            }
+            assert_eq!(worker.state.0.lock().unwrap().completed_payload, 0);
+        }
+    }
+
+    #[test]
+    fn stylesheet_worker_failed_capacity_reservation_preserves_owned_queue() {
+        let mut queue = VecDeque::from([7usize, 9]);
+        let before = queue.capacity();
+        assert!(reserve_worker_queue(&mut queue, before + 1, std::mem::size_of::<usize>(), 0).is_err());
+        assert_eq!(queue, [7, 9]);
+        assert_eq!(queue.capacity(), before);
+        reserve_worker_queue(&mut queue, before + 1, std::mem::size_of::<usize>(), 1024).unwrap();
+        assert_eq!(queue, [7, 9]);
     }
 
     #[test]
