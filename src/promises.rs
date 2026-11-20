@@ -175,9 +175,8 @@ impl Job {
         match self { Self::Callback(_) | Self::Host(_) | Self::MutationObservers => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
     }
 
-    fn retained_bytes(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + match self {
+    fn payload_bytes(&self) -> usize {
+        match self {
                 Self::Thenable { receiver, then, .. } => receiver.bytes() + then.bytes(),
                 Self::Await { frame, value, .. } => frame.retained_bytes() + value.bytes(),
                 Self::Reaction {
@@ -675,10 +674,35 @@ impl Runtime {
 
     fn promise_enqueue(&mut self, job: Job) -> Result<(), Fault> {
         self.step()?;
-        if self.promises.jobs.len() >= self.limits.capacity.promises {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.promises.jobs.len() >= self.limits.capacity.promises {
             return Err(Fault::new(format!("Microtask queue limit reached ({}).", self.limits.capacity.promises)));
         }
-        self.promise_retain(job.retained_bytes().saturating_add(std::mem::size_of::<Option<usize>>()))?;
+        let payload = job.payload_bytes();
+        let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+        let available = available.checked_sub(payload)
+            .ok_or_else(|| Fault::new("Retained value microtask payload exceeds storage allowance."))?;
+        let before = self.promises.jobs.capacity();
+        let mut replacement = None;
+        let mut added = 0;
+        if self.promises.jobs.len() == before {
+            let slot = std::mem::size_of::<(Option<usize>, Job)>();
+            let growth = before.max(4).min(available / slot);
+            if growth == 0 { return Err(Fault::new("Retained value microtask queue exceeds storage allowance.")); }
+            let capacity = before.checked_add(growth).ok_or_else(|| Fault::new("Microtask queue capacity overflow."))?;
+            let mut next = VecDeque::new();
+            next.try_reserve_exact(capacity).map_err(|_| Fault::new("Cannot allocate microtask queue storage."))?;
+            added = next.capacity().checked_sub(before).and_then(|slots| slots.checked_mul(slot))
+                .filter(|bytes| *bytes <= available)
+                .ok_or_else(|| Fault::new("Retained value microtask queue allocation exceeds storage allowance."))?;
+            self.work(before.saturating_mul(slot))?;
+            replacement = Some(next);
+        }
+        self.promise_retain(payload + added)?;
+        if let Some(mut next) = replacement {
+            next.append(&mut self.promises.jobs);
+            self.promises.jobs = next;
+        }
         let callback = match &job {
             Job::Thenable { then: Value::Function(id), .. } => Some(*id),
             Job::Reaction { handler: Some(id), .. } | Job::Callback(id) => Some(*id),
@@ -702,7 +726,7 @@ impl Runtime {
             return Err(Fault::new("MutationObserver microtask reservation lost its queue position."));
         }
         let (_, job) = self.promises.jobs.pop_back().unwrap();
-        self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
+        self.value_bytes -= job.payload_bytes();
         Ok(())
     }
     pub(super) fn prepare_host_microtask(&mut self,host:&mut dyn Host,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,Fault>{
@@ -727,7 +751,7 @@ impl Runtime {
     pub(super) fn finish_host_microtask(&mut self,host:&mut dyn Host,ticket:Option<u64>)->Result<(),Fault>{
         if let Some(id)=ticket {if !host.finish_native_microtask(id){
             if !self.promises.jobs.back().is_some_and(|(_,job)|matches!(job,Job::Host(ticket) if *ticket==id)){return Err(Fault::new("Native microtask reservation lost its queue position."));}
-            let (_,job)=self.promises.jobs.pop_back().unwrap();self.value_bytes-=job.retained_bytes()+std::mem::size_of::<Option<usize>>();
+            let (_,job)=self.promises.jobs.pop_back().unwrap();self.value_bytes-=job.payload_bytes();
         }}Ok(())
     }
 
@@ -1418,6 +1442,7 @@ impl Runtime {
         // The queue no longer owns this job. Publish its fields before any
         // handler runs; permanent Promise roots alone do not cover these Values.
         let marker = self.transient_marker();
+        let mut retained = job.payload_bytes();
         let result = (|| {
             use super::function_reachability::Edge;
             match &job {
@@ -1444,12 +1469,20 @@ impl Runtime {
                     self.push_transient_value(value)?;
                 }
             }
+            // Transfer the activation reservation to the await driver. Other
+            // job payload stays owned across every author callback and failure.
+            if let Job::Await { frame, .. } = &job {
+                let bytes = frame.retained_bytes();
+                self.value_bytes -= bytes;
+                retained -= bytes;
+            }
             self.transient_roots.active_job_registrations += 1;
             let result = self.with_intrinsic_realm(realm, |runtime| runtime.run_promise_job_registered(job, host));
             self.transient_roots.active_job_registrations -= 1;
             result
         })();
         self.restore_transient_marker(marker);
+        self.value_bytes -= retained;
         result
     }
 
@@ -1513,15 +1546,16 @@ impl Runtime {
         self.promises.allocation_trace = AllocationTrace::default();
         let mut diagnostics = Vec::new();
         let result = (|| {
-            let mut executed = 0;
-            while let Some((realm, job)) = self.promises.jobs.pop_front() {
-                self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
-                if executed == self.limits.capacity.promise_jobs {
-                    return Err(Fault::new(
-                        "Microtask checkpoint limit reached (4096 jobs).",
-                    ));
+            let mut executed = 0usize;
+            while !self.promises.jobs.is_empty() {
+                #[cfg(test)]
+                if self.limits.test_entry_arenas && executed == self.limits.capacity.promise_jobs {
+                    return Err(Fault::new(format!("Microtask checkpoint limit reached ({} jobs).", self.limits.capacity.promise_jobs)));
                 }
-                executed += 1;
+                // Check work before taking ownership of a host ticket.
+                self.step()?;
+                executed = executed.checked_add(1).ok_or_else(|| Fault::new("Microtask execution counter overflow."))?;
+                let (realm, job) = self.promises.jobs.pop_front().unwrap();
                 let kind = job.allocation_kind();
                 let first = self.function_arena.script_created;
                 self.promises.allocation_trace.active = Some((kind, first));
@@ -1581,8 +1615,10 @@ impl Runtime {
     /// Cancel existing queued callbacks and pending observers. Promise states
     /// remain ordinary document-owned values, but removed reactions never resume.
     pub fn cancel_microtasks(&mut self) {
-        for (_, job) in std::mem::take(&mut self.promises.jobs) {
-            self.value_bytes -= job.retained_bytes() + std::mem::size_of::<Option<usize>>();
+        let jobs = std::mem::take(&mut self.promises.jobs);
+        self.value_bytes -= jobs.capacity() * std::mem::size_of::<(Option<usize>, Job)>();
+        for (_, job) in jobs {
+            self.value_bytes -= job.payload_bytes();
         }
         for object in &mut self.objects {
             if let Some(data) = &mut object.promise {
@@ -1708,6 +1744,77 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert!(!runtime.object_assigned_closures.contains(&id));
         assert_eq!((runtime.functions.len(), runtime.function_arena.script_created), before);
         assert_eq!(runtime.invoke(closure, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[test]
+    fn browser_microtask_fifo_exceeds_former_queue_count_and_checkpoint_count() {
+        let mut runtime = Runtime::new();
+        runtime.execute("var hits=0,ordered=true;function first(){ordered=ordered&&hits===0;hits++;}function middle(){hits++;}function last(){ordered=ordered&&hits===69999;hits++;}queueMicrotask(first);for(var i=1;i<69999;i++)queueMicrotask(middle);queueMicrotask(last);", &mut NoHost).unwrap();
+        assert_eq!(runtime.promises.jobs.len(),70000);
+        let capacity=runtime.promises.jobs.capacity();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.promises.jobs.capacity(),capacity);
+        assert_eq!(runtime.execute("ordered&&hits===70000;", &mut NoHost).unwrap().to_text(),"true");
+        runtime.begin_job();
+        runtime.execute("hits=0;function again(){if(++hits<270000)queueMicrotask(again);}queueMicrotask(again);", &mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"hits").unwrap().to_number(),270000.0);
+    }
+
+    #[test]
+    fn microtask_storage_refusal_is_atomic_and_cancel_refunds_actual_deque_capacity() {
+        let mut runtime=Runtime::new();
+        let callback=runtime.execute("var hits=0;function queued(){hits++;}queued;",&mut NoHost).unwrap();
+        let Value::Function(callback)=callback else {panic!("callback")};
+        let before=runtime.value_bytes;
+        let limit=runtime.limits.heap.retained_values;
+        let slot=std::mem::size_of::<(Option<usize>,Job)>();
+        runtime.limits.heap.retained_values=before+slot-1;
+        assert!(runtime.promise_enqueue(Job::Callback(callback)).is_err());
+        assert_eq!((runtime.value_bytes,runtime.promises.jobs.len(),runtime.promises.jobs.capacity()),(before,0,0));
+        runtime.limits.heap.retained_values=before+slot;
+        runtime.promise_enqueue(Job::Callback(callback)).unwrap();
+        assert_eq!((runtime.value_bytes,runtime.promises.jobs.capacity()),(before+slot,1));
+        let work=runtime.copy_bytes;
+        assert!(runtime.promise_enqueue(Job::Callback(callback)).is_err());
+        assert_eq!(runtime.copy_bytes,work);
+        assert_eq!(runtime.promises.jobs.len(),1);
+        runtime.cancel_microtasks();
+        assert_eq!((runtime.value_bytes,runtime.promises.jobs.capacity()),(before,0));
+        runtime.limits.heap.retained_values=limit;
+        runtime.begin_job();
+        runtime.promise_enqueue(Job::Callback(callback)).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"hits").unwrap().to_number(),1.0);
+        let before=runtime.value_bytes;
+        let backing=runtime.promises.jobs.capacity()*slot;
+        runtime.cancel_microtasks();
+        assert_eq!(runtime.value_bytes,before-backing);
+    }
+
+    #[test]
+    fn active_reaction_payload_stays_admitted_while_the_author_handler_allocates() {
+        let mut runtime=Runtime::new();
+        runtime.define_global("candidate",Value::String("n".repeat(12000))).unwrap();
+        runtime.execute("var held=null;function observer(value){held=candidate;}observer(null);held=null;",&mut NoHost).unwrap();
+        let Value::Function(handler)=runtime.binding_value(0,"observer").unwrap() else {panic!("handler")};
+        let capability=runtime.new_promise_capability(Value::Function(runtime.promises.constructor.unwrap()),&mut NoHost).unwrap();
+        runtime.promise_enqueue(Job::Reaction{capability,handler:Some(handler),value:Value::String("p".repeat(16000)),reject:false}).unwrap();
+        let payload=runtime.promises.jobs.front().unwrap().1.payload_bytes();
+        let backing=runtime.promises.jobs.capacity()*std::mem::size_of::<(Option<usize>,Job)>();
+        let before=runtime.value_bytes;
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=before+8000;
+        let error=runtime.microtask_checkpoint(&mut NoHost).unwrap_err();
+        assert!(error.contains("Retained value"),"{error}");
+        assert!(matches!(runtime.binding_value(0,"held").unwrap(),Value::Null));
+        assert_eq!(runtime.value_bytes,before-payload-backing);
+        assert_eq!(runtime.promises.jobs.capacity(),0);
+        runtime.limits.heap.retained_values=limit;
+        runtime.begin_job();
+        runtime.execute("queueMicrotask(observer);",&mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"held").unwrap().to_text().len(),12000);
     }
 
     #[test]
@@ -2441,14 +2548,17 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
             )
             .unwrap();
         assert!(runtime.value_bytes > before);
-        let queued = runtime.value_bytes - runtime.retained_arena_bytes();
+        let capacity = runtime.promises.jobs.capacity();
         assert!(runtime
             .microtask_checkpoint(&mut NoHost)
             .unwrap()
             .is_empty());
-        assert!(runtime.value_bytes - runtime.retained_arena_bytes() < queued);
+        assert_eq!(runtime.promises.jobs.capacity(),capacity);
         assert_eq!(runtime.promises.reactions, 0);
         assert!(runtime.promises.jobs.is_empty());
+        let before=runtime.value_bytes;
+        runtime.cancel_microtasks();
+        assert_eq!(runtime.value_bytes,before-capacity*std::mem::size_of::<(Option<usize>,Job)>());
     }
     #[test]
     fn promise_all_preserves_input_order_and_dense_holes() {

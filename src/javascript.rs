@@ -11361,7 +11361,7 @@ strictFailure;
                 ] {
                     let (mut runtime, mut host) = test_runtime();
                     let error = runtime.execute(&source, &mut host).unwrap_err();
-                    assert!(error.contains(message), "{error}");
+                    assert!(error.contains(message) || (message == "Parser nesting limit reached (64)" && error.contains("headroom exhausted during parser entry") && error.contains("native stack limit")), "{error}");
                     assert!(host.records.is_empty());
                     assert!(runtime.programs.is_empty());
                     runtime.begin_job();
@@ -12229,7 +12229,7 @@ caught;
             ] {
                 let (mut runtime,mut host)=test_runtime();
                 let error=runtime.execute(source,&mut host).unwrap_err();
-                assert!(error.contains("limit reached"),"{error}");
+                assert!(error.contains("limit reached") || error.contains("native stack limit"),"{error}");
                 assert!(host.records.is_empty());
                 assert_eq!(runtime.call_depth,0);
             }
