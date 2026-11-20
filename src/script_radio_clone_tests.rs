@@ -279,6 +279,7 @@ fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_res
     let base = doc.nodes.len();
     let native_count = forms.controls.len();
     let old_bytes = page.state.retained;
+    let old_capacity = doc.nodes.capacity();
     let old_work = page.state.host_work;
     let old_copies = page.state.copy_work;
     let result = clone_source(&mut doc, &mut forms, &mut page).unwrap();
@@ -287,11 +288,15 @@ fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_res
     assert_eq!(forms.controls.len() - native_count, 2);
     let spent_work = old_work - page.state.host_work;
     let spent_copies = old_copies - page.state.copy_work;
-    let retained = page.state.retained - old_bytes;
+    // A selected exact budget can omit the default geometric spare slots.
+    // Existing-record movement/init work is independent of that spare capacity.
+    let retained = page.state.retained - old_bytes
+        -(doc.nodes.capacity()-old_capacity)*size_of::<Node>()
+        +(base+4).saturating_sub(old_capacity)*size_of::<Node>();
     let dom_bytes: usize = doc.nodes[base..]
         .iter()
         .map(|n| {
-            node_bytes(n)
+            node_bytes(n) + child_link_bytes(&n.children)
                 + match &n.kind {
                     NodeKind::Element { tag, href, .. } => {
                         tag.len() + href.as_ref().map_or(0, String::len)
@@ -353,7 +358,7 @@ fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_res
             );
             assert!(doc.attr(cloned_choice, "checked").is_some());
         } else {
-            let error = result.err().expect("over-limit clone succeeded");
+            let error = result.err().unwrap_or_else(||panic!("{mode}: over-limit clone succeeded"));
             let boundary = match mode {
                 "nodes" => "node limit",
                 "controls" => "control limit",

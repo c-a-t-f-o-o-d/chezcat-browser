@@ -175,7 +175,6 @@ impl Bridge<'_> {
         let mut image_plans = Vec::new();
         image_plans.try_reserve(images.len()).map_err(|_| "HTML image-plan reservation failed.")?;
         for (image, source) in images { image_plans.push((image, self.prepare_image_change(image, source.as_deref())?)); }
-        self.doc.nodes.try_reserve(count).map_err(|_| "HTML node reservation failed.")?;
         self.doc.nonce_unsafe_nodes.try_reserve(staged.nonce_unsafe_nodes.len()).map_err(|_| "HTML nonce metadata reservation failed.")?;
         self.state.dom.created.try_reserve(count).map_err(|_| "HTML identity reservation failed.")?;
         self.state.dom.fragment_scripts.try_reserve(scripts.len()).map_err(|_| "Inert-script reservation failed.")?;
@@ -197,7 +196,13 @@ impl Bridge<'_> {
             .ok_or("HTML/native select payload overflow.")?;
         // Detached old nodes and their own buffers stay retained; only this
         // replaced root vector is dropped. Child record copies were prepaid.
-        self.state.replace_storage(child_link_bytes(&self.doc.nodes[node].children), bytes, bytes)?;
+        let released = child_link_bytes(&self.doc.nodes[node].children);
+        let available = self.state.retained.checked_sub(released)
+            .and_then(|retained|self.state.retained_limit.checked_sub(retained))
+            .and_then(|available|available.checked_sub(bytes)).ok_or("HTML node/payload backing allowance exhausted.")?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
+        self.state.replace_storage(released, bytes.checked_add(node_bytes).ok_or("HTML node/payload storage overflow.")?, bytes)?;
+        self.commit_main_nodes(node_growth);
         // No fallible operation follows publication of the new child list.
         for &root in &self.doc.nodes[node].children { self.state.tree.parents[root] = None; }
         for old in old { self.state.detached_nodes.insert(old); self.state.dom.connected[old] = false; self.state.tree.active[old] = false; }

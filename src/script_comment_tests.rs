@@ -234,7 +234,7 @@ if(invoke(maker,document,value).nodeType!==8||converted!==1)throw 'same-origin r
     let limit=page.state.node_limit;page.state.node_limit=nodes;
     let out=page.console_eval(&mut doc,&mut forms,"maker.call(document,'rejected');");assert_eq!(out.errors,1);assert!(page.report().contains("DOM appended-node limit reached"),"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.retained,retained);
     page.state.node_limit=limit;page.state.retained_limit=retained;
-    let out=page.console_eval(&mut doc,&mut forms,"maker.call(document,'rejected');");assert_eq!(out.errors,1);assert!(page.report().contains("DOM retained text/attribute growth limit reached"),"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.retained,retained);
+    let out=page.console_eval(&mut doc,&mut forms,"maker.call(document,'rejected');");assert_eq!(out.errors,1);assert!(page.report().contains("DOM retained node/payload backing allowance exhausted"),"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.retained,retained);
     page.state.retained_limit=retained+1024;
     evaluate(&mut page,&mut doc,&mut forms,"if(invoke(maker,document,value).data!=='created'||converted!==1)throw 'fresh-job factory recovery';");
     assert_eq!(doc.nodes.len(),nodes+1);

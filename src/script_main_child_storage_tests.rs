@@ -139,7 +139,7 @@ fn main_child_storage_clone_and_import_admit_compact_child_buffers_before_nodes(
         } else { node_handle(source) };
         let before = bridge.state.retained;
         let nodes = bridge.doc.nodes.len();
-        let bundle = 3 + 2 * size_of::<usize>();
+        let bundle = 3 + 2 * size_of::<usize>() + bridge.main_node_minimum(3).unwrap();
         bridge.state.retained_limit = before + bundle - 1;
         let copy = |bridge: &mut Bridge<'_>| if import {
             bridge.import_node(&[Value::Host(handle), Value::Number(1.0)], None)
@@ -159,7 +159,7 @@ fn main_child_storage_clone_and_import_admit_compact_child_buffers_before_nodes(
 fn main_child_storage_inner_html_moves_nested_buffers_and_refunds_wide_root() {
     let markup = "<div><b>x</b></div>";
     let fragment = crate::html::parse_fragment(markup, "p", true).unwrap();
-    let owned = fragment.nodes.iter().skip(1).map(|node| {
+    let mut owned = fragment.nodes.iter().skip(1).map(|node| {
         node_bytes(node) + child_link_bytes(&node.children) + match &node.kind {
             NodeKind::Element { tag, href, .. } => tag.len() + href.as_ref().map_or(0, String::len),
             _ => 0,
@@ -171,6 +171,7 @@ fn main_child_storage_inner_html_moves_nested_buffers_and_refunds_wide_root() {
     let released = child_link_bytes(&doc.nodes[parent].children);
     let (mut doc, mut forms, mut page) = start(doc);
     let before = page.state.retained;
+    owned += doc.nodes.len().checked_add(fragment.nodes.len()-1).unwrap().saturating_sub(doc.nodes.capacity()) * size_of::<Node>();
     page.state.retained_limit = before - released + owned - 1;
     let nodes = doc.nodes.len();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -215,7 +216,8 @@ fn main_child_storage_six_thousand_cloned_children_pay_actual_compact_backing() 
     let (mut doc, mut forms, mut page) = start(parsed(&markup));
     let source = element(&doc, "div");
     let before = page.state.retained;
-    let bundle = 3 + 6000 + 6000 * size_of::<usize>();
+    let bundle = 3 + 6000 + 6000 * size_of::<usize>()
+        + (doc.nodes.len()+6001).saturating_sub(doc.nodes.capacity())*size_of::<Node>();
     page.state.retained_limit = before + bundle;
     let copied = {
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -233,7 +235,7 @@ fn main_child_storage_script_text_reservation_recovers_without_unpublished_nodes
     let script = fresh(&mut bridge, "script");
     let nodes = bridge.doc.nodes.len();
     let before = bridge.state.retained;
-    let bundle = "payload".len() + size_of::<usize>();
+    let bundle = "payload".len() + size_of::<usize>() + bridge.main_node_minimum(1).unwrap();
     bridge.state.retained_limit = before + bundle - 1;
     assert!(bridge.set(node_handle(script), "text", Value::String("payload".into())).is_err());
     assert_eq!(bridge.state.retained, before);

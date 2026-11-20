@@ -258,7 +258,17 @@ impl Bridge<'_> {
             .iter()
             .map(crate::html::Attribute::owned_bytes)
             .sum::<usize>();
-        self.state.replace_bytes(0, bytes)?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
+            .ok_or("Image node/payload backing allowance exhausted.")?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
+        self.state.detached_images.try_reserve(1).map_err(|_|"Cannot reserve detached image identity.")?;
+        self.state.dom.created.try_reserve(1).map_err(|_|"Cannot reserve image Node identity.")?;
+        self.state.detached_nodes.try_reserve(1).map_err(|_|"Cannot reserve detached image Node.")?;
+        self.state.tree.active.try_reserve(1).map_err(|_|"Cannot reserve image active state.")?;
+        self.state.tree.parents.try_reserve(1).map_err(|_|"Cannot reserve image parent state.")?;
+        self.state.dom.connected.try_reserve(1).map_err(|_|"Cannot reserve image connection state.")?;
+        self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("Image node/payload storage overflow.")?, bytes)?;
+        self.commit_main_nodes(node_growth);
         let node = self.doc.nodes.len();
         self.doc.nodes.push(Node {
             namespace: crate::html::Namespace::Html,
