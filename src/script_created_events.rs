@@ -1,4 +1,4 @@
-//! Persistent untrusted Event/CustomEvent/UIEvent/MouseEvent state. These records never enter the
+//! Persistent untrusted Event/CustomEvent/UIEvent/MouseEvent/KeyboardEvent state. These records never enter the
 //! trusted dispatch slot. Synchronous base/UI dispatch is separate and untrusted.
 use super::*;
 
@@ -28,6 +28,29 @@ struct MouseData {
     modifiers: u16,
     which: u32,
     related: Option<u32>,
+}
+
+struct KeyboardData {
+    key: Value,
+    code: Value,
+    location: u32,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    meta: bool,
+    repeat: bool,
+    composing: bool,
+    key_code: u32,
+    char_code: u32,
+    modifiers: u16,
+}
+impl Default for KeyboardData {
+    fn default()->Self {Self {key:Value::String(String::new()),code:Value::String(String::new()),location:0,
+        ctrl:false,alt:false,shift:false,meta:false,repeat:false,composing:false,key_code:0,char_code:0,modifiers:0}}
+}
+impl KeyboardData {
+    fn payload_bytes(&self)->usize {retained_storage::value_bytes(&self.key)+retained_storage::value_bytes(&self.code)}
+    fn which(&self)->u32 {if self.char_code!=0 {self.char_code}else{self.key_code}}
 }
 
 const EXTRA_MODIFIERS: &[(&str,&str,u16)] = &[
@@ -154,7 +177,7 @@ b.addEventListener('keydown',function(e){saved=e;savedInit=e.initUIEvent;var typ
         assert_eq!(outcome.errors,0,"{}",page.report());
         let button=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("b")).unwrap();
         page.begin_job();
-        let outcome=page.keyboard(&mut doc,&mut forms,KeyboardInput{down:true,target:Some(button),key:"a".into(),code:"KeyA".into(),ctrl:false,shift:false,alt:false,meta:false,repeat:false,location:0,key_code:65});
+        let outcome=page.keyboard(&mut doc,&mut forms,KeyboardInput{down:true,target:Some(button),key:"a".into(),code:"KeyA".into(),ctrl:false,shift:false,alt:false,meta:false,repeat:false,location:0,key_code:65,..KeyboardInput::default()});
         assert_eq!(outcome.errors,0,"{}",page.report());
         assert!(outcome.prevented);
         let outcome=page.console_eval(&mut doc,&mut forms,"savedInit.call(ui,'borrowed',false,false,null,11);if(ui.type!=='borrowed'||ui.detail!==11||ui.isTrusted)throw 'borrow after source expiry';document.title='ui-dispatch-ok';");
@@ -190,7 +213,7 @@ var conversions=0;var detail={valueOf:function(){conversions++;return 6;}};
         assert!(bridge.call(handle,"initUIEvent",&args).is_err());
         let event=&bridge.state.created_events[0];
         assert_eq!(event.name,"original");assert!(event.prevented&&event.bubbles&&event.cancelable);
-        assert_eq!(event.ui.as_ref().unwrap().detail,8);assert_eq!(event.ui.as_ref().unwrap().view,Some(WINDOW));assert_eq!(event.timestamp,stamp);
+        assert_eq!(event.data.ui().unwrap().detail,8);assert_eq!(event.data.ui().unwrap().view,Some(WINDOW));assert_eq!(event.timestamp,stamp);
         let next=bridge.state.next_event;
         bridge.state.limits.host.created_events=bridge.state.created_events.len();
         assert!(bridge.call(DOCUMENT,"createEvent",&[Value::String("UIEvents".into())]).is_err());
@@ -249,7 +272,7 @@ if(e.NONE!==0||e.CAPTURING_PHASE!==1||e.AT_TARGET!==2||e.BUBBLING_PHASE!==3)thro
 for(var e of [events[4],events[5]]){if(e.view!==null||e.relatedTarget!==null||e.detail!==0||e.screenX!==0||e.screenY!==0||e.clientX!==0||e.clientY!==0||e.ctrlKey||e.altKey||e.shiftKey||e.metaKey||e.button!==0||e.buttons!==0)throw 'mouse defaults';}
 if('view' in events[0]||'initMouseEvent' in events[0]||!('initMouseEvent' in events[4])||events[0]===events[1])throw 'class/identity';
 var calls=0,converted=document.createEvent({toString:function(){calls++;return 'MouseEvents';}});if(calls!==1||converted.isTrusted)throw 'factory conversion';
-var errors=0;for(var name of ['CompositionEvent','KeyboardEvent','CustomEvents','Event ','unknown']){try{document.createEvent(name);}catch(e){if(e.name==='NotSupportedError')errors++;}}
+var errors=0;for(var name of ['CompositionEvent','KeyboardEvents','CustomEvents','Event ','unknown']){try{document.createEvent(name);}catch(e){if(e.name==='NotSupportedError')errors++;}}
 try{document.createEvent();}catch(e){if(e.name==='TypeError')errors++;}try{document.createEvent(Symbol());}catch(e){if(e.name==='TypeError')errors++;}
 if(errors!==7||typeof document.dispatchEvent!=='function'||typeof window.dispatchEvent!=='function'||'dispatchEvent' in events[0])throw 'factory/target capability';
 if(document.createEvent!==document.createEvent||converted.initEvent!==converted.initEvent)throw 'method identity';
@@ -412,9 +435,33 @@ var prefix=0;document.title='created-interfaces-ok';
         bridge.call(handle, "initEvent", &[Value::String("x".into())]).unwrap();
         assert_eq!(bridge.state.retained, before - "original".len() + 1);
         assert_eq!(bridge.state.created_events[0].timestamp, stamp);
-        assert_eq!(bridge.state.created_events[0].ui.as_ref().unwrap().detail, 8);
+        assert_eq!(bridge.state.created_events[0].data.ui().unwrap().detail, 8);
         assert!(!bridge.state.created_events[0].prevented);
     }
+}
+
+// A record has one UI family. Sharing this storage avoids charging every
+// base/custom Event for simultaneous mouse and keyboard payloads.
+enum UiRecord {
+    Base,
+    Ui(UiData),
+    Mouse(UiData,MouseData),
+    Keyboard(UiData,KeyboardData),
+}
+impl UiRecord {
+    fn prepare(ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>)->Result<Self,String>{
+        Ok(match (ui,mouse,keyboard) {
+            (None,None,None)=>Self::Base,(Some(ui),None,None)=>Self::Ui(ui),
+            (Some(ui),Some(mouse),None)=>Self::Mouse(ui,mouse),
+            (Some(ui),None,Some(keyboard))=>Self::Keyboard(ui,keyboard),
+            _=>return Err("Event UI family data is inconsistent.".into()),
+        })
+    }
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)=>Some(ui),Self::Base=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)=>Some(ui),Self::Base=>None}}
+    fn mouse(&self)->Option<&MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
+    fn mouse_mut(&mut self)->Option<&mut MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
+    fn keyboard(&self)->Option<&KeyboardData>{if let Self::Keyboard(_,key)=self{Some(key)}else{None}}
 }
 
 pub(super) struct CreatedEvent {
@@ -435,8 +482,7 @@ pub(super) struct CreatedEvent {
     pub(super) trusted: bool,
     pub(super) passive: bool,
     timestamp: f64,
-    ui: Option<UiData>,
-    mouse: Option<MouseData>,
+    data: UiRecord,
     custom: Option<Value>,
     message: bool,
 }
@@ -446,17 +492,18 @@ pub(super) struct CreatedEvent {
 mod storage_tests;
 
 impl CreatedEvent {
-    fn payload_bytes(&self)->usize {self.name.capacity()+owned_custom_bytes(self.custom.as_ref())}
+    fn payload_bytes(&self)->usize {self.name.capacity()+owned_custom_bytes(self.custom.as_ref())+self.data.keyboard().map_or(0,KeyboardData::payload_bytes)}
 }
 fn owned_custom_bytes(value:Option<&Value>)->usize {value.map_or(0,retained_storage::value_bytes)}
 
 #[derive(Clone,Copy)]
-enum Interface { Base, Custom, Ui, Mouse }
+enum Interface { Base, Custom, Ui, Mouse, Keyboard }
 
 fn interface(value: Option<&Value>) -> Option<Interface> {
     let Some(Value::String(name)) = value else { return None; };
     if name.eq_ignore_ascii_case("CustomEvent") { Some(Interface::Custom) }
     else if ["MouseEvent", "MouseEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Mouse) }
+    else if name.eq_ignore_ascii_case("KeyboardEvent") {Some(Interface::Keyboard)}
     else if ["UIEvent", "UIEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Ui) }
     else if ["Event", "Events", "HTMLEvents", "SVGEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Base) }
     else { None }
@@ -493,15 +540,11 @@ impl Bridge<'_> {
             .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
     }
     pub(super) fn construct_base_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
-        self.construct_event_record(owner,args,fields,None,None,None)
+        self.construct_event_record(owner,args,fields,None,None,None,None)
     }
     pub(super) fn ordinary_event_owner(&self,object:u32)->Option<u32> {
         self.created_event_index(object).map(|id|self.state.created_events[id].owner)
-            // Base dispatched Events use the same genuine ordinary-property
-            // store as MouseEvents. KeyboardEvent's opaque specialized fields
-            // retain their existing native routing and inspection boundary.
-            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object
-                && (event.mouse.is_some() || event.keyboard.is_none())).map(|_|WINDOW))
+            .or_else(||self.state.event.as_ref().filter(|event|event.handle==object).map(|_|WINDOW))
     }
     pub(super) fn ui_view_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -517,7 +560,7 @@ impl Bridge<'_> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let detail=field("detail").map(timer_integer).transpose()?.unwrap_or(0);
         let view=self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?;
-        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None,None)
+        self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None,None,None)
     }
     pub(super) fn mouse_target_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
@@ -551,15 +594,53 @@ impl Bridge<'_> {
             // The separate optional which-init dictionary extension is absent.
             button,buttons:integer("buttons")? as u16,modifiers,which:(i32::from(button)+1) as u32,
             related:self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?};
-        self.construct_event_record(owner,args,fields,Some(ui),Some(mouse),None)
+        self.construct_event_record(owner,args,fields,Some(ui),Some(mouse),None,None)
+    }
+    pub(super) fn construct_keyboard_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let integer=|key|field(key).map(timer_integer).transpose().map(|value|value.unwrap_or(0));
+        let flag=|key|field(key).is_some_and(Value::truthy);
+        let ui=UiData {detail:integer("detail")?,view:self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?};
+        let empty=Value::String(String::new());
+        let key=field("key").filter(|value|!matches!(value,Value::Undefined)).unwrap_or(&empty);
+        let code=field("code").filter(|value|!matches!(value,Value::Undefined)).unwrap_or(&empty);
+        if !matches!(key,Value::String(_)|Value::StringUnits(_))||!matches!(code,Value::String(_)|Value::StringUnits(_)){return Err("KeyboardEvent key/code require converted DOMStrings.".into());}
+        let bytes=key.bytes().checked_add(code.bytes()).ok_or("KeyboardEvent string storage overflow.")?;
+        if key.bytes()>self.state.limits.host.string_bytes||code.bytes()>self.state.limits.host.string_bytes
+            || bytes>self.state.retained_limit.saturating_sub(self.state.retained){return Err("KeyboardEvent string allowance exceeded.".into());}
+        self.state.copies(bytes)?;
+        let mut modifiers=0u16;for &(name,_,bit) in EXTRA_MODIFIERS {if flag(name){modifiers|=bit;}}
+        let keyboard=KeyboardData {key:copy_custom_value(key)?,code:copy_custom_value(code)?,location:integer("location")? as u32,
+            ctrl:flag("ctrlKey"),alt:flag("altKey"),shift:flag("shiftKey"),meta:flag("metaKey"),repeat:flag("repeat"),
+            composing:flag("isComposing"),key_code:integer("keyCode")? as u32,char_code:integer("charCode")? as u32,modifiers};
+        self.construct_event_record(owner,args,fields,Some(ui),None,Some(keyboard),None)
+    }
+    pub(super) fn keyboard_receiver(&self,handle:u32)->bool {
+        self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.keyboard().is_some())
+            || self.state.event.as_ref().is_some_and(|event|event.handle==handle&&event.keyboard.is_some())
+    }
+    pub(super) fn keyboard_modifier_state(&mut self,object:u32,args:&[Value])->Result<Value,String> {
+        let Some(Value::String(name))=args.first() else {return Err("KeyboardEvent modifier requires a converted DOMString.".into());};
+        self.state.work(EXTRA_MODIFIERS.len()+4)?;
+        let (ctrl,alt,shift,meta,modifiers)=if let Some(id)=self.created_event_index(object) {
+            let key=self.state.created_events[id].data.keyboard().ok_or("KeyboardEvent modifier receiver is invalid.")?;
+            (key.ctrl,key.alt,key.shift,key.meta,key.modifiers)
+        } else {
+            let key=self.state.event.as_ref().filter(|event|event.handle==object).and_then(|event|event.keyboard.as_ref()).ok_or("KeyboardEvent has expired.")?;
+            let modifiers=u16::from(key.alt_graph)|u16::from(key.caps_lock)*2
+                |u16::from(key.num_lock)*32|u16::from(key.scroll_lock)*64;
+            (key.ctrl,key.alt,key.shift,key.meta,modifiers)
+        };
+        Ok(Value::Bool(match name.as_str(){"Control"=>ctrl,"Alt"=>alt,"Shift"=>shift,"Meta"=>meta,
+            _=>EXTRA_MODIFIERS.iter().any(|(_,key,bit)|*key==name.as_str()&&modifiers&*bit!=0)}))
     }
     pub(super) fn construct_custom_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
         let default=Value::Null;
         let detail=fields.and_then(|fields|fields.iter().find(|(name,_)|*name=="detail").map(|(_,value)|value))
             .filter(|value|!matches!(value,Value::Undefined)).unwrap_or(&default);
-        self.construct_event_record(owner,args,fields,None,None,Some(detail))
+        self.construct_event_record(owner,args,fields,None,None,None,Some(detail))
     }
-    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>,custom:Option<&Value>)->Result<Value,String> {
+    fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>,custom:Option<&Value>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
         self.state.work(self.state.event_lookup_work(8).saturating_add(1))?;
         let Some(Value::String(source))=args.first() else {return Err("Event requires a converted type.".into());};
@@ -567,23 +648,26 @@ impl Bridge<'_> {
         let detail_bytes=custom_bytes(custom)?;
         if detail_bytes>self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
         let bytes=source.len().checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
-        if bytes>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Event retained payload allowance exceeded.".into());}
+        let keyboard_bytes=keyboard.as_ref().map_or(0,KeyboardData::payload_bytes);
+        let required=bytes.checked_add(keyboard_bytes).ok_or("Event keyboard payload overflow.")?;
+        if required>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Event retained payload allowance exceeded.".into());}
         self.state.copies(bytes)?;
         if self.state.created_event_limit_reached(){return Err("Constructed Event allowance exceeded.".into());}
         let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE).ok_or("Event identity space exhausted.")?;
         let mut name=String::new();name.try_reserve_exact(source.len()).map_err(|_|"Could not reserve Event type.")?;name.push_str(source);
         let custom=custom.map(copy_custom_value).transpose()?;
-        let payload=name.capacity().checked_add(owned_custom_bytes(custom.as_ref())).ok_or("Event payload storage overflow.")?;
-        self.state.copies(payload.saturating_sub(bytes))?;
+        let payload=name.capacity().checked_add(owned_custom_bytes(custom.as_ref())).and_then(|bytes|bytes.checked_add(keyboard_bytes)).ok_or("Event payload storage overflow.")?;
+        self.state.copies(payload.saturating_sub(required))?;
         let (replacement,added)=self.state.prepare_created_event_storage(payload)?;
         let handle=self.state.next_event;
         let timestamp=self.event_timestamp(owner,Instant::now())?;
+        let data=UiRecord::prepare(ui,mouse,keyboard)?;
         if let Some(mut records)=replacement {records.append(&mut self.state.created_events);self.state.created_events=records;}
         let flag=|key|fields.is_some_and(|fields|fields.iter().any(|(name,value)|*name==key&&value.truthy()));
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,trusted:false,passive:false,
-            timestamp,ui,mouse,custom,message:false};
+            timestamp,data,custom,message:false};
         self.state.created_events.push(event);
         self.state.retained+=payload+added;
         self.state.next_event=next;
@@ -617,6 +701,7 @@ impl Bridge<'_> {
     }
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
         base_property(name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
+            || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.ui_receiver(object) && (ui_property(name) || matches!(name,"initUIEvent"|"which"|"sourceCapabilities"))
             || self.mouse_receiver(object) && (mouse_property(name) || matches!(name,"initMouseEvent"|"initUIEvent"|"which"|"x"|"y"|"offsetX"|"offsetY"|"movementX"|"movementY"|"pageX"|"pageY"|"layerX"|"layerY"|"getModifierState"|"sourceCapabilities"))
@@ -640,12 +725,12 @@ impl Bridge<'_> {
     }
 
     pub(super) fn mouse_receiver(&self, handle: u32) -> bool {
-        self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].mouse.is_some())
+        self.created_event_index(handle).is_some_and(|id| self.state.created_events[id].data.mouse().is_some())
             || self.state.event.as_ref().is_some_and(|event|event.handle==handle&&event.mouse.is_some())
     }
 
     pub(super) fn ui_receiver(&self,handle:u32)->bool {
-        self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].ui.is_some())
+        self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.ui().is_some())
             || self.state.event.as_ref().is_some_and(|event|event.handle==handle && (event.keyboard.is_some() || event.mouse.is_some()))
     }
 
@@ -662,7 +747,7 @@ impl Bridge<'_> {
 
     pub(super) fn construct_message_event(&mut self, data: &Value) -> Result<u32, String> {
         let Value::Host(handle) = self.construct_event_record(
-            WINDOW, &[Value::String("message".into())], None, None, None, Some(data),
+            WINDOW, &[Value::String("message".into())], None, None, None, None, Some(data),
         )? else { unreachable!() };
         let index = self.created_event_index(handle).unwrap();
         self.state.created_events[index].message = true;
@@ -692,8 +777,8 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.created_event_index(object).is_some_and(|id| base_property(name)
-            || self.state.created_events[id].mouse.is_some() && mouse_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+            || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
             || self.state.event.as_ref().is_some_and(|event|event.handle==object&&event.mouse.is_some()) && mouse_property(name))
@@ -702,9 +787,9 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.state.created_events[id].mouse.is_some() && mouse_property(name)
+            base_property(name) || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
-                || self.state.created_events[id].ui.is_some() && ui_property(name)
+                || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
         }))
     }
@@ -720,6 +805,12 @@ impl Bridge<'_> {
                 copied.try_reserve_exact(len).map_err(|_|"Could not reserve Event type result.")?;
                 copied.push_str(&self.state.created_events[id].name);
                 return Ok(Value::String(copied));
+            }
+            if matches!(name,"key"|"code") && self.keyboard_receiver(object) {
+                let key=self.state.created_events[id].data.keyboard().unwrap();
+                let value=if name=="key"{&key.key}else{&key.code};
+                self.state.copies(value.bytes())?;
+                return copy_custom_value(if name=="key"{&self.state.created_events[id].data.keyboard().unwrap().key}else{&self.state.created_events[id].data.keyboard().unwrap().code});
             }
             if name == "detail" && self.custom_receiver(object) {
                 let bytes = custom_bytes(self.state.created_events[id].custom.as_ref())?;
@@ -742,11 +833,18 @@ impl Bridge<'_> {
                 "isTrusted" => Value::Bool(event.trusted),
                 "composed" => Value::Bool(event.composed),
                 name if constant(name).is_some() => Value::Number(f64::from(constant(name).unwrap())),
-                "view" if event.ui.is_some() => native(event.ui.as_ref().unwrap().view),
-                "detail" if event.ui.is_some() => Value::Number(f64::from(event.ui.as_ref().unwrap().detail)),
-                "which" if event.ui.is_some() => Value::Number(f64::from(event.mouse.as_ref().map_or(0,|mouse|mouse.which))),
-                name if event.mouse.is_some() && mouse_property(name) => {
-                    let mouse = event.mouse.as_ref().unwrap();
+                "view" if event.data.ui().is_some() => native(event.data.ui().unwrap().view),
+                "detail" if event.data.ui().is_some() => Value::Number(f64::from(event.data.ui().unwrap().detail)),
+                "which" if event.data.ui().is_some() => Value::Number(f64::from(event.data.keyboard().map_or_else(||event.data.mouse().map_or(0,|mouse|mouse.which),KeyboardData::which))),
+                name if event.data.keyboard().is_some()&&keyboard_property(name) => {
+                    let key=event.data.keyboard().unwrap();match name {
+                        "location"=>Value::Number(f64::from(key.location)),"keyCode"=>Value::Number(f64::from(key.key_code)),"charCode"=>Value::Number(f64::from(key.char_code)),
+                        "ctrlKey"=>Value::Bool(key.ctrl),"altKey"=>Value::Bool(key.alt),"shiftKey"=>Value::Bool(key.shift),"metaKey"=>Value::Bool(key.meta),
+                        "repeat"=>Value::Bool(key.repeat),"isComposing"=>Value::Bool(key.composing),_=>unreachable!(),
+                    }
+                }
+                name if event.data.mouse().is_some() && mouse_property(name) => {
+                    let mouse = event.data.mouse().unwrap();
                     match name {
                         "relatedTarget" => native(mouse.related),
                         "screenX" => Value::Number(mouse.screen_x), "screenY" => Value::Number(mouse.screen_y),
@@ -832,8 +930,9 @@ impl Bridge<'_> {
             prevented: false, stopped: false, immediate: false,
             target:None,current:None,phase:0,dispatching:false,initialized:false,trusted:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
-            ui: matches!(interface,Interface::Ui|Interface::Mouse).then(UiData::default),
-            mouse: matches!(interface,Interface::Mouse).then(MouseData::default),
+            data:match interface {Interface::Base|Interface::Custom=>UiRecord::Base,Interface::Ui=>UiRecord::Ui(UiData::default()),
+                Interface::Mouse=>UiRecord::Mouse(UiData::default(),MouseData::default()),
+                Interface::Keyboard=>UiRecord::Keyboard(UiData::default(),KeyboardData::default())},
             custom: matches!(interface,Interface::Custom).then_some(Value::Null), message: false };
         self.state.created_events.push(event);
         self.state.retained+=added;
@@ -847,7 +946,7 @@ impl Bridge<'_> {
             self.state.work(self.state.event_lookup_work(8))?;
             match method {
                 "initEvent" | "initCustomEvent" | "initUIEvent" | "initMouseEvent" => {
-                    if method == "initMouseEvent" && self.state.created_events[id].mouse.is_none() {
+                    if method == "initMouseEvent" && self.state.created_events[id].data.mouse().is_none() {
                         return Err("initMouseEvent requires a MouseEvent.".into());
                     }
                     self.validate_created_event_call(object, method, args).map_err(|(_, message)| message)?;
@@ -859,7 +958,7 @@ impl Bridge<'_> {
                         Some(UiData {view,detail:number(4)?})
                     } else {None};
                     let mouse = if method == "initMouseEvent" {
-                        let previous=self.state.created_events[id].mouse.as_ref().unwrap();
+                        let previous=self.state.created_events[id].data.mouse().unwrap();
                         Some(MouseData {
                             screen_x: f64::from(number(5)?), screen_y: f64::from(number(6)?),
                             client_x: f64::from(number(7)?), client_y: f64::from(number(8)?),
@@ -904,12 +1003,12 @@ impl Bridge<'_> {
                     event.cancelable = args.get(2).is_some_and(Value::truthy);
                     event.prevented = false; event.stopped = false; event.immediate = false;
                     event.target=None;
-                    if let Some(ui)=ui {event.ui=Some(ui);}
-                    if let Some(mouse) = mouse { event.mouse = Some(mouse); }
+                    if let Some(ui)=ui {*event.data.ui_mut().ok_or("UIEvent data is unavailable.")?=ui;}
+                    if let Some(mouse) = mouse { *event.data.mouse_mut().ok_or("MouseEvent data is unavailable.")?=mouse; }
                     if let Some(custom) = custom { event.custom = Some(custom); }
                 }
                 "getModifierState" => {
-                    let mouse=self.state.created_events[id].mouse.as_ref().ok_or("getModifierState requires a MouseEvent.")?;
+                    let mouse=self.state.created_events[id].data.mouse().ok_or("getModifierState requires a MouseEvent.")?;
                     let Some(Value::String(name))=args.first() else {return Err("getModifierState requires a converted key.".into());};
                     let active=match name.as_str() {
                         "Alt"=>mouse.alt,"Control"=>mouse.ctrl,"Meta"=>mouse.meta,"Shift"=>mouse.shift,
@@ -955,3 +1054,7 @@ mod mouse_interface_tests;
 #[cfg(test)]
 #[path = "script_event_opaque_path_tests.rs"]
 mod opaque_path_tests;
+
+#[cfg(test)]
+#[path="script_keyboard_event_storage_tests.rs"]
+mod keyboard_storage_tests;

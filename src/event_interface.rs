@@ -1,5 +1,5 @@
-//! Genuine Event/UIEvent/MouseEvent interfaces over existing native event slots.
-//! Native-input immediate prototypes and further interface families stay separate.
+//! Genuine Event/UIEvent/MouseEvent/KeyboardEvent interfaces over native records.
+//! Constructed untrusted state stays separate from trusted native input.
 use super::{Accessors, Fault, Function, Host, Ordinary, PropertyKey, Runtime, Value};
 
 pub(super) const TRUSTED_GETTER_KEY: &str = "\0Event.isTrusted.getter";
@@ -210,6 +210,49 @@ impl Runtime {
         })();
         self.restore_transient_marker(marker);
         result.map_err(Fault::display)
+    }
+
+    pub fn define_keyboard_event_interface(&mut self,window:u32)->Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let parent=*self.native_constructor_prototypes.get(&(window,"UIEvent"))
+                .ok_or_else(||Fault::new("KeyboardEvent requires the canonical UIEvent interface."))?;
+            let parent_constructor=self.objects[parent].properties.get("constructor")
+                .ok_or_else(||Fault::new("Canonical UIEvent constructor is unavailable."))?.value.as_value()?.clone();
+            let Value::Function(parent_constructor)=parent_constructor else {return Err(Fault::new("Canonical UIEvent constructor is invalid."));};
+            let allocation=self.allocate_host_function_with_length(window,"KeyboardEvent",1).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let constructor=Value::Function(allocation.id);
+            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_constructor));
+            let prototype=self.new_object(None)?;
+            self.objects[prototype].prototype=Some(Ordinary::Object(parent));
+            self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+            for (name,operation) in [
+                ("key","\0KeyboardEvent.get.key"),("code","\0KeyboardEvent.get.code"),
+                ("location","\0KeyboardEvent.get.location"),("ctrlKey","\0KeyboardEvent.get.ctrlKey"),
+                ("shiftKey","\0KeyboardEvent.get.shiftKey"),("altKey","\0KeyboardEvent.get.altKey"),
+                ("metaKey","\0KeyboardEvent.get.metaKey"),("repeat","\0KeyboardEvent.get.repeat"),
+                ("isComposing","\0KeyboardEvent.get.isComposing"),("keyCode","\0KeyboardEvent.get.keyCode"),
+                ("charCode","\0KeyboardEvent.get.charCode"),
+            ] {
+                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
+                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+            }
+            let modifier=self.event_native_function(window,"\0KeyboardEvent.getModifierState","getModifierState",1)?;
+            self.store_property(prototype,"getModifierState".into(),modifier,Some((true,true,true)))?;
+            for (name,value) in [("DOM_KEY_LOCATION_STANDARD",0),("DOM_KEY_LOCATION_LEFT",1),("DOM_KEY_LOCATION_RIGHT",2),("DOM_KEY_LOCATION_NUMPAD",3)] {
+                for object in [prototype,self.function_properties[allocation.id]] {
+                    self.store_property(object,name.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;
+                }
+            }
+            self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("KeyboardEvent".into()),Some((false,false,true)))?;
+            self.native_constructor_prototypes.insert((window,"KeyboardEvent"),prototype);
+            self.put_binding(self.global_environment,"KeyboardEvent".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("KeyboardEvent".into(),(false,true,true));
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);result.map_err(Fault::display)
     }
 
     pub(super) fn event_unforgeable(&mut self,object:usize,owner:u32)->Result<(),Fault> {
