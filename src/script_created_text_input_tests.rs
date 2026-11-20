@@ -366,18 +366,18 @@ fn created_text_input_attribute_adoption_keeps_native_retained_charge_and_combin
     let identity = bridge.state.attributes.len() - 1;
     let retained = bridge.state.retained;
     let qname_bytes = bridge.state.attributes[identity].name.bytes();
-    // Adopting this Attr adds one element QName copy and one byte of retained
-    // native control name. The Attr value itself transfers without duplication.
-    bridge.state.retained_limit = retained + qname_bytes;
+    // Adopting this Attr adds one element QName copy, one owner-index slot
+    // and one byte of retained native control name. The Attr value itself transfers without duplication.
+    bridge.state.retained_limit = retained + qname_bytes + std::mem::size_of::<usize>();
     assert!(bridge.set_attribute_node(node_handle(node), &[Value::Host(handle)]).is_err());
     assert_eq!(bridge.state.retained, retained);
     assert_eq!(bridge.state.attributes[identity].owner, None);
     assert_eq!(bridge.state.attributes[identity].value, "q");
     assert_eq!(bridge.doc.attr(node, "name"), None);
     assert!(!bridge.forms.controls.contains_key(&node));
-    bridge.state.retained_limit = retained + qname_bytes + 1;
+    bridge.state.retained_limit = retained + qname_bytes + std::mem::size_of::<usize>() + 1;
     bridge.set_attribute_node(node_handle(node), &[Value::Host(handle)]).unwrap();
-    assert_eq!(bridge.state.retained, retained + qname_bytes + 1);
+    assert_eq!(bridge.state.retained, retained + qname_bytes + std::mem::size_of::<usize>() + 1);
     assert_eq!(bridge.state.attributes[identity].owner, Some(node));
     assert_eq!(bridge.doc.attr(node, "name"), Some("q"));
     assert_eq!(bridge.forms.controls[&node].name, "q");

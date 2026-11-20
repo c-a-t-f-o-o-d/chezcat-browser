@@ -86,8 +86,9 @@ fn created_checkbox_admission_charges_native_and_attribute_bytes_together() {
         page.state.rebuild(&doc).unwrap();
         let before = Snapshot::capture(&doc, &forms, &page);
         // Incoming Attr already owns its value. Adoption retains the element
-        // name and the checkbox's default plus two editor characters.
-        let growth = "type".len() + "on".len() + 2 * std::mem::size_of::<char>();
+        // name, owner-index slot and the checkbox's default plus two editor
+        // characters.
+        let growth = "type".len() + std::mem::size_of::<usize>() + "on".len() + 2 * std::mem::size_of::<char>();
         match mode {
             "retained" => page.state.retained_limit = before.retained + growth - 1,
             "copy" => page.state.copy_work = 0,

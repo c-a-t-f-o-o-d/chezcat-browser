@@ -193,6 +193,7 @@ pub struct HostCapacities {
     pub event_targets: usize,
     pub animation_frames: usize,
     pub media_tasks: usize,
+    #[cfg(test)]
     pub attribute_identities: usize,
     pub node_lists: usize,
     pub node_list_references: usize,
@@ -208,7 +209,10 @@ pub const BROWSER_HOST: HostCapacities = HostCapacities {
     string_bytes: BROWSER_CAPACITIES.string_bytes, extra_nodes: 16_384,
     retained_bytes: 64 * 1024 * 1024, listeners: 4096, event_type_bytes: 16 * 1024,
     timers: 1024, timer_arguments: BROWSER_CAPACITIES.arguments,
-    timer_bytes: 32 * 1024 * 1024, timer_callbacks: 65_536, created_events: 65_536, event_targets: 65_536, animation_frames: 65_536, media_tasks: 65_536, attribute_identities: 65_536, node_lists: 65_536, node_list_references: 1_048_576,
+    timer_bytes: 32 * 1024 * 1024, timer_callbacks: 65_536, created_events: 65_536, event_targets: 65_536, animation_frames: 65_536, media_tasks: 65_536,
+    #[cfg(test)]
+    attribute_identities: 65_536,
+    node_lists: 65_536, node_list_references: 1_048_576,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
