@@ -129,6 +129,9 @@ impl AttributeName {
     pub fn bytes(&self) -> usize {
         self.qualified.len() + self.namespace.as_ref().map_or(0, |ns| ns.uri.len() + ns.local.len() + ns.prefix.as_ref().map_or(0, String::len))
     }
+    pub(crate) fn owned_bytes(&self)->usize {
+        self.qualified.capacity()+self.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,String::capacity))
+    }
     // Callers charge bytes before cloning retained native metadata.
     pub fn copy(&self) -> Self {
         Self { qualified: self.qualified.clone(), namespace: self.namespace.as_ref().map(|ns|
@@ -145,6 +148,7 @@ pub struct Attribute {
 impl Attribute {
     pub fn unqualified(name: String, value: String) -> Self { Self { name: AttributeName::unqualified(name), value } }
     pub fn bytes(&self) -> usize { self.name.bytes() + self.value.len() }
+    pub(crate) fn owned_bytes(&self)->usize{self.name.owned_bytes()+self.value.capacity()}
 }
 
 #[derive(Debug)]

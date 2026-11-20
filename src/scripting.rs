@@ -906,13 +906,13 @@ impl State {
     }
 
     fn replace_bytes(&mut self, old: usize, new: usize) -> Result<(), String> {
-        self.copies(new)?;
-        let retained = self.retained.saturating_sub(old).saturating_add(new);
-        if retained > self.retained_limit {
-            return Err("DOM retained text/attribute growth limit reached (1 MiB).".into());
-        }
-        self.retained = retained;
-        Ok(())
+        self.replace_storage(old,new,new)
+    }
+    fn replace_storage(&mut self,old:usize,new:usize,work:usize)->Result<(),String>{
+        self.copies(work)?;
+        let retained=self.retained.saturating_sub(old).checked_add(new).ok_or("DOM retained storage accounting overflow.")?;
+        if retained>self.retained_limit{return Err(format!("DOM retained text/attribute growth limit reached ({} bytes total).",self.retained_limit));}
+        self.retained=retained;Ok(())
     }
 
     fn log(&mut self, message: &str) {
@@ -2426,10 +2426,10 @@ impl Bridge<'_> {
             self.prepare_canvas_resize(node, &name, value.as_deref())?
         } else { None };
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
-        let factor = if name.html_is("id") { 2 } else { 1 };
-        let old = slot.map_or(0, |slot| attrs[slot].name.bytes() + attrs[slot].value.len() * factor);
+        let old_id=if name.html_is("id"){let NodeKind::Element{id,..}=&self.doc.nodes[node].kind else{unreachable!()};id.as_ref().map_or(0,String::capacity)}else{0};
+        let old = slot.map_or(0, |slot| attrs[slot].owned_bytes()).checked_add(old_id).ok_or("Attribute old payload overflow.")?;
         // Existing expanded names retain the original QName/prefix and order.
-        let new = value.as_ref().map_or(0, |value| value.len() * factor + slot.map_or_else(|| name.bytes(), |slot| attrs[slot].name.bytes()));
+        let new = value.as_ref().map_or(0, |value| value.capacity() + slot.map_or_else(|| name.owned_bytes(), |slot| attrs[slot].name.owned_bytes()));
         let detached_attr = if value.is_none() {
             self.state.attribute_lookup_work()?;
             let position=self.state.attribute_position(node,&name).ok();
@@ -2442,13 +2442,19 @@ impl Bridge<'_> {
             value.as_deref().map(script_clone_node::copy_text).transpose()?
         } else {None};
         let native_bytes = input.as_ref().map_or(0, forms::InputPlan::retained_bytes);
-        let new_bytes = new.checked_add(retained_value).and_then(|bytes|bytes.checked_add(native_bytes))
+        let new_bytes = new.checked_add(copied_id.as_ref().map_or(0,String::capacity)).and_then(|bytes|bytes.checked_add(retained_value)).and_then(|bytes|bytes.checked_add(native_bytes))
             .ok_or("Attribute/native INPUT retained payload overflow.")?;
         let occupied=self.state.retained.saturating_sub(old).checked_add(new_bytes).ok_or("Attribute retained payload overflow.")?;
         let available=self.state.retained_limit.checked_sub(occupied).ok_or("DOM retained attribute backing allowance exhausted.")?;
         let (replacement,backing)=if slot.is_none()&&value.is_some(){retained_storage::grow(attrs,1,available)?}else{(None,0)};
         if replacement.is_some(){self.state.copies(attrs.len()*size_of::<crate::html::Attribute>())?;}
-        self.state.replace_bytes(old,new_bytes.checked_add(backing).ok_or("Attribute retained backing overflow.")?)?;
+        // Spare capacity is retained memory, not copied text. Keep payload
+        // work and newly initialized records separate from allocation bytes.
+        let payload_work=value.as_ref().map_or(0,|value|value.len()+slot.map_or_else(||name.bytes(),|slot|attrs[slot].name.bytes()));
+        let detached_work=if detached_attr.is_some(){slot.map_or(0,|slot|attrs[slot].value.len())}else{0};
+        let record_work=if slot.is_none()&&value.is_some(){size_of::<crate::html::Attribute>()}else{0};
+        let work=payload_work.checked_add(copied_id.as_ref().map_or(0,String::len)).and_then(|bytes|bytes.checked_add(detached_work)).and_then(|bytes|bytes.checked_add(native_bytes)).and_then(|bytes|bytes.checked_add(record_work)).ok_or("Attribute payload work overflow.")?;
+        self.state.replace_storage(old,new_bytes.checked_add(backing).ok_or("Attribute retained backing overflow.")?,work)?;
         let NodeKind::Element { attrs, id, .. } = &mut self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
@@ -6015,18 +6021,21 @@ fn node_bytes(node: &Node) -> usize {
         NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
         NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
         NodeKind::Element { id, attrs, .. } => {
-            id.as_ref().map_or(0, String::len)
+            id.as_ref().map_or(0, String::capacity)
                 + attrs.capacity()*size_of::<crate::html::Attribute>()
-                + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
+                + attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>()
         }
     }
 }
 fn copied_node_bytes(node:&Node)->usize{
-    let bytes=node_bytes(node);
-    if let NodeKind::Element{attrs,..}=&node.kind {bytes-(attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()}else{bytes}
+    if let NodeKind::Element{attrs,id,..}=&node.kind {
+        id.as_ref().map_or(0,String::len)+attrs.len()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
+    }else{node_bytes(node)}
 }
 fn copied_attribute_extra(kind:&NodeKind)->usize{
-    if let NodeKind::Element{attrs,..}=kind {(attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()}else{0}
+    if let NodeKind::Element{attrs,id,..}=kind {
+        (attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()+attrs.iter().map(|attr|attr.owned_bytes()-attr.bytes()).sum::<usize>()+id.as_ref().map_or(0,|text|text.capacity()-text.len())
+    }else{0}
 }
 fn document_bytes(doc: &Document) -> usize {
     doc.title.len() + doc.nodes.iter().map(node_bytes).sum::<usize>()
@@ -7882,3 +7891,7 @@ mod canvas_protocol_tests;
 #[cfg(test)]
 #[path="script_element_attribute_storage_tests.rs"]
 mod element_attribute_storage_tests;
+
+#[cfg(test)]
+#[path="script_attribute_payload_tests.rs"]
+mod attribute_payload_tests;

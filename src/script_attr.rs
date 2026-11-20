@@ -18,7 +18,7 @@ pub(super) fn index(handle: u32) -> Option<usize> {
 }
 
 fn owned_name_bytes(name:&AttributeName)->usize {
-    name.qualified.capacity()+name.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,String::capacity))
+    name.owned_bytes()
 }
 fn copy_text(text:&str)->Result<String,String>{
     let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Attr text storage reservation failed.")?;
@@ -133,19 +133,18 @@ impl Bridge<'_> {
         self.state.attribute_lookup_work()?;
         let position=self.state.attribute_position(node,&element_name);
         let old_id=position.ok().map(|position|self.state.attached_attributes[position]);
-        let (old_name,old_value)=if let Some(slot)=slot {
-            let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};let old=&attrs[slot];
+        let (old_name,old_value,old_name_storage,old_value_storage,old_id_storage)=if let Some(slot)=slot {
+            let NodeKind::Element{attrs,id,..}=&self.doc.nodes[node].kind else {unreachable!()};let old=&attrs[slot];
             self.state.copies(old.name.bytes().checked_add(old.value.len()).ok_or("Attribute copy accounting overflow.")?)?;
-            (Some(copy_name(&old.name)?),copy_text(&old.value)?)
-        } else {(None,String::new())};
+            (Some(copy_name(&old.name)?),copy_text(&old.value)?,old.name.owned_bytes(),old.value.capacity(),if element_name.html_is("id"){id.as_ref().map_or(0,String::capacity)}else{0})
+        } else {(None,String::new(),0,0,0)};
         let new_old_identity=slot.is_some()&&old_id.is_none();
-        let old_name_bytes=old_name.as_ref().map_or(0,AttributeName::bytes);
-        let removed=value_storage.checked_add(old_name_bytes).ok_or("Attribute accounting overflow.")?;
-        let added=old_value.capacity().checked_add(if slot.is_some(){name_bytes}else{0}).and_then(|n|n.checked_add(if new_old_identity{old_name.as_ref().map_or(0,owned_name_bytes)}else{0})).ok_or("Attribute accounting overflow.")?;
+        let removed=value_storage.checked_add(old_name_storage).ok_or("Attribute accounting overflow.")?;
+        let copied_name_storage=element_name.owned_bytes();
+        let added=old_value.capacity().checked_add(if slot.is_some(){copied_name_storage}else{0}).and_then(|n|n.checked_add(if new_old_identity{old_name.as_ref().map_or(0,owned_name_bytes)}else{0})).ok_or("Attribute accounting overflow.")?;
         let retained_before=self.state.retained;
-        let factor=if element_name.html_is("id"){2}else{1};
-        let public_old=if slot.is_some(){old_value.len().checked_mul(factor).and_then(|n|n.checked_add(old_name_bytes)).ok_or("Attribute accounting overflow.")?}else{0};
-        let public_new=value_bytes.checked_mul(factor).and_then(|n|n.checked_add(if slot.is_some(){old_name_bytes}else{name_bytes})).ok_or("Attribute accounting overflow.")?;
+        let public_old=old_value_storage.checked_add(old_name_storage).and_then(|bytes|bytes.checked_add(old_id_storage)).ok_or("Attribute accounting overflow.")?;
+        let public_new=value.capacity().checked_add(if slot.is_some(){old_name_storage}else{write_name.owned_bytes()}).and_then(|bytes|bytes.checked_add(if element_name.html_is("id"){value.len()}else{0})).ok_or("Attribute accounting overflow.")?;
         let total_removed=removed.checked_add(public_old).ok_or("Attribute accounting overflow.")?;
         let total_added=added.checked_add(public_new).ok_or("Attribute accounting overflow.")?;
         let retained_after=if total_added>=total_removed {retained_before.checked_add(total_added-total_removed)}else{retained_before.checked_sub(total_removed-total_added)}.ok_or("Attribute retained accounting overflow/underflow.")?;
@@ -328,7 +327,7 @@ impl Bridge<'_> {
             let name = self.state.attributes[id].name.copy();
             self.public_attribute(owner, name, Some(value))?;
         } else {
-            self.state.replace_bytes(self.state.attributes[id].value.capacity(), value.capacity())?;
+            self.state.replace_storage(self.state.attributes[id].value.capacity(), value.capacity(),value.len())?;
             self.state.attributes[id].value = value;
             self.state.dom_committed();
         }

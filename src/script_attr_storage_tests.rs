@@ -57,24 +57,24 @@ fn browser_attr_registry_and_owner_index_exact_bundle_refusal_and_copy_recovery_
 }
 #[test]
 fn browser_attr_detach_reserves_actual_value_capacity_and_reattach_releases_detached_backing() {
-    let(mut doc,mut forms,mut page)=page("<html><body><p title=old></p></body></html>");
+    let(mut doc,mut forms,mut page)=page("<html><body><p title='a&amp;b'></p></body></html>");
     let node=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{tag,..} if tag=="p")).unwrap();
-    let NodeKind::Element{attrs,..}=&mut doc.nodes[node].kind else{unreachable!()};attrs[0].value.reserve_exact(97);
+    let NodeKind::Element{attrs,..}=&doc.nodes[node].kind else{unreachable!()};
     let capacity=attrs[0].value.capacity();assert!(capacity>attrs[0].value.len());
     let attr=handle(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.lookup_attribute_node_at(node,Some(0)).unwrap());
     let before=page.state.retained;let limit=page.state.retained_limit;
-    page.state.retained_limit=before;
+    page.state.retained_limit=before-"title".len()-1;
     assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.remove_attribute_node(node_handle(node),&[Value::Host(attr)]).is_err());
-    assert_eq!(doc.attr(node,"title"),Some("old"));assert_eq!(page.state.attached_attributes.len(),1);assert_eq!(page.state.retained,before);
+    assert_eq!(doc.attr(node,"title"),Some("a&b"));assert_eq!(page.state.attached_attributes.len(),1);assert_eq!(page.state.retained,before);
     page.state.retained_limit=limit;page.begin_job();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     bridge.remove_attribute_node(node_handle(node),&[Value::Host(attr)]).unwrap();
-    assert_eq!(bridge.state.retained,before-"title".len()-"old".len()+capacity);assert!(bridge.state.attached_attributes.is_empty());
+    assert_eq!(bridge.state.retained,before-"title".len());assert!(bridge.state.attached_attributes.is_empty());
     assert_eq!(bridge.state.attributes[0].value.capacity(),capacity);
     bridge.attr_set(attr,"value",Value::String("new".into())).unwrap();
     bridge.set_attribute_node(node_handle(node),&[Value::Host(attr)]).unwrap();
     assert_eq!(bridge.doc.attr(node,"title"),Some("new"));assert_eq!(bridge.state.attributes[0].value.capacity(),0);
-    assert_eq!(bridge.state.retained,before);assert_eq!(bridge.state.attached_attributes.as_slice(),[0]);
+    assert_eq!(bridge.state.retained,before-capacity+"new".len());assert_eq!(bridge.state.attached_attributes.as_slice(),[0]);
 }
 #[test]
 fn browser_attr_index_preserves_expanded_names_and_real_replacement_identity() {
