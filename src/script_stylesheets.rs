@@ -56,6 +56,7 @@ pub(super) struct StylesheetState {
     pub source_bytes: usize,
     pub source_rules: usize,
     pub sources: HashMap<usize, crate::css::StylesheetUsage>,
+    pub source_capacity: usize,
     pub sources_prepared: bool,
     pub source_setup_error: Option<String>,
     pub in_flight: usize,
@@ -86,7 +87,7 @@ pub(super) fn bare_fragment_link(doc: &Document, node: usize) -> bool {
 
 impl StylesheetState {
     pub(super) fn source_metadata_bytes(&self) -> usize {
-        self.sources.capacity() * std::mem::size_of::<(usize, crate::css::StylesheetUsage)>()
+        self.source_capacity * std::mem::size_of::<(usize, crate::css::StylesheetUsage)>()
     }
 
     fn retire_source(&mut self, node: usize) {
@@ -137,17 +138,23 @@ impl State {
         let record = crate::css::StylesheetUsage { bytes: total.bytes - used.bytes, rules: total.rules - used.rules };
         if !self.stylesheets.sources.contains_key(&node) && self.stylesheets.sources.len() == self.stylesheets.sources.capacity() {
             let slot = std::mem::size_of::<(usize, crate::css::StylesheetUsage)>();
-            let before = self.stylesheets.sources.capacity();
+            // HashMap deletion can lower insertion capacity without releasing
+            // its allocation. Rehash that same reservation before growing it.
+            let before = self.stylesheets.source_capacity;
+            self.work(before.saturating_mul(2))?;
             let available = self.retained_limit.saturating_sub(self.retained);
-            let growth = before.max(4).min(available / slot);
-            if growth == 0 { return Err("Stylesheet source ownership storage exhausted.".into()); }
-            let capacity = before.checked_add(growth).ok_or("Stylesheet ownership capacity overflow.")?;
+            let capacity = if self.stylesheets.sources.len() < before { before } else {
+                let growth = before.max(4).min(available / slot);
+                if growth == 0 { return Err("Stylesheet source ownership storage exhausted.".into()); }
+                before.checked_add(growth).ok_or("Stylesheet ownership capacity overflow.")?
+            };
             let mut replacement = HashMap::new();
             replacement.try_reserve(capacity).map_err(|_| "Cannot allocate stylesheet source ownership.")?;
             let added = (replacement.capacity() - before).checked_mul(slot).ok_or("Stylesheet ownership size overflow.")?;
             let retained = self.retained.checked_add(added).filter(|bytes| *bytes <= self.retained_limit)
                 .ok_or_else(|| format!("Stylesheet source ownership exceeds host retained storage ({} bytes).", self.retained_limit))?;
             replacement.extend(self.stylesheets.sources.drain());
+            self.stylesheets.source_capacity = replacement.capacity();
             self.stylesheets.sources = replacement;
             self.retained = retained;
         }
@@ -182,6 +189,7 @@ impl Page {
         self.state.stylesheets.sources_prepared = true;
         match result {
             Ok((records, total)) => {
+                self.state.stylesheets.source_capacity = records.capacity();
                 self.state.stylesheets.sources = records;
                 self.state.stylesheets.source_bytes = total.bytes;
                 self.state.stylesheets.source_rules = total.rules;
@@ -634,6 +642,32 @@ mod inline_connection_tests {
         page.state.stylesheets.retire_source(usize::MAX);
         assert_eq!(page.state.stylesheets.source_bytes, before.1);
         assert_eq!(page.state.stylesheets.source_rules, before.2);
+    }
+
+    #[test]
+    fn stylesheet_source_churn_reuses_the_owned_map_reservation_without_spare_bytes() {
+        let mut doc = crate::html::parse("<head></head><body></body>");
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::for_test();
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        for node in 0..256 {
+            let (record, total) = page.state.prepare_stylesheet_source(node, "a{color:red}", doc.stylesheet_limits).unwrap();
+            page.state.commit_stylesheet_source(node, record, total);
+        }
+        let retained = page.state.retained;
+        let metadata = page.state.stylesheets.source_metadata_bytes();
+        page.state.retained_limit = retained;
+        for node in 0..2048 {
+            if node % 128 == 0 { page.begin_job(); }
+            page.state.stylesheets.retire_source(node);
+            let (record, total) = page.state.prepare_stylesheet_source(node + 256, "a{color:red}", doc.stylesheet_limits).unwrap();
+            page.state.commit_stylesheet_source(node + 256, record, total);
+        }
+        assert_eq!(page.state.stylesheets.source_rules, 256);
+        assert_eq!(page.state.stylesheets.source_bytes, 256 * "a{color:red}".len());
+        assert_eq!(page.state.retained, retained);
+        assert_eq!(page.state.stylesheets.source_metadata_bytes(), metadata);
     }
 
     #[test]
