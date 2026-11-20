@@ -4029,20 +4029,40 @@ document.title='checked SVG attached';
 }
 
 #[test]
+fn template_svg_style_preserves_actual_attribute_aliases_and_activation_guards() {
+    let(mut doc,mut forms,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r#"
+var seed=document.createElement('template');seed.innerHTML='<svg id="styled" style="display:none; width:24px"><rect width="2" height="3"/></svg>';
+var content=seed.content,svg=content.firstChild,style=svg.getAttributeNode('style'),map=svg.attributes,children=svg.childNodes;
+if(map.getNamedItem('style')!==style||style.ownerElement!==svg)throw 'real inert SVG style Attr';
+document.getElementById('mount').appendChild(content);
+if(!svg.isConnected||svg.ownerDocument!==document||style.ownerDocument!==document||style.ownerElement!==svg||style.value!=='display:none; width:24px'||svg.childNodes!==children||svg.namespaceURI!=='http://www.w3.org/2000/svg'||content.childNodes.length!==0)throw 'genuine SVG style transfer';
+var blocked=document.createElement('template');blocked.innerHTML='<svg style="color:url(/guard)"><rect width="1" height="1"/></svg>';
+var donor=blocked.content,unsafe=donor.firstChild,owner=unsafe.ownerDocument,mount=document.getElementById('mount'),view=mount.childNodes;
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let nodes=doc.nodes.len();let generation=page.state.dom_commits;let retained=page.state.retained;
+    let failed=page.console_eval(&mut doc,&mut forms,"mount.appendChild(donor);");
+    assert_eq!(failed.errors,1,"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom_commits,generation);assert_eq!(page.state.retained,retained);
+    assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());let(added,removed,changed)=page.take_image_changes();assert!(added.is_empty()&&removed.is_empty()&&changed.is_empty());
+    let recovered=page.console_eval(&mut doc,&mut forms,"if(donor.firstChild!==unsafe||unsafe.ownerDocument!==owner||unsafe.isConnected||mount.childNodes!==view||view.length!==1||view[0]!==svg||unsafe.getAttribute('style')!=='color:url(/guard)')throw 'SVG style refusal leaked';unsafe.removeAttribute('style');mount.appendChild(donor);if(!unsafe.isConnected||unsafe.ownerDocument!==document||donor.childNodes.length!==0||view.length!==2)throw 'SVG style safe recovery';");
+    assert_eq!(recovered.errors,0,"{}",page.report());
+}
+
+#[test]
 fn template_svg_keeps_checked_inert_namespaces_and_rolls_back_unsafe_markup() {
     let (mut doc, mut forms, mut page, result) = page("<html><body><main id=app></main></body></html>", &[r#"
 var template=document.createElement('template'), uri='http://www.w3.org/2000/svg';
-template.innerHTML='<fixture-atlas><svg xmlns="http://www.w3.org/2000/svg"><defs><g id="mark"><path d="M1 2 L3 4"/></g><g id="next"><rect x="1" y="2" width="3" height="4"/></g></defs></svg><span id="tail"></span></fixture-atlas>';
+template.innerHTML='<fixture-atlas><svg xmlns="http://www.w3.org/2000/svg" style="display: none; width: 24px"><defs><g id="mark"><path d="M1 2 L3 4"/></g><g id="next"><rect x="1" y="2" width="3" height="4"/></g></defs></svg><span id="tail"></span></fixture-atlas>';
 var content=template.content, host=content.firstChild, svg=host.firstChild, defs=svg.firstChild;
 var mark=defs.firstChild, path=mark.firstChild, owner=content.ownerDocument;
 if(svg.nodeName!=='svg'||!(svg instanceof SVGElement)||svg.namespaceURI!==uri||
    defs.namespaceURI!==uri||mark.namespaceURI!==uri||path.namespaceURI!==uri||
-   path.getAttribute('d')!=='M1 2 L3 4'||mark.nextSibling.getAttribute('id')!=='next'||
+   path.getAttribute('d')!=='M1 2 L3 4'||svg.getAttribute('style')!=='display: none; width: 24px'||mark.nextSibling.getAttribute('id')!=='next'||
    host.lastChild.namespaceURI!=='http://www.w3.org/1999/xhtml'||path.ownerDocument!==owner||
    owner.defaultView!==null||path.isConnected||document.querySelector('svg')!==null)
     throw 'actual private SVG topology';
 var copy=content.cloneNode(true).firstChild.firstChild;
-if(copy===svg||copy.namespaceURI!==uri||copy.firstChild.firstChild.firstChild===path||
+if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttribute('style')||copy.firstChild.firstChild.firstChild===path||
    template.innerHTML.indexOf('<defs><g id="mark"><path')<0)
     throw 'retained SVG serialization or clone';
 "#]);
