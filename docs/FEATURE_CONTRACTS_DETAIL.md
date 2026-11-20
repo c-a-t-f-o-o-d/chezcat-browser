@@ -308,10 +308,13 @@ rendered box, an intrinsic/flex item or a link hit. Original App controls verify
 real nodes with preserved text/layout/hits and resource ownership.
 
 The main document exposes the Comment constructor and its CharacterData-based
-prototype. The tokenizer still omits parsed comments, and checked fragment
-parsing still refuses comments. Full CharacterData, DocumentType, template-content
-trees and child-context factories are outside this slice.
-Loaded-resource, origin and cancellation boundaries remain.
+prototype. The shared tokenizer now retains parsed comments in documents,
+inert documents and checked fragments. Literal data, newline preprocessing,
+closing/EOF behavior, node admission, SVG provenance and real clone/import/splice
+ownership are covered by original connected controls. Full CharacterData and
+DocumentType surfaces, template activation and child-context factories retain
+their separate partial contracts. Loaded-resource, origin and cancellation
+boundaries remain.
 
 Existing native RegExp exec/test paths now perform actual input ToString, using
 String-preferred conversion with ordered symbol/ordinary getters and callbacks.
@@ -486,8 +489,9 @@ framework initialization is claimed.
 
 Checked ordinary HTML fragments admit a finite select/option/optgroup grammar,
 including conventional omitted endings, normal attribute preprocessing and real
-single-select defaults. Unsupported recovery, rich descendants, foreign content,
-comments, resources and parser bounds retain explicit refusals. Pure parser
+single-select defaults. Comments retain their DOM positions without entering
+native option labels or values. Unsupported recovery, rich descendants, foreign
+content, resources and parser bounds retain explicit refusals. Pure parser
 select contexts do not enable mutation inside an existing native control.
 
 New native controls are prepared independently with genuine option/group node

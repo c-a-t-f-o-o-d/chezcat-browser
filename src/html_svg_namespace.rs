@@ -45,7 +45,7 @@ fn supported_attributes(tag: &Tag) -> bool {
 
 pub(super) fn publish(nodes: &mut [Node]) {
     // Arena allocation follows source order. Each completed island owns a
-    // disjoint slice, including only its elements and whitespace text.
+    // disjoint slice, including its elements and non-rendering text/comment nodes.
     for node in nodes {
         if let NodeKind::Element { attrs, .. } = &mut node.kind {
             node.namespace = Namespace::Svg;
@@ -101,7 +101,7 @@ mod tests {
     fn svg_namespace_uncertain_content_cannot_publish_an_earlier_valid_prefix() {
         for bad in ["<foreignObject></foreignObject>", "<use></use>", "<script></script>", "<math></math>",
             "<g><circle></g>",
-            "<g id='a'id='b'></g>", "<g//>", "<g></g/>", "</missing>", "<!--comment-->", "<![CDATA[x]]>"] {
+            "<g id='a'id='b'></g>", "<g//>", "<g></g/>", "</missing>", "<![CDATA[x]]>"] {
             let doc = parse(&format!("<body><svg id=root><circle id='first'/>{bad}</svg><p id=next></p></body>"));
             assert_eq!(node(&doc, "root").namespace, Namespace::UnknownForeign, "{bad}");
             assert_eq!(node(&doc, "first").namespace, Namespace::UnknownForeign, "{bad}");

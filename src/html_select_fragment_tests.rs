@@ -78,8 +78,7 @@ fn select_fragment_nonconventional_recovery_resources_and_existing_bounds_still_
         "<select><div>rich descendant</div></select>", "<select><option><b>rich</b></option></select>",
         "<select><script>injected()</script></select>", "<select><input value=x></select>",
         "<select><option>x</div>", "<select><optgroup></option></select>",
-        "<select><option>x</select><table><tr></tr></table>", "<select></select><svg></svg>",
-        "<select><option>x<!--unsupported--></option></select>"] {
+        "<select><option>x</select><table><tr></tr></table>", "<select></select><svg></svg>"] {
         assert!(parse_fragment(source, "div", true).is_err(), "{source}");
     }
     assert!(parse_fragment(&format!("<select>{}</select>", "<option>x".repeat(MAX_NODES)), "div", true).is_err());

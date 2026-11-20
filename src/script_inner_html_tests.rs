@@ -118,7 +118,7 @@ fn inner_html_context_and_parser_limits_do_not_commit_a_prefix() {
     for context in ["table", "tr", "select", "svg"] {
         assert!(crate::html::parse_fragment("<b>x</b>", context, true).is_err(), "{context}");
     }
-    for source in ["<!--comment-->","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><p>x</b>y","<p><b>x<div>y","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
+    for source in ["<!bogus>","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><p>x</b>y","<p><b>x<div>y","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
     }
     let vt = crate::html::parse_fragment("<img src\u{b}='/not-a-source'>", "div", true).unwrap();
@@ -236,4 +236,49 @@ fn inner_html_rejects_old_stylesheet_context_without_losing_its_generation() {
     let outcome = page.complete_dynamic_stylesheet(&mut doc, &mut forms, &mut styles, &pending[0], Ok("#root{color:red}".into()));
     assert_eq!(outcome.errors, 0, "{}", page.report());
     assert_eq!(styles.get(&old).map(String::as_str), Some("#root{color:red}"));
+}
+
+#[test]
+fn fragment_comments_inner_html_template_import_clone_and_live_views_keep_real_mixed_nodes(){
+    let(doc,forms,page,outcome)=run("<html><body><input id=editor value=seed><div id=mount></div></body></html>",r##"
+var editor=document.getElementById('editor');editor.value='kept edit';
+var target=document.createElement('div');target.innerHTML='before<!-- raw &amp; <img src="/never.ppm"> --><a href="#target" on-click="ordinary">word</a><!--end-->after';
+var list=target.childNodes,view=target.children,comment=list[1];
+if(list.length!==5||view.length!==1||comment.nodeType!==8||comment.data!==' raw &amp; <img src="/never.ppm"> '||comment.parentNode!==target||comment.ownerDocument!==document||target.textContent!=='beforewordafter')throw 'real parsed mixed children';
+var cloned=target.cloneNode(true);if(cloned.childNodes[1]===comment||cloned.childNodes[1].data!==comment.data||cloned.children[0].getAttribute('on-click')!=='ordinary')throw 'real Comment clone';
+var template=document.createElement('template');template.innerHTML=target.innerHTML;var source=template.content,sourceList=source.childNodes,sourceComment=sourceList[1];
+if(sourceList.length!==5||source.children.length!==1||sourceComment.nodeType!==8||sourceComment.data!==comment.data||sourceComment.parentNode!==source||sourceComment.ownerDocument!==source.ownerDocument)throw 'real inert Comment';
+var imported=document.importNode(source,true),donor=imported.childNodes,children=imported.children,copy=donor[1],link=children[0];
+if(copy===sourceComment||copy.nodeType!==8||copy.data!==sourceComment.data||copy.ownerDocument!==document||copy.parentNode!==imported||copy.previousSibling!==donor[0])throw 'real Comment import';
+document.getElementById('mount').appendChild(imported);
+if(donor.length!==0||children.length!==0||copy.parentNode!==document.getElementById('mount')||!copy.isConnected||sourceComment.isConnected||sourceList[1]!==sourceComment||document.querySelectorAll('img').length!==0||editor.value!=='kept edit')throw 'mixed splice owns real nodes and editor';
+document.title='real parsed Comments';
+"##);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"real parsed Comments");
+    assert!(!page.state.images.has_changes());assert!(!doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element{tag,..}if matches!(tag.as_str(),"img"|"script"))));
+    assert_eq!(forms.controls.len(),1);
+}
+#[test]
+fn fragment_comments_failed_later_admission_keeps_tree_native_editor_and_resources_atomic(){
+    let(mut doc,mut forms,mut page,outcome)=run("<html><body><input id=editor value=seed><div id=mount><span>old</span></div></body></html>","document.getElementById('editor').value='kept edit';");assert_eq!(outcome.errors,0);
+    let mount=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("mount")).unwrap();let before=doc.nodes.len();let children=doc.nodes[mount].children.clone();let retained=page.state.retained;
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    for markup in ["<!--prefix--><p onclick='bad()'>no</p>","<!--prefix--><iframe></iframe>","<!--prefix--><script><!--unsupported escaped data--></script>"]{
+        assert!(bridge.set_inner_html(mount,markup).is_err());assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.state.retained,retained);assert!(!bridge.state.images.has_changes());
+    }
+    bridge.state.retained_limit=retained;assert!(bridge.set_inner_html(mount,"<!--needs real storage-->").is_err());assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.state.retained,retained);
+}
+
+#[test]
+fn fragment_comments_native_select_markers_do_not_become_option_values_or_break_editors(){
+    let(doc,forms,page,outcome)=run("<html><body><form id=f><input id=editor value=seed><div id=mount></div></form></body></html>",r#"
+var editor=document.getElementById('editor');editor.value='kept edit';var mount=document.getElementById('mount');
+mount.innerHTML='<!--before--><select id="choice" name="choice"><!--inside--><option>one<!--not label-->two</option><!--after--></select>';
+var select=document.getElementById('choice'),option=select.children[0];
+if(select.childElementCount!==1||select.value!=='onetwo'||select.selectedIndex!==0||option.textContent!=='onetwo'||select.childNodes.length!==3||select.firstChild.nodeType!==8||option.childNodes.length!==3||option.childNodes[1].data!=='not label'||editor.value!=='kept edit')throw 'real native select mixed nodes';
+document.title='native select comment markers';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"native select comment markers");assert_eq!(forms.controls.len(),2);assert!(!page.state.images.has_changes());
+    let choice=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("choice")).unwrap();let options=&forms.controls[&choice].select.as_ref().unwrap().options;
+    assert_eq!(options.len(),1);assert_eq!(options[0].label,"onetwo");assert_eq!(options[0].value,"onetwo");
 }
