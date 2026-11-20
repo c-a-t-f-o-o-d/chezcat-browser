@@ -260,6 +260,8 @@ pub struct Outcome {
     pub errors: usize,
 }
 
+#[path = "script_identity_map.rs"]
+mod identity_map;
 #[path = "script_retained_storage.rs"]
 mod retained_storage;
 

@@ -353,10 +353,20 @@ impl Bridge<'_> {
         self.doc.nonce_unsafe_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve fragment nonce provenance.")?;
         self.state.dom.created.try_reserve(plan.len()).map_err(|_| "Cannot reserve promoted node identities.")?;
         self.state.detached_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve detached promotion identities.")?;
+        self.state.work(plan.len().saturating_mul(self.state.dom.inert_child_lists.lookup_work()))?;
         let child_lists = plan.iter().filter(|item|
             self.state.dom.inert_child_lists.contains_key(&node_handle(item.index))).count();
-        self.state.dom.child_lists.try_reserve(child_lists).map_err(|_| "Cannot reserve promoted child list identities.")?;
-        retained = retained.saturating_add(child_lists.saturating_mul(size_of::<usize>() - size_of::<u32>()));
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(retained).ok_or("DOM retained promotion allowance exhausted.")?;
+        let (child_map,added)=self.state.dom.child_lists.prepare(child_lists,available)?;
+        // Admit conservative movement for every transferred entry before any
+        // native node or index is published. Both old and new map backing stay
+        // charged; removing entries leaves reusable inert-index capacity.
+        let insert_work=child_lists.saturating_mul(self.state.dom.child_lists.len().saturating_add(child_lists).saturating_add(self.state.dom.child_lists.lookup_work()));
+        let remove_work=child_lists.saturating_mul(self.state.dom.inert_child_lists.len().saturating_add(self.state.dom.inert_child_lists.lookup_work()));
+        self.state.work(insert_work.saturating_add(remove_work))?;
+        let grow_copy=if child_map.is_some(){self.state.dom.child_lists.len()}else{0};
+        self.state.copies(self.state.dom.child_lists.movement_bytes(insert_work.saturating_add(grow_copy)).saturating_add(self.state.dom.inert_child_lists.movement_bytes(remove_work)))?;
+        retained=retained.checked_add(added).ok_or("Promoted child-list storage overflow.")?;
         let connected = self.state.dom.connected[parent];
         // Populate checked slots for native CSS and caption preflight while the
         // inert routing still owns them. No renderer or script observes these
@@ -381,6 +391,7 @@ impl Bridge<'_> {
                 return Err(error);
             }
         };
+        self.state.dom.child_lists.commit(child_map);
         self.state.inert_documents.node_mut(fragment).unwrap().children.clear();
         self.doc.nodes[parent].children.splice(position..position, roots);
         for item in plan {
