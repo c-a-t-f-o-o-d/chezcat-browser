@@ -445,6 +445,14 @@ impl Bridge<'_> {
             let Some(Value::Host(handle)) = args.first() else {
                 return Err(Exception("TypeError", "A genuine Node is required.".into()));
             };
+            if *handle != DOCUMENT
+                && !node_index(*handle).is_some_and(|node| self.dom_accessible(node))
+                && self.inert_node_type(*handle).is_none()
+                && !self.attr_receiver(*handle)
+                && self.frame_node_interface(*handle).is_none()
+            {
+                return Err(Exception("TypeError", "A genuine Node is required.".into()));
+            }
             let node = self
                 .range_node(*handle)
                 .map_err(|error| Exception("NotSupportedError", error))?;

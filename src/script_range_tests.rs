@@ -124,6 +124,9 @@ fn dom_range_conversion_order_dom_errors_and_real_receiver_refusals() {
 var r=new Range(),offsetCalls=0;
 try{r.setStart({}, {valueOf:function(){offsetCalls++;return 0;}});throw 'missing bad Node';}catch(e){if(!(e instanceof TypeError))throw e;}
 if(offsetCalls)throw 'node conversion must precede numeric conversion';
+for(var fake of [navigator,location,r]){try{r.selectNodeContents(fake);throw 'missing wrong native brand';}catch(e){if(!(e instanceof TypeError))throw e;}}
+var attr=document.createAttribute('title');try{r.setStart(attr,{valueOf:function(){offsetCalls++;return 0;}});throw 'missing unsupported Attr endpoint';}catch(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw e;}
+if(offsetCalls!==1)throw 'genuine unsupported Node conversion order';
 r.selectNodeContents(a.firstChild);
 try{r.setEnd(a.firstChild,99);throw 'missing offset refusal';}catch(e){if(!(e instanceof DOMException)||e.name!=='IndexSizeError')throw e;}
 if(r.endOffset!==4)throw 'offset error mutated range';

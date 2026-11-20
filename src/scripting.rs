@@ -3608,7 +3608,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="cancelAnimationFrame" && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("SecurityError","Animation capability is unavailable while scripting is disabled.".into()));}
         if object==WINDOW && method=="getComputedStyle" && next_index==1 {self.validate_computed_target(args.first())?;}
         if crate::javascript::range_interface::node_argument(method) && next_index==1 {
-            if !matches!(args.first(),Some(Value::Host(handle)) if *handle==DOCUMENT || node_index(*handle).is_some_and(|node|self.dom_accessible(node)) || self.inert_node_type(*handle).is_some() || self.frame_node_interface(*handle).is_some()) {
+            if !matches!(args.first(),Some(Value::Host(handle)) if *handle==DOCUMENT || node_index(*handle).is_some_and(|node|self.dom_accessible(node)) || self.inert_node_type(*handle).is_some() || self.attr_receiver(*handle) || self.frame_node_interface(*handle).is_some()) {
                 return Err(("TypeError","A genuine Node is required for a Range boundary.".into()));
             }
         }
