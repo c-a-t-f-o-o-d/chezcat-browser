@@ -17,6 +17,9 @@ mod storage_tests;
 #[cfg(test)]
 #[path = "script_template_identity_storage_tests.rs"]
 mod template_identity_storage_tests;
+#[cfg(test)]
+#[path = "script_adopted_storage_tests.rs"]
+mod adopted_storage_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
@@ -25,7 +28,7 @@ pub(super) const HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
 #[derive(Default)]
 pub(super) struct Arena {
     entries: Vec<Entry>,
-    adopted: HashMap<u32, InertNode>,
+    adopted: identity_map::IdentityMap<u32, InertNode>,
     generated: Vec<GeneratedNode>,
     template_documents: identity_map::IdentityMap<u32>,
     template_contents: identity_map::IdentityMap<u32>,
@@ -102,6 +105,7 @@ impl Arena {
         self.entries.capacity() * size_of::<Entry>()
             + self.generated.capacity() * size_of::<GeneratedNode>()
             + self.template_documents.storage_bytes() + self.template_contents.storage_bytes()
+            + self.adopted.storage_bytes()
     }
 
     fn entry(&self, handle: u32) -> Option<&Entry> {
@@ -315,11 +319,14 @@ impl Bridge<'_> {
         let mut indices = Vec::new();
         let mut stylesheet = None;
         let mut retained = 0usize;
+        let mut released = 0usize;
         while let Some((handle, parent, depth)) = pending.pop() {
             if depth > dom_tree::MAX_DOM_DEPTH { return Err("Inert fragment insertion exceeds DOM depth.".into()); }
             self.state.work(1)?;
-            let (_, source, index) = self.parked_template_source(handle)
+            let (inert, source, index) = self.parked_template_source(handle)
                 .ok_or("Inert fragment contains unsupported active markup.")?;
+            released = inert.children.capacity().checked_mul(size_of::<u32>())
+                .and_then(|bytes| released.checked_add(bytes)).ok_or("Promoted inert child-link refund overflow.")?;
             let raw = Rc::clone(&source.node);
             let unsafe_nonce = source.unsafe_nonce;
             let mut bytes = copied_node_bytes(&raw);
@@ -375,7 +382,9 @@ impl Bridge<'_> {
         self.state.work(plan.len().saturating_mul(self.state.dom.inert_child_lists.lookup_work()))?;
         let child_lists = plan.iter().filter(|item|
             self.state.dom.inert_child_lists.contains_key(&node_handle(item.index))).count();
-        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(retained).ok_or("DOM retained promotion allowance exhausted.")?;
+        let available=self.state.retained.checked_sub(released)
+            .and_then(|bytes|self.state.retained_limit.checked_sub(bytes))
+            .and_then(|bytes|bytes.checked_sub(retained)).ok_or("DOM retained promotion allowance exhausted.")?;
         let (child_map,added)=self.state.dom.child_lists.prepare(child_lists,available)?;
         // Admit conservative movement for every transferred entry before any
         // native node or index is published. Both old and new map backing stay
@@ -386,6 +395,15 @@ impl Bridge<'_> {
         let grow_copy=if child_map.is_some(){self.state.dom.child_lists.len()}else{0};
         self.state.copies(self.state.dom.child_lists.movement_bytes(insert_work.saturating_add(grow_copy)).saturating_add(self.state.dom.inert_child_lists.movement_bytes(remove_work)))?;
         retained=retained.checked_add(added).ok_or("Promoted child-list storage overflow.")?;
+        // One sorted membership set permits one compacting removal scan. It
+        // avoids repeatedly shifting the adopted store for each promoted node.
+        let search = (usize::BITS - indices.len().leading_zeros()) as usize + 1;
+        let sort_work = indices.len().checked_mul(search).ok_or("Promotion index sort work overflow.")?;
+        let scan_work = self.state.inert_documents.adopted.len().checked_mul(search + 3)
+            .and_then(|work| work.checked_mul(2)).and_then(|work| work.checked_add(sort_work))
+            .ok_or("Promotion index scan work overflow.")?;
+        self.state.work(scan_work)?;
+        self.state.copies(sort_work.checked_mul(3 * size_of::<usize>()).ok_or("Promotion index sort copy work overflow.")?)?;
         let connected = self.state.dom.connected[parent];
         // Populate checked slots for native CSS and caption preflight while the
         // inert routing still owns them. No renderer or script observes these
@@ -397,7 +415,12 @@ impl Bridge<'_> {
         let checked = (|| {
             self.validate_button_children(parent, &indices)?;
             let inline = stylesheet.map(|node| self.prepare_inline_sheet(node, connected)).transpose()?;
-            self.state.replace_bytes(0, retained)?;
+            indices.sort_unstable();
+            let shifted = self.state.inert_documents.adopted.retention_movement(|handle|
+                !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
+            self.state.work(shifted)?;
+            self.state.copies(self.state.inert_documents.adopted.movement_bytes(shifted))?;
+            self.state.replace_storage(released, retained, retained)?;
             Ok::<_, String>(inline)
         })();
         let inline = match checked {
@@ -413,9 +436,10 @@ impl Bridge<'_> {
         self.state.dom.child_lists.commit(child_map);
         self.state.inert_documents.node_mut(fragment).unwrap().children.clear();
         self.doc.nodes[parent].children.splice(position..position, roots);
+        self.state.inert_documents.adopted.retain(|handle|
+            !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
         for item in plan {
             let handle = node_handle(item.index);
-            self.state.inert_documents.adopted.remove(&handle);
             if let Some(list) = self.state.dom.inert_child_lists.remove(&handle) {
                 self.state.node_lists[queries::node_list_index(list).unwrap()] = queries::NodeList::Children(item.index);
                 self.state.dom.child_lists.insert(item.index, list);
@@ -526,18 +550,18 @@ impl Bridge<'_> {
                 })
             });
         }
-        let payload = size_of::<(u32, InertNode)>();
-        let available = self.state.retained_limit.saturating_sub(self.state.retained)
-            .checked_sub(payload).ok_or("Template adoption record allowance exhausted.")?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained);
+        let minimum = self.state.inert_documents.adopted.minimum_growth(1)?;
         let children = &self.state.inert_documents.node(fragment).unwrap().children;
-        let (replacement, added) = retained_storage::grow(children, 1, available)?;
+        let (replacement, added) = retained_storage::grow(children, 1,
+            available.checked_sub(minimum).ok_or("Template adoption index allowance exhausted.")?)?;
         let moved = if replacement.is_some() { children.len() } else { 0 };
         self.state.work(moved.saturating_add(1))?;
-        let copies = payload.checked_add((moved + 1) * size_of::<u32>())
-            .ok_or("Template child-link copy work overflow.")?;
-        self.state.inert_documents.adopted.try_reserve(1).map_err(|_| "Cannot reserve an adopted template node.")?;
-        self.state.replace_storage(0, payload + added, copies)?;
+        let copies = (moved + 1).checked_mul(size_of::<u32>()).ok_or("Template child-link copy work overflow.")?;
+        let (index_growth, index_bytes) = self.prepare_adopted_index(std::iter::once(child), available - added)?;
+        self.state.replace_storage(0, added + index_bytes, copies)?;
         let arena = &mut self.state.inert_documents;
+        arena.adopted.commit(index_growth);
         if let Some(mut next) = replacement {
             let children = &mut arena.node_mut(fragment).unwrap().children;
             next.append(children);
@@ -827,13 +851,22 @@ impl Bridge<'_> {
             }
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
-        payload = payload.saturating_add(parked.saturating_mul(size_of::<Node>() + size_of::<(u32, InertNode)>()));
-        self.state.inert_documents.adopted.try_reserve(parked).map_err(|_| "Cannot reserve parked template nodes.")?;
+        payload = payload.saturating_add(parked.saturating_mul(size_of::<Node>()));
         self.doc.nodes.try_reserve(parked).map_err(|_| "Cannot reserve future template document slots.")?;
         self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
         self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
         self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
-        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, 0)?;
+        let minimum = self.state.inert_documents.entries.len().checked_add(entries.len())
+            .and_then(|required| required.saturating_sub(self.state.inert_documents.entries.capacity()).checked_mul(size_of::<Entry>()))
+            .and_then(|bytes| self.state.inert_documents.generated.len().checked_add(generated.len())
+                .and_then(|required| required.saturating_sub(self.state.inert_documents.generated.capacity()).checked_mul(size_of::<GeneratedNode>()))
+                .and_then(|sources| bytes.checked_add(sources))).ok_or("Parked template registry storage overflow.")?;
+        let available = self.state.retained.checked_sub(released)
+            .and_then(|retained| self.state.retained_limit.checked_sub(retained))
+            .and_then(|bytes| bytes.checked_sub(payload)).and_then(|bytes| bytes.checked_sub(minimum))
+            .ok_or("Parked template identity bundle allowance exhausted.")?;
+        let (index_growth, index_bytes) = self.prepare_adopted_index(parked_nodes.iter().map(|entry| entry.0), available)?;
+        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, index_bytes)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
@@ -843,7 +876,8 @@ impl Bridge<'_> {
         }
         arena.generated.extend(generated);
         arena.entries.extend(entries);
-        arena.adopted.extend(parked_nodes);
+        arena.adopted.commit(index_growth);
+        for (key, value) in parked_nodes { arena.adopted.insert(key, value); }
         for _ in 0..parked {
             self.doc.nodes.push(Node {
                 namespace: crate::html::Namespace::None,
@@ -1069,6 +1103,33 @@ impl Bridge<'_> {
         let metadata = document_bytes.checked_add(content_bytes).ok_or("Template index storage overflow.")?;
         let handle = self.reserve_inert_storage(count, payload, generated, 0, metadata)?;
         Ok((handle, TemplateIndexGrowth { documents, contents: content_growth }))
+    }
+
+    fn prepare_adopted_index(&mut self, keys: impl ExactSizeIterator<Item=u32>, available: usize)
+        -> Result<(Option<Vec<(u32, InertNode)>>, usize), String>
+    {
+        let count = keys.len();
+        let map = &self.state.inert_documents.adopted;
+        let length = map.len().checked_add(count).ok_or("Adopted node index count overflow.")?;
+        let lookup = (usize::BITS - length.leading_zeros()) as usize + 1;
+        self.state.work(count.checked_mul(3 * lookup + 1).ok_or("Adopted node index work overflow.")?)?;
+        let map = &self.state.inert_documents.adopted;
+        let (growth, added) = map.prepare(count, available)?;
+        let mut moved = if growth.is_some() { map.len() } else { 0 };
+        let mut previous = None;
+        for key in keys {
+            if previous.is_some_and(|before| before >= key) || map.contains_key(&key) {
+                return Err("Adoption requires distinct ordered unpublished identities.".into());
+            }
+            previous = Some(key);
+            moved = moved.checked_add(map.insert_work(&key) - map.lookup_work())
+                .ok_or("Adopted node index movement overflow.")?;
+        }
+        let copies = moved.checked_add(count).and_then(|slots| slots.checked_mul(size_of::<(u32, InertNode)>()))
+            .ok_or("Adopted node index copy work overflow.")?;
+        self.state.work(moved)?;
+        self.state.copies(copies)?;
+        Ok((growth, added))
     }
 
     fn inert_remaining_entries_with_release(&self, released: usize) -> usize {
