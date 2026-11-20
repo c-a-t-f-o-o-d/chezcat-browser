@@ -77,7 +77,7 @@ fn selector_negation_exhaustion_is_never_inverted_into_a_match() {
         assert!(error.contains("work limit"),"{source}: {error}");assert_eq!(budget,0);
     }
     let parents=vec![None;doc.nodes.len()];let previous=vec![None;doc.nodes.len()];
-    let context=MatchContext{doc:&doc,parents:&parents,previous_elements:&previous,checked:None,charge_text:false};
+    let context=MatchContext{doc:&doc,parents:&parents,previous_elements:&previous,sibling_slots:None,checked:None,charge_text:false};
     let mut budget=1;assert!(matches_selector(&parse_selector(".target").unwrap(),target,&context,&mut budget));assert_eq!(budget,0,"old stylesheet boundary is retained");
     let mut budget=1;assert!(!matches_selector(&parse_selector(":not(*)").unwrap(),target,&context,&mut budget));assert_eq!(budget,0);
 }

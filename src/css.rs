@@ -696,6 +696,7 @@ pub fn compute(doc: &Document, external: &HashMap<usize, String>) -> Vec<Style> 
 /// DOM queries use the same selector grammar as styles. Candidates are supplied
 /// in connected document order by the DOM bridge, excluding the query root.
 /// Every traversal shares the caller's remaining job budget.
+#[cfg(test)]
 pub fn query_first(
     doc: &Document,
     source: &str,
@@ -725,6 +726,7 @@ pub fn query_all(
 /// Result backing is fallibly admitted against the caller's current storage.
 /// The caller retains responsibility for charging the returned capacity and
 /// atomically publishing its registry record.
+#[cfg(test)]
 pub fn query_all_with_storage(
     doc:&Document,source:&str,candidates:&[usize],checked:Option<&dyn Fn(usize)->Option<bool>>,
     budget:&mut usize,result_bytes:usize,result_limit:Option<usize>,copy_budget:&mut usize,
@@ -732,10 +734,42 @@ pub fn query_all_with_storage(
     query_matches(doc,source,candidates,checked,budget,false,result_bytes,result_limit,copy_budget)
 }
 
+/// No author callbacks run here. The caller owns a byte-admitted candidate
+/// vector and checked topology; compaction reuses that backing for the result.
+pub fn query_with_topology(
+    doc:&Document,source:&str,mut candidates:Vec<usize>,checked:Option<&dyn Fn(usize)->Option<bool>>,
+    budget:&mut usize,parents:&[Option<usize>],sibling_slots:&[usize],first_only:bool,copy_budget:&mut usize,
+)->Result<Vec<usize>,String> {
+    if source.len()>MAX_SELECTOR_BYTES*16{return Err("Selector query exceeds 8 KiB.".into());}
+    let selectors=parse_selector_list(source,false).ok_or("Invalid selector or selector syntax outside the supported subset.")?;
+    // Detached leaves and parked inert slots can extend the document arena
+    // without participating in the checked connected topology. Per-node
+    // lookups treat their missing parent/sibling metadata as absent ancestry.
+    let context=MatchContext{doc,parents,previous_elements:&[],sibling_slots:Some(sibling_slots),checked,charge_text:true};
+    let mut kept=0;
+    for position in 0..candidates.len() {
+        let node=candidates[position];
+        if node>=doc.nodes.len(){return Err("Selector candidate identity is unavailable.".into());}
+        let matched=selectors.iter().any(|selector|matches_selector(selector,node,&context,budget));
+        if *budget==0{return Err("DOM selector work limit reached.".into());}
+        if matched {
+            if kept!=position {
+                let bytes=std::mem::size_of::<usize>();
+                if bytes>*copy_budget{*copy_budget=0;return Err("DOM selector result copy work limit reached.".into());}
+                *copy_budget-=bytes;candidates[kept]=node;
+            }
+            kept+=1;if first_only{break;}
+        }
+    }
+    if kept==0{return Ok(Vec::new());}
+    candidates.truncate(kept);Ok(candidates)
+}
+
 pub fn valid_query_selector(source: &str) -> bool {
     source.len() <= MAX_SELECTOR_BYTES * 16 && parse_selector_list(source, false).is_some()
 }
 
+#[cfg(test)]
 fn query_matches(
     doc: &Document,
     source: &str,
@@ -776,6 +810,7 @@ fn query_matches(
         doc,
         parents: &parents,
         previous_elements: &previous_elements,
+        sibling_slots:None,
         checked,
         charge_text: true,
     };
@@ -932,6 +967,7 @@ fn compute_cascade(
         doc,
         parents: &parents,
         previous_elements: &previous_elements,
+        sibling_slots:None,
         checked,
         charge_text: meter.is_some(),
     };
@@ -2647,6 +2683,9 @@ struct MatchContext<'a> {
     doc: &'a Document,
     parents: &'a [Option<usize>],
     previous_elements: &'a [Option<usize>],
+    // Browser queries reuse checked native topology instead of allocating a
+    // second whole-document previous-sibling table. Style passes use the table.
+    sibling_slots:Option<&'a [usize]>,
     checked: Option<&'a dyn Fn(usize) -> Option<bool>>,
     // Query jobs share their finite host-work allowance with string matching.
     // Style computation retains its existing node/compound accounting.
@@ -2654,6 +2693,18 @@ struct MatchContext<'a> {
 }
 
 impl<'a> MatchContext<'a> {
+    fn previous_element(&self,node:usize,budget:&mut usize)->Option<usize> {
+        let Some(slots)=self.sibling_slots else{return self.previous_elements.get(node).copied().flatten();};
+        let parent=self.parents.get(node).copied().flatten()?;
+        let slot=*slots.get(node)?;
+        let children=&self.doc.nodes.get(parent)?.children;
+        for &child in children.get(..slot)?.iter().rev() {
+            if *budget==0{return None;}*budget-=1;
+            if matches!(self.doc.nodes.get(child)?.kind,NodeKind::Element{..}){return Some(child);}
+        }
+        None
+    }
+
     fn text_work(&self, bytes: usize, budget: &mut usize) -> bool {
         if !self.charge_text {
             return true;
@@ -2749,7 +2800,7 @@ fn matches_selector(
             });
             if !document || node == 0
                 || context.parents.get(node) != Some(&Some(0))
-                || context.previous_elements.get(node) != Some(&None)
+                || context.previous_element(node,budget).is_some()
             {
                 return false;
             }
@@ -2863,14 +2914,10 @@ fn matches_selector(
                 }
                 false
             }
-            Relation::AdjacentSibling => context
-                .previous_elements
-                .get(node)
-                .copied()
-                .flatten()
+            Relation::AdjacentSibling => context.previous_element(node,budget)
                 .is_some_and(|previous| at(selector, part - 1, previous, context, budget)),
             Relation::GeneralSibling => {
-                let mut previous = context.previous_elements.get(node).copied().flatten();
+                let mut previous = context.previous_element(node,budget);
                 while let Some(index) = previous {
                     if at(selector, part - 1, index, context, budget) {
                         return true;
@@ -2878,7 +2925,7 @@ fn matches_selector(
                     if *budget == 0 {
                         break;
                     }
-                    previous = context.previous_elements.get(index).copied().flatten();
+                    previous = context.previous_element(index,budget);
                 }
                 false
             }
