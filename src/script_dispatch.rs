@@ -8,9 +8,17 @@ pub(super) struct Dispatch {
     name: String,
     visits: Vec<(u32, bool, u8)>,
     visit: usize,
-    snapshot: Vec<u32>,
+    snapshot: Vec<usize>,
     listener: usize,
     property: bool,
+}
+
+impl Dispatch {
+    pub(super) fn storage_bytes(&self)->usize {
+        self.name.capacity()+self.path.capacity()*std::mem::size_of::<u32>()
+            +self.visits.capacity()*std::mem::size_of::<(u32,bool,u8)>()
+            +self.snapshot.capacity()*std::mem::size_of::<usize>()
+    }
 }
 
 #[cfg(test)]
@@ -268,10 +276,11 @@ impl Bridge<'_> {
         let length=if native {self.state.event.as_ref().unwrap().path.len()}
             else {frame.map_or(0,|index|self.state.synthetic_dispatches[index].path.len())};
         self.state.work(length)?;
+        let mut result=Vec::new();
+        self.state.reserve_dispatch_temporary(&mut result,length,0)?;
+        self.state.copies(length.saturating_mul(std::mem::size_of::<u32>()))?;
         let path=if native {self.state.event.as_ref().unwrap().path.as_slice()}
             else {frame.map(|index|self.state.synthetic_dispatches[index].path.as_slice()).unwrap_or(&[])};
-        let mut result=Vec::new();
-        result.try_reserve(length).map_err(|_|"Could not reserve Event path snapshot.")?;
         result.extend_from_slice(path);
         Ok(result)
     }
@@ -377,68 +386,54 @@ impl Bridge<'_> {
             unreachable!()
         };
         let id = self.created_event_index(handle).unwrap();
-        self.state
-            .copies(self.state.created_events[id].name.len())?;
-        let name = self.state.created_events[id].name.clone();
-        let bubbles = self.state.created_events[id].bubbles;
-        let mut path = Vec::new();
-        path.try_reserve(2)
-            .map_err(|_| "Could not reserve the event path.")?;
-        path.push(object);
-        if object == DOCUMENT {
-            if name != "load" {
-                path.push(WINDOW);
-            }
-        } else if object != WINDOW && self.standalone_target_owner(object).is_none() && self.abort_signal_owner(object).is_none()
-            && !self.attr_receiver(object) {
-            let node = node_index(object).ok_or("Event target is not a genuine DOM node.")?;
-            let mut parent = self.state.tree.parents[node];
-            while let Some(node) = parent {
+        let name_len=self.state.created_events[id].name.len();
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        if name_len>available{return Err("DOM retained dispatch name allowance exhausted.".into());}
+        let mut name=String::new();
+        name.try_reserve_exact(name_len).map_err(|_|"Could not reserve dispatch name.")?;
+        if name.capacity()>available{return Err("DOM retained dispatch name allocation exceeds allowance.".into());}
+        self.state.copies(name.capacity())?;name.push_str(&self.state.created_events[id].name);
+        let bubbles=self.state.created_events[id].bubbles;
+        let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,object,name.capacity())?;
+        if object==DOCUMENT {
+            if name!="load"{self.state.push_dispatch_temporary(&mut path,WINDOW,name.capacity())?;}
+        } else if object!=WINDOW&&self.standalone_target_owner(object).is_none()&&self.abort_signal_owner(object).is_none()&&!self.attr_receiver(object) {
+            let node=node_index(object).ok_or("Event target is not a genuine DOM node.")?;
+            let mut parent=self.state.tree.parents[node];
+            while let Some(node)=parent {
                 self.state.work(1)?;
-                if node != 0 {
-                    path.try_reserve(1)
-                        .map_err(|_| "Could not grow the event path.")?;
-                    path.push(node_handle(node));
-                }
-                parent = self.state.tree.parents[node];
+                if node!=0{self.state.push_dispatch_temporary(&mut path,node_handle(node),name.capacity())?;}
+                parent=self.state.tree.parents[node];
             }
             if self.state.dom.connected.get(node).copied().unwrap_or(false) {
-                path.try_reserve(2)
-                    .map_err(|_| "Could not finish the event path.")?;
-                path.push(DOCUMENT);
-                if name != "load" {
-                    path.push(WINDOW);
-                }
+                self.state.push_dispatch_temporary(&mut path,DOCUMENT,name.capacity())?;
+                if name!="load"{self.state.push_dispatch_temporary(&mut path,WINDOW,name.capacity())?;}
             }
         }
-        let mut visits = Vec::new();
-        visits
-            .try_reserve(
-                path.len()
-                    .checked_mul(2)
-                    .ok_or("Event path length overflow.")?,
-            )
-            .map_err(|_| "Could not reserve event propagation phases.")?;
-        visits.extend(path.iter().skip(1).rev().map(|&target| (target, true, 1)));
-        visits.extend([(object, true, 2), (object, false, 2)]);
-        if bubbles {
-            visits.extend(path.iter().skip(1).map(|&target| (target, false, 3)));
-        }
-        self.state
-            .synthetic_dispatches
-            .try_reserve(1)
-            .map_err(|_| "Could not grow the nested event dispatch stack.")?;
-        let token = self.state.synthetic_dispatches.len();
-        self.state.synthetic_dispatches.push(Dispatch {
-            path,
-            event: id,
-            name,
-            visits,
-            visit: 0,
-            snapshot: Vec::new(),
-            listener: 0,
-            property: false,
-        });
+        let visit_count=path.len().checked_add(1).and_then(|count|count.checked_add(if bubbles{path.len()-1}else{0})).ok_or("Event phase count overflow.")?;
+        self.state.work(visit_count)?;
+        let mut visits=Vec::new();
+        self.state.reserve_dispatch_temporary(&mut visits,visit_count,name.capacity()+path.capacity()*std::mem::size_of::<u32>())?;
+        self.state.copies(visit_count.saturating_mul(std::mem::size_of::<(u32,bool,u8)>()))?;
+        visits.extend(path.iter().skip(1).rev().map(|&target|(target,true,1)));
+        visits.extend([(object,true,2),(object,false,2)]);
+        if bubbles{visits.extend(path.iter().skip(1).map(|&target|(target,false,3)));}
+        let frame=Dispatch {path,event:id,name,visits,visit:0,snapshot:Vec::new(),listener:0,property:false};
+        let payload=frame.storage_bytes();
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("DOM retained dispatch payload allowance exhausted.")?;
+        let before=self.state.synthetic_dispatches.capacity();
+        let capacity=if self.state.synthetic_dispatches.len()==before {
+            let growth=before.max(4).min(available/std::mem::size_of::<Dispatch>());
+            if growth==0{return Err("DOM retained dispatch frame allowance exhausted.".into());}
+            before.checked_add(growth).ok_or("Dispatch frame capacity overflow.")?
+        }else{before};
+        let (replacement,added)=retained_storage::capacity(&self.state.synthetic_dispatches,capacity,available)?;
+        self.state.work(self.state.synthetic_dispatches.len().saturating_add(1))?;
+        if replacement.is_some(){self.state.copies(self.state.synthetic_dispatches.len()*std::mem::size_of::<Dispatch>())?;}
+        if let Some(mut next)=replacement {next.append(&mut self.state.synthetic_dispatches);self.state.synthetic_dispatches=next;}
+        let token=self.state.synthetic_dispatches.len();
+        self.state.retained+=payload+added;
+        self.state.synthetic_dispatches.push(frame);
         let event = &mut self.state.created_events[id];
         event.dispatching = true;
         event.trusted = false;
@@ -456,50 +451,27 @@ impl Bridge<'_> {
             return Err("Event dispatch stack mismatch.".into());
         }
         loop {
-            self.state.work(
-                self.state
-                    .listeners
-                    .len()
-                    .saturating_mul(2)
-                    .saturating_add(1),
-            )?;
-            let frame = &mut self.state.synthetic_dispatches[token];
-            let event = &mut self.state.created_events[frame.event];
-            event.passive = false;
-            if event.immediate {
-                return Ok(None);
+            self.state.work(1)?;
+            let (event_id,serial)={
+                let frame=&mut self.state.synthetic_dispatches[token];
+                let event=&mut self.state.created_events[frame.event];
+                event.passive=false;
+                if event.immediate {return Ok(None);}
+                let serial=frame.snapshot.get(frame.listener).copied();
+                if serial.is_some(){frame.listener+=1;}
+                (frame.event,serial)
+            };
+            if let Some(serial)=serial {
+                let Some((callback,target,options,property))=self.state.listeners.get(serial)
+                    .map(|listener|(listener.callback.clone(),listener.target,listener.options,listener.property)) else {continue;};
+                if options.once {self.state.retain_listeners(|listener|listener.serial!=serial)?;}
+                self.state.synthetic_dispatches[token].property=property;
+                let event=&mut self.state.created_events[event_id];
+                event.passive=options.passive;
+                return Ok(Some(crate::javascript::EventCallback {callback,target,event:event.handle}));
             }
-            if let Some(&serial) = frame.snapshot.get(frame.listener) {
-                frame.listener += 1;
-                let Some((callback, target, options, property)) = self
-                    .state
-                    .listeners
-                    .iter()
-                    .find(|listener| listener.serial == serial)
-                    .map(|listener| {
-                        (
-                            listener.callback.clone(),
-                            listener.target,
-                            listener.options,
-                            listener.property,
-                        )
-                    })
-                else {
-                    continue;
-                };
-                if options.once {
-                    self.state
-                        .listeners
-                        .retain(|candidate| candidate.serial != serial);
-                }
-                frame.property = property;
-                event.passive = options.passive;
-                return Ok(Some(crate::javascript::EventCallback {
-                    callback,
-                    target,
-                    event: event.handle,
-                }));
-            }
+            let frame=&mut self.state.synthetic_dispatches[token];
+            let event=&mut self.state.created_events[event_id];
             if event.stopped {
                 return Ok(None);
             }
@@ -509,22 +481,17 @@ impl Bridge<'_> {
             frame.visit += 1;
             event.current = Some(target);
             event.phase = phase;
-            frame.snapshot.clear();
-            frame.listener = 0;
-            self.state.work(self.state.listeners.len())?;
-            let frame = &mut self.state.synthetic_dispatches[token];
-            for listener in &self.state.listeners {
-                if listener.target == target
-                    && listener.event == frame.name
-                    && listener.options.capture == capture
-                {
-                    frame
-                        .snapshot
-                        .try_reserve(1)
-                        .map_err(|_| "Could not grow the event listener snapshot.")?;
-                    frame.snapshot.push(listener.serial);
-                }
-            }
+            frame.listener=0;
+            self.state.work(self.state.listeners.len().saturating_mul(2))?;
+            let frame=&self.state.synthetic_dispatches[token];
+            let count=self.state.listeners.iter().filter(|listener|listener.target==target&&listener.event==frame.name&&listener.options.capture==capture).count();
+            let available=self.state.retained_limit.saturating_sub(self.state.retained);
+            let (replacement,added)=retained_storage::capacity(&frame.snapshot,count,available)?;
+            self.state.copies(count.saturating_mul(std::mem::size_of::<usize>()))?;
+            let frame=&mut self.state.synthetic_dispatches[token];
+            if let Some(next)=replacement {frame.snapshot=next;}else{frame.snapshot.clear();}
+            frame.snapshot.extend(self.state.listeners.iter().filter(|listener|listener.target==target&&listener.event==frame.name&&listener.options.capture==capture).map(|listener|listener.serial));
+            self.state.retained+=added;
         }
     }
     pub(super) fn synthetic_callback_result(&mut self, token: usize, returned_false: bool) {
@@ -545,6 +512,7 @@ impl Bridge<'_> {
             return false;
         }
         let frame = self.state.synthetic_dispatches.pop().unwrap();
+        self.state.retained-=frame.storage_bytes();
         let event = &mut self.state.created_events[frame.event];
         event.current = None;
         event.phase = 0;

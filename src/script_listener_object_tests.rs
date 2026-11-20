@@ -220,16 +220,17 @@ fn listener_object_duplicate_at_capacity_consumes_no_slot_and_removal_allows_rep
         b.addEventListener('notice',first);
         b.addEventListener('notice',second);
     "#);
-    let next = page.state.next_listener;
+    let serials=page.state.listeners.iter().map(|listener|listener.serial).collect::<Vec<_>>();
     let retained = page.state.retained;
     eval(&mut page, &mut doc, &mut forms, "b.addEventListener('notice',first,{once:true});");
     assert_eq!(page.state.listeners.len(), 2);
-    assert_eq!(page.state.next_listener, next);
+    assert_eq!(page.state.listeners.iter().map(|listener|listener.serial).collect::<Vec<_>>(),serials);
     let rejected = page.console_eval(&mut doc, &mut forms, "b.addEventListener('notice',third);");
     assert_eq!(rejected.errors, 1, "{}", page.report());
-    assert_eq!(page.state.next_listener, next);
+    assert_eq!(page.state.listeners.iter().map(|listener|listener.serial).collect::<Vec<_>>(),serials);
     assert_eq!(page.state.retained, retained);
     eval(&mut page, &mut doc, &mut forms, "b.removeEventListener('notice',first);b.addEventListener('notice',third);");
     assert_eq!(page.state.listeners.len(), 2);
-    assert_eq!(page.state.next_listener, next + 1);
+    assert_eq!(page.state.listeners.iter().map(|listener|listener.serial).collect::<Vec<_>>(),vec![serials[1],serials[0]]);
+    assert_eq!(page.state.retained,retained);
 }
