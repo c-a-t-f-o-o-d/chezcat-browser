@@ -1,6 +1,12 @@
 //! Ordered qualified attribute names from the real element storage.
 use super::*;
 impl Bridge<'_> {
+    pub(super) fn ordinary_attribute_method(&self,object:u32,property:&str)->bool{
+        self.attribute_method_member(object,property)&&!self.form_named_control(object,property)
+    }
+    pub(super) fn attribute_method_member(&self,object:u32,property:&str)->bool{
+        matches!(property,"getAttribute"|"getAttributeNode"|"getAttributeNames"|"hasAttribute"|"removeAttribute"|"setAttribute")&&self.attribute_names_receiver(object)
+    }
     pub(super) fn attribute_names_receiver(&self,object:u32)->bool {
         self.inert_node_type(object)==Some(1)||self.attr_element_receiver(object)
     }

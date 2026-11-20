@@ -355,12 +355,13 @@ impl Runtime {
                         ("querySelector", "\0Element.querySelector"),
                         ("querySelectorAll", "\0Element.querySelectorAll"),
                         ("getAttribute", "getAttribute"),
+                        ("setAttribute", "setAttribute"),
                         ("getAttributeNode", "getAttributeNode"),
                         ("hasAttribute", "hasAttribute"),
                         ("removeAttribute", "removeAttribute"),
                         ("getAttributeNames", "\0Element.getAttributeNames"),
                     ] {
-                        let method=self.allocate_host_function_with_length(window,operation,if key=="getAttributeNames"{0}else{1}).map_err(Fault::new)?;
+                        let method=self.allocate_host_function_with_length(window,operation,if key=="getAttributeNames"{0}else if key=="setAttribute"{2}else{1}).map_err(Fault::new)?;
                         if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                         self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
                         self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
