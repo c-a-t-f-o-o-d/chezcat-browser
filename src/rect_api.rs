@@ -88,10 +88,12 @@ log='';caught=false;try{DOMRect.fromRect({get height(){throw marker;},get width(
             assert!(error.contains("call limit"), "{error}");
             runtime.begin_job();
             runtime.execute("var stable=new DOMRect(1,2,3,4);", &mut NoHost).unwrap();
-            runtime.value_bytes = runtime.limits.heap.retained_values;
-            let error = runtime.execute("try{new DOMRect();}catch(e){stable.x=99;}", &mut NoHost).unwrap_err();
+            let callback=runtime.execute("(function(){try{new DOMRect();}catch(e){stable.x=99;}});",&mut NoHost).unwrap();
+            let limit=runtime.limits.heap.retained_values;
+            runtime.limits.heap.retained_values=runtime.value_bytes;
+            let error = runtime.invoke(callback,&[],Value::Undefined,&mut NoHost).unwrap_err();
             assert!(error.contains("retained"), "{error}");
-            runtime.value_bytes = 0;
+            runtime.limits.heap.retained_values=limit;
             runtime.begin_job();
             assert_eq!(runtime.execute("stable.x;", &mut NoHost).unwrap().to_number(), 1.0);
         }).unwrap().join().unwrap();

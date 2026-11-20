@@ -60,6 +60,8 @@ mod number_to_fixed;
 mod number_to_fixed_tests;
 #[path = "program_allocation.rs"]
 mod program_allocation;
+#[path="program_storage.rs"]
+mod program_storage;
 #[path = "function_reachability.rs"]
 mod function_reachability;
 #[cfg(test)]
@@ -2042,6 +2044,9 @@ struct Template {
 }
 
 struct Program {
+    // Immutable owned backing; Cell permits shared unpublished parsed handles.
+    // Publication writes the same snapshot without changing executable state.
+    retained_bytes:std::cell::Cell<usize>,
     source: String,
     strict: bool,
     exprs: Vec<Expr>,
@@ -2155,6 +2160,7 @@ impl Parser {
             capacity,
             heap,
             program: Program {
+                retained_bytes:std::cell::Cell::new(0),
                 source: owned_source,
                 strict,
                 exprs: Vec::new(),
@@ -4834,7 +4840,7 @@ impl Runtime {
         self.retain_parsed_program(program)
     }
 
-    fn retain_parsed_program(&mut self, program: Rc<Program>) -> Result<Rc<Program>, Fault> {
+    fn retain_parsed_program(&mut self,program:Rc<Program>) -> Result<Rc<Program>, Fault> {
         self.prepare_program_capacity(program.source.len(), program.node_count(), true)?;
         if self.program_count_refused()
             || self.retained_source.saturating_add(program.source.len()) > self.limits.capacity.retained_source
@@ -4850,16 +4856,21 @@ impl Runtime {
             })
             .sum::<usize>();
         let nodes = program.node_count();
-        if self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast {
+        if self.ast_count_refused(nodes) {
             return Err(self.program_limit_fault(&program.source, Some(nodes), "parsed-retention", None, true));
         }
         // Registry capacity is owned retained metadata. Reserve and admit
         // movement before mutating regexp/source/AST retention or publishing
         // the parsed program; failure drops only the unpublished reservation.
-        let growth=limits::prepare_retained_growth(&self.programs,1,self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        let payload=program.retained_payload_bytes(||self.step())?;
+        let registry=if self.programs.len()==self.programs.capacity(){std::mem::size_of::<Rc<Program>>()}else{0};
+        self.prepare_program_storage(program.source.len(),nodes,false,payload.saturating_add(registry))?;
+        let available=self.limits.heap.retained_values.saturating_sub(self.value_bytes).checked_sub(payload).ok_or_else(||Fault::new("Retained value program storage exhausted."))?;
+        let growth=limits::prepare_retained_growth(&self.programs,1,available)?;
         if growth.added!=0{self.work(self.programs.len()*std::mem::size_of::<Rc<Program>>())?;}
         self.retain_regexp(regexp_bytes)?;
-        let added=growth.added;growth.commit(&mut self.programs);self.value_bytes+=added;
+        program.retained_bytes.set(payload);
+        let added=growth.added;growth.commit(&mut self.programs);self.value_bytes+=added+payload;
         self.retained_source += program.source.len();
         self.retained_ast += nodes;
         self.programs.push(program.clone());
@@ -11851,7 +11862,8 @@ caught;
                 runtime.execute(source, &mut TestHost::default()).unwrap().to_text(),
                 "A"
             );
-            assert_eq!(runtime.job_usage(), (13, expected_work, 0));
+            // Four flat AST records are scanned before publication.
+            assert_eq!(runtime.job_usage(), (17, expected_work, 0));
         }
         for (source, work) in [
             ("payload;\n", 8238),
@@ -12068,13 +12080,13 @@ caught;
     fn sparse_padding_is_bounded_without_storing_thousands_of_holes() {
         let (mut runtime, mut host) = test_runtime();
         let properties = runtime.properties;
-        let retained = runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>();
+        let retained = runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>()-runtime.programs.iter().map(|p|p.retained_bytes.get()).sum::<usize>();
         let value = runtime
             .execute(r"Array(7824).join('\n');", &mut host)
             .unwrap();
         assert_eq!(value.to_text().len(), 7823);
         assert_eq!(runtime.properties, properties);
-        assert_eq!(runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>(),retained);
+        assert_eq!(runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>()-runtime.programs.iter().map(|p|p.retained_bytes.get()).sum::<usize>(),retained);
         assert!(
             runtime.steps > MAX_STEPS / 2,
             "Holes should not consume one full property lookup each"
@@ -12691,8 +12703,10 @@ work().then(function(value) { test.record(value); });
                     assert_eq!(runtime.eval_depth, 0);
                 }
                 let mut runtime = Runtime::for_test();
+                runtime.limits.heap.retained_values=64*1024*1024;
                 runtime.program_allocation.disabled = true;
                 runtime.register_program(&nodes, false).unwrap();
+                runtime.begin_job();
                 runtime.register_program(&nodes, false).unwrap();
                 assert_eq!(runtime.retained_ast, MAX_RETAINED_AST);
                 let source_before = runtime.retained_source;
@@ -13776,6 +13790,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
         // Include the base-name frame: 4095 members plus the base exactly fit.
         // The original 4096-member witness remains a negative case below.
         let (mut accepted, mut recorder) = test_runtime();
+        accepted.limits.heap.retained_values=64*1024*1024;
         assert!(matches!(accepted.execute(&format!("test{};", ".child".repeat(MAX_EVALUATION_FRAMES - 1)), &mut recorder).unwrap(), Value::Host(1)));
         for source in [
             "while(true);".to_string(),
@@ -13786,6 +13801,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
             format!("{}true;", "!".repeat(4000)),
         ] {
             let (mut runtime, mut host) = test_runtime();
+            runtime.limits.heap.retained_values=64*1024*1024;
             let error = runtime.execute(&source, &mut host).unwrap_err();
             assert!(error.contains("limit"), "{error}");
             runtime.begin_job();
@@ -13826,6 +13842,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
                 ].into_iter().enumerate() {
                     eprintln!("hostile nesting: case {case}");
                     let (mut runtime, mut host) = test_runtime();
+                    runtime.limits.heap.retained_values=64*1024*1024;
                     let error = runtime.execute(&source, &mut host).unwrap_err();
                     assert!(error.contains("limit"), "{error}");
                 }
@@ -13847,7 +13864,15 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
         assert_eq!(host.records, ["bootstrap"]);
         runtime.begin_job();
         let dense = format!("{}test.record('parsed');", ";".repeat(70_000));
-        runtime.execute(&dense, &mut host).unwrap();
+        runtime.limits.heap.retained_values=64*1024*1024;
+        let dense=runtime.register_program(&dense,false).unwrap();
+        // Isolate the existing dense top-level execution witness from the new
+        // compilation-accounting scan; each phase keeps the same job budget.
+        runtime.begin_job();
+        let global=runtime.global_environment;
+        runtime.prepare(&dense,&dense.body,global,true,&mut host).unwrap();
+        let this=runtime.global_this().unwrap();
+        assert!(matches!(runtime.statements(&dense,&dense.body,global,&this,&mut host).unwrap(),Control::Normal(_)));
         assert_eq!(host.records, ["bootstrap", "parsed"]);
         runtime.begin_job();
         let error = runtime.execute("while(true){}", &mut host).unwrap_err();
@@ -13862,6 +13887,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
     #[test]
     fn retained_bundle_source_limit_rejects_before_executing() {
         let (mut runtime, mut host) = test_runtime();
+        runtime.limits.heap.retained_values=64*1024*1024;
         runtime.program_allocation.disabled = true;
         let source = format!("/*{}*/", "x".repeat(MAX_SOURCE_BYTES - 4));
         for _ in 0..MAX_RETAINED_SOURCE / MAX_SOURCE_BYTES {

@@ -32,7 +32,7 @@ impl Runtime {
     #[cfg(test)]
     pub(super) fn retained_arena_bytes(&self) -> usize {
         fn bytes<T>(values: &Vec<T>) -> usize { values.capacity() * std::mem::size_of::<T>() }
-        bytes(&self.programs) + bytes(&self.functions) + bytes(&self.function_properties) + bytes(&self.function_realms)
+        self.programs.iter().map(|program|program.retained_bytes.get()).sum::<usize>() + bytes(&self.programs) + bytes(&self.functions) + bytes(&self.function_properties) + bytes(&self.function_realms)
             + bytes(&self.function_initial_names) + bytes(&self.function_arena.free)
             + bytes(&self.environments) + bytes(&self.free_environments) + bytes(&self.deferred_native_methods)
     }

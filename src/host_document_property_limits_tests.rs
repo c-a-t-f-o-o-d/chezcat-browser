@@ -56,14 +56,20 @@ fn document_own_properties_vm_property_and_retained_growth_fail_before_publicati
         let mut runtime=fixture(false);
         runtime.execute("try{}catch(e){}finally{}document.keep='old';",&mut Native).unwrap();
         let id=runtime.host_objects[&42];
+        let source=if mode==2 {"document.keep='larger retained value';"} else {"document.overflow=19;"};
+        let callback=runtime.execute(&format!("(function(){{try{{{source}after++;}}catch(e){{caught++;}}finally{{finalized++;}}after++;}});"),&mut Native).unwrap();
         let before=(runtime.properties,runtime.value_bytes,runtime.objects[id].properties.len());
         let limits=runtime.limits.heap;
-        let (source,message)=match mode {
-            0=>{runtime.limits.heap.object_properties=before.2;("document.overflow=19;","property limit")},
-            1=>{runtime.limits.heap.properties=before.0;("document.overflow=19;","property limit")},
-            _=>{runtime.limits.heap.retained_values=before.1;("document.keep='larger retained value';","Retained value limit")},
+        let message=match mode {
+            0=>{runtime.limits.heap.object_properties=before.2;"property limit"},
+            1=>{runtime.limits.heap.properties=before.0;"property limit"},
+            _=>{runtime.limits.heap.retained_values=before.1;"Retained value limit"},
         };
-        fatal(&mut runtime,&format!("try{{{source}after++;}}catch(e){{caught++;}}finally{{finalized++;}}after++;"),message);
+        let error=runtime.invoke(callback,&[],Value::Undefined,&mut Native).unwrap_err();
+        assert!(error.contains(message),"{error}");
+        assert!(runtime.invocation_failed_fatally());
+        for name in ["caught","finalized","after"] {assert_eq!(runtime.binding_value(runtime.global_environment,name).unwrap().to_number(),0.0,"{name}");}
+        assert!(runtime.invocation.is_none());assert!(runtime.transient_registration_is_empty());
         assert_eq!((runtime.properties,runtime.value_bytes,runtime.objects[id].properties.len()),before);
         assert_eq!(runtime.get_property(id,"keep").unwrap().to_text(),"old");
         assert!(!runtime.objects[id].properties.contains_key("overflow"));

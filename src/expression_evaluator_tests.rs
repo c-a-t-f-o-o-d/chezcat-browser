@@ -287,6 +287,7 @@ fn heap_evaluation_fatal_work_and_frame_failures_cancel_microtasks() {
             ("var total=0;for(var i=0;i<2000;i++)total+=payload.charCodeAt(0)".into(), "String/copy work limit"),
         ] {
             let (mut runtime, mut host) = realm();
+            runtime.limits.heap.retained_values=64*1024*1024;
             runtime.define_global("payload", Value::String("x".repeat(16 * 1024))).unwrap();
             let source = format!("Promise.resolve().then(function(){{try{{{expression};}}catch(e){{probe.record('caught');}}finally{{probe.record('finally');}}}});Promise.resolve().then(function(){{probe.record('late');}});");
             runtime.execute(&source, &mut host).unwrap();

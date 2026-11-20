@@ -36,6 +36,14 @@ pub(super) struct TaggedTemplateSite {
     objects: RefCell<HashMap<Option<usize>, usize>>,
 }
 
+impl TaggedTemplateSite {
+    pub(super) fn immutable_bytes(&self,tick:&mut impl FnMut()->Result<(),Fault>)->Result<usize,Fault> {
+        let mut bytes=std::mem::size_of::<Self>()+2*std::mem::size_of::<usize>()+self.chunks.capacity()*std::mem::size_of::<TaggedChunk>();
+        for chunk in &self.chunks{tick()?;bytes=bytes.saturating_add(chunk.cooked.capacity());}
+        Ok(bytes)
+    }
+}
+
 // Cooked text is represented in the runtime's existing UTF-8 string model.
 // Pair adjacent escaped UTF-16 units within a chunk; lone units remain an
 // explicit capability boundary, including at an interpolation boundary.
