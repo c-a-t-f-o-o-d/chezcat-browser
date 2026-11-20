@@ -2346,7 +2346,7 @@ fn set_attribute_ns_budget_failures_preserve_records_identity_and_detached_value
     bridge.state.copy_work = bridge.state.limits.copy_bytes;
     bridge.state.host_work = 0;
     assert!(bridge.call(node_handle(node), "removeAttributeNS", &args[..2]).is_err());
-    assert_eq!(bridge.state.attributes[0].owner, Some(node));
+    assert_eq!(bridge.state.attributes[0].owner.and_then(node_index), Some(node));
     bridge.state.host_work = bridge.state.limits.host_work;
     bridge.doc.nodes[node].namespace = crate::html::Namespace::UnknownForeign;
     assert!(bridge.call(node_handle(node), "setAttributeNS", &args).unwrap_err().contains("foreign"));
@@ -2424,7 +2424,7 @@ fn named_map_laziness_quota_rollback_and_unsupported_surfaces_preserve_real_entr
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let Value::Host(map) = bridge.get(object, "attributes").unwrap() else { panic!("missing map") };
     let before = bridge.state.retained;
-    for _ in 0..4 { assert!(bridge.has(map, "0").unwrap()); assert!(matches!(bridge.get(map, "length").unwrap(), Value::Number(2.0))); }
+    for _ in 0..4 { assert!(bridge.has(map, "0").unwrap()); assert!(matches!(bridge.call(map, "\0NamedNodeMap.get.length",&[]).unwrap(), Value::Number(2.0))); }
     assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
     bridge.state.retained_limit = before;
     assert!(bridge.get(map, "0").is_err()); assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
@@ -2648,7 +2648,7 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
         assert!(bridge.set(handle, "value", Value::String("changed".into())).is_err());
         assert_eq!(bridge.doc.attr(node, name), Some(original.as_str()));
         assert_eq!(bridge.state.retained, before);
-        assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner, Some(node));
+        assert_eq!(bridge.state.attributes[script_attr::index(handle).unwrap()].owner.and_then(node_index), Some(node));
     }
     assert!(bridge.call(node_handle(nodes[3]), "getAttributeNode", &[Value::String("title".into())]).is_err());
     let input = node_handle(nodes[0]);
@@ -2664,7 +2664,7 @@ fn attr_removal_and_setters_keep_resource_control_and_inert_policy() {
     let Value::Host(href)=bridge.call(link,"getAttributeNode",&[Value::String("href".into())]).unwrap() else {panic!("missing stylesheet Attr")};
     bridge.set(href,"value",Value::String("https://example.test/changed.css".into())).unwrap();
     assert_eq!(bridge.doc.attr(nodes[2],"href"),Some("https://example.test/changed.css"));
-    assert_eq!(bridge.state.attributes[script_attr::index(href).unwrap()].owner,Some(nodes[2]));
+    assert_eq!(bridge.state.attributes[script_attr::index(href).unwrap()].owner.and_then(node_index),Some(nodes[2]));
     assert_eq!(bridge.state.stylesheets.pending.len(),1);
     let request=bridge.state.stylesheets.pending.front().unwrap().clone();
     assert_eq!(request.target.display(),"https://example.test/changed.css");
@@ -2716,7 +2716,7 @@ fn attr_detach_retains_exact_value_bytes_and_budget_failures_publish_no_partial_
     bridge.state.host_work = 0;
     assert!(bridge.call(node_handle(p), "removeAttributeNode", &[Value::Host(attr)]).is_err());
     assert_eq!(bridge.doc.attr(p, "title"), Some("original"));
-    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].owner, Some(p));
+    assert_eq!(bridge.state.attributes[script_attr::index(attr).unwrap()].owner.and_then(node_index), Some(p));
     assert_eq!(bridge.state.retained, before);
     bridge.state.host_work = bridge.state.limits.host_work;
     bridge.state.copy_work = 0;

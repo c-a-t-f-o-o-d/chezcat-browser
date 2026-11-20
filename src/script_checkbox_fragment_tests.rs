@@ -173,7 +173,7 @@ impl Snapshot {
         Self { nodes: format!("{:?}", doc.nodes), parents: page.state.tree.parents.clone(),
             connected: page.state.dom.connected.clone(), created: page.state.dom.created.iter().collect(), detached: page.state.detached_nodes.iter().collect(),
             controls: forms.controls.iter().map(|(&node,c)| format!("{node}:{:?}:{:?}:{:?}:{:?}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}", c.kind,c.owner,c.name,c.value.text(),c.value.cursor,c.value.anchor,c.value.offset,c.dirty_value,c.checked,c.disabled,c.readonly,c.required,c.max_length,c.tab_index)).collect(),
-            attributes: page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.clone(),attr.value.clone())).collect(),
+            attributes: page.state.attributes.iter().map(|attr|(attr.owner.and_then(node_index),attr.name.qualified.clone(),attr.value.clone())).collect(),
             retained: page.state.retained, commits: page.state.dom_commits }
     }
 }

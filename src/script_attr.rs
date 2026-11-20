@@ -7,7 +7,8 @@ pub(super) const ATTR_BASE: u32 = 0x8200_0000;
 const ATTR_HANDLES: usize = 0x0100_0000;
 
 pub(super) struct Attr {
-    pub(super) owner: Option<usize>,
+    pub(super) owner: Option<u32>,
+    pub(super) document: u32,
     pub(super) name: AttributeName,
     // Attached values stay in the element. Removal moves the actual String here.
     pub(super) value: String,
@@ -31,10 +32,11 @@ struct Reservation {records:Option<Vec<Attr>>,index:Option<Vec<usize>>,added:usi
 pub(super) enum InputPreparation {Pending,Ready(Option<forms::InputPlan>)}
 impl State {
     pub(super) fn attribute_lookup_work(&mut self)->Result<(),String>{self.work((usize::BITS-self.attached_attributes.len().leading_zeros()) as usize+1)}
-    pub(super) fn attribute_position(&self,node:usize,name:&AttributeName)->Result<usize,usize>{
+    pub(super) fn attribute_position(&self,node:usize,name:&AttributeName)->Result<usize,usize>{self.attribute_owner_position(node_handle(node),name)}
+    pub(super) fn attribute_owner_position(&self,owner:u32,name:&AttributeName)->Result<usize,usize>{
         self.attached_attributes.binary_search_by(|&id|{
             let attr=&self.attributes[id];
-            (attr.owner.unwrap(),attr.name.namespace_uri(),attr.name.local()).cmp(&(node,name.namespace_uri(),name.local()))
+            (attr.owner.unwrap(),attr.name.namespace_uri(),attr.name.local()).cmp(&(owner,name.namespace_uri(),name.local()))
         })
     }
 }
@@ -102,14 +104,14 @@ impl Bridge<'_> {
         let reservation=self.prepare_attribute_storage(1,0,occupied)?;let added=reservation.added;
         self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
         let handle=ATTR_BASE+self.state.attributes.len() as u32;
-        self.state.attributes.push(Attr{owner:None,name,value:String::new()});self.state.dom_committed();
+        self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name,value:String::new()});self.state.dom_committed();
         Ok(Value::Host(handle))
     }
 
     pub(super) fn validate_attr_attachment(&self,object:u32,args:&[Value])->Result<(),(&'static str,String)> {
         let Some(Value::Host(handle))=args.first() else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
         let Some(attr)=index(*handle).and_then(|id|self.state.attributes.get(id)) else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
-        if attr.owner.is_some() && attr.owner!=node_index(object) {return Err(("InUseAttributeError","Attr already belongs to another Element.".into()));}
+        if attr.owner.is_some() && attr.owner!=Some(object) {return Err(("InUseAttributeError","Attr already belongs to another Element.".into()));}
         Ok(())
     }
 
@@ -119,7 +121,7 @@ impl Bridge<'_> {
         self.validate_attr_attachment(object,args).map_err(|(_,message)|message)?;
         let node=self.attr_element_node(object)?;
         let Value::Host(handle)=args[0] else {unreachable!()};let incoming=index(handle).unwrap();
-        if self.state.attributes[incoming].owner==Some(node) {return Ok(Value::Host(handle));}
+        if self.state.attributes[incoming].owner==Some(node_handle(node)) {return Ok(Value::Host(handle));}
         let attr=&self.state.attributes[incoming];
         let active_name=attr.name.namespace.is_none() && !attr.name.qualified.contains(':');
         if active_name && (self.dom_script(node) && matches!(attr.name.qualified.as_str(),"src"|"type"|"charset"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"async"|"defer"|"nomodule")
@@ -168,13 +170,13 @@ impl Bridge<'_> {
         self.commit_attribute_storage(reservation);
         let insert=match position{Ok(position)=>{self.state.attached_attributes.remove(position);position},Err(position)=>position};
         let result=if let Some(old_id)=old_id {
-            self.state.attributes[old_id].owner=None;self.state.attributes[old_id].value=old_value;
+            self.state.attributes[old_id].owner=None;self.state.attributes[old_id].document=DOCUMENT;self.state.attributes[old_id].value=old_value;
             Value::Host(ATTR_BASE+old_id as u32)
         } else if let Some(old_name)=old_name {
             let handle=ATTR_BASE+self.state.attributes.len() as u32;
-            self.state.attributes.push(Attr{owner:None,name:old_name,value:old_value});Value::Host(handle)
+            self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name:old_name,value:old_value});Value::Host(handle)
         } else {Value::Null};
-        self.state.attributes[incoming].owner=Some(node);self.state.attributes[incoming].value=String::new();
+        self.state.attributes[incoming].owner=Some(node_handle(node));self.state.attributes[incoming].document=DOCUMENT;self.state.attributes[incoming].value=String::new();
         self.state.attached_attributes.insert(insert,incoming);
         Ok(result)
     }
@@ -284,28 +286,24 @@ impl Bridge<'_> {
                 Ok(Value::String(name_text(&self.state.attributes[id].name, name).unwrap().to_owned()))
             }
             "value" | "nodeValue" | "textContent" => {
-                let location = if let Some(owner) = attr.owner {
-                    let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { return Err("Invalid Attr owner.".into()); };
-                    self.state.work(attrs.len())?;
-                    self.state.copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
-                    let slot = attrs.iter().position(|entry| entry.name.same_expanded_name(&self.state.attributes[id].name))
-                        .ok_or("Attached Attr is missing from its owner.")?;
-                    Some((owner, slot))
-                } else { None };
-                let len = if let Some((owner, slot)) = location {
-                    let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { unreachable!() };
-                    attrs[slot].value.len()
-                } else { self.state.attributes[id].value.len() };
-                if len > self.state.limits.host.string_bytes { return Err("Attr value exceeds the host string bound.".into()); }
-                self.state.copies(len)?;
-                let text = if let Some((owner, slot)) = location {
-                    let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { unreachable!() };
-                    &attrs[slot].value
-                } else { &self.state.attributes[id].value };
+                let location=if let Some(owner)=attr.owner {
+                    let attrs=self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?;
+                    let work=attrs.len();let names=attrs.iter().map(|attr|attr.name.bytes()).sum();
+                    self.state.work(work)?;self.state.copies(names)?;
+                    let slot=self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?.iter().position(|entry|entry.name.same_expanded_name(&self.state.attributes[id].name)).ok_or("Attached Attr is missing from its owner.")?;
+                    Some((owner,slot))
+                }else{None};
+                let text=if let Some((owner,slot))=location{&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].value}else{&self.state.attributes[id].value};
+                let length=text.len();if length>self.state.limits.host.string_bytes{return Err("Attr value exceeds the host string bound.".into());}
+                self.state.copies(length)?;
+                let text=if let Some((owner,slot))=location{&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].value}else{&self.state.attributes[id].value};
                 Ok(Value::String(text.to_owned()))
             }
-            "ownerElement" => Ok(attr.owner.map_or(Value::Null, |node| Value::Host(node_handle(node)))),
-            "ownerDocument" => Ok(Value::Host(DOCUMENT)),
+            "ownerElement" => Ok(attr.owner.map_or(Value::Null,Value::Host)),
+            "ownerDocument" => {
+                if let Some(owner)=attr.owner {if self.inert_node_type(owner).is_some(){return self.inert_get(owner,"ownerDocument");}return Ok(Value::Host(DOCUMENT));}
+                Ok(Value::Host(attr.document))
+            },
             "nodeType" => Ok(Value::Number(2.0)),
             "specified" => Ok(Value::Bool(true)),
             "isConnected" => Ok(Value::Bool(false)),
@@ -325,6 +323,7 @@ impl Bridge<'_> {
         if let Some(owner) = self.state.attributes[id].owner {
             self.state.copies(self.state.attributes[id].name.bytes())?;
             let name = self.state.attributes[id].name.copy();
+            let owner=node_index(owner).filter(|_|self.inert_node_type(owner).is_none()).ok_or("Inert Attr value assignment is unavailable.")?;
             self.public_attribute(owner, name, Some(value))?;
         } else {
             self.state.replace_storage(self.state.attributes[id].value.capacity(), value.capacity(),value.len())?;
@@ -343,24 +342,36 @@ impl Bridge<'_> {
     }
 
     pub(super) fn lookup_attribute_node_at(&mut self, node: usize, slot: Option<usize>) -> Result<Value, String> {
-        let Some(slot) = slot else { return Ok(Value::Null); };
-        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
-        let name = &attrs[slot].name;
+        self.lookup_owner_attribute_node_at(node_handle(node),slot)
+    }
+    pub(super) fn lookup_owner_attribute_node_at(&mut self,owner:u32,slot:Option<usize>)->Result<Value,String>{
+        let Some(slot)=slot else{return Ok(Value::Null);};
+        let name=&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?.get(slot).ok_or("Missing attribute slot.")?.name;
+        let copy_work=name.bytes();
         self.state.attribute_lookup_work()?;
-        let position=match self.state.attribute_position(node,name){Ok(position)=>return Ok(Value::Host(ATTR_BASE+self.state.attached_attributes[position] as u32)),Err(position)=>position};
-        self.state.copies(name.bytes())?;
-        let name=copy_name(name)?;let payload=owned_name_bytes(&name);
-        let occupied=self.state.retained.checked_add(payload).ok_or("Attr retained storage overflow.")?;
+        let name=&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].name;
+        let position=self.state.attribute_owner_position(owner,name);
+        let position=match position{Ok(position)=>return Ok(Value::Host(ATTR_BASE+self.state.attached_attributes[position] as u32)),Err(position)=>position};
+        self.state.copies(copy_work)?;
+        let name=copy_name(&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].name)?;
+        let document=if self.inert_node_type(owner).is_some(){let Value::Host(document)=self.inert_get(owner,"ownerDocument")?else{return Err("Inert Attr document is unavailable.".into());};document}else{DOCUMENT};
+        let occupied=self.state.retained.checked_add(owned_name_bytes(&name)).ok_or("Attr retained storage overflow.")?;
         let reservation=self.prepare_attribute_storage(1,1,occupied)?;let added=reservation.added;
         self.state.copies((self.state.attached_attributes.len()-position)*size_of::<usize>())?;
         self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
-        let id=self.state.attributes.len();let handle = ATTR_BASE + id as u32;
-        self.state.attributes.push(Attr { owner: Some(node), name, value: String::new() });
-        self.state.attached_attributes.insert(position,id);
-        Ok(Value::Host(handle))
+        let id=self.state.attributes.len();let handle=ATTR_BASE+id as u32;
+        self.state.attributes.push(Attr{owner:Some(owner),document,name,value:String::new()});self.state.attached_attributes.insert(position,id);Ok(Value::Host(handle))
     }
 
     pub(super) fn get_attribute_node(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        if self.inert_node_type(object)==Some(1){
+            let mut text=self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
+            if matches!(self.inert_get(object,"namespaceURI")?,Value::String(ref uri) if uri=="http://www.w3.org/1999/xhtml"){text.make_ascii_lowercase();}
+            let attrs=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?;
+            let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));
+            self.state.work(work)?;let slot=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?.iter().position(|attr|attr.name.qualified==text);
+            return self.lookup_owner_attribute_node_at(object,slot);
+        }
         let node = self.attr_element_node(object)?;
         let text = self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
         self.state.copies(text.len())?;
@@ -382,6 +393,13 @@ impl Bridge<'_> {
     }
 
     pub(super) fn get_attribute_node_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        if self.inert_node_type(object)==Some(1){
+            let uri=namespace(args)?;let local=self.text(args.get(1).ok_or("getAttributeNodeNS requires a local name.")?)?;
+            let attrs=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?;
+            let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;let slot=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?.iter().position(|attr|attr.name.matches(uri,&local));
+            return self.lookup_owner_attribute_node_at(object,slot);
+        }
+
         let node = self.attr_element_node(object)?;
         let local = self.text(args.get(1).ok_or("getAttributeNodeNS requires two arguments.")?)?;
         let slot = self.attribute_slot(node, namespace(args)?, &local)?;
@@ -424,7 +442,7 @@ impl Bridge<'_> {
         let Some(attr) = index(*handle).and_then(|id| self.state.attributes.get(id)) else {
             return Err(("TypeError", "removeAttributeNode requires an Attr.".into()));
         };
-        if node_index(object) != attr.owner || attr.owner.is_none() {
+        if Some(object) != attr.owner || attr.owner.is_none() {
             return Err(("NotFoundError", "Attr does not belong to this Element.".into()));
         }
         Ok(())
@@ -437,7 +455,7 @@ impl Bridge<'_> {
         self.state.copies(self.state.attributes[id].name.bytes())?;
         let attr = &self.state.attributes[id];
         let name = attr.name.copy();
-        let owner = attr.owner.unwrap();
+        let owner=node_index(attr.owner.unwrap()).filter(|_|self.inert_node_type(attr.owner.unwrap()).is_none()).ok_or("Inert Attr removal requires its inert owner path.")?;
         self.public_attribute(owner, name, None)?;
         Ok(Value::Host(handle))
     }
@@ -504,7 +522,7 @@ impl Bridge<'_> {
         let id = index(object)?;
         Some((|| {
             let owner = self.state.attributes.get(id).ok_or("Invalid Attr handle.")?.owner;
-            if let Some(owner) = owner { dom_tree::default_namespace(self.doc, owner, None, self.state) }
+            if let Some(owner) = owner {let node=node_index(owner).filter(|_|self.inert_node_type(owner).is_none()).ok_or("Inert Attr namespace traversal is unavailable.")?;dom_tree::default_namespace(self.doc, node, None, self.state)}
             else { self.state.work(1)?; Ok(None) }
         })())
     }

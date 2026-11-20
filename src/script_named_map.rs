@@ -5,11 +5,15 @@
 use super::*;
 
 const BASE: u32 = 0xc000_0000;
-pub(super) fn element(handle: u32) -> Option<u32> {
-    (BASE..BASE + NODE_HANDLES).contains(&handle).then(|| node_handle((handle - BASE) as usize))
-        .filter(|handle| node_index(*handle).is_some())
+const INERT_BASE:u32=0xc100_0000;
+pub(super) fn element(handle:u32)->Option<u32>{
+    if (BASE..BASE+NODE_HANDLES).contains(&handle){Some(node_handle((handle-BASE) as usize))}
+    else if (INERT_BASE+1..INERT_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION)).contains(&handle){Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_BASE))}
+    else{None}
 }
-pub(super) fn handle(element: u32) -> u32 { BASE + (element - NODE_BASE) }
+pub(super) fn handle(element:u32)->u32 {
+    if node_index(element).is_some(){BASE+(element-NODE_BASE)}else{INERT_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
+}
 pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
         "item" => Some("item"),
@@ -21,20 +25,21 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
 
 impl Bridge<'_> {
     pub(super) fn named_map_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|owner| self.class_list_element_receiver(owner))
+        element(object).is_some_and(|owner| self.inert_node_type(owner)==Some(1)||self.class_list_element_receiver(owner))
     }
-    fn named_map_node(&mut self, object: u32) -> Result<usize, String> {
+    fn named_map_owner(&mut self, object: u32) -> Result<u32, String> {
         let owner = element(object).ok_or("Invalid NamedNodeMap handle.")?;
-        self.attr_element_node(owner)
+        if self.inert_node_type(owner)==Some(1){return Ok(owner);}
+        self.attr_element_node(owner).map(node_handle)
     }
     pub(super) fn named_map_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
-        let node = self.named_map_node(object)?;
-        let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+        let owner = self.named_map_owner(object)?;
         self.state.work(1)?;
+        let attrs=self.element_attribute_source(owner).ok_or("NamedNodeMap owner attributes are unavailable.")?;
         if property == "length" { return Ok(Value::Number(attrs.len() as f64)); }
         if let Some(index) = collection_index(property) {
             let slot = (index < attrs.len()).then_some(index);
-            let value = self.lookup_attribute_node_at(node, slot)?;
+            let value = self.lookup_owner_attribute_node_at(owner, slot)?;
             return Ok(if matches!(value, Value::Null) { Value::Undefined } else { value });
         }
         if matches!(property, "setNamedItem" | "setNamedItemNS" | "removeNamedItem" | "removeNamedItemNS") {
@@ -48,32 +53,33 @@ impl Bridge<'_> {
         if matches!(property, "toString" | "toLocaleString" | "valueOf" | "hasOwnProperty" | "isPrototypeOf" | "propertyIsEnumerable" | "__defineGetter__" | "__defineSetter__" | "__lookupGetter__" | "__lookupSetter__") {
             return Ok(Value::Undefined);
         }
-        if self.raw_attribute_slot(node, property)?.is_some() {
+        let attrs=self.element_attribute_source(owner).ok_or("NamedNodeMap owner attributes are unavailable.")?;
+        let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));self.state.work(work)?;let present=self.element_attribute_source(owner).ok_or("NamedNodeMap owner attributes are unavailable.")?.iter().any(|attr|attr.name.qualified==property);
+        if present {
             return Err("NamedNodeMap named-property reflection is not implemented; use getNamedItem.".into());
         }
         Ok(Value::Undefined)
     }
     pub(super) fn named_map_has(&mut self, object: u32, property: &str) -> Result<bool, String> {
         if property == "length" || method(property).is_some() {
-            self.named_map_node(object)?;
+            self.named_map_owner(object)?;
             return Ok(true);
         }
         if let Some(index) = collection_index(property) {
-            let node = self.named_map_node(object)?;
+            let owner = self.named_map_owner(object)?;
             self.state.work(1)?;
-            let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
+            let attrs=self.element_attribute_source(owner).ok_or("NamedNodeMap owner attributes are unavailable.")?;
             return Ok(index < attrs.len());
         }
         self.named_map_get(object, property).map(|value| !matches!(value, Value::Undefined))
     }
     pub(super) fn named_map_call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
-        let node = self.named_map_node(object)?;
-        let owner = node_handle(node);
+        let owner = self.named_map_owner(object)?;
         match method {
             "item" => {
                 let index = timer_integer(args.first().ok_or("item requires an index.")?)? as u32 as usize;
-                let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
-                self.lookup_attribute_node_at(node, (index < attrs.len()).then_some(index))
+                let attrs=self.element_attribute_source(owner).ok_or("NamedNodeMap owner attributes are unavailable.")?;
+                self.lookup_owner_attribute_node_at(owner, (index < attrs.len()).then_some(index))
             }
             "getNamedItem" => self.get_attribute_node(owner, args),
             "getNamedItemNS" => self.get_attribute_node_ns(owner, args),
@@ -84,8 +90,13 @@ impl Bridge<'_> {
         if collection_index(property).is_some() {
             return self.named_map_get(object, property).map(|value| (!matches!(value, Value::Undefined)).then_some(value));
         }
-        if property == "length" || method(property).is_some() { self.named_map_node(object)?; return Ok(None); }
+        if prototype_member(property) { self.named_map_owner(object)?; return Ok(None); }
         self.named_map_get(object, property)?;
         Ok(None)
     }
 }
+
+pub(super) fn operation(method:&str)->Option<&'static str>{match method{
+    "\0NamedNodeMap.get.length"=>Some("length"),"\0NamedNodeMap.item"=>Some("item"),
+    "\0NamedNodeMap.getNamedItem"=>Some("getNamedItem"),"\0NamedNodeMap.getNamedItemNS"=>Some("getNamedItemNS"),_=>None}}
+pub(super) fn prototype_member(property:&str)->bool{matches!(property,"constructor"|"__proto__"|"length"|"item"|"getNamedItem"|"getNamedItemNS")}

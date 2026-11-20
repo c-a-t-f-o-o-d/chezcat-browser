@@ -105,7 +105,7 @@ fn created_checkbox_admission_charges_native_and_attribute_bytes_together() {
             assert!(matches!(adopt(&mut doc, &mut forms, &mut page), Ok(Value::Null)));
             assert_eq!(page.state.retained, before.retained + growth);
             assert_eq!(forms.controls[&node].kind, Kind::Checkbox);
-            assert_eq!(page.state.attributes[0].owner, Some(node));
+            assert_eq!(page.state.attributes[0].owner.and_then(node_index), Some(node));
         }
         no_resources(&mut page);
     }

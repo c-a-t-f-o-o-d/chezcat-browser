@@ -113,7 +113,7 @@ impl Bridge<'_> {
         if let Some(id) = script_attr::index(handle) {
             let attr = self.state.attributes.get(id).ok_or("Invalid Attr position handle.")?;
             return match attr.owner {
-                Some(owner) => self.main_position_path(owner, Some(id)),
+                Some(owner) => {let node=node_index(owner).filter(|_|self.inert_node_type(owner).is_none()).ok_or("Inert Attr position traversal is unavailable.")?;self.main_position_path(node, Some(id))},
                 None => Ok(PositionPath { root: handle, steps: Vec::new(), attribute: Some(id) }),
             };
         }
@@ -137,7 +137,7 @@ impl Bridge<'_> {
         if this.steps == other.steps {
             return Ok(Value::Number(match (this.attribute, other.attribute) {
                 (Some(this), Some(other)) => {
-                    let owner = self.state.attributes[this].owner.ok_or("Missing attached Attr owner.")?;
+                    let owner = self.state.attributes[this].owner.and_then(node_index).ok_or("Missing main Attr owner.")?;
                     let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { return Err("Invalid Attr owner.".into()); };
                     self.state.work(attrs.iter().fold(attrs.len(), |work, attr| work.saturating_add(attr.name.bytes().saturating_mul(2))))?;
                     let this_name = &self.state.attributes[this].name;

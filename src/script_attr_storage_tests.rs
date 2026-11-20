@@ -108,7 +108,7 @@ fn browser_attr_replacement_registry_and_index_growth_fit_exactly_and_refuse_bef
     let old=handle(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.set_attribute_node(node_handle(node),&[Value::Host(incoming)]).unwrap());
     assert_eq!(old,ATTR_BASE+1);assert_eq!(doc.attr(node,"title"),Some("new"));
     assert_eq!(page.state.retained,before+bundle);assert_eq!(page.state.attributes.capacity(),2);assert_eq!(page.state.attached_attributes.capacity(),1);
-    assert_eq!(page.state.attributes[0].owner,Some(node));assert_eq!(page.state.attributes[0].value.capacity(),0);
+    assert_eq!(page.state.attributes[0].owner.and_then(node_index),Some(node));assert_eq!(page.state.attributes[0].value.capacity(),0);
     assert_eq!(page.state.attributes[1].owner,None);assert_eq!(page.state.attributes[1].value,"old");
 }
 

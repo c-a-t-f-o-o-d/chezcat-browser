@@ -169,7 +169,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
             c.value.text(), c.dirty_value, (c.value.cursor, c.value.anchor, c.value.offset),
         ))).collect(),
         attributes: page.state.attributes.iter()
-            .map(|a| (a.owner, a.name.qualified.clone(), a.value.clone())).collect(),
+            .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.clone())).collect(),
         retained: page.state.retained,
         commits: page.state.dom_commits,
     }
@@ -233,7 +233,7 @@ fn created_radio_attribute_admission_preflights_control_capacity_and_attribute_s
         if mode == "retained" {
             page.state.retained_limit = original_limit;
             assert!(matches!(adopt(&mut doc, &mut forms, &mut page), Ok(Value::Null)));
-            assert_eq!(page.state.attributes[0].owner, Some(node));
+            assert_eq!(page.state.attributes[0].owner.and_then(node_index), Some(node));
             assert_eq!(forms.controls[&node].kind, Kind::Radio);
             assert_eq!(forms.controls[&node].value.text(), "on");
         }
