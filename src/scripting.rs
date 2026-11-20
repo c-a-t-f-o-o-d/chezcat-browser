@@ -473,6 +473,7 @@ struct State {
     canvas_contexts: script_canvas_context::Contexts,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
+    attached_attributes: Vec<usize>,
     declined_images: usize,
     declined_beacons: usize,
     eval_allowed: bool,
@@ -560,6 +561,7 @@ impl State {
             canvas_contexts: script_canvas_context::Contexts::default(),
             node_list_references: 0,
             attributes: Vec::new(),
+            attached_attributes: Vec::new(),
             declined_images: 0,
             declined_beacons: 0,
             eval_allowed: false,
@@ -2365,6 +2367,9 @@ impl Bridge<'_> {
     }
 
     fn attribute_named(&mut self, node: usize, name: crate::html::AttributeName, value: Option<String>) -> Result<(), String> {
+        self.attribute_named_prepared(node,name,value,script_attr::InputPreparation::Pending)
+    }
+    fn attribute_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<String>,input:script_attr::InputPreparation)->Result<(),String>{
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -2374,7 +2379,7 @@ impl Bridge<'_> {
         }
         let repaint_sheet = sheet_media && self.state.dom.connected[node]
             && self.doc.attr(node, "media") != value.as_deref();
-        let input = self.prepare_input_attribute(node, &name, value.as_deref())?;
+        let input = match input{script_attr::InputPreparation::Pending=>self.prepare_input_attribute(node,&name,value.as_deref())?,script_attr::InputPreparation::Ready(input)=>input};
         let button = self.prepare_button_attribute(node, &name, value.as_deref())?;
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
         if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
@@ -2426,11 +2431,12 @@ impl Bridge<'_> {
         // Existing expanded names retain the original QName/prefix and order.
         let new = value.as_ref().map_or(0, |value| value.len() * factor + slot.map_or_else(|| name.bytes(), |slot| attrs[slot].name.bytes()));
         let detached_attr = if value.is_none() {
-            self.state.work(self.state.attributes.len())?;
-            self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.bytes()).sum())?;
-            self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name.same_expanded_name(&name))
+            self.state.attribute_lookup_work()?;
+            let position=self.state.attribute_position(node,&name).ok();
+            if let Some(position)=position{self.state.copies((self.state.attached_attributes.len()-position-1)*size_of::<usize>())?;}
+            position.map(|position|(position,self.state.attached_attributes[position]))
         } else { None };
-        let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.len()) } else { 0 };
+        let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.capacity()) } else { 0 };
         if name.html_is("id") { self.state.copies(value.as_ref().map_or(0, String::len))?; }
         let native_bytes = input.as_ref().map_or(0, forms::InputPlan::retained_bytes);
         let new_bytes = new.checked_add(retained_value).and_then(|bytes|bytes.checked_add(native_bytes))
@@ -2449,7 +2455,8 @@ impl Bridge<'_> {
                 attrs[index].value = value;
             } else {
                 let removed = attrs.remove(index).value;
-                if let Some(attr) = detached_attr {
+                if let Some((position,attr)) = detached_attr {
+                    self.state.attached_attributes.remove(position);
                     self.state.attributes[attr].owner = None;
                     self.state.attributes[attr].value = removed;
                 }

@@ -2418,7 +2418,7 @@ fn named_map_laziness_quota_rollback_and_unsupported_surfaces_preserve_real_entr
     assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
     bridge.state.retained_limit = before;
     assert!(bridge.get(map, "0").is_err()); assert!(bridge.state.attributes.is_empty()); assert_eq!(bridge.state.retained, before);
-    bridge.state.retained_limit = before + 100;
+    bridge.state.retained_limit = before + size_of::<script_attr::Attr>() + size_of::<usize>() + "title".len();
     bridge.state.copy_work = 0;
     assert!(bridge.get(map, "1").is_err()); assert!(bridge.state.attributes.is_empty());
     bridge.state.copy_work = bridge.state.limits.copy_bytes;

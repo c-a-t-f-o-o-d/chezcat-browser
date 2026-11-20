@@ -4,7 +4,7 @@ use super::*;
 use crate::html::{AttributeName, AttributeNamespace};
 
 pub(super) const ATTR_BASE: u32 = 0x8200_0000;
-const MAX_ATTRS: usize = 65_536;
+const ATTR_HANDLES: usize = 0x0100_0000;
 
 pub(super) struct Attr {
     pub(super) owner: Option<usize>,
@@ -14,7 +14,29 @@ pub(super) struct Attr {
 }
 
 pub(super) fn index(handle: u32) -> Option<usize> {
-    (ATTR_BASE..ATTR_BASE + MAX_ATTRS as u32).contains(&handle).then(|| (handle - ATTR_BASE) as usize)
+    (ATTR_BASE..ATTR_BASE + ATTR_HANDLES as u32).contains(&handle).then(|| (handle - ATTR_BASE) as usize)
+}
+
+fn owned_name_bytes(name:&AttributeName)->usize {
+    name.qualified.capacity()+name.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,String::capacity))
+}
+fn copy_text(text:&str)->Result<String,String>{
+    let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Attr text storage reservation failed.")?;
+    copied.push_str(text);Ok(copied)
+}
+fn copy_name(name:&AttributeName)->Result<AttributeName,String>{
+    Ok(AttributeName{qualified:copy_text(&name.qualified)?,namespace:name.namespace.as_ref().map(|ns|Ok::<_,String>(AttributeNamespace{uri:copy_text(&ns.uri)?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?})).transpose()?})
+}
+struct Reservation {records:Option<Vec<Attr>>,index:Option<Vec<usize>>,added:usize}
+pub(super) enum InputPreparation {Pending,Ready(Option<forms::InputPlan>)}
+impl State {
+    pub(super) fn attribute_lookup_work(&mut self)->Result<(),String>{self.work((usize::BITS-self.attached_attributes.len().leading_zeros()) as usize+1)}
+    pub(super) fn attribute_position(&self,node:usize,name:&AttributeName)->Result<usize,usize>{
+        self.attached_attributes.binary_search_by(|&id|{
+            let attr=&self.attributes[id];
+            (attr.owner.unwrap(),attr.name.namespace_uri(),attr.name.local()).cmp(&(node,name.namespace_uri(),name.local()))
+        })
+    }
 }
 
 fn property(name: &str) -> bool {
@@ -43,22 +65,42 @@ fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
 }
 
 impl Bridge<'_> {
+    fn prepare_attribute_storage(&mut self,records:usize,index:usize,occupied:usize)->Result<Reservation,String>{
+        let length=self.state.attributes.len();
+        #[cfg(test)]
+        if records!=0&&self.state.limits.test_entry_arenas&&length>=self.state.limits.host.attribute_identities {
+            return Err(format!("Attr identity limit reached ({} per document).",self.state.limits.host.attribute_identities));
+        }
+        if records!=0&&length>=ATTR_HANDLES{return Err("Attr native identity space exhausted.".into());}
+        let available=self.state.retained_limit.checked_sub(occupied).ok_or("DOM retained Attr payload allowance exhausted.")?;
+        let index_min=if index!=0&&self.state.attached_attributes.len()==self.state.attached_attributes.capacity(){size_of::<usize>()}else{0};
+        let (record_backing,record_bytes)=retained_storage::grow(&self.state.attributes,records,available.checked_sub(index_min).ok_or("DOM retained Attr/index allowance exhausted.")?)?;
+        let (index_backing,index_bytes)=retained_storage::grow(&self.state.attached_attributes,index,available-record_bytes)?;
+        if record_backing.is_some(){self.state.copies(length*size_of::<Attr>())?;}
+        if index_backing.is_some(){self.state.copies(self.state.attached_attributes.len()*size_of::<usize>())?;}
+        Ok(Reservation{records:record_backing,index:index_backing,added:record_bytes+index_bytes})
+    }
+    fn commit_attribute_storage(&mut self,reservation:Reservation){
+        if let Some(mut next)=reservation.records{next.append(&mut self.state.attributes);self.state.attributes=next;}
+        if let Some(mut next)=reservation.index{next.append(&mut self.state.attached_attributes);self.state.attached_attributes=next;}
+    }
+
     pub(super) fn create_attribute(&mut self,args:&[Value],namespaced:bool)->Result<Value,String> {
-        let qualified=self.text(args.get(usize::from(namespaced)).ok_or("Attribute creation requires a name.")?)?;
+        let mut qualified=self.text(args.get(usize::from(namespaced)).ok_or("Attribute creation requires a name.")?)?;
         let name=if namespaced {
             let ns=namespace(args)?;
             super::script_attribute_names::validate_namespace(ns,&qualified).map_err(|(_,message)|message)?;
             if let Some(uri)=ns {
                 let (prefix,local)=qualified.split_once(':').map_or((None,qualified.as_str()),|(prefix,local)|(Some(prefix),local));
                 self.state.copies(uri.len().checked_add(qualified.len()).ok_or("Attribute name accounting overflow.")?)?;
-                let namespace=AttributeNamespace{uri:uri.into(),prefix:prefix.map(str::to_owned),local:local.into()};
+                let namespace=AttributeNamespace{uri:copy_text(uri)?,prefix:prefix.map(copy_text).transpose()?,local:copy_text(local)?};
                 AttributeName{qualified,namespace:Some(namespace)}
             } else {AttributeName::unqualified(qualified)}
-        } else {AttributeName::unqualified(qualified.to_ascii_lowercase())};
-        let limit=self.state.limits.host.attribute_identities.min(MAX_ATTRS);
-        if self.state.attributes.len()>=limit {return Err(format!("Attr identity limit reached ({limit} per document)."));}
-        self.state.attributes.try_reserve(1).map_err(|_|"Attr storage reservation failed.")?;
-        self.state.replace_bytes(0,name.bytes())?;
+        } else {qualified.make_ascii_lowercase();AttributeName::unqualified(qualified)};
+        let payload=owned_name_bytes(&name);
+        let occupied=self.state.retained.checked_add(payload).ok_or("Attr retained storage overflow.")?;
+        let reservation=self.prepare_attribute_storage(1,0,occupied)?;let added=reservation.added;
+        self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
         let handle=ATTR_BASE+self.state.attributes.len() as u32;
         self.state.attributes.push(Attr{owner:None,name,value:String::new()});self.state.dom_committed();
         Ok(Value::Host(handle))
@@ -84,26 +126,22 @@ impl Bridge<'_> {
             || self.dom_stylesheet(node) && matches!(attr.name.qualified.as_str(),"href"|"rel"|"type"|"media"|"as"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"disabled")) {
             return Err("Attribute-node adoption for active script/stylesheet settings is not implemented; no attribute was changed.".into());
         }
-        let name_bytes=attr.name.bytes();let value_bytes=attr.value.len();
+        let name_bytes=attr.name.bytes();let value_bytes=attr.value.len();let value_storage=attr.value.capacity();
         self.state.copies(name_bytes.checked_mul(2).and_then(|n|n.checked_add(value_bytes)).ok_or("Attribute copy accounting overflow.")?)?;
-        let element_name=self.state.attributes[incoming].name.copy();let write_name=element_name.copy();let value=self.state.attributes[incoming].value.clone();
+        let element_name=copy_name(&self.state.attributes[incoming].name)?;let write_name=copy_name(&element_name)?;let value=copy_text(&self.state.attributes[incoming].value)?;
         let slot=self.attribute_slot(node,element_name.namespace_uri(),element_name.local())?;
-        self.state.work(self.state.attributes.len())?;
-        let old_id=self.state.attributes.iter().position(|attr|attr.owner==Some(node)&&attr.name.same_expanded_name(&element_name));
+        self.state.attribute_lookup_work()?;
+        let position=self.state.attribute_position(node,&element_name);
+        let old_id=position.ok().map(|position|self.state.attached_attributes[position]);
         let (old_name,old_value)=if let Some(slot)=slot {
             let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else {unreachable!()};let old=&attrs[slot];
             self.state.copies(old.name.bytes().checked_add(old.value.len()).ok_or("Attribute copy accounting overflow.")?)?;
-            (Some(old.name.copy()),old.value.clone())
+            (Some(copy_name(&old.name)?),copy_text(&old.value)?)
         } else {(None,String::new())};
         let new_old_identity=slot.is_some()&&old_id.is_none();
-        if new_old_identity {
-            let limit=self.state.limits.host.attribute_identities.min(MAX_ATTRS);
-            if self.state.attributes.len()>=limit {return Err(format!("Attr identity limit reached ({limit} per document)."));}
-            self.state.attributes.try_reserve(1).map_err(|_|"Attr storage reservation failed.")?;
-        }
         let old_name_bytes=old_name.as_ref().map_or(0,AttributeName::bytes);
-        let removed=value_bytes.checked_add(old_name_bytes).ok_or("Attribute accounting overflow.")?;
-        let added=old_value.len().checked_add(if slot.is_some(){name_bytes}else{0}).and_then(|n|n.checked_add(if new_old_identity{old_name_bytes}else{0})).ok_or("Attribute accounting overflow.")?;
+        let removed=value_storage.checked_add(old_name_bytes).ok_or("Attribute accounting overflow.")?;
+        let added=old_value.capacity().checked_add(if slot.is_some(){name_bytes}else{0}).and_then(|n|n.checked_add(if new_old_identity{old_name.as_ref().map_or(0,owned_name_bytes)}else{0})).ok_or("Attribute accounting overflow.")?;
         let retained_before=self.state.retained;
         let factor=if element_name.html_is("id"){2}else{1};
         let public_old=if slot.is_some(){old_value.len().checked_mul(factor).and_then(|n|n.checked_add(old_name_bytes)).ok_or("Attribute accounting overflow.")?}else{0};
@@ -112,15 +150,23 @@ impl Bridge<'_> {
         let total_added=added.checked_add(public_new).ok_or("Attribute accounting overflow.")?;
         let retained_after=if total_added>=total_removed {retained_before.checked_add(total_added-total_removed)}else{retained_before.checked_sub(total_removed-total_added)}.ok_or("Attribute retained accounting overflow/underflow.")?;
         if retained_after>self.state.retained_limit {return Err("DOM retained attribute growth allowance reached.".into());}
+        let input=self.prepare_input_attribute(node,&element_name,Some(&value))?;
+        let native_bytes=input.as_ref().map_or(0,forms::InputPlan::retained_bytes);
+        let occupied=retained_after.checked_add(native_bytes).ok_or("Attr/native INPUT retained storage overflow.")?;
+        let reservation=self.prepare_attribute_storage(usize::from(new_old_identity),usize::from(old_id.is_none()),occupied)?;
+        let backing=reservation.added;
+        self.state.copies(self.state.attached_attributes.len().saturating_mul(2*size_of::<usize>()))?;
         self.state.copies(added)?;
         // Stage the complete identity transfer before the checked element/native
         // write. Its final quota check must include both identity growth and
         // any newly admitted native INPUT storage. A shrinking element write
         // can offset a temporary positive transfer balance.
-        self.state.retained=if added>=removed {retained_before.checked_add(added-removed)}else{retained_before.checked_sub(removed-added)}
+        self.state.retained=if added+backing>=removed {retained_before.checked_add(added+backing-removed)}else{retained_before.checked_sub(removed-added-backing)}
             .ok_or("Attribute retained transfer overflow/underflow.")?;
-        if let Err(error)=self.public_attribute(node,write_name,Some(value)) {self.state.retained=retained_before;return Err(error);}
+        if let Err(error)=self.public_attribute_prepared(node,write_name,Some(value),InputPreparation::Ready(input)) {self.state.retained=retained_before;return Err(error);}
         if let Some(slot)=slot {let NodeKind::Element{attrs,..}=&mut self.doc.nodes[node].kind else {unreachable!()};attrs[slot].name=element_name;}
+        self.commit_attribute_storage(reservation);
+        let insert=match position{Ok(position)=>{self.state.attached_attributes.remove(position);position},Err(position)=>position};
         let result=if let Some(old_id)=old_id {
             self.state.attributes[old_id].owner=None;self.state.attributes[old_id].value=old_value;
             Value::Host(ATTR_BASE+old_id as u32)
@@ -128,7 +174,8 @@ impl Bridge<'_> {
             let handle=ATTR_BASE+self.state.attributes.len() as u32;
             self.state.attributes.push(Attr{owner:None,name:old_name,value:old_value});Value::Host(handle)
         } else {Value::Null};
-        self.state.attributes[incoming].owner=Some(node);self.state.attributes[incoming].value.clear();
+        self.state.attributes[incoming].owner=Some(node);self.state.attributes[incoming].value=String::new();
+        self.state.attached_attributes.insert(insert,incoming);
         Ok(result)
     }
     pub(super) fn attr_native_member(&self, name: &str) -> bool {
@@ -280,7 +327,7 @@ impl Bridge<'_> {
             let name = self.state.attributes[id].name.copy();
             self.public_attribute(owner, name, Some(value))?;
         } else {
-            self.state.replace_bytes(self.state.attributes[id].value.len(), value.len())?;
+            self.state.replace_bytes(self.state.attributes[id].value.capacity(), value.capacity())?;
             self.state.attributes[id].value = value;
             self.state.dom_committed();
         }
@@ -299,19 +346,17 @@ impl Bridge<'_> {
         let Some(slot) = slot else { return Ok(Value::Null); };
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
         let name = &attrs[slot].name;
-        self.state.work(self.state.attributes.len())?;
-        self.state.copies(self.state.attributes.iter().filter(|attr| attr.owner == Some(node)).map(|attr| attr.name.bytes()).sum())?;
-        if let Some(id) = self.state.attributes.iter().position(|attr| attr.owner == Some(node) && attr.name.same_expanded_name(name)) {
-            return Ok(Value::Host(ATTR_BASE + id as u32));
-        }
-        let limit = self.state.limits.host.attribute_identities.min(MAX_ATTRS);
-        if self.state.attributes.len() >= limit { return Err(format!("Attr identity limit reached ({limit} per document).")); }
-        self.state.attributes.try_reserve(1).map_err(|_| "Attr storage reservation failed.")?;
+        self.state.attribute_lookup_work()?;
+        let position=match self.state.attribute_position(node,name){Ok(position)=>return Ok(Value::Host(ATTR_BASE+self.state.attached_attributes[position] as u32)),Err(position)=>position};
         self.state.copies(name.bytes())?;
-        self.state.replace_bytes(0, name.bytes())?;
-        let name = name.copy();
-        let handle = ATTR_BASE + self.state.attributes.len() as u32;
+        let name=copy_name(name)?;let payload=owned_name_bytes(&name);
+        let occupied=self.state.retained.checked_add(payload).ok_or("Attr retained storage overflow.")?;
+        let reservation=self.prepare_attribute_storage(1,1,occupied)?;let added=reservation.added;
+        self.state.copies((self.state.attached_attributes.len()-position)*size_of::<usize>())?;
+        self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
+        let id=self.state.attributes.len();let handle = ATTR_BASE + id as u32;
         self.state.attributes.push(Attr { owner: Some(node), name, value: String::new() });
+        self.state.attached_attributes.insert(position,id);
         Ok(Value::Host(handle))
     }
 
@@ -400,11 +445,14 @@ impl Bridge<'_> {
     // Resolve a raw QName or expanded name before entering this policy boundary.
     // Only real lower-case null-namespace HTML attributes have native effects.
     pub(super) fn public_attribute(&mut self, node: usize, name: AttributeName, value: Option<String>) -> Result<(), String> {
+        self.public_attribute_prepared(node,name,value,InputPreparation::Pending)
+    }
+    fn public_attribute_prepared(&mut self,node:usize,name:AttributeName,value:Option<String>,input:InputPreparation)->Result<(),String>{
         if name.namespace.is_some() || name.qualified.contains(':') || name.qualified.bytes().any(|c| c.is_ascii_uppercase()) {
-            return self.attribute_named(node, name, value);
+            return self.attribute_named_prepared(node, name, value,input);
         }
         let key = name.qualified.as_str();
-        if self.accepts_input_type(node, &name, value.as_deref()) { return self.attribute_named(node, name, value); }
+        if self.accepts_input_type(node, &name, value.as_deref()) { return self.attribute_named_prepared(node, name, value,input); }
         if self.hidden_input_attribute(node,&name,&value)? {return Ok(());}
         let media_source=key=="src"&&self.media_element_receiver(node_handle(node));
         let media_controls=key=="controls"&&self.media_interface_receiver(node_handle(node));
@@ -412,7 +460,7 @@ impl Bridge<'_> {
         if self.stylesheet_attribute_change(node, key, value.as_deref())? { return Ok(()); }
         if self.dom_script(node) && matches!(key, "src" | "type" | "charset" | "nonce" | "integrity" | "crossorigin" | "referrerpolicy" | "fetchpriority" | "async" | "defer" | "nomodule") {
             let queue = key == "src" && self.state.dom.connected[node];
-            self.attribute_named(node, name, value)?;
+            self.attribute_named_prepared(node, name, value,input)?;
             if queue { self.queue_dynamic_script(node)?; }
             return Ok(());
         }
@@ -449,7 +497,7 @@ impl Bridge<'_> {
         if key == "style" {
             if let Some(value) = value.as_ref() { validate_style(value, self.state.limits.host.string_bytes)?; }
         }
-        self.attribute_named(node, name, value)
+        self.attribute_named_prepared(node, name, value,input)
     }
 
     pub(super) fn attr_default_namespace(&mut self, object: u32) -> Option<Result<Option<&'static str>, String>> {
@@ -469,3 +517,7 @@ mod anchor_attribute_tests;
 #[cfg(test)]
 #[path = "script_hidden_input_tests.rs"]
 mod hidden_input_tests;
+
+#[cfg(test)]
+#[path="script_attr_storage_tests.rs"]
+mod storage_tests;
