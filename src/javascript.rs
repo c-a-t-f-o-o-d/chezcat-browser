@@ -279,6 +279,7 @@ const MAX_PARSE_DEPTH: usize = 64;
 const MAX_EXPRESSION_FRAMES: usize = 4096;
 // Flat else-if dispatchers do not consume native parser/evaluator frames.
 // Pending branches across nested statements still share a finite allowance.
+#[cfg(test)]
 const MAX_IF_BRANCHES: usize = 4096;
 // Native reentry (statements, callbacks and compound helpers), not the
 // expression continuation stack. Never raise this to enlarge heap capacity.
@@ -2745,8 +2746,11 @@ impl Parser {
         let mut current = id;
         let mut first = StmtKind::Empty;
         loop {
-            if self.if_branches >= MAX_IF_BRANCHES {
-                return Err(self.unsupported("Pending if-branch limit reached (4096)."));
+            #[cfg(test)]
+            if let Some(limit) = self.capacity.test_expression_frames {
+                if self.if_branches >= limit {
+                    return Err(self.unsupported(format!("Pending if-branch limit reached ({limit}).")));
+                }
             }
             self.if_branches += 1;
             self.need("(")?;
