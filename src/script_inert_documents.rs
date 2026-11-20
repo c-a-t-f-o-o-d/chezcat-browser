@@ -385,8 +385,6 @@ impl Bridge<'_> {
         let position = reference.and_then(|reference| self.doc.nodes[parent].children.iter().position(|&node| node == reference))
             .unwrap_or(self.doc.nodes[parent].children.len());
         self.doc.nonce_unsafe_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve fragment nonce provenance.")?;
-        self.state.dom.created.try_reserve(plan.len()).map_err(|_| "Cannot reserve promoted node identities.")?;
-        self.state.detached_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve detached promotion identities.")?;
         self.state.work(plan.len().saturating_mul(self.state.dom.inert_child_lists.lookup_work()))?;
         let mut child_lists = 0usize;
         for item in &mut plan {

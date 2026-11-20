@@ -33,6 +33,8 @@ mod dom_collections;
 use dom_collections::collection_handle_index;
 #[path = "script_tree_order.rs"]
 mod tree_order;
+#[path = "script_node_sets.rs"]
+mod node_sets;
 #[path = "script_node_state.rs"]
 mod node_state;
 #[path = "script_dom_tree.rs"]
@@ -94,6 +96,9 @@ mod script_class_list;
 mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
+#[cfg(test)]
+#[path = "script_node_sets_tests.rs"]
+mod script_node_sets_tests;
 #[cfg(test)]
 #[path = "script_tree_order_tests.rs"]
 mod script_tree_order_tests;
@@ -494,8 +499,8 @@ struct State {
     listeners: listener_store::Store,
     native_functions: HashMap<&'static str, Value>,
     native_methods: Vec<(u32, &'static str, Value)>,
-    detached_images: HashSet<usize>,
-    detached_nodes: HashSet<usize>,
+    detached_images: node_sets::NodeSet,
+    detached_nodes: node_sets::NodeSet,
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
     canvas_contexts: script_canvas_context::Contexts,
@@ -583,8 +588,8 @@ impl State {
             listeners: listener_store::Store::default(),
             native_functions: HashMap::new(),
             native_methods: Vec::new(),
-            detached_images: HashSet::new(),
-            detached_nodes: HashSet::new(),
+            detached_images: node_sets::NodeSet::default(),
+            detached_nodes: node_sets::NodeSet::default(),
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
             canvas_contexts: script_canvas_context::Contexts::default(),
@@ -2640,9 +2645,6 @@ impl Bridge<'_> {
         // their old data and identity; a nonempty replacement creates a new
         // Text, while the empty string creates no child at all.
         let detached_parent = self.state.detached_nodes.contains(&node);
-        let retained_count = descendants.len().checked_add(usize::from(detached_parent && !text.is_empty()))
-            .ok_or("textContent retained-node accounting overflow.")?;
-        self.state.detached_nodes.try_reserve(retained_count).map_err(|_| "textContent detached-node reservation failed.")?;
         let text_bytes = if text.is_empty() { 0 } else { text.capacity() };
         let count = usize::from(!text.is_empty());
         let minimum = self.main_node_minimum(count)?;

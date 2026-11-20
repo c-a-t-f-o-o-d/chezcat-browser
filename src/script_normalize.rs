@@ -165,10 +165,6 @@ impl Bridge<'_> {
             }
             strings.push((keeper, text));
         }
-        self.state
-            .detached_nodes
-            .try_reserve(removed.len())
-            .map_err(|_| "Normalize detached-node reservation failed.")?;
         // String copying was charged before allocation; the retained total was
         // validated before staging and no callback can change it in between.
         self.state.retained = retained;

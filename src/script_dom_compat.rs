@@ -261,9 +261,6 @@ impl Bridge<'_> {
         let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
             .ok_or("Image node/payload backing allowance exhausted.")?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
-        self.state.detached_images.try_reserve(1).map_err(|_|"Cannot reserve detached image identity.")?;
-        self.state.dom.created.try_reserve(1).map_err(|_|"Cannot reserve image Node identity.")?;
-        self.state.detached_nodes.try_reserve(1).map_err(|_|"Cannot reserve detached image Node.")?;
         self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("Image node/payload storage overflow.")?, bytes)?;
         self.commit_main_nodes(node_growth);
         let node = self.doc.nodes.len();

@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn node_root_new_detached_nodes_remain_their_own_roots() {
         let (mut doc, mut forms, mut page) = fixture("var n=document.createElement('section');n.id='fresh';var t=document.createTextNode('fresh text');var c=document.createComment('fresh comment');");
-        let created: Vec<_> = page.state.dom.created.iter().copied().collect();
+        let created: Vec<_> = page.state.dom.created.iter().collect();
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
         for node in created {
             assert_host(root(&mut bridge, node_handle(node), false), node_handle(node));

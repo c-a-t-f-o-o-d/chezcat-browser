@@ -270,7 +270,7 @@ fn attribute_nodes_existing_identity_moves_payload_without_double_retention_and_
     for tag in ["script","link"] {
         let source=format!("var resource=document.createElement('{tag}');var attr=document.createAttribute('{}');attr.value='/must-not-fetch';",if tag=="script"{"src"}else{"href"});
         let (mut doc,mut forms,mut page,outcome)=self::page("<div>Test</div>",&[&source]);assert_eq!(outcome.errors,0,"{}",page.report());
-        let resource=page.state.dom.created.iter().copied().find(|&n|super::tag(&doc,n)==tag).unwrap();
+        let resource=page.state.dom.created.iter().find(|&n|super::tag(&doc,n)==tag).unwrap();
         let retained=page.state.retained;let commits=page.state.dom_commits;
         assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.call(node_handle(resource),"setAttributeNode",&[Value::Host(script_attr::ATTR_BASE)]).unwrap_err().contains("active script/stylesheet"));
         assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);assert!(doc.attr(resource,if tag=="script"{"src"}else{"href"}).is_none());assert_eq!(page.state.attributes[0].owner,None);

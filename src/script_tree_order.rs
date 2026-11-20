@@ -5,7 +5,7 @@ impl State {
     pub(super) fn order_bytes(&self)->usize {self.tree.order.capacity()*size_of::<usize>()}
     #[cfg(test)]
     pub(super) fn tree_storage_bytes(&self)->usize {
-        self.node_state_bytes()+self.order_bytes()+self.tree.ids.capacity()*size_of::<(usize,usize)>()
+        self.node_sets_storage_bytes()+self.node_state_bytes()+self.order_bytes()+self.tree.ids.capacity()*size_of::<(usize,usize)>()
             +self.tree_stack.capacity()*size_of::<Visit>()
     }
     pub(super) fn push_tree_order(&mut self,order:&mut Vec<usize>,node:usize,other:usize)->Result<(),String> {

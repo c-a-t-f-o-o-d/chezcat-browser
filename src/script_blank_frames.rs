@@ -996,7 +996,7 @@ document.title='expando-realm-ok';
             let (doc,_,page,outcome)=start(source,&crate::csp::PolicySet::default());
             assert_eq!(outcome.errors,1,"{}",page.report());
             assert!(page.state.blank_frames.is_empty());
-            let f=page.state.dom.created.iter().copied().find(|&node|tag(&doc,node)=="iframe").unwrap();
+            let f=page.state.dom.created.iter().find(|&node|tag(&doc,node)=="iframe").unwrap();
             assert!(!page.state.dom.connected[f]);
         }
         for write in [

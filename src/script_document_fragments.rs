@@ -101,8 +101,6 @@ impl Bridge<'_> {
         let mut overrides=Vec::new();overrides.try_reserve(roots.len()+usize::from(old.is_some())).map_err(|_|"Fragment owner projection reservation failed.")?;
         for &root in &roots {overrides.push((root,Some(parent)));}
         if let Some(old)=old {overrides.push((old,None));}
-        self.state.detached_nodes.try_reserve(incoming.len().checked_add(outgoing.len()).ok_or("Fragment detached size overflow.")?)
-            .map_err(|_|"Fragment detached identity reservation failed.")?;
         let connected=self.state.dom.connected[parent];
         let form_plan=self.prepare_select_form_change(None,&overrides)?;
         let images=self.prepare_image_connections(&incoming,connected)?;

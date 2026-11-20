@@ -93,11 +93,11 @@ fn main_node_storage_every_producer_admits_one_exact_record_with_its_owned_paylo
 fn main_node_storage_twelve_thousand_detached_records_keep_initial_node_handles_and_paid_capacity() {
     let(mut doc,mut forms,mut page)=page("<html><body><p>kept</p></body></html>",0);
     let held=doc.nodes.iter().position(|node|node.kind.character_data()==Some("kept")).unwrap();
-    let before=page.state.retained;let states=page.state.node_state_bytes();let capacity=doc.nodes.capacity();let nodes=doc.nodes.len();
+    let before=page.state.retained;let states=page.state.node_state_bytes()+page.state.node_sets_storage_bytes();let capacity=doc.nodes.capacity();let nodes=doc.nodes.len();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     for _ in 0..12_000 {bridge.create_dom_node(NodeKind::DocumentFragment).unwrap();}
     assert_eq!(bridge.doc.nodes.len(),nodes+12_000);
-    assert_eq!(bridge.state.retained-before,(bridge.doc.nodes.capacity()-capacity)*size_of::<Node>()+bridge.state.node_state_bytes()-states);
+    assert_eq!(bridge.state.retained-before,(bridge.doc.nodes.capacity()-capacity)*size_of::<Node>()+bridge.state.node_state_bytes()+bridge.state.node_sets_storage_bytes()-states);
     assert_eq!(bridge.doc.nodes[held].kind.character_data(),Some("kept"));
     assert!(bridge.state.retained<=bridge.state.retained_limit);
 }

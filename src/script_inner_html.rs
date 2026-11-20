@@ -176,9 +176,6 @@ impl Bridge<'_> {
         image_plans.try_reserve(images.len()).map_err(|_| "HTML image-plan reservation failed.")?;
         for (image, source) in images { image_plans.push((image, self.prepare_image_change(image, source.as_deref())?)); }
         self.doc.nonce_unsafe_nodes.try_reserve(staged.nonce_unsafe_nodes.len()).map_err(|_| "HTML nonce metadata reservation failed.")?;
-        self.state.dom.created.try_reserve(count).map_err(|_| "HTML identity reservation failed.")?;
-        self.state.dom.fragment_scripts.try_reserve(scripts.len()).map_err(|_| "Inert-script reservation failed.")?;
-        self.state.detached_nodes.try_reserve(old.len().saturating_add(count)).map_err(|_| "Detached-node reservation failed.")?;
         let mut children = Vec::new();
         self.state.copies(staged.nodes[0].children.len().checked_mul(size_of::<usize>()).ok_or("HTML root child copy work overflow.")?)?;
         children.try_reserve_exact(staged.nodes[0].children.len()).map_err(|_| "HTML children reservation failed.")?;
