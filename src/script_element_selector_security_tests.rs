@@ -27,14 +27,16 @@ var w=frame.contentWindow,childRoot=w.document.documentElement,childOne=w.Elemen
 var read=w.Function('node','selector','return node.querySelector(selector);'),borrow=w.Function('fn','node','selector','return fn.call(node,selector);'),own=w.Function('return window===self&&document.body.nodeType===1;');
 if(childOne===one||childAll===all||childOne.call(root,'.item')!==a||childAll.call(root,'.item').length!==2||read(root,'.item')!==a||borrow(one,root,'.item')!==a||!own())throw 'same-origin native function owner/receiver';
 var touched=0,request={toString:function(){touched++;return 'body';}},refused=0;
-for(var fn of [one,all,childOne,childAll]){
+var match=Element.prototype.matches,closest=Element.prototype.closest,childMatch=w.Element.prototype.matches,childClosest=w.Element.prototype.closest;
+if(childMatch===match||childClosest===closest||!childMatch.call(a,'.item')||childClosest.call(a,'#root')!==root)throw 'matching owner realm/borrow';
+for(var fn of [one,all,childOne,childAll,match,closest,childMatch,childClosest]){
  try{fn.call(childRoot,request);throw 'unsupported child query fabricated';}catch(error){if(error.name!=='NotSupportedError')throw error;refused++;}
  try{fn.call(w.document,request);throw 'child Document accepted as Element';}catch(error){if(error.name!=='TypeError')throw error;refused++;}
 }
-if(touched||refused!==8||one.call(root,'.item')!==a||!own())throw 'child boundary coercion or native owner recovery';
+if(touched||refused!==16||one.call(root,'.item')!==a||!own())throw 'child boundary coercion or native owner recovery';
 "#);
     page.set_location(&location("https://different-selector.test/changed"));
-    for source in ["one.call(childRoot,request);","all.call(childRoot,request);","childOne.call(childRoot,request);","read(root,request);","borrow(one,root,request);"] {
+    for source in ["one.call(childRoot,request);","all.call(childRoot,request);","childOne.call(childRoot,request);","match.call(childRoot,request);","closest.call(childRoot,request);","childMatch.call(childRoot,request);","childClosest.call(childRoot,request);","read(root,request);","borrow(one,root,request);"] {
         page.clear_console();let allocations=page.runtime.window_allocation_state_for_test();
         let out=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(out.errors,1,"{source}\n{}",page.report());

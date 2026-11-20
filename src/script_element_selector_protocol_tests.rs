@@ -7,7 +7,8 @@ fn fixture() -> (Document, Forms, Page) {
         "<form id=f><input id=neighbor name=keep value=original>",
         "<input id=named-one name=querySelector value=one><input id=named-all name=querySelectorAll value=all></form>",
         "<div id=root><span id=a class=item>A</span>middle<div id=nested><span id=b class=item>B</span></div></div>",
-        "<div id=destination><span id=c class=item>C</span></div>"
+        "<div id=destination><span id=c class=item>C</span></div>",
+        "<form id=matching-form><input name=matches id=named-match><input name=closest id=named-closest></form>"
     ));
     doc.scripting_enabled=true;
     let mut forms=Forms::new(&doc);let mut page=Page::for_test();
@@ -132,5 +133,81 @@ for(var name of ['querySelector','querySelectorAll']){
  if(form[name]!==expected)throw 'prototype restoration overrode named form control';
 }
 if(form.querySelector!==namedOne||form.querySelectorAll!==namedAll||neighbor.value!=='original'||neighbor.defaultValue!=='original'||namedOne.form!==form||namedAll.form!==form)throw 'form query altered control state or owner';
+"#);
+}
+
+#[test]
+fn element_matching_canonical_descriptors_current_tree_and_detached_self() {
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var a=document.getElementById('a'),root=document.getElementById('root'),nested=document.getElementById('nested'),b=document.getElementById('b');
+var match=Element.prototype.matches,closest=Element.prototype.closest;
+for(var name of ['matches','closest']){
+ var d=Object.getOwnPropertyDescriptor(Element.prototype,name);
+ if(typeof d.value!=='function'||d.value.name!==name||d.value.length!==1||!d.writable||!d.enumerable||!d.configurable||a[name]!==d.value||Object.hasOwn(a,name))throw 'canonical matching descriptor';
+}
+if(!match.call(a,'#root > span.item')||match.call(root,'.item')||closest.call(b,'#root')!==root||closest.call(b,'.item')!==b||closest.call(root,'.missing')!==null)throw 'real matching or inclusive ancestors';
+var saved=match,hits=[];for(var child of root.children){if(saved.call(child,'.item'))hits.push(child);}
+if(hits.length!==1||hits[0]!==a)throw 'saved canonical matching over live children';
+var request={toString:function(){a.setAttribute('class','changed');nested.appendChild(a);return '#nested > .changed';}};
+if(!match.call(a,request)||closest.call(a,'#nested')!==nested)throw 'matching used tree before selector conversion';
+nested.removeChild(a);
+if(!match.call(a,'.changed')||closest.call(a,'.changed')!==a||closest.call(a,'#root')!==null||a.isConnected)throw 'detached matching self';
+var template=document.createElement('template');template.innerHTML='<svg id=vector><path id=shape d="M0 0 L2 2"></path></svg>';
+root.appendChild(template.content);
+var shape=document.getElementById('shape'),vector=document.getElementById('vector');
+if(!match.call(shape,'path')||closest.call(shape,'svg')!==vector||shape.namespaceURI!=='http://www.w3.org/2000/svg')throw 'promoted SVG canonical matching';
+"#);
+}
+
+#[test]
+fn element_matching_brand_conversion_errors_and_inert_boundary() {
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var a=document.getElementById('a'),touched=0,rejected=0,request={toString:function(){touched++;return '.item';}};
+var fake={get nodeType(){touched++;return 1;}};
+var receivers=[undefined,null,3,'span',fake,Object.create(Element.prototype),document,window,document.createTextNode('x'),document.createComment('x'),document.createDocumentFragment()];
+for(var fn of [Element.prototype.matches,Element.prototype.closest]){
+ for(var receiver of receivers){try{fn.call(receiver,request);throw 'wrong matching brand accepted';}catch(e){if(e.name!=='TypeError')throw e;rejected++;}}
+ try{new fn(request);throw 'constructible matching';}catch(e){if(e.name!=='TypeError')throw e;}
+ try{fn.call(a);throw 'missing matching selector';}catch(e){if(e.name!=='TypeError')throw e;}
+ try{fn.call(a,Symbol('selector'));throw 'Symbol matching selector';}catch(e){if(e.name!=='TypeError')throw e;}
+ try{fn.call(a,'[');throw 'invalid matching selector';}catch(e){if(e.name!=='SyntaxError')throw e;}
+ var marker={},conversion={toString:function(){throw marker;}};
+ try{fn.call(a,conversion);throw 'matching conversion swallowed';}catch(e){if(e!==marker)throw e;}
+ fn.call(a,'.item',{toString:function(){throw 'extra converted';}});
+}
+var template=document.createElement('template');template.innerHTML='<span>inert</span>';
+for(var fn of [Element.prototype.matches,Element.prototype.closest]){
+ try{fn.call(template.content.firstChild,request);throw 'inert selector fabricated';}catch(e){if(e.name!=='NotSupportedError')throw e;}
+}
+if(touched||rejected!==receivers.length*2||!a.matches('.item')||a.closest('#root')!==document.getElementById('root'))throw 'matching validation order/recovery';
+"#);
+}
+
+#[test]
+fn element_matching_live_overrides_saved_native_and_form_named_precedence() {
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var a=document.getElementById('a'),state={};
+for(var name of ['matches','closest']){
+ var descriptor=Object.getOwnPropertyDescriptor(Element.prototype,name),saved=descriptor.value;
+ a[name]=function(){return state;};if(a[name]()!==state||!Object.hasOwn(a,name))throw 'own matching shadow';
+ if(name==='matches'?!saved.call(a,'.item'):saved.call(a,'.item')!==a)throw 'saved matching followed shadow';
+ delete a[name];if(a[name]!==saved)throw 'matching shadow deletion';
+ Object.defineProperty(Element.prototype,name,{get:function(){if(this!==a)throw 'matching getter receiver';return function(){return state;};},configurable:true});
+ if(a[name]()!==state)throw 'live matching prototype';
+ if(name==='matches'?!saved.call(a,'.item'):saved.call(a,'.item')!==a)throw 'saved matching followed prototype';
+ delete Element.prototype[name];if(a[name]!==undefined||name in a)throw 'ghost matching fallback';
+ Object.defineProperty(Element.prototype,name,descriptor);
+}
+var form=document.getElementById('matching-form');
+var m=form.firstElementChild,c=form.lastElementChild;
+if(form.matches!==m||form.closest!==c||!Element.prototype.matches.call(form,'form')||Element.prototype.closest.call(form,'form')!==form)throw 'matching named form control precedence/borrowing';
+for(var name of ['matches','closest']){
+ var d=Object.getOwnPropertyDescriptor(Element.prototype,name),expected=name==='matches'?m:c;
+ delete Element.prototype[name];if(form[name]!==expected)throw 'matching deletion hid form control';Object.defineProperty(Element.prototype,name,d);
+ if(form[name]!==expected||expected.form!==form)throw 'matching restoration replaced named control';
+}
 "#);
 }

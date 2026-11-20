@@ -141,6 +141,10 @@ document.getElementById('copy').onclick=function(event){
     if(fragment.childElementCount!==0||fragment.firstElementChild!==null||fragment.lastElementChild!==null||mount.childElementCount!==1||mount.firstElementChild!==imported||mount.lastElementChild!==imported||input.firstElementChild!==source)throw 'live ParentNode insertion';
     if(fragment.children!==importedView||importedView.length!==0||mount.children!==mountView||Array.from(mountView)[0]!==imported||input.children!==sourceView||sourceView[0]!==source||imported.children!==savedChildren)throw 'real live HTMLCollection import and insertion';
     if(mount.childNodes[1]!==marker||!marker.isConnected||sourceMarker.isConnected||sourceMarker.parentNode!==input||mount.children.length!==1)throw 'real mixed-node activation';
+    var match=Element.prototype.matches,closest=Element.prototype.closest;
+    if(!match.call(imported,'a')||closest.call(imported,'#mount')!==mount)throw 'real imported canonical matching';
+    var selected=[];for(var child of mount.children){if(match.call(child,'a'))selected.push(child);}
+    if(selected.length!==1||selected[0]!==imported)throw 'real saved matching over imported live children';
     document.title='Template imported';
 };
 </script></body></html>"#).unwrap();
