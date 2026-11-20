@@ -977,9 +977,8 @@ impl Runtime {
                             self.step()?; // Optional-chain reference construction.
                         }
                         if let Some(calls) = followup_call {
-                            if calls.count > MAX_EVALUATION_FRAMES.saturating_sub(self.evaluation_frames) {
-                                return Err(Fault::new("Pending evaluation limit reached (4096)."));
-                            }
+                            self.check_await_operand_count(calls.count.saturating_sub(1)
+                                .saturating_add(self.evaluation_frames))?;
                             for _ in 0..calls.count {
                                 self.step()?; // Enter each call before evaluating its callee.
                             }
@@ -1031,29 +1030,19 @@ impl Runtime {
     }
 
     fn reserve_await_assignment(&mut self, frame: &mut Activation) -> Result<(), Fault> {
-        if frame.assignments.len() >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Async assignment nesting limit reached (4096)."));
-        }
+        self.check_await_operand_count(frame.assignments.len())?;
         if frame.assignments.len() == frame.assignments.capacity() {
-            let slot = std::mem::size_of::<Reference>();
-            self.await_storage(frame.retained_bytes().saturating_add(slot),
-                (frame.assignments.len() + 1).saturating_mul(slot))?;
-            frame.assignments.try_reserve_exact(1)
-                .map_err(|_| Fault::new("Unable to allocate bounded async assignment stack."))?;
+            let retained = frame.retained_bytes();
+            self.grow_await_scope_stack(&mut frame.assignments, retained)?;
         }
         Ok(())
     }
 
     fn reserve_await_plain_call(&mut self, frame: &mut Activation) -> Result<(), Fault> {
-        if frame.plain_calls.len() >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Async call nesting limit reached (4096)."));
-        }
+        self.check_await_operand_count(frame.plain_calls.len())?;
         if frame.plain_calls.len() == frame.plain_calls.capacity() {
-            let slot = std::mem::size_of::<Box<PreparedPlainArguments>>();
-            self.await_storage(frame.retained_bytes().saturating_add(slot),
-                (frame.plain_calls.len() + 1).saturating_mul(slot))?;
-            frame.plain_calls.try_reserve_exact(1)
-                .map_err(|_| Fault::new("Unable to allocate bounded async call stack."))?;
+            let retained = frame.retained_bytes();
+            self.grow_await_scope_stack(&mut frame.plain_calls, retained)?;
         }
         Ok(())
     }
@@ -1062,21 +1051,27 @@ impl Runtime {
     fn capture_await_comparison(&mut self, frame: &mut Activation) -> Result<Progress, Fault> {
         let value = frame.take_expression_value()?;
         let operands = &frame.comparison_operands;
-        if operands.len() >= MAX_EVALUATION_FRAMES {
-            return Err(Fault::new("Async comparison nesting limit reached (4096)."));
-        }
+        self.check_await_operand_count(operands.len())?;
         let retained = frame.retained_bytes().saturating_add(value.bytes());
         if operands.len() == operands.capacity() {
-            let slot = std::mem::size_of::<Value>();
-            self.await_storage(retained.saturating_add(slot),
-                (operands.len() + 1).saturating_mul(slot).saturating_add(value.bytes()))?;
-            frame.comparison_operands.try_reserve_exact(1)
-                .map_err(|_| Fault::new("Unable to allocate bounded async comparison stack."))?;
+            self.grow_await_scope_stack(&mut frame.comparison_operands, retained)?;
+            self.work_as(value.bytes(), WorkKind::ArgumentCapture)?;
         } else {
             self.await_storage(retained, value.bytes())?;
         }
         frame.comparison_operands.push(value);
         Ok(Progress::Continue)
+    }
+
+    fn check_await_operand_count(&self, count: usize) -> Result<(), Fault> {
+        #[cfg(test)]
+        if let Some(limit) = self.limits.test_evaluation_frames {
+            if count >= limit {
+                return Err(Fault::new(format!("Pending evaluation limit reached ({limit}).")));
+            }
+        }
+        let _ = count;
+        Ok(())
     }
 
     fn finish_await_assignment(
@@ -1130,11 +1125,15 @@ impl Runtime {
         if calls.count == 1 {
             return self.eval_resumed_expression(&frame.program, calls.outer, value, environment, &frame.this, host);
         }
-        let bytes = calls.count.saturating_mul(std::mem::size_of::<ExprId>());
+        let bytes = calls.count.checked_mul(std::mem::size_of::<ExprId>())
+            .ok_or_else(|| Fault::new("Async call chain storage arithmetic overflow."))?;
         self.await_storage(frame.retained_bytes().saturating_add(bytes), bytes)?;
         let mut suffix = Vec::new();
         suffix.try_reserve_exact(calls.count)
             .map_err(|_| Fault::new("Unable to allocate bounded async call chain."))?;
+        let allocated = suffix.capacity().checked_mul(std::mem::size_of::<ExprId>())
+            .ok_or_else(|| Fault::new("Async call chain capacity arithmetic overflow."))?;
+        self.await_storage(frame.retained_bytes().saturating_add(allocated), 0)?;
         let mut expression = calls.outer;
         for _ in 0..calls.count {
             suffix.push(expression);

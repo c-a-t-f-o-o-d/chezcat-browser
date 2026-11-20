@@ -283,6 +283,7 @@ const MAX_IF_BRANCHES: usize = 4096;
 // Native reentry (statements, callbacks and compound helpers), not the
 // expression continuation stack. Never raise this to enlarge heap capacity.
 const MAX_EVAL_DEPTH: usize = 128;
+#[cfg(test)]
 const MAX_EVALUATION_FRAMES: usize = 4096;
 #[cfg(test)]
 const MAX_EVALUATION_FRAME_SLOTS: usize = 2 * MAX_EVALUATION_FRAMES;
