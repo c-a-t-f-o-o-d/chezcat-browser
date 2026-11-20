@@ -264,9 +264,6 @@ impl Bridge<'_> {
         self.state.detached_images.try_reserve(1).map_err(|_|"Cannot reserve detached image identity.")?;
         self.state.dom.created.try_reserve(1).map_err(|_|"Cannot reserve image Node identity.")?;
         self.state.detached_nodes.try_reserve(1).map_err(|_|"Cannot reserve detached image Node.")?;
-        self.state.tree.active.try_reserve(1).map_err(|_|"Cannot reserve image active state.")?;
-        self.state.tree.parents.try_reserve(1).map_err(|_|"Cannot reserve image parent state.")?;
-        self.state.dom.connected.try_reserve(1).map_err(|_|"Cannot reserve image connection state.")?;
         self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("Image node/payload storage overflow.")?, bytes)?;
         self.commit_main_nodes(node_growth);
         let node = self.doc.nodes.len();

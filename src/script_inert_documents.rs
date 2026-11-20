@@ -902,9 +902,6 @@ impl Bridge<'_> {
             }
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
-        self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
-        self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
-        self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
         let minimum = self.state.inert_documents.entries.len().checked_add(entries.len())
             .and_then(|required| required.saturating_sub(self.state.inert_documents.entries.capacity()).checked_mul(size_of::<Entry>()))
             .and_then(|bytes| self.state.inert_documents.generated.len().checked_add(generated.len())

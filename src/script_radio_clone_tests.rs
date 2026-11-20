@@ -276,10 +276,13 @@ fn radio_clone_later_protected_descendant_rolls_back_native_staging_and_preserve
 #[test]
 fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_restore_all_state() {
     let (mut doc, mut forms, mut page) = staged("", "");
+    page.state.rebuild(&doc).unwrap();
     let base = doc.nodes.len();
     let native_count = forms.controls.len();
     let old_bytes = page.state.retained;
     let old_capacity = doc.nodes.capacity();
+    let old_states=page.state.node_state_bytes();
+    let minimum=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(4).unwrap();
     let old_work = page.state.host_work;
     let old_copies = page.state.copy_work;
     let result = clone_source(&mut doc, &mut forms, &mut page).unwrap();
@@ -292,7 +295,7 @@ fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_res
     // Existing-record movement/init work is independent of that spare capacity.
     let retained = page.state.retained - old_bytes
         -(doc.nodes.capacity()-old_capacity)*size_of::<Node>()
-        +(base+4).saturating_sub(old_capacity)*size_of::<Node>();
+        -(page.state.node_state_bytes()-old_states)+minimum;
     let dom_bytes: usize = doc.nodes[base..]
         .iter()
         .map(|n| {
@@ -329,6 +332,7 @@ fn radio_clone_exact_node_native_storage_and_work_boundaries_publish_once_or_res
             String::new()
         };
         let (mut doc, mut forms, mut page) = staged(&filler, "");
+        page.state.rebuild(&doc).unwrap();
         let base = doc.nodes.len();
         let before = snapshot(&doc, &forms, &page);
         page.state.node_limit = base + 4 - usize::from(mode == "nodes");

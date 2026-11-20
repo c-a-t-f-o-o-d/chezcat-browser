@@ -116,6 +116,7 @@ fn browser_attr_replacement_registry_and_index_growth_fit_exactly_and_refuse_bef
 fn browser_attr_owner_index_growth_leaves_exact_native_input_payload_headroom() {
     let(mut doc,mut forms,mut page)=page("<html><body></body></html>");
     page.runtime.execute("var input=document.createElement('input');input.id='fresh';",&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
+    page.state.rebuild(&doc).unwrap();
     let node=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{tag,..} if tag=="input")).unwrap();
     let attr=handle(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.create_attribute(&[Value::String("name".into())],false).unwrap());
     Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.attr_set(attr,"value",Value::String("q".repeat(80))).unwrap();

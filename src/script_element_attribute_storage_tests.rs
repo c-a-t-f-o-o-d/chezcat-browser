@@ -51,7 +51,7 @@ fn browser_element_attribute_clone_pays_compact_copy_and_fragments_retain_moved_
     for index in 0..18{bridge.public_attribute(node,crate::html::AttributeName::unqualified(format!("data-k{index}")),Some("x".into())).unwrap();}
     for index in 0..18{bridge.public_attribute(node,crate::html::AttributeName::unqualified(format!("data-k{index}")),None).unwrap();}
     assert!(attrs(bridge.doc,node).capacity()>attrs(bridge.doc,node).len());
-    let before=bridge.state.retained;let copied=copied_node_bytes(&bridge.doc.nodes[node])+"p".len();bridge.state.retained_limit=before+copied;
+    let before=bridge.state.retained;let copied=copied_node_bytes(&bridge.doc.nodes[node])+"p".len()+bridge.main_node_minimum(1).unwrap();bridge.state.retained_limit=before+copied;
     let Value::Host(cloned)=bridge.clone_node(node_handle(node),false).unwrap()else{panic!("real clone")};let cloned=node_index(cloned).unwrap();
     assert_eq!(attrs(bridge.doc,cloned).len(),1);assert_eq!(attrs(bridge.doc,cloned).capacity(),1);assert_eq!(bridge.state.retained,before+copied);assert_eq!(bridge.doc.attr(cloned,"title"),Some("old"));
     bridge.state.retained_limit=limit;let before=bridge.state.retained;
