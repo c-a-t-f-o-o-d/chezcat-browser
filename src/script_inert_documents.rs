@@ -703,10 +703,16 @@ impl Bridge<'_> {
         let arena = &self.state.inert_documents;
         let owner = arena.node(fragment).ok_or("Template fragment is unavailable.")?.owner;
         let fragment_index = (fragment - FIRST_ENTRY) as usize;
+        let root = arena.node(fragment).ok_or("Template fragment is unavailable.")?;
+        let released = root.children.capacity().checked_mul(size_of::<u32>())
+            .ok_or("Template child-link storage overflow.")?;
+        let detach_work = root.children.len();
         let count = parsed.nodes.len().checked_sub(1).ok_or("Missing checked fragment root.")?;
-        if count > self.inert_remaining_entries() {
+        if count > self.inert_remaining_entries_with_release(released) {
             return Err("Inert DOM identity limit reached during template replacement.".into());
         }
+        self.state.work(detach_work)?;
+        let arena = &self.state.inert_documents;
         let first = FIRST_ENTRY + arena.entries.len() as u32;
         let generated_base = arena.generated.len();
         // Leave immutable raw sources in the inert arena. A separate reserved
@@ -788,7 +794,7 @@ impl Bridge<'_> {
         self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
         self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
         self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
-        let committed = self.reserve_inert_entries(entries.len(), payload, generated.len())?;
+        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
@@ -963,10 +969,14 @@ impl Bridge<'_> {
     }
 
     fn inert_remaining_entries(&self) -> usize {
+        self.inert_remaining_entries_with_release(0)
+    }
+
+    fn inert_remaining_entries_with_release(&self, released: usize) -> usize {
         let arena = &self.state.inert_documents;
         let representation = (ENTRY_END - FIRST_ENTRY) as usize;
         let spare = arena.entries.capacity().saturating_sub(arena.entries.len());
-        let available = self.state.retained_limit.saturating_sub(self.state.retained);
+        let available = self.state.retained_limit.saturating_sub(self.state.retained.saturating_sub(released));
         let remaining = representation.saturating_sub(arena.entries.len())
             .min(spare.saturating_add(available / size_of::<Entry>()));
         #[cfg(test)]
@@ -979,6 +989,10 @@ impl Bridge<'_> {
     // Entry and generated-source backing grow jointly with the admitted payload.
     // Prepare both replacements before publishing either capacity or any handle.
     fn reserve_inert_entries(&mut self, count: usize, payload: usize, generated: usize) -> Result<u32, String> {
+        self.reserve_inert_storage(count, payload, generated, 0)
+    }
+
+    fn reserve_inert_storage(&mut self, count: usize, payload: usize, generated: usize, released: usize) -> Result<u32, String> {
         let arena = &self.state.inert_documents;
         let current = arena.entries.len();
         #[cfg(test)]
@@ -990,14 +1004,15 @@ impl Bridge<'_> {
         if count > ((ENTRY_END - FIRST_ENTRY) as usize).saturating_sub(current) {
             return Err("Inert DOM typed identity space exhausted.".into());
         }
-        if count > self.inert_remaining_entries() {
+        if count > self.inert_remaining_entries_with_release(released) {
             return Err(format!("Inert DOM entry backing allowance exhausted ({} bytes available).",
                 self.state.retained_limit.saturating_sub(self.state.retained)));
         }
         let handle = FIRST_ENTRY.checked_add(u32::try_from(current).map_err(|_| "Inert identity index overflow.")?)
             .ok_or("Inert identity overflow.")?;
         self.state.work(count.saturating_add(generated))?;
-        let available = self.state.retained_limit.saturating_sub(self.state.retained)
+        let retained = self.state.retained.checked_sub(released).ok_or("Inert retained storage refund underflow.")?;
+        let available = self.state.retained_limit.saturating_sub(retained)
             .checked_sub(payload).ok_or("Inert DOM retained payload allowance exhausted.")?;
         let arena = &self.state.inert_documents;
         let minimum = arena.generated.len().checked_add(generated)
@@ -1015,7 +1030,7 @@ impl Bridge<'_> {
             .ok_or("Inert identity copy work overflow.")?;
         let added = payload.checked_add(entry_bytes).and_then(|bytes| bytes.checked_add(source_bytes))
             .ok_or("Inert retained storage overflow.")?;
-        self.state.replace_storage(0, added, work)?;
+        self.state.replace_storage(released, added, work)?;
         let arena = &mut self.state.inert_documents;
         if let Some(mut next) = entries { next.append(&mut arena.entries); arena.entries = next; }
         if let Some(mut next) = sources { next.append(&mut arena.generated); arena.generated = next; }
