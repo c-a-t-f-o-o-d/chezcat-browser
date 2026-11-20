@@ -4029,6 +4029,20 @@ document.title='checked SVG attached';
 }
 
 #[test]
+fn template_svg_mask_container_keeps_namespace_children_clone_and_real_owners() {
+    let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r#"
+var seed=document.createElement('template');seed.innerHTML='<svg><defs><mask id="mask" maskUnits="userSpaceOnUse" maskContentUnits="objectBoundingBox" mask-type="alpha"><rect width="1" height="1" fill="white"/></mask></defs></svg>';
+var content=seed.content,svg=content.firstChild,defs=svg.firstChild,mask=defs.firstChild,rect=mask.firstChild,owner=mask.ownerDocument,units=mask.getAttributeNode('maskUnits'),children=mask.children;
+if(mask.nodeName!=='mask'||!(mask instanceof SVGElement)||mask.namespaceURI!=='http://www.w3.org/2000/svg'||rect.namespaceURI!==mask.namespaceURI||mask.parentNode!==defs||rect.ownerDocument!==owner||mask.getAttributeNames().join(',')!=='id,maskUnits,maskContentUnits,mask-type'||mask.getAttribute('maskunits')!==null||mask.getAttribute('maskContentUnits')!=='objectBoundingBox'||mask.getAttribute('mask-type')!=='alpha')throw 'actual SVG mask metadata';
+var clone=content.cloneNode(true).firstChild.firstChild.firstChild;
+if(clone===mask||clone.firstChild===rect||clone.ownerDocument!==owner||clone.getAttribute('maskUnits')!=='userSpaceOnUse'||seed.innerHTML.indexOf('maskContentUnits="objectBoundingBox"')<0)throw 'real mask clone and serialization';
+document.getElementById('mount').appendChild(content);
+if(document.getElementById('mask')!==mask||!mask.isConnected||rect.ownerDocument!==document||mask.children!==children||children[0]!==rect||units.ownerElement!==mask||units.ownerDocument!==document||units.value!=='userSpaceOnUse'||content.childNodes.length!==0||clone.isConnected)throw 'real mask promotion';
+"#]);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());let(added,removed,changed)=page.take_image_changes();assert!(added.is_empty()&&removed.is_empty()&&changed.is_empty());assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_style_preserves_actual_attribute_aliases_and_activation_guards() {
     let(mut doc,mut forms,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r#"
 var seed=document.createElement('template');seed.innerHTML='<svg id="styled" style="display:none; width:24px" aria-hidden="true" role="img" viewBox="0 0 24 24" data-href="/ordinary"><rect width="2" height="3"/></svg>';
@@ -4076,6 +4090,8 @@ if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttr
         "<svg aria-hidden='true' data-href='/ordinary' onclick='trigger()'></svg>",
         "<svg role='img' href='/guard'></svg>",
         "<svg aria-hidden='true' xlink:href='/guard'></svg>",
+        "<svg><defs><mask onclick='trigger()'></mask></defs></svg>",
+        "<svg><defs><mask href='/guard'></mask></defs></svg>",
         "<svg><path fill='url(#foreign)'/></svg>",
         "<svg><image href='/guard'/></svg>",
         "<svg><g></svg>",
