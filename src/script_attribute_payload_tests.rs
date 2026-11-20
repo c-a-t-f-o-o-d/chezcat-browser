@@ -53,10 +53,10 @@ fn browser_attribute_wide_qname_refund_funds_exact_native_identity_transfer() {
 #[test]
 fn browser_attribute_fragment_retains_decoded_capacity_and_clone_pays_only_compact_copy() {
     let(mut doc,mut forms,mut page)=page("<html><body><div></div></body></html>");let mount=element(&doc,"div");let before=page.state.retained;
-    let old_nodes=doc.nodes.capacity();
+    let old_nodes=doc.nodes.capacity();let old_states=page.state.node_state_bytes();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};bridge.set(node_handle(mount),"innerHTML",Value::String("<span data-key='a&amp;b'></span>".into())).unwrap();let node=element(bridge.doc,"span");
     let attr=attribute(bridge.doc,node,"data-key");assert!(attr.value.capacity()>attr.value.len());let NodeKind::Element{attrs,..}=&bridge.doc.nodes[node].kind else{unreachable!()};
-    assert_eq!(bridge.state.retained-before,attrs.capacity()*size_of::<crate::html::Attribute>()+attr.name.owned_bytes()+attr.value.capacity()+"span".len()+child_link_bytes(&bridge.doc.nodes[mount].children)+(bridge.doc.nodes.capacity()-old_nodes)*size_of::<Node>());
-    let before=bridge.state.retained;let copied=size_of::<crate::html::Attribute>()+"data-key".len()+"a&b".len()+"span".len();bridge.state.retained_limit=before+copied;
+    assert_eq!(bridge.state.retained-before,attrs.capacity()*size_of::<crate::html::Attribute>()+attr.name.owned_bytes()+attr.value.capacity()+"span".len()+child_link_bytes(&bridge.doc.nodes[mount].children)+(bridge.doc.nodes.capacity()-old_nodes)*size_of::<Node>()+bridge.state.node_state_bytes()-old_states);
+    bridge.state.rebuild(bridge.doc).unwrap();let before=bridge.state.retained;let copied=bridge.main_node_minimum(1).unwrap()+size_of::<crate::html::Attribute>()+"data-key".len()+"a&b".len()+"span".len();bridge.state.retained_limit=before+copied;
     let Value::Host(cloned)=bridge.clone_node(node_handle(node),false).unwrap()else{panic!("real clone")};let cloned=node_index(cloned).unwrap();assert_eq!(bridge.state.retained,before+copied);assert_eq!(bridge.doc.attr(cloned,"data-key"),Some("a&b"));assert_eq!(attribute(bridge.doc,cloned,"data-key").value.capacity(),3);
 }

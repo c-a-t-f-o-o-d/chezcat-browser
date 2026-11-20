@@ -89,16 +89,14 @@ fn boolean_script_attribute(name: &str) -> bool {
 }
 
 impl State {
-    fn id_storage_available(&self) -> Result<usize, String> {
-        let old=self.tree.ids.capacity().checked_mul(size_of::<(usize,usize)>())
-            .ok_or("DOM ID index backing overflow.")?;
-        self.retained_limit.checked_add(old).and_then(|limit|limit.checked_sub(self.retained))
+    fn id_storage_available(&self, states:usize) -> Result<usize, String> {
+        self.tree_replacement_available()?.checked_sub(states)
             .ok_or("DOM retained ID index replacement allowance exhausted.".into())
     }
 
-    fn push_document_id(&mut self, ids: &mut Vec<(usize, usize)>, node: usize, order: usize) -> Result<(), String> {
+    fn push_document_id(&mut self, ids: &mut Vec<(usize, usize)>, node: usize, order: usize, states:usize) -> Result<(), String> {
         let old = ids.capacity().checked_mul(size_of::<(usize, usize)>()).ok_or("DOM ID index backing overflow.")?;
-        let available = self.id_storage_available()?.checked_sub(old).ok_or("DOM retained ID index allowance exhausted.")?;
+        let available = self.id_storage_available(states)?.checked_sub(old).ok_or("DOM retained ID index allowance exhausted.")?;
         let (growth, _) = retained_storage::grow(ids, 1, available)?;
         self.work(1)?;
         let records = 1usize.checked_add(if growth.is_some(){ids.len()}else{0}).ok_or("DOM ID index movement overflow.")?;
@@ -184,13 +182,15 @@ impl State {
         // Charge the slot index and up to twice the added traversal field
         // size for growth of the temporary stack.
         self.copies(doc.nodes.len().saturating_mul(3 * std::mem::size_of::<usize>()))?;
+        let states=self.prepare_rebuilt_states(doc.nodes.len())?;
+        let state_bytes=states.bytes();
         let mut tree = Tree {
-            active: vec![false; doc.nodes.len()],
-            parents: vec![None; doc.nodes.len()],
+            active: states.active,
+            parents: states.parents,
             sibling_slots: vec![usize::MAX; doc.nodes.len()],
             ..Tree::default()
         };
-        let mut connected = vec![false; doc.nodes.len()];
+        let mut connected = states.connected;
         let mut stack = if doc.nodes.is_empty() {
             Vec::new()
         } else {
@@ -225,7 +225,7 @@ impl State {
                 }
                 if self.index_id_text(doc,node)?.is_some_and(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes) {
                     // The index reads document-owned text; it retains no ID copy.
-                    self.push_document_id(&mut tree.ids, node, tree.order.len() - 1)?;
+                    self.push_document_id(&mut tree.ids, node, tree.order.len() - 1, state_bytes)?;
                 }
             }
             stack.extend(
@@ -257,7 +257,8 @@ impl State {
         self.sort_document_ids(doc, &mut tree.ids)?;
         let old_ids = self.tree.ids.capacity() * size_of::<(usize, usize)>();
         let new_ids = tree.ids.capacity() * size_of::<(usize, usize)>();
-        self.retained = self.retained.checked_sub(old_ids).and_then(|bytes|bytes.checked_add(new_ids))
+        self.retained = self.retained.checked_sub(old_ids).and_then(|bytes|bytes.checked_sub(self.node_state_bytes()))
+            .and_then(|bytes|bytes.checked_add(new_ids)).and_then(|bytes|bytes.checked_add(state_bytes))
             .ok_or("DOM ID index retained accounting overflow.")?;
         self.tree = tree;
         self.dom.connected = connected;
@@ -1026,9 +1027,6 @@ impl Bridge<'_> {
         let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
         self.state.dom.created.try_reserve(1).map_err(|_|"DOM created identity reservation failed.")?;
         self.state.detached_nodes.try_reserve(1).map_err(|_|"DOM detached identity reservation failed.")?;
-        self.state.tree.active.try_reserve(1).map_err(|_|"DOM active-state reservation failed.")?;
-        self.state.tree.parents.try_reserve(1).map_err(|_|"DOM parent-state reservation failed.")?;
-        self.state.dom.connected.try_reserve(1).map_err(|_|"DOM connection-state reservation failed.")?;
         if matches!(&kind,NodeKind::Element{tag,..} if tag=="script") {
             self.state.dom.force_async.try_reserve(1).map_err(|_|"DOM script-state reservation failed.")?;
         }
@@ -1951,7 +1949,8 @@ document.title='conversions-ok';
         page.state.node_limit=old_nodes;let old_retained=page.state.retained_limit;page.state.retained_limit=retained+2;
         let result=page.console_eval(&mut doc,&mut forms,"document.createElementNS(ns,'div');");assert_eq!(result.errors,1);assert_eq!(doc.nodes.len(),before);assert_eq!(page.state.retained,retained);
         page.state.retained_limit=old_retained;
+        let old_states=page.state.node_state_bytes();let old_core=doc.nodes.capacity();
         let source=format!("var name='{}';var element=document.createElementNS(ns,name);if(element.localName!==name)throw 'name truncated';", "n".repeat(512));
-        let result=page.console_eval(&mut doc,&mut forms,&source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),before+1);assert_eq!(page.state.retained,retained+512);assert!(!page.has_host_tasks());
+        let result=page.console_eval(&mut doc,&mut forms,&source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),before+1);assert_eq!(page.state.retained,retained+512+page.state.node_state_bytes()-old_states+(doc.nodes.capacity()-old_core)*size_of::<Node>());assert!(!page.has_host_tasks());
     }
 }

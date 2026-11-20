@@ -602,7 +602,7 @@ mod inline_connection_tests {
         page.set_stylesheet_sources(&doc, &HashMap::new());
         assert_eq!(page.start(&mut doc, &mut forms, &[source]).errors, 0, "{}", page.report());
         assert_eq!(page.state.executed, 1);
-        assert_eq!(page.state.retained, document_bytes(&doc) + page.state.stylesheets.source_metadata_bytes());
+        assert_eq!(page.state.retained, document_bytes(&doc) + page.state.node_state_bytes() + page.state.stylesheets.source_metadata_bytes());
     }
 
     #[test]

@@ -31,6 +31,8 @@ use queries::node_list_index;
 #[path = "script_collections.rs"]
 mod dom_collections;
 use dom_collections::collection_handle_index;
+#[path = "script_node_state.rs"]
+mod node_state;
 #[path = "script_dom_tree.rs"]
 mod dom_tree;
 #[path = "script_position.rs"]
@@ -90,6 +92,9 @@ mod script_class_list;
 mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
+#[cfg(test)]
+#[path = "script_node_state_tests.rs"]
+mod script_node_state_tests;
 #[cfg(test)]
 #[path = "script_id_index_tests.rs"]
 mod script_id_index_tests;
@@ -2547,33 +2552,6 @@ impl Bridge<'_> {
             }
         }
         Ok(())
-    }
-
-    fn main_node_minimum(&self, count: usize) -> Result<usize, String> {
-        self.doc.nodes.len().checked_add(count)
-            .and_then(|required|required.saturating_sub(self.doc.nodes.capacity()).checked_mul(size_of::<Node>()))
-            .ok_or("Main DOM node backing overflow.".into())
-    }
-
-    fn prepare_main_nodes(&mut self, count: usize, available: usize) -> Result<(Option<Vec<Node>>, usize), String> {
-        if count==0 { return Ok((None,0)); }
-        // Node, style, dataset and element wrappers share the 24-bit arena index.
-        let maximum = NODE_HANDLES as usize;
-        let required = self.doc.nodes.len().checked_add(count).filter(|length|*length<=maximum)
-            .ok_or_else(||format!("24-bit DOM node identity domain exhausted ({maximum} nodes)."))?;
-        let usable = maximum.saturating_sub(self.doc.nodes.capacity()).checked_mul(size_of::<Node>())
-            .ok_or("Main DOM representation backing overflow.")?;
-        let (growth, added) = retained_storage::grow(&self.doc.nodes, count, available.min(usable))?;
-        let moved = if growth.is_some(){self.doc.nodes.len()}else{0};
-        let records = moved.checked_add(count).ok_or("Main DOM node movement overflow.")?;
-        self.state.work(records)?;
-        self.state.copies(records.checked_mul(size_of::<Node>()).ok_or("Main DOM node copy work overflow.")?)?;
-        debug_assert!(required<=growth.as_ref().map_or(self.doc.nodes.capacity(),Vec::capacity));
-        Ok((growth,added))
-    }
-
-    fn commit_main_nodes(&mut self, growth: Option<Vec<Node>>) {
-        if let Some(mut nodes)=growth {nodes.append(&mut self.doc.nodes);self.doc.nodes=nodes;}
     }
 
     fn text_content(&mut self, node: usize) -> Result<String, String> {

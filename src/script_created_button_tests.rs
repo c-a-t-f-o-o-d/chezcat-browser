@@ -188,6 +188,7 @@ fn created_button_context_and_native_interior_refusals_preserve_both_models() {
 fn created_button_attribute_and_admission_quotas_fail_before_native_publication() {
     let (mut doc,mut forms,mut page)=fixture();
     run(&mut doc,&mut forms,&mut page,"var button=document.createElement('button');button.id='created';button.appendChild(document.createTextNode('Caption'));");
+    page.state.rebuild(&doc).unwrap();
     let node=id(&doc,"created");let host=id(&doc,"host");let before=controls(&forms);let retained=page.state.retained;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     for (key,text) in [("name","n".repeat(8193)),("value","🦀".repeat(2049))] {
@@ -230,6 +231,7 @@ fn created_button_control_and_reset_payload_limits_refuse_without_partial_admiss
         // exercised independently of an earlier attribute payload check.
         if let NodeKind::Element{attrs,..}=&mut doc.nodes[node].kind {attrs.push(crate::html::Attribute::unqualified("name".into(),"q".into()));}
         page.state.retained += "name".len()+"q".len();
+        page.state.rebuild(&doc).unwrap();
         let before=controls(&forms);let retained=page.state.retained;
         let result=page.console_eval(&mut doc,&mut forms,"document.getElementById('host').appendChild(button);");
         assert_eq!(result.errors,1,"{}",page.report());assert_eq!(controls(&forms),before);assert!(!forms.controls.contains_key(&node));assert!(doc.nodes[host].children.is_empty());assert_eq!(page.state.retained,retained);

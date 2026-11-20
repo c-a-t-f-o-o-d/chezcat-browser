@@ -31,14 +31,16 @@ fn main_child_storage_startup_and_clear_retain_backing_while_replacement_refunds
     let parent = element(&doc, "p");
     let text = doc.nodes[parent].children[0];
     wide_children(&mut doc, parent, 64);
-    let expected = document_bytes(&doc);
+    let baseline = document_bytes(&doc);
     let width = child_link_bytes(&doc.nodes[parent].children);
     let (mut doc, mut forms, mut page) = start(doc);
+    let expected=baseline+page.state.node_state_bytes();
     assert_eq!(page.state.retained, expected);
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     bridge.set_text_content(parent, String::new()).unwrap();
     assert_eq!(bridge.state.retained, expected);
     assert_eq!(child_link_bytes(&bridge.doc.nodes[parent].children), width);
+    bridge.state.rebuild(bridge.doc).unwrap();
     bridge.state.retained_limit = expected - width;
     bridge.set_inner_html(parent, "").unwrap();
     assert_eq!(bridge.state.retained, expected - width);
@@ -53,6 +55,8 @@ fn main_child_storage_append_exact_and_copy_refusal_keep_parent_and_reuse_paid_s
     let parent = element(&doc, "p");
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let child = fresh(&mut bridge, "b");
+    // Isolate child-link admission from later state-array compaction refunds.
+    bridge.state.dirty=true;bridge.state.rebuild(bridge.doc).unwrap();
     let before = bridge.state.retained;
     bridge.state.retained_limit = before + size_of::<usize>() - 1;
     assert!(call(&mut bridge, parent, "appendChild", &[Value::Host(node_handle(child))]).is_err());
@@ -171,7 +175,7 @@ fn main_child_storage_inner_html_moves_nested_buffers_and_refunds_wide_root() {
     let released = child_link_bytes(&doc.nodes[parent].children);
     let (mut doc, mut forms, mut page) = start(doc);
     let before = page.state.retained;
-    owned += doc.nodes.len().checked_add(fragment.nodes.len()-1).unwrap().saturating_sub(doc.nodes.capacity()) * size_of::<Node>();
+    owned += Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(fragment.nodes.len()-1).unwrap();
     page.state.retained_limit = before - released + owned - 1;
     let nodes = doc.nodes.len();
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
@@ -217,7 +221,7 @@ fn main_child_storage_six_thousand_cloned_children_pay_actual_compact_backing() 
     let source = element(&doc, "div");
     let before = page.state.retained;
     let bundle = 3 + 6000 + 6000 * size_of::<usize>()
-        + (doc.nodes.len()+6001).saturating_sub(doc.nodes.capacity())*size_of::<Node>();
+        + Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(6001).unwrap();
     page.state.retained_limit = before + bundle;
     let copied = {
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };

@@ -303,6 +303,7 @@ fn created_text_input_control_and_retained_default_payload_limits_are_atomic() {
         let node = id(&doc, "fresh");
         let host = id(&doc, "host");
         let before = controls(&forms);
+        page.state.rebuild(&doc).unwrap();
         let retained = page.state.retained;
         let result = page.console_eval(&mut doc, &mut forms, "fresh.name='q';");
         assert_eq!(result.errors, 1, "{}", page.report());
@@ -358,6 +359,7 @@ fn created_text_input_internal_mixed_resource_topology_refuses_before_publicatio
 fn created_text_input_attribute_adoption_keeps_native_retained_charge_and_combined_limit() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc, &mut forms, &mut page, "var input=document.createElement('input');input.id='created';");
+    page.state.rebuild(&doc).unwrap();
     let node = id(&doc, "created");
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let attr = bridge.create_attribute(&[Value::String("name".into())], false).unwrap();

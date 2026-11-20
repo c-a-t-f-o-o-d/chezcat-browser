@@ -283,9 +283,6 @@ impl Bridge<'_> {
         self.doc.nonce_unsafe_nodes.try_reserve(nonce_count).map_err(|_| "DOM clone nonce reservation failed.")?;
         self.state.dom.created.try_reserve(count).map_err(|_| "DOM clone identity reservation failed.")?;
         self.state.detached_nodes.try_reserve(count).map_err(|_| "DOM clone detached reservation failed.")?;
-        self.state.tree.parents.try_reserve(count).map_err(|_| "DOM clone parent reservation failed.")?;
-        self.state.tree.active.try_reserve(count).map_err(|_| "DOM clone active-state reservation failed.")?;
-        self.state.dom.connected.try_reserve(count).map_err(|_| "DOM clone connection reservation failed.")?;
         self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM clone node/payload storage overflow.")?, bytes)?;
         self.commit_main_nodes(node_growth);
         for copy in staged {
