@@ -703,12 +703,14 @@ pub fn query_first(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     budget: &mut usize,
 ) -> Result<Option<usize>, String> {
-    query_matches(doc, source, candidates, checked, budget, true)
+    let mut copy_budget=usize::MAX;
+    query_matches(doc, source, candidates, checked, budget, true,usize::MAX,None,&mut copy_budget)
         .map(|matches| matches.first().copied())
 }
 
 /// Match the supported selector grammar in candidate order, once per candidate.
-/// Snapshot callers retain at most 4096 references, regardless of document size.
+/// Test convenience entry; production callers supply their retained allowance.
+#[cfg(test)]
 pub fn query_all(
     doc: &Document,
     source: &str,
@@ -716,7 +718,18 @@ pub fn query_all(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     budget: &mut usize,
 ) -> Result<Vec<usize>, String> {
-    query_matches(doc, source, candidates, checked, budget, false)
+    let mut copy_budget=usize::MAX;
+    query_all_with_storage(doc,source,candidates,checked,budget,usize::MAX,None,&mut copy_budget)
+}
+
+/// Result backing is fallibly admitted against the caller's current storage.
+/// The caller retains responsibility for charging the returned capacity and
+/// atomically publishing its registry record.
+pub fn query_all_with_storage(
+    doc:&Document,source:&str,candidates:&[usize],checked:Option<&dyn Fn(usize)->Option<bool>>,
+    budget:&mut usize,result_bytes:usize,result_limit:Option<usize>,copy_budget:&mut usize,
+)->Result<Vec<usize>,String> {
+    query_matches(doc,source,candidates,checked,budget,false,result_bytes,result_limit,copy_budget)
 }
 
 pub fn valid_query_selector(source: &str) -> bool {
@@ -730,6 +743,9 @@ fn query_matches(
     checked: Option<&dyn Fn(usize) -> Option<bool>>,
     budget: &mut usize,
     first_only: bool,
+    result_bytes:usize,
+    result_limit:Option<usize>,
+    copy_budget:&mut usize,
 ) -> Result<Vec<usize>, String> {
     if source.len() > MAX_SELECTOR_BYTES * 16 {
         return Err("Selector query exceeds 8 KiB.".into());
@@ -769,8 +785,23 @@ fn query_matches(
             .iter()
             .any(|selector| matches_selector(selector, node, &context, budget))
         {
-            if matched.len() == 4096 {
-                return Err("DOM selector result limit reached (4096 elements).".into());
+            if result_limit.is_some_and(|limit|matched.len()>=limit) {
+                return Err(format!("DOM selector result limit reached ({} elements).",result_limit.unwrap()));
+            }
+            if matched.len()==matched.capacity() {
+                let before=matched.capacity();let slot=std::mem::size_of::<usize>();
+                let available=(result_bytes/slot).saturating_sub(before);
+                let growth=before.max(4).min(available);
+                if growth==0{return Err("DOM retained selector result allowance exhausted.".into());}
+                let mut next=Vec::new();next.try_reserve_exact(before.checked_add(growth).ok_or("Selector result capacity overflow.")?).map_err(|_|"Could not reserve selector result storage.")?;
+                if next.capacity()>result_bytes/slot{return Err("DOM retained selector result allocation exceeds allowance.".into());}
+                // Admit movement before publishing the replacement. Work is
+                // cumulative; a refusal leaves no partial snapshot exposed.
+                if matched.len()>*budget{*budget=0;return Err("DOM selector work limit reached.".into());}
+                *budget-=matched.len();
+                let bytes=matched.len()*slot;
+                if bytes>*copy_budget{*copy_budget=0;return Err("DOM selector result copy work limit reached.".into());}
+                *copy_budget-=bytes;next.append(&mut matched);matched=next;
             }
             matched.push(node);
             if first_only {
