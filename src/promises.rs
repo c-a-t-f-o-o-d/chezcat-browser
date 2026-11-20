@@ -167,12 +167,15 @@ enum Job {
     /// A native stable-state procedure owns no ECMAScript references. It runs
     /// in the host document, sharing FIFO order and all normal job allowances.
     Host(u64),
+    // Host-free cancellation retains only the ticket until a host boundary can
+    // retire it. The existing deque owns this storage; no cleanup allocation.
+    CancelledHost(u64),
     MutationObservers,
 }
 
 impl Job {
     fn allocation_kind(&self) -> usize {
-        match self { Self::Callback(_) | Self::Host(_) | Self::MutationObservers => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
+        match self { Self::Callback(_) | Self::Host(_) | Self::CancelledHost(_) | Self::MutationObservers => 0, Self::Reaction { .. } | Self::Await { .. } => 1, Self::Thenable { .. } => 2 }
     }
 
     fn payload_bytes(&self) -> usize {
@@ -187,7 +190,7 @@ impl Job {
                         + capability.reject.bytes()
                         + value.bytes()
                 }
-                Self::Callback(_) | Self::Host(_) | Self::MutationObservers => 0,
+                Self::Callback(_) | Self::Host(_) | Self::CancelledHost(_) | Self::MutationObservers => 0,
             }
     }
 }
@@ -214,6 +217,7 @@ pub(super) struct Arena {
     groups: Vec<Group>,
     elements: Vec<Element>,
     jobs: VecDeque<(Option<usize>, Job)>,
+    cancelled_host_jobs: usize,
     draining: bool,
     allocation_trace: AllocationTrace,
     jobs_started: [usize; 3],
@@ -298,7 +302,7 @@ impl Arena {
         for group in &self.groups { group.capability.reachability_edges(add); add(Edge::Object(group.values)); }
         for (_, job) in &self.jobs {
             match job {
-                Job::Host(_) | Job::MutationObservers => {},
+                Job::Host(_) | Job::CancelledHost(_) | Job::MutationObservers => {},
                 Job::Callback(id) => add(Edge::Function(*id)),
                 Job::Await { frame, value, .. } => {
                     frame.reachability_edges(add);
@@ -709,7 +713,7 @@ impl Runtime {
             _ => None,
         };
         let realm = match &job {
-            Job::Host(_) | Job::MutationObservers => None,
+            Job::Host(_) | Job::CancelledHost(_) | Job::MutationObservers => None,
             Job::Await { frame, .. } => frame.realm(),
             _ => callback.map_or(self.active_realm, |id| self.function_realms[id]),
         };
@@ -731,7 +735,7 @@ impl Runtime {
     }
     pub(super) fn prepare_host_microtask(&mut self,host:&mut dyn Host,object:u32,member:&str,args:&[Value],setter:bool)->Result<Option<u64>,Fault>{
         let ticket=host.prepare_native_microtask(object,member,args,setter).map_err(Fault::new)?;
-        if let Some(id)=ticket {if let Err(error)=self.promise_enqueue(Job::Host(id)){host.finish_native_microtask(id);return Err(error);}}
+        if let Some(id)=ticket {if let Err(error)=self.promise_enqueue(Job::Host(id)){host.cancel_native_microtask(id);return Err(error);}}
         Ok(ticket)
     }
     // A source mutation reserves its stable-state job before committing, but
@@ -1442,11 +1446,12 @@ impl Runtime {
         // The queue no longer owns this job. Publish its fields before any
         // handler runs; permanent Promise roots alone do not cover these Values.
         let marker = self.transient_marker();
+        let ticket = match &job { Job::Host(ticket) => Some(*ticket), _ => None };
         let mut retained = job.payload_bytes();
         let result = (|| {
             use super::function_reachability::Edge;
             match &job {
-                Job::Host(_) | Job::MutationObservers => {},
+                Job::Host(_) | Job::CancelledHost(_) | Job::MutationObservers => {},
                 Job::Callback(function) => self.push_transient_root(Edge::Function(*function))?,
                 Job::Await { frame, value, .. } => {
                     let mut registered = Ok(());
@@ -1483,6 +1488,9 @@ impl Runtime {
         })();
         self.restore_transient_marker(marker);
         self.value_bytes -= retained;
+        if result.is_err() {
+            if let Some(ticket) = ticket { host.cancel_native_microtask(ticket); }
+        }
         result
     }
 
@@ -1490,6 +1498,7 @@ impl Runtime {
         self.step()?;
         match job {
             Job::Host(ticket)=>{host.run_native_microtask(ticket).map_err(Fault::new)?;}
+            Job::CancelledHost(_) => return Err(Fault::new("Cancelled native microtask reached execution.")),
             Job::MutationObservers => self.notify_mutation_observers(host)?,
             Job::Await { frame, value, reject } => self.resume_await_body(frame, value, reject, host)?,
             Job::Callback(function) => {
@@ -1539,6 +1548,7 @@ impl Runtime {
     /// allowance. Ordinary callback errors and unhandled rejections are bounded
     /// diagnostics; resource/capability failures cancel pending work and return.
     pub fn microtask_checkpoint(&mut self, host: &mut dyn Host) -> Result<Vec<String>, String> {
+        self.flush_native_microtask_cancellations(host);
         if self.job_failed_fatally || self.promises.draining || self.call_depth != 0 || self.eval_depth != 0 {
             return Ok(Vec::new());
         }
@@ -1562,6 +1572,7 @@ impl Runtime {
                 self.promises.allocation_trace.started[kind] += 1;
                 self.promises.jobs_started[kind] = self.promises.jobs_started[kind].saturating_add(1);
                 let result = self.run_promise_job(realm, job, host);
+                self.flush_native_microtask_cancellations(host);
                 self.promises.allocation_trace.active = None;
                 self.promises.allocation_trace.scripts[kind] += self.function_arena.script_created.saturating_sub(first);
                 if result.is_ok() {
@@ -1607,19 +1618,48 @@ impl Runtime {
         if result.is_err() {
             self.job_failed_fatally = true;
             self.cancel_microtasks();
+            self.flush_native_microtask_cancellations(host);
         }
         self.collect_environments();
         result.map(|()| diagnostics).map_err(Fault::display)
     }
 
+    fn release_empty_microtask_storage(&mut self) {
+        if self.promises.jobs.is_empty() {
+            self.value_bytes -= self.promises.jobs.capacity() * std::mem::size_of::<(Option<usize>, Job)>();
+            self.promises.jobs = VecDeque::new();
+        }
+    }
+
+    pub(super) fn flush_native_microtask_cancellations(&mut self, host: &mut dyn Host) {
+        if self.promises.cancelled_host_jobs == 0 { return; }
+        self.promises.jobs.retain(|(_, job)| {
+            if let Job::CancelledHost(ticket) = job {
+                host.cancel_native_microtask(*ticket);
+                false
+            } else { true }
+        });
+        self.promises.cancelled_host_jobs = 0;
+        self.release_empty_microtask_storage();
+    }
+
     /// Cancel existing queued callbacks and pending observers. Promise states
     /// remain ordinary document-owned values, but removed reactions never resume.
+    /// Native tickets and their deque backing remain charged until a host entry
+    /// acknowledges cancellation; Page teardown also retires its native owner.
     pub fn cancel_microtasks(&mut self) {
-        let jobs = std::mem::take(&mut self.promises.jobs);
-        self.value_bytes -= jobs.capacity() * std::mem::size_of::<(Option<usize>, Job)>();
-        for (_, job) in jobs {
-            self.value_bytes -= job.payload_bytes();
-        }
+        self.promises.jobs.retain_mut(|(_, job)| {
+            match job {
+                Job::Host(ticket) => {
+                    *job = Job::CancelledHost(*ticket);
+                    self.promises.cancelled_host_jobs += 1;
+                    true
+                }
+                Job::CancelledHost(_) => true,
+                _ => { self.value_bytes -= job.payload_bytes(); false }
+            }
+        });
+        self.release_empty_microtask_storage();
         for object in &mut self.objects {
             if let Some(data) = &mut object.promise {
                 self.value_bytes -= data.reaction_storage_bytes();
@@ -1660,14 +1700,14 @@ impl Runtime {
             }
         }
         let mut queued = [0usize;3];
-        for (_, job) in &self.promises.jobs { queued[job.allocation_kind()] += 1; }
+        for (_, job) in &self.promises.jobs { if !matches!(job,Job::CancelledHost(_)) { queued[job.allocation_kind()] += 1; } }
         format!("Promise snapshot: pending={pending}; fulfilled={fulfilled}; rejected={rejected} (handled={handled}, reported={reported}); pending reactions={reactions}; queued callback/reaction/thenable={queued:?}; lifetime jobs started={:?}, succeeded={:?}. Snapshot does not run jobs or change rejection reporting.\n{samples}",self.promises.jobs_started,self.promises.jobs_succeeded)
     }
 
-    pub fn has_queued_microtasks(&self)->bool { !self.promises.jobs.is_empty() }
+    pub fn has_queued_microtasks(&self)->bool { self.promises.jobs.len() > self.promises.cancelled_host_jobs }
     #[cfg(test)]
     pub fn has_microtasks(&self) -> bool {
-        !self.promises.jobs.is_empty()
+        self.has_queued_microtasks()
             || self.objects.iter().any(|object| {
                 object.promise.as_ref().is_some_and(|data| {
                     matches!(data.state, State::Rejected(_)) && !data.handled && !data.reported
@@ -1744,6 +1784,106 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert!(!runtime.object_assigned_closures.contains(&id));
         assert_eq!((runtime.functions.len(), runtime.function_arena.script_created), before);
         assert_eq!(runtime.invoke(closure, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[derive(Default)]
+    struct TicketHost {
+        next: u64,
+        pending: std::collections::BTreeSet<u64>,
+        cancelled: Vec<u64>,
+        ran: Vec<u64>,
+        fail_run: bool,
+    }
+    impl Host for TicketHost {
+        fn get(&mut self,_:u32,_:&str)->Result<Value,String>{Err("No native reads.".into())}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{Err("No native writes.".into())}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{Err("No native calls.".into())}
+        fn prepare_native_microtask(&mut self,_:u32,_:&str,_:&[Value],_:bool)->Result<Option<u64>,String>{
+            self.next+=1;self.pending.insert(self.next);Ok(Some(self.next))
+        }
+        fn finish_native_microtask(&mut self,ticket:u64)->bool{self.pending.contains(&ticket)}
+        fn cancel_native_microtask(&mut self,ticket:u64){
+            if self.pending.remove(&ticket){self.cancelled.push(ticket);}
+        }
+        fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{
+            if self.fail_run { return Err("Native job admission failed.".into()); }
+            assert!(self.pending.remove(&ticket));self.ran.push(ticket);Ok(())
+        }
+    }
+    fn queue_native_ticket(runtime:&mut Runtime,host:&mut TicketHost)->u64 {
+        let ticket=runtime.prepare_host_microtask(host,1,"source",&[],true).unwrap().unwrap();
+        runtime.finish_host_microtask(host,Some(ticket)).unwrap();
+        ticket
+    }
+
+    #[test]
+    fn native_microtask_work_failure_before_and_after_pop_cancels_each_ticket_and_recovers() {
+        for (steps,fail_run) in [(0,false),(1,false),(1000,true)] {
+            let mut runtime=Runtime::new();
+            let mut host=TicketHost {fail_run,..TicketHost::default()};
+            let before=runtime.value_bytes;
+            let first=queue_native_ticket(&mut runtime,&mut host);
+            let second=queue_native_ticket(&mut runtime,&mut host);
+            runtime.steps=steps;
+            let error=runtime.microtask_checkpoint(&mut host).unwrap_err();
+            assert!(error.contains(if fail_run {"Native job admission failed"} else {"Execution step limit"}),"{error}");
+            assert!(host.ran.is_empty());
+            assert!(host.pending.is_empty());
+            assert_eq!(host.cancelled,vec![first,second]);
+            assert_eq!(runtime.value_bytes,before);
+            assert_eq!(runtime.promises.jobs.capacity(),0);
+            assert_eq!(runtime.promises.cancelled_host_jobs,0);
+            runtime.begin_job();
+            host.fail_run=false;
+            let fresh=queue_native_ticket(&mut runtime,&mut host);
+            assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+            assert_eq!(host.ran,vec![fresh]);
+        }
+    }
+
+    #[test]
+    fn native_microtask_host_free_cancellation_keeps_paid_tickets_until_host_acknowledgement() {
+        for native_settlement in [false,true] {
+            let mut runtime=Runtime::new();
+            let mut host=TicketHost::default();
+            let (promise,_)=runtime.new_native_promise().unwrap();
+            let before=runtime.value_bytes;
+            let first=queue_native_ticket(&mut runtime,&mut host);
+            let second=queue_native_ticket(&mut runtime,&mut host);
+            let backing=runtime.promises.jobs.capacity()*std::mem::size_of::<(Option<usize>,Job)>();
+            if native_settlement {
+                runtime.steps=0;
+                assert!(runtime.settle_native_promise(&promise,NativePromiseOutcome::Fulfill).is_err());
+            } else {
+                runtime.limits.capacity.source_bytes=0;
+                assert!(runtime.compile_handler("return 1;").is_err());
+            }
+            runtime.cancel_microtasks();
+            assert_eq!(runtime.promises.cancelled_host_jobs,2);
+            assert!(!runtime.has_queued_microtasks());
+            assert_eq!(runtime.value_bytes,before+backing);
+            assert_eq!(host.pending.len(),2);
+            // A fatal job still acknowledges cancellation before returning.
+            assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+            assert_eq!(host.cancelled,vec![first,second]);
+            assert!(host.ran.is_empty());
+            assert!(host.pending.is_empty());
+            assert_eq!(runtime.value_bytes,before);
+            assert_eq!(runtime.promises.jobs.capacity(),0);
+        }
+    }
+
+    #[test]
+    fn native_microtask_enqueue_refusal_retires_the_prepared_ticket() {
+        let mut runtime=Runtime::new();
+        let mut host=TicketHost::default();
+        let before=runtime.value_bytes;
+        runtime.limits.heap.retained_values=before;
+        assert!(runtime.prepare_host_microtask(&mut host,1,"source",&[],true).is_err());
+        assert!(host.pending.is_empty());
+        assert_eq!(host.cancelled,vec![1]);
+        assert_eq!(runtime.value_bytes,before);
+        assert_eq!(runtime.promises.jobs.capacity(),0);
     }
 
     #[test]

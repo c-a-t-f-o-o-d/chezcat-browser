@@ -844,6 +844,9 @@ pub trait Host {
     /// True only if the operation committed the prepared task; false rolls the
     /// reserved queue entry back without touching previously queued jobs.
     fn finish_native_microtask(&mut self,_ticket:u64)->bool{false}
+    /// Retire this ticket without running it. Hosts preparing tickets must
+    /// override this for committed work; repeated cancellation is harmless.
+    fn cancel_native_microtask(&mut self,ticket:u64){self.finish_native_microtask(ticket);}
     fn run_native_microtask(&mut self,_ticket:u64)->Result<(),String>{Err("Native microtask is unavailable.".into())}
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String>;
 }
@@ -4503,6 +4506,7 @@ impl Runtime {
     }
 
     pub fn execute(&mut self, source: &str, host: &mut dyn Host) -> Result<Value, String> {
+        self.flush_native_microtask_cancellations(host);
         let previous_strict = self.strict;
         let previous_invocation = self.invocation.take();
         let result = (|| {
@@ -4526,6 +4530,7 @@ impl Runtime {
         {
             self.job_failed_fatally = true;
             self.cancel_microtasks();
+            self.flush_native_microtask_cancellations(host);
         }
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
@@ -4739,24 +4744,27 @@ impl Runtime {
         this: Value,
         host: &mut dyn Host,
     ) -> Result<Value, String> {
+        self.flush_native_microtask_cancellations(host);
         self.pin_exported_value(&function);
         self.pin_exported_value(&this);
         for value in args { self.pin_exported_value(value); }
         let result = self.call_value(function, args, this, host);
-        self.finish_invocation(result)
+        self.finish_invocation(result, host)
     }
 
     pub(crate) fn invoke_native_dispatch(&mut self, token: usize, host: &mut dyn Host) -> Result<(), String> {
+        self.flush_native_microtask_cancellations(host);
         let result = self.dispatch_native_event(token, host).map(Value::Bool);
-        self.finish_invocation(result).map(|_| ())
+        self.finish_invocation(result, host).map(|_| ())
     }
 
-    fn finish_invocation(&mut self, result: Result<Value, Fault>) -> Result<Value, String> {
+    fn finish_invocation(&mut self, result: Result<Value, Fault>, host: &mut dyn Host) -> Result<Value, String> {
         self.record_entry_result(true, &result);
         if result.as_ref().is_err_and(|error| error.exception.is_none()) {
             self.job_failed_fatally = true;
             self.cancel_microtasks();
         }
+        self.flush_native_microtask_cancellations(host);
         if let Ok(value) = &result { self.pin_exported_value(value); }
         self.collect_environments();
         result.map_err(|error| self.display_fault(error))

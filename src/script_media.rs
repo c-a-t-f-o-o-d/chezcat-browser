@@ -186,6 +186,26 @@ queueMicrotask(function(){if(video.networkState!==2||video.currentSrc.indexOf('s
         }
     }
     #[test]
+    fn native_media_ticket_cancellation_is_specific_and_releases_committed_selection() {
+        let (mut doc,mut forms,mut p,node)=page(crate::javascript::limits::CAPACITY_REGRESSION);
+        let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut p.state};
+        let first=bridge.prepare_media_microtask(node_handle(node),"src",&[Value::String("first.ivf".into())],true).unwrap().unwrap();
+        bridge.commit_media_source_change(node).unwrap();
+        let second=bridge.prepare_media_microtask(node_handle(node),"src",&[Value::String("second.ivf".into())],true).unwrap().unwrap();
+        bridge.commit_media_source_change(node).unwrap();
+        let current=bridge.state.embedded_video.as_ref().unwrap().retired.clone();
+        bridge.cancel_media_microtask(first);
+        assert_eq!(bridge.state.media_changes.pending.as_ref().unwrap().ticket,second);
+        assert!(!current.load(Ordering::Relaxed));
+        bridge.cancel_media_microtask(second);
+        bridge.cancel_media_microtask(second);
+        assert!(bridge.state.media_changes.pending.is_none());
+        assert!(bridge.state.media_changes.prepared.is_none());
+        assert!(current.load(Ordering::Relaxed));
+        assert_eq!(bridge.state.embedded_video.as_ref().unwrap().network,1);
+    }
+
+    #[test]
     fn native_media_same_owned_attr_needs_no_job_even_when_queue_full() {
         let mut limits = crate::javascript::limits::CAPACITY_REGRESSION;
         limits.capacity.promises = 1;
@@ -502,6 +522,20 @@ impl Bridge<'_> {
             .pending
             .as_ref()
             .is_some_and(|p| p.ticket == ticket)
+    }
+    pub(super) fn cancel_media_microtask(&mut self, ticket: u64) {
+        if self.state.media_changes.prepared.as_ref().is_some_and(|p| p.ticket == ticket) {
+            self.state.media_changes.prepared = None;
+        }
+        if self.state.media_changes.pending.as_ref().is_some_and(|p| p.ticket == ticket) {
+            if let Some(snapshot) = &mut self.state.embedded_video {
+                self.state.media_play.reset_source(&crate::media_tasks::Scope {node:snapshot.node,retired:snapshot.retired.clone()});
+                snapshot.retired.store(true, Ordering::Relaxed);
+                snapshot.network = 1;
+            }
+            self.state.media_changes.pending = None;
+            self.state.media_changes.ready = None;
+        }
     }
     pub(super) fn media_source_prepared(&self) -> bool {
         self.state.media_changes.prepared.is_some()

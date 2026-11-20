@@ -11,13 +11,14 @@ impl Runtime {
         current_target: Value,
         host: &mut dyn Host,
     ) -> Result<Value, String> {
+        self.flush_native_microtask_cancellations(host);
         self.pin_exported_value(&callback);
         self.pin_exported_value(&current_target);
         for value in args {
             self.pin_exported_value(value);
         }
         let result = self.call_event_listener(callback, args, current_target, host);
-        self.finish_invocation(result)
+        self.finish_invocation(result, host)
     }
 
     /// Synchronous dispatchEvent uses this operation within its current job.
