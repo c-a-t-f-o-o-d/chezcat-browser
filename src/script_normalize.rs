@@ -167,6 +167,28 @@ impl Bridge<'_> {
         }
         // String copying was charged before allocation; the retained total was
         // validated before staging and no callback can change it in between.
+        self.state.prepare_range_changes(removed.len(),1)?;
+        if !self.state.ranges.is_empty() {
+            let bytes=parents.iter().try_fold(0usize,|total,(parent,_)| {
+                self.doc.nodes[*parent].children.iter().try_fold(total,|total,&node|total.checked_add(self.doc.nodes[node].kind.character_data().map_or(0,str::len)))
+            }).ok_or("Range normalization work overflow.")?;
+            let children=parents.iter().try_fold(0usize,|total,(parent,_)|total.checked_add(self.doc.nodes[*parent].children.len())).ok_or("Range normalization child work overflow.")?;
+            self.state.work(bytes.checked_add(children).ok_or("Range normalization scan overflow.")?)?;
+            // Every allocation/refusal precedes these infallible live updates.
+            for (parent,_) in &parents {
+                let mut index=0usize;let mut keeper=None;let mut offset=0usize;
+                for &node in &self.doc.nodes[*parent].children {
+                    if let NodeKind::Text(text)=&self.doc.nodes[node].kind {
+                        let length=text.encode_utf16().count();
+                        if let Some(kept)=keeper {
+                            self.state.ranges_merge_text(*parent,index,node,kept,offset);offset+=length;
+                        } else if text.is_empty() {
+                            self.state.ranges_remove(*parent,index,1,&[node]);
+                        } else {keeper=Some(node);offset=length;index+=1;}
+                    } else {keeper=None;offset=0;index+=1;}
+                }
+            }
+        }
         self.state.retained = retained;
         // No fallible operation remains after this point.
         for (keeper, text) in strings {

@@ -105,7 +105,11 @@ impl Bridge<'_> {
         let form_plan=self.prepare_select_form_change(None,&overrides)?;
         let images=self.prepare_image_connections(&incoming,connected)?;
         let bytes = child_link_bytes(&children).checked_add(form_plan.retained_bytes).ok_or("Fragment child/native storage overflow.")?;
+        self.state.prepare_range_changes(3,incoming.len().saturating_add(outgoing.len()))?;
         self.state.replace_storage(child_link_bytes(&self.doc.nodes[parent].children), bytes, form_plan.retained_bytes)?;
+        self.state.ranges_remove(donor,0,roots.len(),&incoming);
+        if old.is_some() { self.state.ranges_remove(parent,position,1,&outgoing); }
+        self.state.ranges_insert(parent,position,roots.len());
         // All validation, quota checks, allocations and native plans precede
         // the first write. No author callback or fallible work in publication.
         self.doc.nodes[donor].children.clear();

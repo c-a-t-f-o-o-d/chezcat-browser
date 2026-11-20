@@ -195,7 +195,9 @@ impl Bridge<'_> {
             .and_then(|retained|self.state.retained_limit.checked_sub(retained))
             .and_then(|available|available.checked_sub(bytes)).ok_or("HTML node/payload backing allowance exhausted.")?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
+        self.state.prepare_range_changes(1,old.len())?;
         self.state.replace_storage(released, bytes.checked_add(node_bytes).ok_or("HTML node/payload storage overflow.")?, bytes)?;
+        self.state.ranges_remove(node,0,self.doc.nodes[node].children.len(),&old);
         self.commit_main_nodes(node_growth);
         // No fallible operation follows publication of the new child list.
         for &root in &self.doc.nodes[node].children { self.state.tree.parents[root] = None; }

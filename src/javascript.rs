@@ -47,6 +47,8 @@ mod function_allocation;
 mod function_arena;
 #[path = "number_radix.rs"]
 mod number_radix;
+#[path = "range_interface.rs"]
+pub(crate) mod range_interface;
 #[path = "abort_interface.rs"]
 pub(crate) mod abort_interface;
 #[path = "message_channel_interface.rs"]
@@ -546,6 +548,7 @@ pub struct NativeAttributeChange {
 }
 
 pub trait Host {
+    fn prepare_range_operation(&mut self,_receiver:u32,_method:&str,_args:&[Value]) -> Result<(),range_interface::Error> { Err(range_interface::Error::Exception("NotSupportedError","DOM ranges are unavailable.".into())) }
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
     fn mutation_observation_target(&self, _target: u32) -> Option<bool> { None }
@@ -9122,6 +9125,15 @@ impl Runtime {
         // checks must see this call's incumbent, even after a refused call.
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
+        if range_interface::operation(method) {
+            if let Err(error)=host.prepare_range_operation(object,method,args) {
+                return Err(match error {
+                    range_interface::Error::Fatal(message)=>Fault::new(message),
+                    range_interface::Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+                    range_interface::Error::Exception(kind,message)=>Fault::thrown(self.native_dom_exception(kind,&message)?),
+                });
+            }
+        }
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if kind == "NotSupportedError"
                 && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | "\0Media.load" | "\0Media.pause")

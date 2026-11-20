@@ -551,6 +551,7 @@ impl Bridge<'_> {
                 self.state.work(shifted)?;
                 self.state.copies(self.state.dom.inert_child_lists.movement_bytes(shifted))?;
             }
+            self.state.prepare_range_changes(1,0)?;
             self.state.replace_storage(released, retained, retained)?;
             Ok::<_, String>(inline)
         })();
@@ -564,6 +565,7 @@ impl Bridge<'_> {
                 return Err(error);
             }
         };
+        self.state.ranges_insert(parent,position,roots.len());
         self.state.dom.child_lists.commit(child_map);
         if let Some(mut children) = destination_children {
             children.append(&mut self.doc.nodes[parent].children);

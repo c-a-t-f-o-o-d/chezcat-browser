@@ -660,7 +660,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn define_canvas_operation(
+    pub(super) fn define_canvas_operation(
         &mut self,
         prototype: usize,
         window: u32,
@@ -892,7 +892,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn define_readonly_node_getter(
+    pub(super) fn define_readonly_node_getter(
         &mut self,
         prototype: usize,
         window: u32,

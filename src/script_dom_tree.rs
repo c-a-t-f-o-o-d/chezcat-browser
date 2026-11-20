@@ -1313,7 +1313,16 @@ impl Bridge<'_> {
         let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
         let bytes = child_link_bytes(&children).checked_add(child_link_bytes(&source_children))
             .and_then(|bytes|bytes.checked_add(form_plan.retained_bytes)).ok_or("DOM replacement child/native storage overflow.")?;
+        self.state.prepare_range_changes(3,incoming_nodes.len().saturating_add(outgoing_nodes.len()))?;
+        let (source_position,replacement_position) = if self.state.ranges.is_empty() {(None,0)} else {
+            self.state.work(children.len().saturating_add(source_parent.map_or(0,|source|self.doc.nodes[source].children.len())))?;
+            (source_parent.and_then(|source|self.doc.nodes[source].children.iter().position(|&node|node==child)),
+             children.iter().position(|&node|node==child).ok_or("Range replacement position is unavailable.")?)
+        };
         self.state.replace_storage(old_links, bytes, form_plan.retained_bytes)?;
+        if let (Some(source),Some(index))=(source_parent,source_position) {self.state.ranges_remove(source,index,1,&incoming_nodes);}
+        self.state.ranges_remove(parent,replacement_position,1,&outgoing_nodes);
+        self.state.ranges_insert(parent,replacement_position,1);
         // No fallible work remains after publishing either parent's new list.
         if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
         self.doc.nodes[parent].children = children;
@@ -1452,7 +1461,13 @@ impl Bridge<'_> {
             .and_then(|slots|slots.checked_mul(size_of::<usize>()))
             .and_then(|bytes|bytes.checked_add(form_plan.retained_bytes)).ok_or("DOM child/native copy work overflow.")?;
         let bytes = child_bytes.checked_add(form_plan.retained_bytes).ok_or("DOM child/native storage overflow.")?;
+        self.state.prepare_range_changes(2,descendants.len())?;
+        let source_position = if self.state.ranges.is_empty() {None} else {
+            self.state.work(old_parent.map_or(0,|source|self.doc.nodes[source].children.len()))?;
+            old_parent.and_then(|source|self.doc.nodes[source].children.iter().position(|&node|node==child))
+        };
         self.state.replace_storage(0,bytes,copied)?;
+        if let (Some(source),Some(index))=(old_parent,source_position) {self.state.ranges_remove(source,index,1,&descendants);}
         if let Some(mut children) = child_growth {
             children.append(&mut self.doc.nodes[parent].children);
             self.doc.nodes[parent].children=children;
@@ -1471,6 +1486,7 @@ impl Bridge<'_> {
                         .position(|&node| node == reference)
                 })
                 .unwrap_or(self.doc.nodes[parent].children.len());
+            self.state.ranges_insert(parent,position,1);
             self.doc.nodes[parent].children.insert(position, child);
         }
         self.state.tree.parents[child] = if method == "removeChild" {
@@ -1545,6 +1561,7 @@ impl Bridge<'_> {
         };
         // Keep the private child buffer reserved while node construction admits
         // the Text. No callback can observe this reservation; failure refunds it.
+        self.state.prepare_range_changes(1,self.doc.nodes[node].children.len())?;
         self.state.replace_storage(0, added, if text.is_empty(){0}else{size_of::<usize>()})?;
         let new_child = if text.is_empty() {
             None
@@ -1558,6 +1575,7 @@ impl Bridge<'_> {
             };
             node_index(handle)
         };
+        self.state.ranges_remove(node,0,self.doc.nodes[node].children.len(),&self.doc.nodes[node].children);
         if let Some(children) = child_growth { self.doc.nodes[node].children = children; }
         for child in self.doc.nodes[node].children.drain(..) {
             self.state.detached_nodes.insert(child);
@@ -1612,7 +1630,9 @@ impl Bridge<'_> {
             } else {
                 self.text(value)?
             };
+            self.state.prepare_range_changes(1,0)?;
             self.state.replace_storage(old_bytes, text.capacity(), text.len())?;
+            self.state.ranges_replace_data(node);
             match &mut self.doc.nodes[node].kind {
                 NodeKind::Text(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
                     *data = text;

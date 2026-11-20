@@ -138,6 +138,8 @@ mod script_anchor_url;
 pub use script_anchor_mouse::AnchorMouseInput;
 #[path = "script_dispatch.rs"]
 mod script_dispatch;
+#[path = "script_ranges.rs"]
+mod script_ranges;
 #[path = "script_abort.rs"]
 mod script_abort;
 #[path = "script_message_channel.rs"]
@@ -516,6 +518,7 @@ struct State {
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
     canvas_contexts: script_canvas_context::Contexts,
+    ranges: Vec<script_ranges::Record>,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
     attached_attributes: Vec<usize>,
@@ -605,6 +608,7 @@ impl State {
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
             canvas_contexts: script_canvas_context::Contexts::default(),
+            ranges: Vec::new(),
             node_list_references: 0,
             attributes: Vec::new(),
             attached_attributes: Vec::new(),
@@ -1258,6 +1262,7 @@ impl Page {
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_keyboard_event_interface(WINDOW).expect("fixed KeyboardEvent interface");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
+        runtime.define_range_interfaces(WINDOW).expect("fixed range interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
         runtime.define_tree_walker(WINDOW).expect("fixed tree traversal interfaces");
         runtime.define_inert_document_interfaces(WINDOW, script_inert_documents::GET,
@@ -2676,7 +2681,9 @@ impl Bridge<'_> {
         // buffer has spare capacity. Old detached children remain charged.
         let retained = text_bytes.checked_add(child_bytes).and_then(|bytes|bytes.checked_add(node_bytes)).ok_or("textContent retained storage overflow.")?;
         let work = text.len().checked_add(if text.is_empty(){0}else{size_of::<usize>()}).ok_or("textContent copy work overflow.")?;
+        self.state.prepare_range_changes(1,descendants.len())?;
         self.state.replace_storage(0, retained, work)?;
+        self.state.ranges_remove(node,0,self.doc.nodes[node].children.len(),&descendants);
         self.commit_main_nodes(node_growth);
         self.state.detached_nodes.extend(descendants);
         if let Some(children) = child_growth { self.doc.nodes[node].children = children; }
@@ -2977,6 +2984,7 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn prepare_range_operation(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error> { self.validate_range_call(receiver,method,args) }
     fn tree_walker_document(&self, document: u32) -> bool {
         document == DOCUMENT
     }
@@ -3051,13 +3059,13 @@ impl Host for Bridge<'_> {
             return Some(WINDOW);
         }
         if self.message_instance(object).is_some() { return Some(WINDOW); }
-        self.ordinary_event_owner(object).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+        self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
-        self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
+        self.range_owner(object).is_some() || self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.abort_instance(object).is_some() || self.message_instance(object).is_some()
             || self.canvas_context_receiver(object)
@@ -3085,6 +3093,7 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some(window)=self.range_owner(object) { return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"Range"))}); }
         if self.event_target_interface(object) {
             return Some(crate::javascript::NativeAncestry { window: object, constructor: Some((object, "Window")) });
         }
@@ -3172,11 +3181,12 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
-        object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
+        self.range_owner(object).is_some() || object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
             || self.abort_instance(object).is_some()
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.range_owner(object).is_some() {return false;}
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
         if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
         if self.frame_document_prototype_lookup(object,property) {return false;}
@@ -3361,6 +3371,7 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END) { return &[(1,false)]; }
         if method == script_inert_documents::parser::PARSE { return &[(0, true), (1, true)]; }
         if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
         if method == CREATE_PROCESSING_INSTRUCTION { return &[(0, true), (1, true)]; }
@@ -3514,6 +3525,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
         if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
         if object == WINDOW && crate::javascript::message_channel_interface::operation(method) { return Some(WINDOW); }
@@ -3595,9 +3607,15 @@ impl Host for Bridge<'_> {
         -> Result<(), (&'static str, String)> {
         if object==WINDOW && method=="cancelAnimationFrame" && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("SecurityError","Animation capability is unavailable while scripting is disabled.".into()));}
         if object==WINDOW && method=="getComputedStyle" && next_index==1 {self.validate_computed_target(args.first())?;}
+        if crate::javascript::range_interface::node_argument(method) && next_index==1 {
+            if !matches!(args.first(),Some(Value::Host(handle)) if *handle==DOCUMENT || node_index(*handle).is_some_and(|node|self.dom_accessible(node)) || self.inert_node_type(*handle).is_some() || self.attr_receiver(*handle) || self.frame_node_interface(*handle).is_some()) {
+                return Err(("TypeError","A genuine Node is required for a Range boundary.".into()));
+            }
+        }
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if crate::javascript::range_interface::node_argument(method) { return &[0]; }
         if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{&[0,1]}else{&[0]}; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
         if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
@@ -3622,6 +3640,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if crate::javascript::range_interface::operation(method) { return crate::javascript::range_interface::arity(method); }
         if let Some(method)=script_named_map::operation(method){return match method{"item"|"getNamedItem"=>1,"getNamedItemNS"=>2,_=>0};}
         if method == script_inert_documents::parser::PARSE { return 2; }
         if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{2}else{1}; }
@@ -3708,6 +3727,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if crate::javascript::range_interface::operation(method) { return Ok(()); }
         if method == MEDIA_QUERY_LIST && object == WINDOW {
             return Err(("TypeError", "Illegal MediaQueryList constructor.".into()));
         }
@@ -4106,6 +4126,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
             return object==WINDOW && self.media_query_owner(receiver).is_some();
         }
@@ -4313,7 +4334,7 @@ impl Host for Bridge<'_> {
         if script_inline_style::handle(object) {return self.inline_keys(object, false);}
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
-        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
+        if self.range_owner(object).is_some() || self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(Vec::new());}
         if script_named_map::element(object).is_some() {
             self.named_map_get(object, "length")?;
             return Err("NamedNodeMap complete indexed/named enumeration is not implemented; use length and item.".into());
@@ -4365,7 +4386,7 @@ impl Host for Bridge<'_> {
         if self.inherited_node_property(object,property) {self.state.work(1)?;return Ok(None);}
         if self.node_tree_method_member(object,property) {self.state.work(1)?;return Ok(None);}
         if object==DOCUMENT && dom_tree::document_node_property(property) {self.state.work(1)?;return Ok(None);}
-        if self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(None);}
+        if self.range_owner(object).is_some() || self.standalone_target_owner(object).is_some() || self.abort_instance(object).is_some() {self.state.work(1)?;return Ok(None);}
         if script_named_map::element(object).is_some() { return self.named_map_own_data(object, property); }
         if self.attr_receiver(object) { self.state.work(1)?; return Ok(None); }
         if self.event_receiver(object) {
@@ -4646,6 +4667,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.range_owner(object).is_some() {self.state.work(1)?;return Ok(false);}
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(false);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(false);}
         if parent_children::member(property) && self.parent_node_receiver(object) {return Ok(true);}
@@ -4945,6 +4967,7 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.range_owner(object).is_some() { self.state.work(1)?;return Ok(Value::Undefined); }
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(Value::Undefined);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(Value::Undefined);}
         if parent_children::member(property) && self.parent_node_receiver(object) {return self.parent_node_get(object,property);}
@@ -5578,6 +5601,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if crate::javascript::range_interface::operation(method) { return self.range_call(object,method,args); }
         if object==WINDOW && method=="matchMedia" {return self.create_media_query(args);}
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {return self.media_query_get(object,method);}
         if crate::javascript::message_channel_interface::operation(method) {
@@ -8029,3 +8053,7 @@ mod attribute_payload_tests;
 #[cfg(test)]
 #[path="script_keyboard_event_tests.rs"]
 mod script_keyboard_event_tests;
+
+#[cfg(test)]
+#[path = "script_range_tests.rs"]
+mod range_tests;
