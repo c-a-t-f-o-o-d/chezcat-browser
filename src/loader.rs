@@ -87,11 +87,9 @@ impl Default for LoadOptions {
 
 pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
 pub(crate) const MAX_STYLESHEETS: usize = 256;
-const MAX_RESOURCE_ATTEMPTS: usize = 8192;
 const MAX_LOCAL_HTML_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LOCAL_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
-// Decoded-image counts stay independent from CSS/script request capacities.
-const MAX_UNIQUE_IMAGES: usize = 64;
+// Decoded backing and optional reuse metadata each have a byte allowance.
 pub(crate) const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 
 pub struct Script {
@@ -146,6 +144,14 @@ struct ResourceKey {
     address: ResourceAddress,
 }
 impl ResourceKey {
+    fn payload_bytes(&self) -> usize {
+        match &self.address {
+            ResourceAddress::Web(url) => url.host.capacity().saturating_add(url.path.capacity())
+                .saturating_add(url.query.as_ref().map_or(0, String::capacity)),
+            ResourceAddress::File(path) => path.capacity(),
+            ResourceAddress::Data(_) => 0,
+        }
+    }
     fn new(kind: &'static str, location: &Location) -> Option<Self> {
         let address = if let Some(url) = &location.url {
             ResourceAddress::Web(url.clone())
@@ -1150,11 +1156,6 @@ fn load_request_progressively(
     )?;
     check_cancel(cancel)?;
     let mut events = Vec::new();
-    if stats.attempts >= MAX_RESOURCE_ATTEMPTS {
-        events.push(
-            format!("Resource attempt limit reached ({MAX_RESOURCE_ATTEMPTS}). Additional references were skipped."),
-        );
-    }
     if stats.omitted_messages > 0 {
         events.push(format!(
             "{} repeated/additional resource messages omitted.",
@@ -1201,13 +1202,10 @@ impl LoadStats {
         }
     }
     fn begin_attempt(&mut self, network: bool) -> Result<(), String> {
-        if self.attempts >= MAX_RESOURCE_ATTEMPTS {
-            return Err(format!("Resource attempt limit reached ({MAX_RESOURCE_ATTEMPTS})."));
-        }
         if network && self.started.elapsed() > Duration::from_secs(45) {
             return Err("Page resource time budget reached (45 seconds).".to_owned());
         }
-        self.attempts += 1;
+        self.attempts = self.attempts.checked_add(1).ok_or("Resource attempt counter overflow.")?;
         Ok(())
     }
     fn remaining_bytes(&self) -> usize {
@@ -1966,7 +1964,7 @@ fn load_images(
 ) -> Result<(), String> {
     let mut cache = HashMap::<ResourceKey, ResourceOutcome>::new();
     let mut prefetched = HashMap::<ResourceKey, Result<http::Response, String>>::new();
-    let mut unique_images = 0usize;
+    let mut cache_payload = 0usize;
     let mut image_bytes = 0usize;
     let mut update = ImageUpdate {
         images: HashMap::new(),
@@ -2050,11 +2048,6 @@ fn load_images(
                     ResourceOutcome::Css(..) => unreachable!("image cache only"),
                 };
             }
-            if unique_images >= MAX_UNIQUE_IMAGES {
-                return Err(format!(
-                    "Unique image count limit reached ({MAX_UNIQUE_IMAGES})."
-                ));
-            }
             if image_bytes >= MAX_DECODED_IMAGE_BYTES {
                 return Err("Decoded image budget is full (64 MiB).".to_owned());
             }
@@ -2085,8 +2078,6 @@ fn load_images(
                     let slots = 3usize
                         .saturating_sub(prefetched.len())
                         .max(1)
-                        .min(49 - stats.attempts)
-                        .min(MAX_UNIQUE_IMAGES - unique_images)
                         .min((remaining / (8 * 1024 * 1024)).max(1));
                     let urls = image_batch_urls(
                         plan,
@@ -2100,7 +2091,8 @@ fn load_images(
                         pool,
                         policy,
                     );
-                    stats.attempts += urls.len() - 1;
+                    stats.attempts = stats.attempts.checked_add(urls.len() - 1)
+                        .ok_or("Resource attempt counter overflow.")?;
                     let responses = fetch_image_batch(
                         &urls,
                         (8 * 1024 * 1024).min(remaining),
@@ -2160,7 +2152,6 @@ fn load_images(
             let mut asset = image::decode_asset_checked(&bytes, &check_image)?;
             let decoded = fit_image_budget(&mut asset, image_bytes)?;
             image_bytes += decoded;
-            unique_images += 1;
             let mut message = format!(
                 "loaded {} x {} pixels, {}",
                 asset.bitmap.width, asset.bitmap.height, resolved_name
@@ -2183,7 +2174,7 @@ fn load_images(
                     update.animations.get(&image.node).cloned(),
                 ),
             };
-            cache.insert(key, outcome);
+            retain_image_outcome(&mut cache, &mut cache_payload, key, outcome, MAX_DECODED_IMAGE_BYTES);
         }
         if !trace_attempted && !was_reused {
             if let (Some(address), Err(error)) = (&trace_address, &result) {
@@ -2200,6 +2191,33 @@ fn load_images(
         }
     }
     publish_images(&mut update, deliver)
+}
+
+/// Optional reuse metadata is an eviction budget, never a content count cap.
+/// Decoded backing has separate admission; clearing this cache does not discard
+/// already delivered images. Account entry capacity and owned address/error data.
+fn retain_image_outcome(
+    cache: &mut HashMap<ResourceKey, ResourceOutcome>, payload: &mut usize,
+    key: ResourceKey, outcome: ResourceOutcome, limit: usize,
+) {
+    let bytes = key.payload_bytes().saturating_add(match &outcome {
+        ResourceOutcome::Failed(error) => error.capacity(), _ => 0,
+    });
+    let slot = std::mem::size_of::<(ResourceKey, ResourceOutcome)>();
+    let total = |capacity: usize, payload: usize| capacity.saturating_mul(slot).saturating_add(payload);
+    if total(cache.len().saturating_add(1), payload.saturating_add(bytes)) > limit {
+        *cache = HashMap::new();
+        *payload = 0;
+    }
+    if cache.try_reserve(1).is_err()
+        || total(cache.capacity(), payload.saturating_add(bytes)) > limit
+    {
+        *cache = HashMap::new();
+        *payload = 0;
+        return;
+    }
+    *payload += bytes;
+    cache.insert(key, outcome);
 }
 
 fn publish_images(
@@ -2868,13 +2886,13 @@ mod tests {
     fn small_local_icons_no_longer_hit_the_old_attempt_limit() {
         let folder = Folder::new();
         let mut source = String::new();
-        for index in 0..50 {
+        for index in 0..96 {
             let name = format!("icon-{index}.ppm");
             folder.file(&name, &format!("P3\n1 1\n255\n{index} 60 100\n"));
             source.push_str(&format!("<img src={name}>"));
         }
         let loaded = local(&folder.page(&source)).unwrap();
-        assert_eq!(loaded.images.len(), 50);
+        assert_eq!(loaded.images.len(), 96);
         assert_eq!(loaded.skipped, 0);
         assert_eq!(
             loaded
@@ -2882,7 +2900,7 @@ mod tests {
                 .values()
                 .map(|bitmap| bitmap.pixels.len() * 4)
                 .sum::<usize>(),
-            200
+            384
         );
         assert!(!loaded
             .events
@@ -3258,6 +3276,8 @@ mod tests {
                         "/repeat-resources" => format!("<link rel=stylesheet href=/post-style.css><style>p{{color:#abcdef}}</style><link rel=stylesheet href='./post-style.css#again'><p id=result>Repeat</p>{}{}<img src='/post-image.ppm#after-many-references'><script src=/ok.js></script><script src=/ok.js></script>", "<img src=/post-image.ppm>".repeat(40), "<img src=/unsupported.gif>".repeat(60)),
                         "/unsupported.gif" => { mime="image/gif"; "GIF89a-not-an-implemented-format".into() },
                         "/post-image.ppm" | "/post-image-2.ppm" | "/post-image-3.ppm" | "/image-csp-forbidden.ppm" | "/held.ppm" => { mime="image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".into() },
+                        "/many-images" => (0..96).map(|i| format!("<img src=/many-icon-{i}.ppm>")).collect::<String>(),
+                        _ if path.starts_with("/many-icon-") => { mime="image/x-portable-pixmap"; "P3\n1 1\n255\n255 0 0\n".into() },
                         _ => panic!("Unexpected resource request {path}"),
                     };
                     let content_type = if mime.is_empty() {
@@ -4195,11 +4215,42 @@ mod tests {
     }
 
     #[test]
-    fn resource_attempts_have_a_finite_shared_boundary() {
+    fn many_network_images_cross_both_former_batch_and_unique_limits() {
+        let site = Site::new();
+        let loaded = site.load("/many-images", http::FetchMode::Normal, true);
+        assert_eq!(loaded.images.len(), 96);
+        assert_eq!(loaded.skipped, 0, "{:?}", loaded.events);
+        assert_eq!(site.requests.lock().unwrap().len(), 97);
+        assert!(loaded.images.values().all(|bitmap| bitmap.pixels == [0xffff0000]));
+    }
+
+    #[test]
+    fn image_reuse_metadata_eviction_does_not_discard_delivered_pixels() {
+        let mut cache = HashMap::new();
+        let mut payload = 0;
+        let bitmap = Arc::new(Bitmap { width: 1, height: 1, pixels: vec![0xff123456] });
+        let key = ResourceKey { kind: "IMAGE", address: ResourceAddress::Data([1; 32]) };
+        let limit = 8 * std::mem::size_of::<(ResourceKey, ResourceOutcome)>();
+        retain_image_outcome(&mut cache, &mut payload, key.clone(), ResourceOutcome::Image(bitmap.clone(), None), limit);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(Arc::strong_count(&bitmap), 2);
+        retain_image_outcome(&mut cache, &mut payload,
+            ResourceKey { kind: "IMAGE", address: ResourceAddress::Data([2; 32]) },
+            ResourceOutcome::Failed("x".repeat(limit + 1)), limit);
+        assert!(cache.is_empty());
+        assert_eq!(payload, 0);
+        assert_eq!(Arc::strong_count(&bitmap), 1);
+        assert_eq!(bitmap.pixels, [0xff123456]);
+    }
+
+    #[test]
+    fn resource_attempt_counter_does_not_cap_content_and_keeps_checked_arithmetic() {
         let mut stats = LoadStats::new(Instant::now());
-        for _ in 0..MAX_RESOURCE_ATTEMPTS { stats.begin_attempt(false).unwrap(); }
-        assert!(stats.begin_attempt(false).unwrap_err().contains(&MAX_RESOURCE_ATTEMPTS.to_string()));
-        assert_eq!(stats.attempts, MAX_RESOURCE_ATTEMPTS);
+        stats.attempts = 9000;
+        stats.begin_attempt(false).unwrap();
+        assert_eq!(stats.attempts, 9001);
+        stats.attempts = usize::MAX;
+        assert!(stats.begin_attempt(false).unwrap_err().contains("counter overflow"));
         // Time and bytes are independent; higher counts do not disable either.
         stats.attempts = 0;
         stats.started = Instant::now() - Duration::from_secs(46);
