@@ -496,13 +496,16 @@ fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_ret
     // nonempty attributes let this control exercise admission during a splice.
     for (node, name, value) in [(inputs[0], "qa", "one"), (inputs[1], "qb", "two")] {
         let NodeKind::Element { attrs, .. } = &mut doc.nodes[node].kind else { unreachable!() };
+        let before=attrs.capacity()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>();
         for (key, text) in [("name", name), ("value", value)] {
             attrs.push(crate::html::Attribute { name: crate::html::AttributeName::unqualified(key.into()), value: text.into() });
-            page.state.retained += key.len() + text.len();
         }
+        page.state.retained+=attrs.capacity()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>()-before;
         page.state.tree.parents[node] = Some(donor);
     }
+    let old_links=child_link_bytes(&doc.nodes[donor].children);
     doc.nodes[donor].children = inputs.to_vec();
+    page.state.retained=page.state.retained-old_links+child_link_bytes(&doc.nodes[donor].children);
     page.state.dirty = true;
     page.state.rebuild(&doc).unwrap();
     let original = controls(&forms);
@@ -512,6 +515,7 @@ fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_ret
     let retained = page.state.retained;
     let commits = page.state.dom_commits;
     let one_native = 2 + 3 + 3 + 3 * std::mem::size_of::<char>();
+    let links=(doc.nodes[host].children.len()+inputs.len())*size_of::<usize>()-child_link_bytes(&doc.nodes[host].children);
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     bridge.doc.nodes[donor].namespace = crate::html::Namespace::UnknownForeign;
     assert!(bridge.prepare_created_input_plan(inputs[0], None, None).is_err(), "A fragment kind cannot bypass unknown foreign provenance");
@@ -520,7 +524,7 @@ fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_ret
     assert_eq!(staged.retained_bytes(), one_native, "Fresh admission accepts a genuine detached fragment ancestor");
     drop(staged);
     assert_eq!(controls(bridge.forms), original);
-    bridge.state.retained_limit = retained + 2 * one_native - 1;
+    bridge.state.retained_limit = retained + 2 * one_native + links - 1;
     assert!(bridge.splice_document_fragment(host, "appendChild", &[Value::Host(node_handle(donor))]).is_err());
     assert_eq!([donor, host].map(|node| bridge.doc.nodes[node].children.clone()), children);
     assert_eq!(bridge.state.tree.parents, parents);
@@ -534,11 +538,11 @@ fn created_text_input_fragment_internal_fresh_payload_splice_checks_combined_ret
     assert!(page.take_dynamic_stylesheets().is_empty());
     assert!(page.take_image_changes().2.is_empty());
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    bridge.state.retained_limit = retained + 2 * one_native;
+    bridge.state.retained_limit = retained + 2 * one_native + links;
     bridge.splice_document_fragment(host, "appendChild", &[Value::Host(node_handle(donor))]).unwrap();
     assert!(bridge.doc.nodes[donor].children.is_empty());
     assert_eq!(&bridge.doc.nodes[host].children[children[1].len()..], &inputs);
-    assert_eq!(bridge.state.retained, retained + 2 * one_native);
+    assert_eq!(bridge.state.retained, retained + 2 * one_native + links);
     for (node, name, value) in [(inputs[0], "qa", "one"), (inputs[1], "qb", "two")] {
         let control = &bridge.forms.controls[&node];
         assert_eq!(control.kind, Kind::Text);

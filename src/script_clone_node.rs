@@ -155,7 +155,11 @@ impl Bridge<'_> {
             let children = self.inert_children(handle).ok_or("Inert import source is unavailable.")?;
             pending.extend(children.iter().take(count).map(|&child| (child, Some(index), depth + 1)));
             let mut children = Vec::new();
+            self.state.copies(count.checked_mul(size_of::<usize>()).ok_or("Imported child-link copy work overflow.")?)?;
             children.try_reserve_exact(count).map_err(|_| "Cannot reserve DOM import child links.")?;
+            bytes = bytes.checked_add(child_link_bytes(&children))
+                .filter(|bytes| *bytes <= self.state.retained_limit.saturating_sub(self.state.retained))
+                .ok_or("Imported child-link backing exceeds allowance.")?;
             children.extend(start..start + count);
             staged.push(DetachedCopy { node: Node { kind, namespace, children }, parent, unsafe_nonce });
         }
@@ -229,8 +233,15 @@ impl Bridge<'_> {
             bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Copied element attribute backing exceeds allowance.")?;
             self.state.copies(extra)?;
             let unsafe_nonce = self.doc.nonce_unsafe_nodes.contains(&source);
+            self.state.copies(children.len().checked_mul(size_of::<usize>()).ok_or("Cloned child-link copy work overflow.")?)?;
+            let mut child_links = Vec::new();
+            child_links.try_reserve_exact(children.len()).map_err(|_| "Cannot reserve cloned child links.")?;
+            bytes = bytes.checked_add(child_link_bytes(&child_links))
+                .filter(|bytes| *bytes <= self.state.retained_limit.saturating_sub(self.state.retained))
+                .ok_or("Cloned child-link backing exceeds allowance.")?;
+            child_links.extend(first..first + children.len());
             staged.push(DetachedCopy {
-                node: Node { kind, namespace: item.namespace, children: (first..first + children.len()).collect() },
+                node: Node { kind, namespace: item.namespace, children: child_links },
                 parent,
                 unsafe_nonce,
             });

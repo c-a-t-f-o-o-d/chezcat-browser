@@ -359,6 +359,8 @@ impl Bridge<'_> {
             let (inert, _, _) = self.parked_template_source(handle).unwrap();
             let mut node_children = Vec::new();
             node_children.try_reserve_exact(children).map_err(|_| "Cannot reserve promoted subtree children.")?;
+            retained = retained.checked_add(child_link_bytes(&node_children) - children * size_of::<usize>())
+                .ok_or("Promoted child allocation storage overflow.")?;
             pending.try_reserve(children).map_err(|_| "Cannot reserve promoted subtree traversal.")?;
             for &child in &inert.children {
                 let slot = node_index(child).ok_or("Inert fragment contains unsupported active markup.")?;
@@ -379,7 +381,6 @@ impl Bridge<'_> {
         self.state.work(self.doc.nodes[parent].children.len())?;
         let position = reference.and_then(|reference| self.doc.nodes[parent].children.iter().position(|&node| node == reference))
             .unwrap_or(self.doc.nodes[parent].children.len());
-        self.doc.nodes[parent].children.try_reserve(count).map_err(|_| "Cannot reserve fragment destination children.")?;
         self.doc.nonce_unsafe_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve fragment nonce provenance.")?;
         self.state.dom.created.try_reserve(plan.len()).map_err(|_| "Cannot reserve promoted node identities.")?;
         self.state.detached_nodes.try_reserve(plan.len()).map_err(|_| "Cannot reserve detached promotion identities.")?;
@@ -403,7 +404,15 @@ impl Bridge<'_> {
         let available=self.state.retained.checked_sub(released)
             .and_then(|bytes|self.state.retained_limit.checked_sub(bytes))
             .and_then(|bytes|bytes.checked_sub(retained)).ok_or("DOM retained promotion allowance exhausted.")?;
-        let (child_map,added)=self.state.dom.child_lists.prepare(child_lists,available)?;
+        let minimum = self.state.dom.child_lists.minimum_growth(child_lists)?;
+        let (destination_children, child_bytes) = retained_storage::grow(&self.doc.nodes[parent].children, count,
+            available.checked_sub(minimum).ok_or("Promoted child-list/child-buffer allowance exhausted.")?)?;
+        let (child_map,added)=self.state.dom.child_lists.prepare(child_lists,available-child_bytes)?;
+        let moved = if destination_children.is_some(){self.doc.nodes[parent].children.len()}else{0};
+        self.state.work(moved.saturating_add(count))?;
+        let copied = moved.checked_add(self.doc.nodes[parent].children.len()).and_then(|slots|slots.checked_add(count))
+            .and_then(|slots|slots.checked_mul(size_of::<usize>())).ok_or("Promoted child-buffer copy work overflow.")?;
+        self.state.copies(copied)?;
         // Append then sort the destination once. The source index compacts in
         // one membership scan after all failure points; its backing stays paid.
         let destination_length = self.state.dom.child_lists.len().checked_add(child_lists)
@@ -417,7 +426,7 @@ impl Bridge<'_> {
         let copied = destination_sort.checked_mul(3).and_then(|work|work.checked_add(grow_copy))
             .and_then(|work|work.checked_add(child_lists)).ok_or("Promoted child-list copy work overflow.")?;
         self.state.copies(self.state.dom.child_lists.movement_bytes(copied))?;
-        retained=retained.checked_add(added).ok_or("Promoted child-list storage overflow.")?;
+        retained=retained.checked_add(added).and_then(|bytes|bytes.checked_add(child_bytes)).ok_or("Promoted child-list storage overflow.")?;
         // One sorted membership set permits one compacting removal scan. It
         // avoids repeatedly shifting the adopted store for each promoted node.
         let search = (usize::BITS - indices.len().leading_zeros()) as usize + 1;
@@ -465,6 +474,10 @@ impl Bridge<'_> {
             }
         };
         self.state.dom.child_lists.commit(child_map);
+        if let Some(mut children) = destination_children {
+            children.append(&mut self.doc.nodes[parent].children);
+            self.doc.nodes[parent].children=children;
+        }
         self.state.dom.child_lists.append_and_sort(child_lists,
             plan.iter().filter_map(|item|item.child_list.map(|list|(item.index,list))));
         if child_lists!=0 {

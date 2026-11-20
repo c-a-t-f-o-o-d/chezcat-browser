@@ -167,13 +167,16 @@ fn checkbox_move_work_copy_and_existing_node_retention_limits_publish_no_prefix(
                 "var check=document.getElementById('check'),shell=document.getElementById('shell'),fragment=document.createDocumentFragment();document.getElementById('neighbor').value='neighbor edited';check.checked=false;");
             let kept=Kept::new(&doc,&mut forms);eval(&mut doc,&mut forms,&mut page,"fragment.appendChild(shell);");kept.assert(&doc,&forms,false,None,false);
             page.state.rebuild(&doc).unwrap();let donor=doc.nodes.iter().position(|node|matches!(node.kind,NodeKind::DocumentFragment)).unwrap();let dest=id(&doc,"dest");
-            let before=Snapshot::capture(&doc,&forms,&page);page.state.node_limit=doc.nodes.len();page.state.retained_limit=page.state.retained;
+            let before=Snapshot::capture(&doc,&forms,&page);page.state.node_limit=doc.nodes.len();
+            let links=(doc.nodes[dest].children.len()+doc.nodes[donor].children.len())*size_of::<usize>();
+            let final_retained=page.state.retained-child_link_bytes(&doc.nodes[dest].children)+links;
+            page.state.retained_limit=final_retained;
             if copy_limit {page.state.copy_work=allowance;} else {page.state.host_work=allowance;}
             let result=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.splice_document_fragment(dest,"appendChild",&[Value::Host(node_handle(donor))]);
             if result.is_err() {
                 failures+=1;assert_eq!(Snapshot::capture(&doc,&forms,&page),before,"copy={copy_limit} allowance={allowance}");kept.assert(&doc,&forms,false,None,false);
             } else {
-                successes+=1;kept.assert(&doc,&forms,false,Some("b"),false);assert!(doc.nodes[donor].children.is_empty());assert_eq!(page.state.retained,before.retained);assert_eq!(page.state.dom_commits,before.commits.and_then(|value|value.checked_add(1)));
+                successes+=1;kept.assert(&doc,&forms,false,Some("b"),false);assert!(doc.nodes[donor].children.is_empty());assert_eq!(page.state.retained,final_retained);assert_eq!(page.state.dom_commits,before.commits.and_then(|value|value.checked_add(1)));
             }
             no_resources(&mut page);
         }

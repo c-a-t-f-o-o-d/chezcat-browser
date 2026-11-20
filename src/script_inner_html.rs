@@ -138,6 +138,8 @@ impl Bridge<'_> {
             if local == 0 { continue; }
             let item = &staged.nodes[local];
             bytes = bytes.checked_add(node_bytes(item)).ok_or("HTML fragment retained size overflow.")?;
+            bytes = bytes.checked_add(child_link_bytes(&item.children)).ok_or("HTML fragment child storage overflow.")?;
+            self.state.copies(item.children.len().checked_mul(size_of::<usize>()).ok_or("HTML fragment child copy work overflow.")?)?;
             if let NodeKind::Element { tag: name, attrs, .. } = &item.kind {
                 let href = match &item.kind { NodeKind::Element {href, ..} => href.as_ref().map_or(0, String::len), _ => 0 };
                 bytes = bytes.checked_add(name.len()).and_then(|bytes| bytes.checked_add(href)).ok_or("HTML fragment retained size overflow.")?;
@@ -182,7 +184,8 @@ impl Bridge<'_> {
         self.state.tree.parents.try_reserve(count).map_err(|_| "HTML parent reservation failed.")?;
         self.state.tree.active.try_reserve(count).map_err(|_| "HTML active-node reservation failed.")?;
         let mut children = Vec::new();
-        children.try_reserve(staged.nodes[0].children.len()).map_err(|_| "HTML children reservation failed.")?;
+        self.state.copies(staged.nodes[0].children.len().checked_mul(size_of::<usize>()).ok_or("HTML root child copy work overflow.")?)?;
+        children.try_reserve_exact(staged.nodes[0].children.len()).map_err(|_| "HTML children reservation failed.")?;
         children.extend(staged.nodes[0].children.iter().map(|&child| base + child - 1));
         let mut form_roots = Vec::new();
         form_roots.try_reserve(self.doc.nodes[node].children.len().saturating_add(children.len())).map_err(|_| "Select fragment roots reservation failed.")?;
@@ -190,8 +193,11 @@ impl Bridge<'_> {
         form_roots.extend(children.iter().map(|&root| (root, Some(node))));
         let form_plan = self.prepare_select_form_change(Some((&staged, base)), &form_roots)?;
         self.state.copies(form_plan.retained_bytes)?;
-        let bytes = bytes.checked_add(form_plan.retained_bytes).ok_or("HTML/native select payload overflow.")?;
-        self.state.replace_bytes(0, bytes)?; // Detached old storage stays retained.
+        let bytes = bytes.checked_add(form_plan.retained_bytes).and_then(|bytes|bytes.checked_add(child_link_bytes(&children)))
+            .ok_or("HTML/native select payload overflow.")?;
+        // Detached old nodes and their own buffers stay retained; only this
+        // replaced root vector is dropped. Child record copies were prepaid.
+        self.state.replace_storage(child_link_bytes(&self.doc.nodes[node].children), bytes, bytes)?;
         // No fallible operation follows publication of the new child list.
         for &root in &self.doc.nodes[node].children { self.state.tree.parents[root] = None; }
         for old in old { self.state.detached_nodes.insert(old); self.state.dom.connected[old] = false; self.state.tree.active[old] = false; }
