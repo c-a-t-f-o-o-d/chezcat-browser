@@ -191,12 +191,7 @@ impl Bridge<'_> {
     pub(super) fn node_list_keys(&mut self, handle: u32) -> Result<Vec<String>, String> {
         let Value::Number(length) = self.node_list_get(handle,"length")? else { unreachable!() };
         let length = length as usize;
-        self.state.work(length)?;
-        self.state.copies(length.checked_mul(20).ok_or("NodeList key accounting overflow.")?)?;
-        let mut keys = Vec::new();
-        keys.try_reserve_exact(length).map_err(|_| "NodeList enumeration reservation failed.")?;
-        for index in 0..length { keys.push(index.to_string()); }
-        Ok(keys)
+        self.state.index_keys(length)
     }
 
     pub(super) fn query_candidates(&mut self, root: usize) -> Result<Vec<usize>, String> {
