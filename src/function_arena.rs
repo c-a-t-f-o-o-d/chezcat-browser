@@ -145,7 +145,16 @@ impl Runtime {
     }
 
     pub(super) fn rollback_unpublished_function(&mut self, allocation: Allocation) -> Result<(), Fault> {
-        self.vacate_function_slot(allocation.id, allocation.appended, false)
+        let payload = match &self.functions[allocation.id] {
+            Function::Script { lexical_this, .. } => lexical_this.as_ref().map_or(0, super::Value::bytes),
+            Function::Bound(bound) => bound.retained_bytes(),
+            Function::Promise(closure) => closure.retained_bytes(),
+            _ => 0,
+        };
+        self.vacate_function_slot(allocation.id, allocation.appended, false)?;
+        // Backing vector capacity remains owned; these dropped captures do not.
+        self.value_bytes -= payload;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -346,7 +355,7 @@ mod tests {
         aligned(&runtime);
     }
     #[test]
-    fn first_backing_failure_preserves_append_middle_and_trailing_topology_and_legacy_payload_charge() {
+    fn first_backing_failure_preserves_append_middle_and_trailing_topology_and_refunds_payload() {
         for shape in 0..3 {
             let (mut runtime, expected) = match shape {
                 0 => { let runtime = Runtime::for_capacity_test(); let id = runtime.functions.len(); (runtime, id) },
@@ -361,7 +370,7 @@ mod tests {
             runtime.limits.heap.objects = runtime.objects.len();
             assert!(runtime.make_function(&program, template, 0, &Value::String("retain".into())).is_err());
             assert_eq!((runtime.functions.len(), runtime.function_arena.occupied, runtime.function_arena.script_created), (before.0, before.1, before.2));
-            assert_eq!(runtime.value_bytes, before.3 + "retain".len());
+            assert_eq!(runtime.value_bytes, before.3);
             assert_eq!(runtime.next_function_slot().unwrap(), expected);
             if shape != 0 { assert!(matches!(runtime.functions[expected], Function::Vacant)); }
             aligned(&runtime);
@@ -371,14 +380,14 @@ mod tests {
         }
     }
     #[test]
-    fn first_backing_failure_keeps_legacy_bound_capture_charge() {
+    fn first_backing_failure_refunds_unpublished_bound_capture() {
         let mut runtime = Runtime::for_capacity_test();
         let target = runtime.function_prototype.unwrap();
         let before = (runtime.functions.len(), runtime.function_arena.occupied, runtime.value_bytes);
         runtime.limits.heap.objects = runtime.objects.len();
         assert!(runtime.bind_function(target, &[Value::String("captured".into())], &mut Native).is_err());
         assert_eq!((runtime.functions.len(), runtime.function_arena.occupied), (before.0, before.1));
-        assert_eq!(runtime.value_bytes, before.2 + std::mem::size_of::<Value>() + "captured".len());
+        assert_eq!(runtime.value_bytes, before.2);
         aligned(&runtime);
     }
     #[test]

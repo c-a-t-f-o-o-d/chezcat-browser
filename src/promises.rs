@@ -134,12 +134,12 @@ pub(super) enum Closure {
 }
 
 impl Closure {
-    fn retained_bytes(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + match self {
-                Self::FinallyValue { value, .. } => value.bytes(),
-                _ => 0,
-            }
+    // The closure record itself resides in the charged function arena.
+    pub(super) fn retained_bytes(&self) -> usize {
+        match self {
+            Self::FinallyValue { value, .. } => value.bytes(),
+            _ => 0,
+        }
     }
     fn arity(&self) -> usize {
         match self {
@@ -1670,7 +1670,7 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
     }
 
     #[test]
-    fn first_promise_closure_backing_failure_keeps_legacy_capture_charge_for_append_and_reuse() {
+    fn first_promise_closure_backing_failure_refunds_capture_for_append_and_reuse() {
         for reused in [false, true] {
             let mut runtime = Runtime::for_capacity_test();
             if reused {
@@ -1680,11 +1680,10 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
             }
             let before = (runtime.functions.len(), runtime.function_arena.occupied, runtime.value_bytes, runtime.function_arena.script_created);
             let closure = Closure::FinallyValue { value: Value::String("retained".into()), reject: false };
-            let charge = closure.retained_bytes();
             runtime.limits.heap.objects = runtime.objects.len();
             assert!(runtime.promise_function(closure).is_err());
             assert_eq!((runtime.functions.len(), runtime.function_arena.occupied, runtime.function_arena.script_created), (before.0, before.1, before.3));
-            assert_eq!(runtime.value_bytes, before.2 + charge);
+            assert_eq!(runtime.value_bytes, before.2);
             assert_eq!(runtime.functions.len(), runtime.function_properties.len());
             assert_eq!(runtime.functions.len(), runtime.function_realms.len());
             assert_eq!(runtime.functions.len(), runtime.function_initial_names.len());
