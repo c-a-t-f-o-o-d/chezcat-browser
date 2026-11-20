@@ -11,11 +11,21 @@ impl Runtime {
         this: &Value,
         host: &mut dyn Host,
     ) -> Result<Control, Fault> {
+        let mut if_parents = Vec::new();
+        let result = self.selected_if_with_storage(program, id, env, this, host, &mut if_parents);
+        self.value_bytes -= if_parents.capacity() * std::mem::size_of::<StmtId>();
+        result
+    }
+
+    #[inline(never)]
+    fn selected_if_with_storage(
+        &mut self, program: &Rc<Program>, id: StmtId, env: usize, this: &Value,
+        host: &mut dyn Host, if_parents: &mut Vec<StmtId>,
+    ) -> Result<Control, Fault> {
         let mut current = id;
         // Selected if branches need only target IDs and UpdateEmpty(undefined)
         // after their child returns. Keep that bounded metadata on the heap and
         // enter the child in this actual activation, with its original step.
-        let mut if_parents = Vec::new();
         loop {
             #[cfg(test)]
             let tail = !self.transient_roots.disable_if_statement_tail;
@@ -32,23 +42,22 @@ impl Runtime {
                     let Some(branch) = branch else {
                         return Ok(Control::Normal(Some(Value::Undefined)));
                     };
-                    if if_parents.len() == MAX_IF_BRANCHES {
-                        return Err(Fault::new("Pending if-branch limit reached (4096).")
-                            .at(&program.source, at));
+                    #[cfg(test)]
+                    if let Some(limit) = self.limits.test_evaluation_frames {
+                        if if_parents.len() >= limit {
+                            return Err(Fault::new(format!("Pending if-branch limit reached ({limit})."))
+                                .at(&program.source, at));
+                        }
                     }
                     // Unlike a retained native child frame, this ID is a
                     // real heap copy and pays the finite copy allowance.
                     self.work_as(std::mem::size_of::<StmtId>(), WorkKind::ConditionalTarget)
                         .map_err(|error| error.at(&program.source, at))?;
                     if if_parents.len() == if_parents.capacity() {
-                        let count = if_parents
-                            .capacity()
-                            .max(8)
-                            .min(MAX_IF_BRANCHES - if_parents.len());
-                        if_parents.try_reserve_exact(count).map_err(|_| {
-                            Fault::new("Unable to allocate bounded if-branch storage.")
-                                .at(&program.source, at)
-                        })?;
+                        let spare = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+                        let added = limits::grow_suspension_stack(if_parents, spare)
+                            .map_err(|error| error.at(&program.source, at))?;
+                        self.value_bytes += added;
                     }
                     if_parents.push(current);
                     // The existing flat false-if handoff locates its entry step
