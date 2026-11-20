@@ -8,6 +8,16 @@ pub(super) fn capacity<T>(values:&Vec<T>,capacity:usize,available:usize)->Result
     Ok((Some(next),bytes))
 }
 
+pub(super) fn grow<T>(values:&Vec<T>,additional:usize,available:usize)->Result<(Option<Vec<T>>,usize),String> {
+    let required=values.len().checked_add(additional).ok_or("Host metadata capacity overflow.")?;
+    let before=values.capacity();
+    if required<=before{return Ok((None,0));}
+    let slot=std::mem::size_of::<T>();
+    let growth=before.max(4).max(required-before).min(available/slot);
+    let target=before.checked_add(growth).filter(|target|*target>=required).ok_or("DOM retained host metadata allowance exhausted.")?;
+    capacity(values,target,available)
+}
+
 /// Capacity for copied strings/code units; immutable BigInt shares retain their
 /// full payload allowance even though cloning the reference allocates no text.
 pub(super) fn value_bytes(value:&super::Value)->usize {

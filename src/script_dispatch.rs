@@ -58,8 +58,10 @@ document.title='standalone-event-target-ok';
         page.state.limits.host.event_targets=1;let retained=page.state.retained;
         let out=page.console_eval(&mut doc,&mut forms,"new EventTarget();");assert_eq!(out.errors,1);assert_eq!(page.state.standalone_targets.len(),1);assert_eq!(page.state.retained,retained);
         page.state.limits.host.event_targets=crate::javascript::limits::BROWSER.host.event_targets;let out=page.console_eval(&mut doc,&mut forms,"for(var i=0;i<300;i++)new EventTarget();");assert_eq!(out.errors,0,"{}",page.report());assert_eq!(page.state.standalone_targets.len(),301);
-        page.state.retained_limit=page.state.retained;let out=page.console_eval(&mut doc,&mut forms,"new EventTarget();");assert_eq!(out.errors,1);assert_eq!(page.state.standalone_targets.len(),301);
-        page.state.retained_limit=usize::MAX;let out=page.console_eval(&mut doc,&mut forms,"var recovered=new EventTarget();if(!(recovered instanceof EventTarget))throw 'recovery';");assert_eq!(out.errors,0,"{}",page.report());
+        while page.state.standalone_targets.len()<page.state.standalone_targets.capacity(){Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.create_standalone_target(WINDOW).unwrap();}
+        let count=page.state.standalone_targets.len();let limit=page.state.retained_limit;
+        page.state.retained_limit=page.state.retained;let out=page.console_eval(&mut doc,&mut forms,"new EventTarget();");assert_eq!(out.errors,1);assert_eq!(page.state.standalone_targets.len(),count);
+        page.state.retained_limit=limit;let out=page.console_eval(&mut doc,&mut forms,"var recovered=new EventTarget();if(!(recovered instanceof EventTarget))throw 'recovery';");assert_eq!(out.errors,0,"{}",page.report());
         let bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};assert!(bridge.standalone_target_owner(0x9000_ffff).is_none());assert!(!bridge.dispatch_receiver(0x9000_ffff));assert!(!bridge.exposed_native_prototype(0x9000_ffff));
     }
     fn start(source: &str) -> (Document, Forms, Page, Outcome) {
@@ -301,18 +303,27 @@ impl Bridge<'_> {
             .saturating_add(self.state.message_channels.port_count())
             .saturating_add(self.state.media_queries.len())
     }
+    pub(super) fn event_target_count_refused(&self,additional:usize)->bool {
+        let count=self.event_target_count();
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&additional>self.state.limits.host.event_targets.saturating_sub(count){return true;}
+        count.checked_add(additional).is_none()
+    }
     pub(super) fn create_standalone_target(&mut self,owner:u32)->Result<Value,String> {
         self.state.work(1)?;
-        if self.event_target_count() >= self.state.limits.host.event_targets {
+        if self.event_target_count_refused(1) {
             return Err("Standalone EventTarget limit reached.".into());
         }
         let index=u32::try_from(self.state.standalone_targets.len()).map_err(|_|"EventTarget identity overflow.")?;
         let handle=0x9000_0000u32.checked_add(index).filter(|id|*id<0xc000_0000).ok_or("EventTarget identity overflow.")?;
-        let bytes=std::mem::size_of::<u32>();
-        let retained=self.state.retained.checked_add(bytes).filter(|n|*n<=self.state.retained_limit).ok_or("EventTarget retained allocation limit reached.")?;
-        self.state.standalone_targets.try_reserve(1).map_err(|_|"Could not reserve EventTarget storage.")?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let (replacement,added)=retained_storage::grow(&self.state.standalone_targets,1,available)?;
+        if let Some(mut targets)=replacement {
+            self.state.copies(self.state.standalone_targets.len()*std::mem::size_of::<u32>())?;
+            targets.append(&mut self.state.standalone_targets);self.state.standalone_targets=targets;
+        }
         self.state.standalone_targets.push(owner);
-        self.state.retained=retained;
+        self.state.retained+=added;
         Ok(Value::Host(handle))
     }
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {

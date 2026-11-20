@@ -59,32 +59,23 @@ impl Bridge<'_> {
             return Err("AbortSignal creation requires an active scripting owner.".into());
         }
         self.state.work(1)?;
-        let occupied = self.event_target_count();
-        if occupied >= self.state.limits.host.event_targets {
+        if self.event_target_count_refused(1) {
             return Err("Native EventTarget limit reached.".into());
         }
         let index = u32::try_from(self.state.abort_signals.len())
             .ok()
             .filter(|index| *index < ARENA)
             .ok_or("AbortSignal identity space exhausted.")?;
-        let bytes = size_of::<Record>().saturating_add(reason.bytes());
-        let retained = self
-            .state
-            .retained
-            .checked_add(bytes)
-            .filter(|bytes| *bytes <= self.state.retained_limit)
-            .ok_or("AbortSignal retention limit reached.")?;
-        self.state
-            .abort_signals
-            .try_reserve(1)
-            .map_err(|_| "Could not reserve AbortSignal state.")?;
+        let bytes=retained_storage::value_bytes(&reason);
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes).ok_or("AbortSignal retention limit reached.")?;
+        let (replacement,added)=retained_storage::grow(&self.state.abort_signals,1,available)?;
         self.state.copies(reason.bytes())?;
-        self.state.abort_signals.push(Record {
-            owner,
-            controller,
-            reason,
-        });
-        self.state.retained = retained;
+        if let Some(mut signals)=replacement {
+            self.state.copies(self.state.abort_signals.len()*size_of::<Record>())?;
+            signals.append(&mut self.state.abort_signals);self.state.abort_signals=signals;
+        }
+        self.state.abort_signals.push(Record{owner,controller,reason});
+        self.state.retained+=bytes+added;
         Ok(index
             + if controller {
                 CONTROLLER_BASE
