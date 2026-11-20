@@ -175,6 +175,13 @@ impl NodeKind {
         }
     }
 
+    pub(crate) fn character_data_capacity(&self) -> Option<usize> {
+        match self {
+            Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data.capacity()),
+            Self::Element { .. } | Self::DocumentFragment => None,
+        }
+    }
+
     pub(crate) fn is_nonrendered_character_data(&self) -> bool {
         matches!(self, Self::Comment(_) | Self::ProcessingInstruction { .. })
     }

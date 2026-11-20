@@ -90,6 +90,9 @@ mod script_class_list;
 mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
+#[cfg(test)]
+#[path = "script_character_storage_tests.rs"]
+mod script_character_storage_tests;
 #[path = "script_element_properties.rs"]
 mod script_element_properties;
 #[path = "script_created_events.rs"]
@@ -2617,7 +2620,9 @@ impl Bridge<'_> {
             let needed = 1usize.saturating_sub(self.doc.nodes[node].children.capacity());
             self.doc.nodes[node].children.try_reserve(needed).map_err(|_| "textContent child reservation failed.")?;
         }
-        self.state.replace_bytes(0, text.len())?;
+        // An empty replacement creates no retained Text, even if its incoming
+        // buffer has spare capacity. Old detached children remain charged.
+        self.state.replace_storage(0, if text.is_empty() { 0 } else { text.capacity() }, text.len())?;
         self.state.detached_nodes.extend(descendants);
         self.doc.nodes[node].children.clear();
         if !text.is_empty() {
@@ -5290,7 +5295,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "title" {
             let value = self.text(&value)?;
             self.state
-                .replace_bytes(self.doc.title.len(), value.len())?;
+                .replace_storage(self.doc.title.capacity(), value.capacity(), value.len())?;
             self.doc.title = value;
             self.state.dom_committed();
             self.state.layout_changed();
@@ -6004,8 +6009,8 @@ fn text_container(tag: &str) -> bool {
 fn node_bytes(node: &Node) -> usize {
     match &node.kind {
         NodeKind::DocumentFragment => 0,
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
-        NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
+        NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
         NodeKind::Element { id, attrs, .. } => {
             id.as_ref().map_or(0, String::capacity)
                 + attrs.capacity()*size_of::<crate::html::Attribute>()
@@ -6013,18 +6018,36 @@ fn node_bytes(node: &Node) -> usize {
         }
     }
 }
-fn copied_node_bytes(node:&Node)->usize{
-    if let NodeKind::Element{attrs,id,..}=&node.kind {
-        id.as_ref().map_or(0,String::len)+attrs.len()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
-    }else{node_bytes(node)}
+// Compact copies need only the used payload. Reconcile any capacity returned
+// by the allocator after the fallible copy, before publishing its new owner.
+fn copied_node_bytes(node: &Node) -> usize {
+    match &node.kind {
+        NodeKind::Element { attrs, id, .. } => {
+            id.as_ref().map_or(0, String::len)
+                + attrs.len() * size_of::<crate::html::Attribute>()
+                + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
+        }
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
+        NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+        NodeKind::DocumentFragment => 0,
+    }
 }
-fn copied_attribute_extra(kind:&NodeKind)->usize{
-    if let NodeKind::Element{attrs,id,..}=kind {
-        (attrs.capacity()-attrs.len())*size_of::<crate::html::Attribute>()+attrs.iter().map(|attr|attr.owned_bytes()-attr.bytes()).sum::<usize>()+id.as_ref().map_or(0,|text|text.capacity()-text.len())
-    }else{0}
+fn copied_payload_extra(kind: &NodeKind) -> usize {
+    match kind {
+        NodeKind::Element { attrs, id, .. } => {
+            (attrs.capacity() - attrs.len()) * size_of::<crate::html::Attribute>()
+                + attrs.iter().map(|attr| attr.owned_bytes() - attr.bytes()).sum::<usize>()
+                + id.as_ref().map_or(0, |text| text.capacity() - text.len())
+        }
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity() - text.len(),
+        NodeKind::ProcessingInstruction { target, data } => {
+            target.capacity() - target.len() + data.capacity() - data.len()
+        }
+        NodeKind::DocumentFragment => 0,
+    }
 }
 fn document_bytes(doc: &Document) -> usize {
-    doc.title.len() + doc.nodes.iter().map(node_bytes).sum::<usize>()
+    doc.title.capacity() + doc.nodes.iter().map(node_bytes).sum::<usize>()
 }
 fn prefix(text: &str, maximum: usize) -> &str {
     let mut end = text.len().min(maximum);

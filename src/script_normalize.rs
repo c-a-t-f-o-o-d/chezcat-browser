@@ -93,7 +93,7 @@ impl Bridge<'_> {
                             return Err("Normalized Text exceeds the host string bound.".into());
                         }
                         old_bytes = old_bytes
-                            .checked_add(old.len())
+                            .checked_add(old.capacity())
                             .ok_or("Normalize retained accounting overflow.")?;
                         new_bytes = new_bytes
                             .checked_add(length)
@@ -121,7 +121,7 @@ impl Bridge<'_> {
         if parents.is_empty() {
             return Ok(Value::Undefined);
         }
-        let retained = self
+        let mut retained = self
             .state
             .retained
             .saturating_sub(old_bytes)
@@ -139,6 +139,9 @@ impl Bridge<'_> {
             let mut text = String::new();
             text.try_reserve_exact(length)
                 .map_err(|_| "Normalize text reservation failed.")?;
+            retained = retained.checked_add(text.capacity() - length)
+                .filter(|bytes| *bytes <= self.state.retained_limit)
+                .ok_or("DOM retained text allocation limit reached during normalize.")?;
             for node in run {
                 let NodeKind::Text(part) = &self.doc.nodes[node].kind else {
                     unreachable!()
