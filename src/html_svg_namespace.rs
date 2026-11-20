@@ -17,7 +17,7 @@ pub(super) fn flow_context(name: &str) -> bool {
 }
 
 pub(super) fn shape_element(name: &str) -> bool {
-    matches!(name, "svg" | "defs" | "g" | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
+    matches!(name, "svg" | "defs" | "g" | "mask" | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
 }
 
 pub(super) fn supported_tag(tag: &Tag) -> bool {
@@ -33,6 +33,7 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
     if !tag.clean_syntax{return Some(("malformed element",&tag.name));}
     tag.attrs.iter().find_map(|(key, value)| (!match key.as_str() {
         "id" | "class" | "style" | "role" | "focusable" | "tabindex" | "viewbox" | "preserveaspectratio" | "pathlength" |
+        "maskunits" | "maskcontentunits" | "mask-type" |
         "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
         "fill" | "stroke" => value.strip_prefix('#').map_or_else(
@@ -59,6 +60,8 @@ pub(super) fn publish(nodes: &mut [Node]) {
                     "viewbox" => Some("viewBox"),
                     "preserveaspectratio" => Some("preserveAspectRatio"),
                     "pathlength" => Some("pathLength"),
+                    "maskunits" => Some("maskUnits"),
+                    "maskcontentunits" => Some("maskContentUnits"),
                     _ => None,
                 };
                 if let Some(name) = adjusted { attr.name.qualified = name.into(); }
@@ -84,9 +87,9 @@ mod tests {
     #[test]
     fn svg_namespace_balanced_islands_publish_only_scoped_elements() {
         let doc = parse("<html><body><circle id=outside></circle><svg id=root xmlns='http://www.w3.org/2000/svg'>\n\
-            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g></svg>\
+            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g><defs><mask id=mask maskUnits=userSpaceOnUse><rect id='mask-rect'/></mask></defs></svg>\
             <svg id='empty'/><div id=after xmlns='http://www.w3.org/2000/svg'></div></body></html>");
-        for id in ["root", "group", "a", "b", "nested", "p", "empty"] {
+        for id in ["root", "group", "a", "b", "nested", "p", "empty", "mask", "mask-rect"] {
             assert_eq!(node(&doc, id).namespace, Namespace::Svg, "{id}");
         }
         for id in ["outside", "after"] { assert_eq!(node(&doc, id).namespace, Namespace::Html); }
@@ -94,6 +97,8 @@ mod tests {
         assert_eq!(group.children.len(), 3, "self-closing shapes must be siblings");
         let NodeKind::Element {attrs,..} = &node(&doc, "root").kind else { panic!("SVG root") };
         assert!(attrs.iter().any(|a| a.name.matches(Some("http://www.w3.org/2000/xmlns/"), "xmlns")));
+        let NodeKind::Element{attrs,..}=&node(&doc,"mask").kind else{panic!("SVG mask")};
+        assert!(attrs.iter().any(|attr|attr.name.html_is("maskUnits")&&attr.value=="userSpaceOnUse"));
         assert!(doc.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Text(_))).all(|n| n.namespace == Namespace::None));
         assert_eq!(Namespace::Svg.element_uri(), Some("http://www.w3.org/2000/svg"));
         assert!(Namespace::Svg.is_foreign() && Namespace::UnknownForeign.is_foreign());
