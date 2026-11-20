@@ -413,7 +413,7 @@ fn assert_external_bootstrap_outcomes(app: &mut App, peer: &Peer) {
     );
     assert_eq!(app.history_index, 1, "{}", failure_context(app, peer));
     assert_eq!(
-        app.history[1].location.display(),
+        app.history.borrow().entry(1).unwrap().location.display(),
         peer.url("/search?q=test"), "{}", failure_context(app, peer)
     );
     let all_get = peer
@@ -617,15 +617,15 @@ fn unchanged_hash_is_inert_and_fragment_navigation_preserves_external_requests()
     // this entry. Assigning already-current hashes remains inert.
     assert_eq!(app.history.len(), 2);
     assert_eq!(app.history_index, 1);
-    assert_eq!(app.history[1].location.display(), peer.url("/hash#changed"));
+    assert_eq!(app.history.borrow().entry(1).unwrap().location.display(), peer.url("/hash#changed"));
     let outcome = app.scripting.as_mut().unwrap().console_eval(
         &mut app.document, &mut app.forms, "location.hash='#later';");
     assert_eq!(outcome.errors, 0, "{}", report(&app));
     app.process_script_requests();
     assert_eq!(app.history.len(), 3);
     assert_eq!(app.history_index, 2);
-    assert_eq!(app.history[1].location.display(), peer.url("/hash#changed"));
-    assert_eq!(app.history[2].location.display(), peer.url("/hash#later"));
+    assert_eq!(app.history.borrow().entry(1).unwrap().location.display(), peer.url("/hash#changed"));
+    assert_eq!(app.history.borrow().entry(2).unwrap().location.display(), peer.url("/hash#later"));
     let requests = peer.requests.lock().unwrap();
     for path in ["/hash", "/hash.js", "/after-hash.js"] {
         assert_eq!(

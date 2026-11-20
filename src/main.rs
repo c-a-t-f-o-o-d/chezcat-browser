@@ -31,6 +31,7 @@ mod fonts;
 mod forms;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod history;
+mod session_history;
 mod html;
 mod html_canvas;
 mod http;

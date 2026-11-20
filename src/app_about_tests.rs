@@ -43,7 +43,7 @@ struct PageState {
 fn page_state(app: &App) -> PageState {
     PageState { raw:app.raw.clone(), nodes:format!("{:?}", app.document.nodes),
         location:app.location.display(),
-        history:app.history.iter().map(|item| (item.location.display(), item.scroll, item.document)).collect(),
+        history:app.history.borrow().entries().iter().map(|item| (item.location.display(), item.scroll, item.document)).collect(),
         history_index:app.history_index, scroll:app.scroll, epoch:app.script_epoch }
 }
 fn contents(app: &App) -> &about::Contents {

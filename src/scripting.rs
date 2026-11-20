@@ -219,6 +219,7 @@ mod script_document_properties;
 mod script_inner_html;
 #[path = "script_history.rs"]
 mod script_history;
+#[cfg(test)]
 pub use script_history::HistoryData;
 use script_history::HistoryState;
 
@@ -1212,6 +1213,7 @@ impl Page {
             (LOCATION, "replace"),
             (LOCATION, "reload"),
             (HISTORY, "replaceState"),
+            (HISTORY, "pushState"),
             (PERFORMANCE, "now"),
             (DOCUMENT, "getElementById"),
             (DOCUMENT, "getElementsByTagName"),
@@ -3404,7 +3406,7 @@ impl Host for Bridge<'_> {
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
-        if object == HISTORY && method == "replaceState" { return &[(1, true), (2, true)]; }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") { return &[(1, true), (2, true)]; }
         if self.named_map_receiver(object) {
             let method=script_named_map::operation(method).unwrap_or(method);
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
@@ -3495,7 +3497,7 @@ impl Host for Bridge<'_> {
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return Some(2);}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return Some(1);}
         if node_index(object).is_some() && method == "replaceChild" { return Some(2); }
-        if object == HISTORY && method == "replaceState" { return Some(2); }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") { return Some(2); }
         if method == "getBoundingClientRect" && self.class_list_element_receiver(object) { return Some(0); }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => Some(1), "getNamedItemNS" => Some(2), _ => None }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return Some(3); }
@@ -3583,7 +3585,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="getComputedStyle" && index==1 {return true;}
         if (object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS")
             || self.inert_document(object) && method=="createElementNS") && index==0 {return true;}
-        if object == HISTORY && method == "replaceState" && index == 2 { return true; }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") && index == 2 { return true; }
         if self.named_map_receiver(object) { return script_named_map::operation(method).unwrap_or(method) == "getNamedItemNS" && index == 0; }
         method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attr_element_receiver(object)
@@ -3647,7 +3649,7 @@ impl Host for Bridge<'_> {
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return 2;}
         if object==DOCUMENT && method=="createAttribute" || self.attr_element_receiver(object)&&matches!(method,"setAttributeNode"|"setAttributeNodeNS") {return 1;}
-        if object == HISTORY && method == "replaceState" { return 2; }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
         if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
@@ -3841,8 +3843,8 @@ impl Host for Bridge<'_> {
                 return Err(("TypeError", "An EventListener callback must be an object or null.".into()));
             }
         }
-        if object == HISTORY && method == "replaceState" {
-            if self.state.history.current.is_none() { self.history_target(args)?; }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") {
+            self.validate_history_active()?;
             if matches!(args.first(), Some(Value::Function(_) | Value::Symbol(_))) { return Err(("DataCloneError", "This History value cannot be serialized for storage.".into())); }
             if matches!(args.first(), Some(Value::Object(_) | Value::Host(_))) { return Ok(()); }
             self.history_target(args)?;
@@ -4219,7 +4221,7 @@ impl Host for Bridge<'_> {
             return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS"|"createElementNS") {return receiver==DOCUMENT;}
-        if object == HISTORY { return receiver == HISTORY && method == "replaceState"; }
+        if object == HISTORY { return receiver == HISTORY && matches!(method,"replaceState"|"pushState"); }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
         if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
@@ -4699,8 +4701,8 @@ impl Host for Bridge<'_> {
         if object==PERFORMANCE_TIMING {return Ok(self.state.navigation_timing.is_some_and(|t|t.value(property).is_some()));}
         if object == HISTORY {
             return match property {
-                "state" | "length" | "replaceState" => Ok(true),
-                "constructor" | "__proto__" | "scrollRestoration" | "go" | "back" | "forward" | "pushState" => Err(format!("History property {property:?} is not implemented.")),
+                "state" | "length" | "replaceState" | "pushState" => Ok(true),
+                "constructor" | "__proto__" | "scrollRestoration" | "go" | "back" | "forward" => Err(format!("History property {property:?} is not implemented.")),
                 _ => Ok(false),
             };
         }
@@ -5790,7 +5792,7 @@ impl Host for Bridge<'_> {
         if object == LOCATION {
             return self.location_call(method, args);
         }
-        if object == HISTORY && method == "replaceState" { return self.history_replace(args); }
+        if object == HISTORY && matches!(method,"replaceState"|"pushState") { return if method=="pushState"{self.history_push(args)}else{self.history_replace(args)}; }
         if object == DOCUMENT_IMAGES {
             if args.is_empty() {
                 return Err("Image collection methods require one argument.".into());

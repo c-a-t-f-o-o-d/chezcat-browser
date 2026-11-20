@@ -83,6 +83,7 @@ impl Site {
                             if path == "/blocked" { headers = "Content-Security-Policy: script-src 'unsafe-inline'; img-src 'none'\r\n".into(); }
                             if path.starts_with("/history-blocked-base") { headers = "Content-Security-Policy: base-uri 'none'\r\n".into(); }
                             let action = match path.as_str() {
+                                "/history-push-startup" => "var historyRuns=1,historyStart=history.length;history.pushState('first','','?p=1#first');history.replaceState('replaced','','?p=2#second');history.pushState('third','','?p=3#third');if(history.length!==historyStart+2||history.state!=='third'||location.search!=='?p=3'||document.URL!==location.href)throw Error('startup ordered pushes');",
                                 "/history-startup" => "if(history.state!==null)throw Error('initial entry');history.replaceState('startup','','/history-startup-clean?keep=2#ready');if(history.state!=='startup'||document.URL!==location.origin+'/history-startup-clean?keep=2#ready')throw Error('startup History');var startupMarker=61;",
                                 path if path.starts_with("/history-length") => "var startupHistoryLength=history.length;history.replaceState(null,'');if(history.length!==startupHistoryLength)throw Error('replacement count');Promise.resolve().then(function(){if(history.length!==startupHistoryLength)throw Error('microtask count');document.title='History count ready';});",
                                 "/parser-held" => "img.src='/two.ppm';",
@@ -435,10 +436,12 @@ fn history_length_redirects_retention_and_cancelled_navigation_use_real_entries(
     let mut app = open(&site, "/history-length-a");
     wait(&mut app, |app| !app.is_loading());
     let requests = site.requests.lock().unwrap().len();
-    for index in 0..MAX_SESSION_HISTORY_ENTRIES + 3 {
+    let before=app.history.len();
+    let additions=131;
+    for index in 0..additions {
         app.navigate_location(site.location(&format!("/history-length-a#entry-{index}")), true);
     }
-    assert_eq!(app.history.len(), MAX_SESSION_HISTORY_ENTRIES);
+    assert_eq!(app.history.len(), before+additions);
     assert_history_length(&mut app, false);
     assert_eq!(site.requests.lock().unwrap().len(), requests);
     let site = Site::new();
@@ -504,7 +507,7 @@ fn history_replace_state_updates_real_entries_without_fetch_and_preserves_docume
     eval(&mut app, "var order='';var result=history.replaceState(history.state,{toString:function(){order+='unused';return '';}},{toString:function(){order+='url';return '/history?keep=2#two';}});if(result!==undefined||order!=='unusedurl'||history.state!==null||location.href!==location.origin+'/history?keep=2#two'||document.URL!==location.href||document.documentURI!==location.href||field.value!=='edited'||marker.value!==17||windows!==1)throw Error('synchronous rewrite');");
     assert_eq!((app.history.len(), app.history_index), (length, index));
     assert_eq!(app.location, site.location("/history?keep=2#two"));
-    assert_eq!(app.history[index].location, app.location);
+    assert_eq!(app.history.borrow().entry(index).unwrap().location, app.location);
     assert_eq!(app.base_location, app.location);
     assert_eq!((app.script_epoch, app.document.nodes.as_ptr(), app.scroll), (epoch, nodes, scroll));
     app.history_move(-1);
@@ -616,13 +619,13 @@ fn history_replace_state_commits_before_real_form_default_or_cancellation() {
 fn history_replace_state_startup_uses_new_entry_and_stop_keeps_committed_mutation() {
     let site = Site::new();
     let mut app = App::new();
-    let home = app.history[0].location.clone();
+    let home = app.history.borrow().entry(0).unwrap().location.clone();
     app.navigate_location(site.location("/history-startup"), true);
     wait(&mut app, |app| !app.is_loading());
     assert_eq!(app.location, site.location("/history-startup-clean?keep=2#ready"));
     assert_eq!(app.history.len(), 2);
-    assert_eq!(app.history[0].location, home);
-    assert_eq!(app.history[1].location, app.location);
+    assert_eq!(app.history.borrow().entry(0).unwrap().location, home);
+    assert_eq!(app.history.borrow().entry(1).unwrap().location, app.location);
     eval(&mut app, "if(startupMarker!==61||history.state!=='startup')throw Error('startup entry state');");
     assert_eq!(site.requests.lock().unwrap().as_slice(), ["/history-startup"]);
     let epoch = app.script_epoch;
@@ -632,7 +635,7 @@ fn history_replace_state_startup_uses_new_entry_and_stop_keeps_committed_mutatio
     app.stop_loading();
     assert!(!app.is_loading());
     assert_eq!(app.location, site.location("/history-stopped"));
-    assert_eq!(app.history[1].location, app.location);
+    assert_eq!(app.history.borrow().entry(1).unwrap().location, app.location);
     assert_eq!(app.script_epoch, epoch);
     eval(&mut app, "if(history.state!=='stopped'||startupMarker!==61||document.URL!==location.href)throw Error('Stop dropped committed History');");
     assert_eq!(site.requests.lock().unwrap().as_slice(), ["/history-startup"]);
@@ -779,4 +782,81 @@ fn image_worker_background_only_poll_leaves_element_fifo_and_pixels_intact() {
         assert_eq!(element.result.unwrap().bitmap.pixels, [0xffff0000; 2]);
     }
     assert!(worker.poll(false).is_none());
+}
+
+#[test]
+fn history_push_state_startup_order_branching_and_native_back_preserve_live_document(){
+    let site=Site::new();let mut app=open(&site,"/history-push-startup");wait(&mut app,|app|!app.is_loading());
+    assert_eq!(app.history.len(),4);assert_eq!(app.history_index,3);assert_eq!(app.location,site.location("/history-push-startup?p=3#third"));
+    let epoch=app.script_epoch;let nodes=app.document.nodes.as_ptr();let requests=site.requests.lock().unwrap().len();
+    eval(&mut app,"var kept=document.getElementById('entry');kept.value='edited';if(historyRuns!==1||history.state!=='third')throw 'real startup entries';");
+    let control=app.document.nodes.iter().enumerate().find_map(|(node,_)|(app.document.attr(node,"id")==Some("entry")).then_some(node)).unwrap();
+    {let editor=&mut app.forms.controls.get_mut(&control).unwrap().value;editor.cursor=4;editor.anchor=1;editor.offset=2;}
+    app.history_move(-1);assert_eq!(app.location,site.location("/history-push-startup?p=2#second"));
+    eval(&mut app,"if(history.state!=='replaced'||historyRuns!==1||document.getElementById('entry')!==kept||kept.value!=='edited')throw 'real Back state and document';");
+    app.history_move(-1);eval(&mut app,"if(history.state!==null||history.length!==historyStart+2||historyRuns!==1)throw 'real predecessor entry';");
+    app.history_move(1);eval(&mut app,"history.pushState('branch','','?branch=4');if(history.state!=='branch'||history.length!==historyStart+2)throw 'real forward branch truncation';");
+    assert_eq!(app.history.len(),4);assert_eq!(app.history_index,3);assert_eq!(app.location,site.location("/history-push-startup?branch=4"));
+    assert_eq!(app.script_epoch,epoch);assert_eq!(app.document.nodes.as_ptr(),nodes);assert_eq!(site.requests.lock().unwrap().len(),requests);
+    let editor=&app.forms.controls[&control].value;assert_eq!((editor.text(),editor.cursor,editor.anchor,editor.offset),("edited".into(),4,1,2));
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+}
+#[test]
+fn history_push_state_reentrant_conversion_origin_guards_and_scroll_restoration_are_real(){
+    let site=Site::new();let mut app=open(&site,"/history");wait(&mut app,|app|!app.is_loading());
+    let requests=site.requests.lock().unwrap().len();let length=app.history.len();let epoch=app.script_epoch;
+    eval(&mut app,r#"
+var push=history.pushState,startLength=history.length,touched=0;
+if(typeof push!=='function'||push.length!==2||push!==history.pushState)throw 'real saved pushState';
+try{push.call({},null,'',{toString:function(){touched++;return '/bad';}});throw 'fake History receiver';}catch(e){if(e.name!=='TypeError')throw e;}
+if(touched)throw 'brand converted URL';
+var title={toString:function(){touched++;history.pushState('inner','','/folder/inner');return 'unused';}};
+push.call(history,'outer',title,'../outer#ready');
+if(touched!==1||history.length!==startLength+2||history.state!=='outer'||location.pathname!=='/outer'||document.URL!==location.href)throw 'reentrant ordered pushes';
+var before=location.href,count=history.length,caught=0;
+try{history.pushState('bad','','https://other-history.test/');}catch(e){if(e.name==='SecurityError')caught++;}
+try{history.pushState(function(){},'','https://other-history.test/');}catch(e){if(e.name==='DataCloneError')caught++;}
+try{history.pushState(null);}catch(e){if(e.name==='TypeError')caught++;}
+var marker={},url={toString:function(){throw marker;}};try{history.pushState(null,'',url);}catch(e){if(e===marker)caught++;}
+if(caught!==4||location.href!==before||history.length!==count||history.state!=='outer')throw 'push refusal changed current entry';
+"#);
+    assert_eq!(app.history.len(),length+2);app.set_scroll(120);
+    eval(&mut app,"history.pushState('scrolled','','#scroll');");assert_eq!(app.scroll,120);
+    app.set_scroll(240);eval(&mut app,"history.replaceState('positioned','');");
+    app.history_move(-1);assert_eq!(app.scroll,120);eval(&mut app,"if(history.state!=='outer')throw 'scroll predecessor state';");
+    app.history_move(1);assert_eq!(app.scroll,240);eval(&mut app,"if(history.state!=='positioned')throw 'scroll successor state';");
+    assert_eq!(site.requests.lock().unwrap().len(),requests);assert_eq!(app.script_epoch,epoch);
+}
+
+#[test]
+fn history_push_state_roundtrips_serializable_primitives_without_reusing_realm_identities(){
+    let site=Site::new();let mut app=open(&site,"/history");wait(&mut app,|app|!app.is_loading());let requests=site.requests.lock().unwrap().len();
+    eval(&mut app,r#"
+var big=BigInt('123456789012345678901234567890'),units='\uD800x';
+history.pushState(big,'','#big');if(history.state!==big||typeof history.state!=='bigint')throw 'real BigInt history primitive';
+history.pushState(units,'','#units');if(history.state!==units||history.state.charCodeAt(0)!==55296)throw 'real exact UTF16 history primitive';
+history.pushState(NaN,'','#nan');if(!Number.isNaN(history.state))throw 'real NaN history primitive';
+history.replaceState(-0,'');if(1/history.state!==-Infinity)throw 'real signed-zero history primitive';
+history.pushState(undefined,'','#undefined');if(history.state!==undefined)throw 'real undefined history primitive';
+"#);
+    app.history_move(-1);eval(&mut app,"if(1/history.state!==-Infinity)throw 'real signed-zero restored';");
+    app.history_move(-1);eval(&mut app,"if(history.state!==units||history.state.length!==2)throw 'real UTF16 restored';");
+    app.history_move(-1);eval(&mut app,"if(history.state!==big)throw 'real BigInt restored';");
+    assert_eq!(site.requests.lock().unwrap().len(),requests);
+}
+
+#[test]
+fn history_entry_admission_refuses_network_commit_and_late_images_then_recovers(){
+    let site=Site::new();let mut app=open(&site,"/start");wait(&mut app,|app|!app.is_loading());
+    let location=app.location.clone();let raw=app.raw.clone();let epoch=app.script_epoch;let nodes=app.document.nodes.as_ptr();let bitmap=app.images[&image(&app)].clone();
+    let length=app.history.len();let index=app.history_index;let bytes=app.history.borrow().storage_bytes();
+    app.history.borrow_mut().set_limit_for_test(bytes);
+    app.navigate_location(site.location("/parser-held"),false);wait(&mut app,|app|app.failed&&!app.is_loading());
+    assert!(app.status.contains("Session retained"),"{}",app.status);assert_eq!(app.location,location);assert_eq!(app.address.text(),location.display());
+    assert_eq!(app.raw,raw);assert_eq!(app.script_epoch,epoch);assert_eq!(app.document.nodes.as_ptr(),nodes);assert_eq!(app.history.len(),length);assert_eq!(app.history_index,index);
+    assert_eq!(app.history.borrow().storage_bytes(),bytes);assert!(Arc::ptr_eq(&app.images[&image(&app)],&bitmap));
+    site.release();for _ in 0..8{app.poll_load();std::thread::sleep(Duration::from_millis(2));}
+    assert_eq!(app.script_epoch,epoch);assert_eq!(app.raw,raw);assert!(Arc::ptr_eq(&app.images[&image(&app)],&bitmap));
+    app.history.borrow_mut().set_limit_for_test(crate::session_history::BYTE_ALLOWANCE);app.navigate_location(site.location("/fresh"),false);wait(&mut app,|app|!app.is_loading());
+    assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"Fresh document");assert_eq!(app.history.len(),length+1);
 }
