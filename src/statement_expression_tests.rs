@@ -121,10 +121,10 @@ fn selected_if_pending_metadata_has_an_exact_finite_copy_allowance() {
 }
 
 #[test]
-fn statement_expression_live_stack_and_recursive_parser_share_original_bound() {
+fn statement_expression_live_stack_and_recursive_parser_share_measured_headroom() {
     std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
         let mut first_rejected = None;
-        for arrays in 0..=64 {
+        for arrays in [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048] {
             let mut runtime = Runtime::new();
             let code = format!("{}42{};", "[".repeat(arrays), "]".repeat(arrays));
             runtime.define_global("code", Value::String(code)).unwrap();
@@ -133,7 +133,10 @@ fn statement_expression_live_stack_and_recursive_parser_share_original_bound() {
             match result {
                 Ok(_) => assert!(first_rejected.is_none(), "recursive parse admission must be monotonic"),
                 Err(error) => {
-                    assert!(error.contains("Parser nesting limit reached (64)"), "{error}");
+                    let measured = error.contains("Native stack headroom exhausted during parser entry")
+                        || error.contains("Native stack headroom exhausted during evaluator entry");
+                    let fallback = !cfg!(windows) && error.contains("nesting limit reached");
+                    assert!(measured || fallback, "{error}");
                     first_rejected.get_or_insert(arrays);
                 }
             }
@@ -142,7 +145,7 @@ fn statement_expression_live_stack_and_recursive_parser_share_original_bound() {
             assert_eq!(runtime.execute("6*7;", &mut NoHost).unwrap().to_number(), 42.0);
         }
         let first = first_rejected.expect("recursive parser must retain finite rejection");
-        assert!(first > 2 && first <= 64, "first rejected depth={first}");
+        assert!(first > 2, "first rejected depth={first}");
         eprintln!("With 20 live recursive calls, first rejected recursive array depth: {first}");
     }).unwrap().join().unwrap();
 }

@@ -6956,9 +6956,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Control, Fault> {
         self.step()?;
-        if self.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        self.check_native_evaluation_stack()?;
         let marker = self.publish_statement_inputs(env, this, None)?;
         self.eval_depth += 1;
         self.transient_roots.owned_eval_depth += 1;
@@ -7317,17 +7315,18 @@ impl Runtime {
         // Retain one step per condition/body, the condition's zero-byte copy
         // call, both native guards and the original source position of faults.
         let mut condition_phase = !first_body;
+        self.step()?;
+        // Neither phase can reenter evaluation or change the native stack
+        // reservation. Measure once while preserving each phase's job step.
+        self.check_native_evaluation_stack()?;
         loop {
-            self.step()?;
-            if self.eval_depth >= MAX_EVAL_DEPTH {
-                return Err(Fault::new("Evaluation nesting limit reached (128)."));
-            }
             if condition_phase {
                 self.check_pending_evaluation()
                     .map_err(|error| error.at(&program.source, program.exprs[condition].at))?;
                 self.work_as(0, WorkKind::ValueCopy)?;
             }
             condition_phase = !condition_phase;
+            self.step()?;
         }
     }
 
@@ -7824,9 +7823,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.step()?;
-        if self.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        self.check_native_evaluation_stack()?;
         let marker = self.publish_statement_inputs(env, this, None)?;
         self.eval_depth += 1;
         self.transient_roots.owned_eval_depth += 1;
@@ -11161,6 +11158,63 @@ strictFailure;
                 assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
                 assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
             }
+        }).unwrap().join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn browser_native_evaluator_accepts_finite_recursive_statements_and_values() {
+        std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+            let left = "[".repeat(160);
+            let right = "]".repeat(160);
+            for source in [
+                format!("var answer=0;{}answer=17;{}answer;", "{".repeat(160), "}".repeat(160)),
+                format!("var cursor={left}17{right};for(var i=0;i<160;i++)cursor=cursor[0];cursor;"),
+                format!("var {left}answer{right}={left}17{right};answer;"),
+            ] {
+                let mut runtime = Runtime::new();
+                let mut host = TestHost::default();
+                assert_eq!(runtime.execute(&source, &mut host).unwrap().to_text(), "17");
+                assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+                assert!(runtime.transient_registration_is_empty());
+            }
+        }).unwrap().join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn browser_native_evaluator_stops_at_measured_headroom_on_a_one_mib_stack() {
+        std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
+            let mut runtime = Runtime::new();
+            let mut host = TestHost::default();
+            let mut program = Parser::parse("17;", &mut MAX_REGEXP_WORK.clone()).unwrap();
+            let mut statement = program.body[0];
+            let StmtKind::Expr(mut expression) = program.stmts[statement].kind else { unreachable!() };
+            for _ in 0..12_000 {
+                let prior = statement;
+                statement = program.stmts.len();
+                program.stmts.push(Stmt { kind: StmtKind::Block(vec![prior]), at: 0 });
+                let prior = expression;
+                expression = program.exprs.len();
+                program.exprs.push(Expr {
+                    kind: ExprKind::Array(vec![Some(Argument { expression: prior, spread: false })]),
+                    at: 0, parenthesized: false,
+                });
+            }
+            // The direct arena isolates evaluator pressure from parser admission.
+            let program = Rc::new(program);
+            runtime.begin_job();
+            let result = runtime.statement(&program, statement, 0, &Value::Undefined, &mut host);
+            let fault = result.err().expect("the finite native stack must stop statement recursion");
+            assert!(fault.message.contains("Native stack headroom exhausted during evaluator entry"), "{}", fault.display());
+            assert!(runtime.transient_registration_is_empty());
+            runtime.begin_job();
+            let fault = runtime.eval(&program, expression, 0, &Value::Undefined, &mut host).unwrap_err();
+            assert!(fault.message.contains("Native stack headroom exhausted during evaluator entry"), "{}", fault.display());
+            assert!(runtime.transient_registration_is_empty());
+            assert_eq!((runtime.eval_depth, runtime.call_depth), (0, 0));
+            runtime.begin_job();
+            assert_eq!(runtime.execute("2+2;", &mut host).unwrap().to_text(), "4");
         }).unwrap().join().unwrap();
     }
 

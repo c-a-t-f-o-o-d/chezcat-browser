@@ -4,8 +4,10 @@
 
 use super::{
     ExprId, ExprKind, Fault, Host, Program, PropertyKey, Reference, Runtime, Value,
-    WorkKind, MAX_EVAL_DEPTH,
+    WorkKind,
 };
+#[cfg(test)]
+use super::MAX_EVAL_DEPTH;
 use std::rc::Rc;
 
 impl Runtime {
@@ -35,9 +37,7 @@ impl Runtime {
 
         self.step()?; // reference construction
         self.step()?; // base-name eval, including its normal depth boundary
-        if self.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        self.check_native_evaluation_stack()?;
         self.eval_depth += 1;
         let receiver = (|| {
             match self.lookup(env, name)? {
@@ -144,9 +144,7 @@ mod tests {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         runtime.step()?;
-        if runtime.eval_depth >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Evaluation nesting limit reached (128)."));
-        }
+        runtime.check_native_evaluation_stack()?;
         runtime.eval_depth += 1;
         let result = (|| {
             let reference = runtime.reference(program, id, 0, &Value::Undefined, host)?;
