@@ -23,6 +23,9 @@ mod adopted_storage_tests;
 #[cfg(test)]
 #[path = "script_promoted_child_list_tests.rs"]
 mod promoted_child_list_tests;
+#[cfg(test)]
+#[path = "script_main_node_storage_tests.rs"]
+mod main_node_storage_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
@@ -899,8 +902,6 @@ impl Bridge<'_> {
             }
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
-        payload = payload.saturating_add(parked.saturating_mul(size_of::<Node>()));
-        self.doc.nodes.try_reserve(parked).map_err(|_| "Cannot reserve future template document slots.")?;
         self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
         self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
         self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
@@ -913,9 +914,14 @@ impl Bridge<'_> {
             .and_then(|retained| self.state.retained_limit.checked_sub(retained))
             .and_then(|bytes| bytes.checked_sub(payload)).and_then(|bytes| bytes.checked_sub(minimum))
             .ok_or("Parked template identity bundle allowance exhausted.")?;
-        let (index_growth, index_bytes) = self.prepare_adopted_index(parked_nodes.iter().map(|entry| entry.0), available)?;
-        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, index_bytes)?;
+        let node_minimum = self.main_node_minimum(parked)?;
+        let (index_growth, index_bytes) = self.prepare_adopted_index(parked_nodes.iter().map(|entry| entry.0),
+            available.checked_sub(node_minimum).ok_or("Parked main-node backing allowance exhausted.")?)?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(parked, available-index_bytes)?;
+        let metadata = index_bytes.checked_add(node_bytes).ok_or("Parked native/main backing overflow.")?;
+        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, metadata)?;
         debug_assert_eq!(committed, first);
+        self.commit_main_nodes(node_growth);
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
         let old = std::mem::replace(&mut root.children, root_children);

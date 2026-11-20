@@ -277,14 +277,17 @@ impl Bridge<'_> {
         let base = self.doc.nodes.len();
         let count = staged.len();
         let nonce_count = staged.iter().filter(|copy| copy.unsafe_nonce).count();
-        self.doc.nodes.try_reserve(count).map_err(|_| "DOM clone node reservation failed.")?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
+            .ok_or("DOM clone node/payload backing allowance exhausted.")?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
         self.doc.nonce_unsafe_nodes.try_reserve(nonce_count).map_err(|_| "DOM clone nonce reservation failed.")?;
         self.state.dom.created.try_reserve(count).map_err(|_| "DOM clone identity reservation failed.")?;
         self.state.detached_nodes.try_reserve(count).map_err(|_| "DOM clone detached reservation failed.")?;
         self.state.tree.parents.try_reserve(count).map_err(|_| "DOM clone parent reservation failed.")?;
         self.state.tree.active.try_reserve(count).map_err(|_| "DOM clone active-state reservation failed.")?;
         self.state.dom.connected.try_reserve(count).map_err(|_| "DOM clone connection reservation failed.")?;
-        self.state.replace_bytes(0, bytes)?;
+        self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM clone node/payload storage overflow.")?, bytes)?;
+        self.commit_main_nodes(node_growth);
         for copy in staged {
             let node = self.doc.nodes.len();
             self.doc.nodes.push(copy.node);

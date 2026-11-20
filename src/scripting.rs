@@ -2540,6 +2540,35 @@ impl Bridge<'_> {
         Ok(())
     }
 
+    fn main_node_minimum(&self, count: usize) -> Result<usize, String> {
+        self.doc.nodes.len().checked_add(count)
+            .and_then(|required|required.saturating_sub(self.doc.nodes.capacity()).checked_mul(size_of::<Node>()))
+            .ok_or("Main DOM node backing overflow.".into())
+    }
+
+    fn prepare_main_nodes(&mut self, count: usize, available: usize) -> Result<(Option<Vec<Node>>, usize), String> {
+        if count==0 { return Ok((None,0)); }
+        // All three direct node-derived domains must remain disjoint. Their
+        // current coupled representation is separate unfinished architecture.
+        let maximum = ((STYLE_BASE-NODE_BASE) as usize).min((DATASET_BASE-STYLE_BASE) as usize)
+            .min((EVENT_BASE-DATASET_BASE) as usize);
+        let required = self.doc.nodes.len().checked_add(count).filter(|length|*length<=maximum)
+            .ok_or_else(||format!("Current DOM/style/dataset identity domains exhausted ({maximum} nodes)."))?;
+        let usable = maximum.saturating_sub(self.doc.nodes.capacity()).checked_mul(size_of::<Node>())
+            .ok_or("Main DOM representation backing overflow.")?;
+        let (growth, added) = retained_storage::grow(&self.doc.nodes, count, available.min(usable))?;
+        let moved = if growth.is_some(){self.doc.nodes.len()}else{0};
+        let records = moved.checked_add(count).ok_or("Main DOM node movement overflow.")?;
+        self.state.work(records)?;
+        self.state.copies(records.checked_mul(size_of::<Node>()).ok_or("Main DOM node copy work overflow.")?)?;
+        debug_assert!(required<=growth.as_ref().map_or(self.doc.nodes.capacity(),Vec::capacity));
+        Ok((growth,added))
+    }
+
+    fn commit_main_nodes(&mut self, growth: Option<Vec<Node>>) {
+        if let Some(mut nodes)=growth {nodes.append(&mut self.doc.nodes);self.doc.nodes=nodes;}
+    }
+
     fn text_content(&mut self, node: usize) -> Result<String, String> {
         self.state.rebuild(self.doc)?;
         let mut result = String::new();
@@ -2619,19 +2648,23 @@ impl Bridge<'_> {
             .ok_or("textContent retained-node accounting overflow.")?;
         self.state.detached_nodes.try_reserve(retained_count).map_err(|_| "textContent detached-node reservation failed.")?;
         let text_bytes = if text.is_empty() { 0 } else { text.capacity() };
+        let count = usize::from(!text.is_empty());
+        let minimum = self.main_node_minimum(count)?;
         let (child_growth, child_bytes) = if text.is_empty() { (None, 0) } else {
             let available = self.state.retained_limit.saturating_sub(self.state.retained)
-                .checked_sub(text_bytes).ok_or("textContent child/text storage allowance exhausted.")?;
+                .checked_sub(text_bytes).and_then(|bytes|bytes.checked_sub(minimum))
+                .ok_or("textContent child/text/node storage allowance exhausted.")?;
             retained_storage::capacity(&self.doc.nodes[node].children, 1, available)?
         };
-        if !text.is_empty() {
-            self.doc.nodes.try_reserve(1).map_err(|_| "textContent node reservation failed.")?;
-        }
+        let available = self.state.retained_limit.saturating_sub(self.state.retained)
+            .checked_sub(text_bytes).and_then(|bytes|bytes.checked_sub(child_bytes)).ok_or("textContent node backing allowance exhausted.")?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
         // An empty replacement creates no retained Text, even if its incoming
         // buffer has spare capacity. Old detached children remain charged.
-        let retained = text_bytes.checked_add(child_bytes).ok_or("textContent retained storage overflow.")?;
+        let retained = text_bytes.checked_add(child_bytes).and_then(|bytes|bytes.checked_add(node_bytes)).ok_or("textContent retained storage overflow.")?;
         let work = text.len().checked_add(if text.is_empty(){0}else{size_of::<usize>()}).ok_or("textContent copy work overflow.")?;
         self.state.replace_storage(0, retained, work)?;
+        self.commit_main_nodes(node_growth);
         self.state.detached_nodes.extend(descendants);
         if let Some(children) = child_growth { self.doc.nodes[node].children = children; }
         self.doc.nodes[node].children.clear();
@@ -6057,7 +6090,8 @@ fn copied_payload_extra(kind: &NodeKind) -> usize {
     }
 }
 fn document_bytes(doc: &Document) -> usize {
-    doc.title.capacity() + doc.nodes.iter().map(|node| node_bytes(node) + child_link_bytes(&node.children)).sum::<usize>()
+    doc.nodes.capacity()*size_of::<Node>() + doc.title.capacity()
+        + doc.nodes.iter().map(|node| node_bytes(node) + child_link_bytes(&node.children)).sum::<usize>()
 }
 fn child_link_bytes(children: &Vec<usize>) -> usize {
     children.capacity() * size_of::<usize>()

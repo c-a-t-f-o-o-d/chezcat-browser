@@ -933,7 +933,10 @@ impl Bridge<'_> {
         let handle = u32::try_from(node).ok().and_then(|index|NODE_BASE.checked_add(index))
             .filter(|handle|*handle<STYLE_BASE).ok_or("DOM node identity space exhausted.")?;
         // Reserve every owner container before bytes or a native identity are published.
-        self.doc.nodes.try_reserve(1).map_err(|_|"DOM node storage reservation failed.")?;
+        let remaining = self.state.retained_limit.saturating_sub(self.state.retained);
+        let available = remaining.checked_sub(bytes).ok_or_else(||format!(
+            "DOM retained node/payload backing allowance exhausted ({remaining} bytes available; {bytes} payload bytes requested)."))?;
+        let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
         self.state.dom.created.try_reserve(1).map_err(|_|"DOM created identity reservation failed.")?;
         self.state.detached_nodes.try_reserve(1).map_err(|_|"DOM detached identity reservation failed.")?;
         self.state.tree.active.try_reserve(1).map_err(|_|"DOM active-state reservation failed.")?;
@@ -947,7 +950,8 @@ impl Bridge<'_> {
             NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
             _ => bytes,
         };
-        self.state.replace_storage(0, bytes, work)?;
+        self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM node/payload storage overflow.")?, work)?;
+        self.commit_main_nodes(node_growth);
         if matches!(&kind, NodeKind::Element { tag, .. } if tag == "script") {
             self.state.dom.force_async.insert(node);
         }
@@ -1429,8 +1433,10 @@ impl Bridge<'_> {
         self.state.detached_nodes.try_reserve(self.doc.nodes[node].children.len())
             .map_err(|_| "Script text detached-node reservation failed.")?;
         let (child_growth, added) = if text.is_empty() { (None, 0) } else {
+            let minimum = self.main_node_minimum(1)?;
             let available = self.state.retained_limit.saturating_sub(self.state.retained)
-                .checked_sub(text.capacity()).ok_or("Script text/child storage allowance exhausted.")?;
+                .checked_sub(text.capacity()).and_then(|bytes|bytes.checked_sub(minimum))
+                .ok_or("Script text/child/node storage allowance exhausted.")?;
             retained_storage::capacity(&self.doc.nodes[node].children, 1, available)?
         };
         // Keep the private child buffer reserved while node construction admits
