@@ -216,7 +216,7 @@ impl Bridge<'_> {
         }
         let bytes = 3 + attrs.capacity()*size_of::<crate::html::Attribute>() + attrs
             .iter()
-            .map(crate::html::Attribute::bytes)
+            .map(crate::html::Attribute::owned_bytes)
             .sum::<usize>();
         self.state.replace_bytes(0, bytes)?;
         let node = self.doc.nodes.len();
