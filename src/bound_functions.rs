@@ -16,6 +16,12 @@ pub(super) struct Bound {
 }
 
 impl Bound {
+    pub(super) fn retained_bytes(&self) -> usize {
+        // The receiver record is inline in the already charged function slot.
+        self.arguments.capacity() * std::mem::size_of::<Value>() + self.receiver.bytes()
+            + self.arguments.iter().map(Value::bytes).sum::<usize>()
+    }
+
     pub(super) fn reachability_cost(&self) -> usize { self.arguments.len() + 2 }
 
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
@@ -48,7 +54,7 @@ impl Runtime {
         // Charge both captured strings and the argument slots themselves. Bound
         // arguments cannot become an unaccounted arena of primitive values.
         let retained = std::mem::size_of::<Value>()
-            .saturating_mul(arguments.len() + 1)
+            .saturating_mul(arguments.len())
             .saturating_add(receiver.bytes())
             .saturating_add(arguments.iter().map(Value::bytes).sum::<usize>());
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
@@ -63,58 +69,66 @@ impl Runtime {
         }
         self.work(retained)?;
         let receiver = receiver.clone();
-        let arguments = arguments.to_vec();
-        let prototype = self.ordinary_prototype(Ordinary::Function(target))?;
-
-        // Only an own length participates. Read length before name, preserving
-        // accessor side effects and abrupt completions without coercing either.
-        let owner = self.ordinary_id(Ordinary::Function(target))?;
-        let length = if self.objects[owner].properties.contains_key("length") {
-            match self.get_ordinary_property_with_host(
-                Ordinary::Function(target),
-                "length",
-                host,
-            )? {
-                Value::Number(value) if value == f64::INFINITY => f64::INFINITY,
-                Value::Number(value) if value.is_finite() => {
-                    (value.trunc() - arguments.len() as f64).max(0.0)
-                }
-                _ => 0.0,
-            }
-        } else {
-            0.0
-        };
-        let name =
-            self.get_ordinary_property_with_host(Ordinary::Function(target), "name", host)?;
-        let mut bound_name = String::from("bound ");
-        if let Value::String(name) = name {
-            self.append_string(&mut bound_name, &name)?;
-        }
-        // User callbacks above may allocate functions or retain values.
-        if self.function_count_refused(1) {
-            return Err(self.function_limit_fault("bound"));
-        }
-        self.prepare_function_slot_storage()?;
+        let mut saved = Vec::new();
+        saved.try_reserve_exact(arguments.len()).map_err(|_| Fault::new("Cannot allocate bound argument storage."))?;
+        saved.extend(arguments.iter().cloned());
+        let bound = Bound { target, receiver, arguments: saved };
+        let retained = bound.retained_bytes();
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        let allocation = self.insert_function_slot(Function::Bound(Bound {
-            target,
-            receiver,
-            arguments,
-        }))?;
-        let index = allocation.id;
+        // Captures stay owned across observable length/name getters, including
+        // their recursive bind calls. Transfer the reservation only on insertion.
         self.value_bytes += retained;
-        self.initialize_function_properties(allocation, &bound_name, 0, false)?;
-        let properties = self.function_properties[index];
-        self.objects[properties].prototype = prototype;
-        self.store_property(
-            properties,
-            "length".into(),
-            Value::Number(length),
-            Some((false, false, true)),
-        )?;
-        Ok(Value::Function(index))
+        let mut transferred = false;
+        let result = (|| {
+            let prototype = self.ordinary_prototype(Ordinary::Function(target))?;
+
+            // Only an own length participates. Read length before name, preserving
+            // accessor side effects and abrupt completions without coercing either.
+            let owner = self.ordinary_id(Ordinary::Function(target))?;
+            let length = if self.objects[owner].properties.contains_key("length") {
+                match self.get_ordinary_property_with_host(
+                    Ordinary::Function(target),
+                    "length",
+                    host,
+                )? {
+                    Value::Number(value) if value == f64::INFINITY => f64::INFINITY,
+                    Value::Number(value) if value.is_finite() => {
+                        (value.trunc() - bound.arguments.len() as f64).max(0.0)
+                    }
+                    _ => 0.0,
+                }
+            } else {
+                0.0
+            };
+            let name =
+                self.get_ordinary_property_with_host(Ordinary::Function(target), "name", host)?;
+            let mut bound_name = String::from("bound ");
+            if let Value::String(name) = name {
+                self.append_string(&mut bound_name, &name)?;
+            }
+            // User callbacks above may allocate functions or retain values.
+            if self.function_count_refused(1) {
+                return Err(self.function_limit_fault("bound"));
+            }
+            self.prepare_function_slot_storage()?;
+            let allocation = self.insert_function_slot(Function::Bound(bound))?;
+            transferred = true;
+            let index = allocation.id;
+            self.initialize_function_properties(allocation, &bound_name, 0, false)?;
+            let properties = self.function_properties[index];
+            self.objects[properties].prototype = prototype;
+            self.store_property(
+                properties,
+                "length".into(),
+                Value::Number(length),
+                Some((false, false, true)),
+            )?;
+            Ok(Value::Function(index))
+        })();
+        if !transferred { self.value_bytes -= retained; }
+        result
     }
 
     pub(super) fn bound_arguments(
@@ -226,6 +240,32 @@ mod tests {
             var array=new (Array.bind(null,2,3))();
             if(array.length!==2 || array[0]!==2 || !(array instanceof Array))throw 'native construction';
         "#);
+    }
+
+    #[test]
+    fn bound_captures_admit_getter_allocations_against_the_same_storage_and_refund_failure() {
+        let mut runtime = Runtime::new();
+        let function=runtime.execute("var held='old';function target(){return 7;}Object.defineProperty(target,'length',{get:function(){held=candidate;return 0;},configurable:true});target;", &mut NoHost).unwrap();
+        let Value::Function(target)=function else {panic!("original target")};
+        runtime.define_global("candidate",Value::String("y".repeat(30000))).unwrap();
+        let payload=Value::String("x".repeat(12000));
+        let before=runtime.value_bytes-runtime.retained_arena_bytes();
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=runtime.value_bytes+40000;
+        let deadline=runtime.job_deadline;
+        let copy=runtime.copy_bytes;
+        let error=runtime.bind_function(target,&[payload.clone(),payload.clone()],&mut NoHost).unwrap_err();
+        assert!(error.message.contains("Retained value limit"),"{}",error.message);
+        assert!(error.exception.is_none());
+        assert_eq!(runtime.binding_value(0,"held").unwrap().to_text(),"old");
+        assert_eq!(runtime.value_bytes-runtime.retained_arena_bytes(),before);
+        assert!(runtime.copy_bytes<copy);
+        assert_eq!(runtime.job_deadline,deadline);
+        runtime.limits.heap.retained_values=limit;
+        runtime.begin_job();
+        runtime.execute("Object.defineProperty(target,'length',{value:0});",&mut NoHost).unwrap();
+        let bound=runtime.bind_function(target,&[payload.clone(),payload],&mut NoHost).unwrap();
+        assert_eq!(runtime.invoke(bound,&[],Value::Undefined,&mut NoHost).unwrap().to_number(),7.0);
     }
 
     #[test]
