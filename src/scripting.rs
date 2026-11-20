@@ -122,6 +122,8 @@ mod script_forms;
 #[path = "script_resources.rs"]
 mod script_resources;
 pub use script_resources::DynamicScript;
+#[cfg(test)]
+pub use script_resources::ScriptRequest;
 use script_resources::DynamicState;
 #[path = "script_blank_frames.rs"]
 mod script_blank_frames;

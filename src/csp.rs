@@ -33,6 +33,23 @@ pub struct PolicySet {
     restrict_cross_origin_resources: bool,
 }
 
+impl PolicySet {
+    pub(crate) fn owned_bytes(&self)->usize {
+        let mut bytes=std::mem::size_of::<Self>()+self.origin.as_ref().map_or(0,Location::payload_bytes)
+            +self.policies.capacity()*std::mem::size_of::<Policy>()+self.diagnostics.capacity()*std::mem::size_of::<String>()
+            +self.diagnostics.iter().map(String::capacity).sum::<usize>();
+        for policy in &self.policies {
+            for sources in [&policy.default,&policy.scripts,&policy.elements,&policy.attributes,&policy.styles,&policy.style_elements,&policy.fonts,&policy.images,&policy.media,&policy.base,&policy.forms].into_iter().flatten() {
+                bytes=bytes.saturating_add(sources.capacity()*std::mem::size_of::<Source>());
+                for source in sources {
+                    bytes=bytes.saturating_add(match source {Source::Origin{host,..}|Source::Nonce(host)|Source::Hash(_,host)=>host.capacity(),_=>0});
+                }
+            }
+        }
+        bytes
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Policy {
     start: usize,

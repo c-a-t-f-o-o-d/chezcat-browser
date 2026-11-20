@@ -85,7 +85,6 @@ impl Default for LoadOptions {
     }
 }
 
-pub(crate) const MAX_SCRIPTS: usize = crate::javascript::limits::BROWSER_CAPACITIES.programs;
 const MAX_LOCAL_HTML_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LOCAL_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
 // Decoded backing and optional reuse metadata each have a byte allowance.
@@ -95,6 +94,23 @@ pub struct Script {
     pub node: usize,
     pub source: String,
     pub label: String,
+}
+
+impl Script {
+    pub(crate) fn payload_bytes(&self)->usize{self.source.capacity().saturating_add(self.label.capacity())}
+}
+fn retain_script(scripts:&mut Vec<Script>,payload:&mut usize,script:Script,limit:usize)->Result<(),String> {
+    let owned=script.payload_bytes();
+    let before=scripts.capacity();let slot=std::mem::size_of::<Script>();
+    let used=payload.checked_add(before.saturating_mul(slot)).and_then(|bytes|bytes.checked_add(owned)).filter(|bytes|*bytes<=limit).ok_or("Retained script record/source storage exhausted.")?;
+    if scripts.len()==before {
+        let growth=before.max(4).min((limit-used)/slot);
+        let capacity=before.checked_add(growth).filter(|_|growth>0).ok_or("Retained script list backing exhausted.")?;
+        let mut next=Vec::new();next.try_reserve_exact(capacity).map_err(|_|"Could not reserve retained script list.")?;
+        if next.capacity().saturating_sub(before).saturating_mul(slot)>limit-used{return Err("Allocated script list exceeds its storage allowance.".into());}
+        next.append(scripts);*scripts=next;
+    }
+    *payload+=owned;scripts.push(script);Ok(())
 }
 
 pub struct Loaded {
@@ -1252,7 +1268,8 @@ fn load_critical_resources(
     let mut cache = HashMap::<(ResourceKey, bool, Option<String>), ResourceOutcome>::new();
     let mut style_bases = HashMap::<usize, Location>::new();
     let mut css_usage=css::StylesheetUsage::default();
-    let mut script_bytes = 0usize;
+    let mut script_bytes=loaded.scripts.iter().map(|script|script.source.len()).sum::<usize>();
+    let mut script_payload=loaded.scripts.iter().map(Script::payload_bytes).sum::<usize>();
     for node in css::document_order(&loaded.document) {
         let item=&loaded.document.nodes[node];
         check_cancel(cancel)?;
@@ -1306,9 +1323,8 @@ fn load_critical_resources(
                     return Err(reason.clone());
                 }
                 check_script(&loaded.document, node)?;
-                if loaded.scripts.len() >= capacity.programs {
-                    return Err(format!("Script count limit reached ({}).", capacity.programs));
-                }
+                #[cfg(test)]
+                if capacity.test_loader_program_count.is_some_and(|limit|loaded.scripts.len()>=limit){return Err(format!("Script count limit reached ({}).",capacity.test_loader_program_count.unwrap()));}
                 if script_bytes >= capacity.retained_source {
                     return Err(format!("Script source budget is full ({} MiB).", capacity.retained_source / (1024 * 1024)));
                 }
@@ -1318,12 +1334,9 @@ fn load_critical_resources(
                     loaded
                         .csp
                         .allows_inline(node, csp::nonce(&loaded.document, node), &source)?;
-                    script_bytes += source.len();
-                    loaded.scripts.push(Script {
-                        node,
-                        source,
-                        label: label.clone(),
-                    });
+                    let bytes=source.len();
+                    retain_script(&mut loaded.scripts,&mut script_payload,Script{node,source,label:label.clone()},capacity.script_storage_bytes)?;
+                    script_bytes+=bytes;
                     return Ok("queued classic script after document parsing".to_owned());
                 }
             }
@@ -1549,12 +1562,9 @@ fn load_critical_resources(
                 Ok(format!("loaded {resolved_name}"))
             } else {
                 let source = decode_script(bytes, &encoding, script_limit)?;
-                script_bytes += source.len();
-                loaded.scripts.push(Script {
-                    node,
-                    source,
-                    label: resolved_name.clone(),
-                });
+                let bytes=source.len();
+                retain_script(&mut loaded.scripts,&mut script_payload,Script{node,source,label:resolved_name.clone()},capacity.script_storage_bytes)?;
+                script_bytes+=bytes;
                 Ok(format!(
                     "queued classic script after document parsing: {resolved_name}"
                 ))
@@ -3085,7 +3095,11 @@ mod tests {
     #[test]
     fn script_source_count_and_byte_budgets_are_independent() {
         let folder = Folder::new();
-        let capacity = crate::javascript::limits::REGRESSION_CAPACITIES;
+        let mut capacity = crate::javascript::limits::REGRESSION_CAPACITIES;
+        // Preserve the logical source-policy witness independently of actual
+        // decoder/source/label reservations. Separate exact-storage cases
+        // exercise that admission rather than requiring minimal String capacity.
+        capacity.script_storage_bytes=8*1024*1024;
         let local = |location: &Location| local_with_options(location, LoadOptions {
             script_capacity: capacity, ..LoadOptions::default()
         });
@@ -4275,6 +4289,27 @@ mod tests {
         assert_eq!(site.requests.lock().unwrap().len(), 1);
     }
 
+    #[test]
+    fn parser_scripts_exceed_old_count_with_real_page_execution_and_owned_list_storage() {
+        let folder=Folder::new();
+        let mut markup=String::from("<html><head></head><body><script>var hits=0;</script>");
+        markup.push_str(&"<script>hits++;</script>".repeat(6000));markup.push_str("<script>document.title=String(hits);</script></body></html>");
+        let loaded=local(&folder.page(&markup)).unwrap();
+        assert_eq!(loaded.scripts.len(),6002);assert_eq!(loaded.skipped,0,"{:?}",loaded.events);
+        assert!(loaded.scripts.windows(2).all(|scripts|scripts[0].node<scripts[1].node));
+        let mut doc=loaded.document;let mut forms=crate::forms::Forms::new(&doc);let mut page=crate::scripting::Page::new();
+        let result=page.start(&mut doc,&mut forms,&loaded.scripts);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.title,"6000");
+    }
+    #[test]
+    fn retained_script_list_exact_capacity_and_payload_refusal_keep_prior_records() {
+        let slot=std::mem::size_of::<Script>();let mut scripts=Vec::new();let mut payload=0;
+        let script=||Script{node:1,source:"1;".into(),label:"original".into()};
+        let owned=script().payload_bytes();
+        assert!(retain_script(&mut scripts,&mut payload,script(),slot+owned-1).is_err());assert_eq!((scripts.len(),scripts.capacity(),payload),(0,0,0));
+        retain_script(&mut scripts,&mut payload,script(),slot+owned).unwrap();assert_eq!((scripts.len(),scripts.capacity(),payload),(1,1,owned));
+        assert!(retain_script(&mut scripts,&mut payload,script(),slot+owned).is_err());assert_eq!((scripts.len(),scripts.capacity(),payload),(1,1,owned));
+        retain_script(&mut scripts,&mut payload,script(),2*(slot+owned)).unwrap();assert_eq!((scripts.len(),scripts.capacity(),payload),(2,2,2*owned));
+    }
 }
 
 #[cfg(test)]
