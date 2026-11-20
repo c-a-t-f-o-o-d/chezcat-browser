@@ -28,3 +28,20 @@ pub(super) fn value_bytes(value:&super::Value)->usize {
         _=>0,
     }
 }
+
+/// Preserve primitive and native/object identity while copying mutable string
+/// backing fallibly. The caller enforces the operation's accepted value kinds.
+pub(super) fn copy_value(value:&super::Value)->Result<super::Value,String> {
+    use super::Value;
+    match value {
+        Value::String(text)=>{
+            let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Could not reserve native value text.")?;
+            copied.push_str(text);Ok(Value::String(copied))
+        }
+        Value::StringUnits(units)=>{
+            let mut copied=Vec::new();copied.try_reserve_exact(units.len()).map_err(|_|"Could not reserve native value code units.")?;
+            copied.extend_from_slice(units);Ok(Value::StringUnits(copied))
+        }
+        _=>Ok(value.clone()),
+    }
+}

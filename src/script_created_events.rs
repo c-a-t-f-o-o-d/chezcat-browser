@@ -468,26 +468,7 @@ fn custom_bytes(value: Option<&Value>) -> Result<usize, &'static str> {
     Ok(value.map_or(0, Value::bytes))
 }
 
-fn copy_custom_value(value: &Value) -> Result<Value, String> {
-    match value {
-        Value::String(text) => {
-            let mut copied = String::new();
-            copied.try_reserve_exact(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
-            copied.push_str(text);
-            Ok(Value::String(copied))
-        }
-        Value::StringUnits(units) => {
-            let mut copied = Vec::new();
-            copied.try_reserve_exact(units.len()).map_err(|_| "Could not reserve CustomEvent detail code units.")?;
-            copied.extend_from_slice(units);
-            Ok(Value::StringUnits(copied))
-        }
-        // Object/function/native/symbol values retain their genuine identities;
-        // Runtime already pins exported host arguments until document teardown.
-        Value::Undefined | Value::Null | Value::Bool(_) | Value::Number(_) | Value::BigInt(_) |
-        Value::Symbol(_) | Value::Function(_) | Value::Object(_) | Value::Host(_) => Ok(value.clone()),
-    }
-}
+fn copy_custom_value(value:&Value)->Result<Value,String> {retained_storage::copy_value(value)}
 
 fn constant(name: &str) -> Option<u8> {
     match name { "NONE" => Some(0), "CAPTURING_PHASE" => Some(1), "AT_TARGET" => Some(2), "BUBBLING_PHASE" => Some(3), _ => None }

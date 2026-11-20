@@ -12,6 +12,9 @@ const ARENA: u32 = PORT_BASE - CHANNEL_BASE;
 pub(super) struct State {
     channels: Vec<[Port; 2]>,
     queue: VecDeque<Message>,
+    // First started, attached destination in logical deque order. Every queue
+    // or port-state mutation maintains this cache; deadline polling never scans.
+    ready: Option<usize>,
 }
 
 #[derive(Default)]
@@ -24,6 +27,7 @@ struct Message {
     target: u32,
     queued: Instant,
     data: Value,
+    // Owned payload only; inline records are paid by deque capacity.
     bytes: usize,
 }
 
@@ -53,11 +57,12 @@ impl State {
     }
 
     pub(super) fn next_deadline(&self) -> Option<Instant> {
-        self.queue.iter().find(|message| self.port_ready(message.target)).map(|message| message.queued)
+        self.ready.and_then(|index|self.queue.get(index)).map(|message|message.queued)
     }
 
     pub(super) fn clear(&mut self) -> usize {
-        self.queue.drain(..).map(|message| message.bytes).sum()
+        let bytes=self.queue.iter().map(|message|message.bytes).sum::<usize>()+self.queue.capacity()*size_of::<Message>();
+        self.queue=VecDeque::new();self.ready=None;bytes
     }
 
     fn close(&mut self, handle: u32, index: usize, endpoint: usize) -> usize {
@@ -68,6 +73,8 @@ impl State {
             released += message.bytes;
             false
         });
+        self.ready=self.queue.iter().position(|message|self.port_ready(message.target));
+        if self.queue.is_empty(){released+=self.queue.capacity()*size_of::<Message>();self.queue=VecDeque::new();}
         released
     }
 }
@@ -78,17 +85,42 @@ impl Page {
     }
 
     pub(super) fn poll_message_task(&mut self, doc: &mut Document, forms: &mut Forms, now: Instant) -> Option<Outcome> {
-        let index = self.state.message_channels.queue.iter().position(|message|
-            message.queued <= now && self.state.message_channels.port_ready(message.target))?;
-        let message = self.state.message_channels.queue.remove(index).unwrap();
-        self.state.retained -= message.bytes;
+        let index=self.state.message_channels.ready?;
+        if self.state.message_channels.queue.get(index)?.queued>now{return None;}
         self.begin_job();
+        let prepared=(||->Result<Option<usize>,String> {
+            let len=self.state.message_channels.queue.len();
+            let moved=index.min(len-index-1);
+            self.state.work(moved.saturating_add(1))?;
+            self.state.copies(moved.saturating_mul(size_of::<Message>()))?;
+            // Earlier entries were ineligible before removal and no port state
+            // has changed. Only the suffix can supply the next eligible task.
+            let mut next=index+1;
+            while next<len {
+                self.state.work(1)?;
+                if self.state.message_channels.port_ready(self.state.message_channels.queue[next].target){return Ok(Some(next-1));}
+                next+=1;
+            }
+            Ok(None)
+        })();
+        let ready=match prepared {
+            Ok(ready)=>ready,
+            Err(error)=>{
+                self.clear_message_tasks();self.runtime.cancel_microtasks();self.cancel_media_selection();
+                self.state.error("MessagePort dispatch",&error);return Some(Outcome{errors:1,..Outcome::default()});
+            }
+        };
+        let message=self.state.message_channels.queue.remove(index).unwrap();
+        self.state.message_channels.ready=ready;
         let before = self.state.errors;
         let result = {
             let mut bridge = Bridge { doc, forms, state: &mut self.state };
             bridge.begin_message_delivery(message.target, &message.data)
                 .and_then(|token| self.runtime.invoke_native_dispatch(token, &mut bridge))
         };
+        let payload=message.bytes;
+        drop(message);
+        self.state.retained-=payload;
         if let Err(error) = result { self.state.error("MessagePort message", &error); }
         self.microtask_checkpoint(doc, forms);
         Some(Outcome {
@@ -152,10 +184,14 @@ impl Bridge<'_> {
             }
             POST => self.post_message(object, &args[0]),
             START => {
-                self.start_message_port(object);
+                let ready=self.prepare_message_start(object)?;
+                self.commit_message_start(object,ready);
                 Ok(Value::Undefined)
             }
             CLOSE => {
+                let len=self.state.message_channels.queue.len();
+                self.state.work(len.saturating_mul(2).saturating_add(1))?;
+                self.state.copies(len.saturating_mul(size_of::<Message>()))?;
                 let (index, endpoint) = self.state.message_channels.port_index(object).unwrap();
                 let released = self.state.message_channels.close(object, index, endpoint);
                 self.state.retained -= released;
@@ -164,8 +200,9 @@ impl Bridge<'_> {
             MESSAGE => Ok(self.handler(object, "onmessage")?.unwrap_or(Value::Null)),
             SET_MESSAGE => {
                 let value = args.first().filter(|value| matches!(value, Value::Function(_))).cloned().unwrap_or(Value::Null);
+                let ready=self.prepare_message_start(object)?;
                 self.set_handler(object, "onmessage", value)?;
-                self.start_message_port(object);
+                self.commit_message_start(object,ready);
                 Ok(Value::Undefined)
             }
             DATA => self.message_event_data(object),
@@ -195,28 +232,58 @@ impl Bridge<'_> {
         Ok(Value::Host(CHANNEL_BASE + (count / 2) as u32))
     }
 
-    fn start_message_port(&mut self, handle: u32) {
-        let (index, endpoint) = self.state.message_channels.port_index(handle).unwrap();
-        self.state.message_channels.channels[index][endpoint].started = true;
+    fn prepare_message_start(&mut self,handle:u32)->Result<Option<usize>,String> {
+        let (index,endpoint)=self.state.message_channels.port_index(handle).unwrap();
+        let port=&self.state.message_channels.channels[index][endpoint];
+        let ready=self.state.message_channels.ready;
+        if port.started||port.detached{return Ok(ready);}
+        let end=ready.unwrap_or(self.state.message_channels.queue.len());
+        for index in 0..end {
+            self.state.work(1)?;
+            if self.state.message_channels.queue[index].target==handle{return Ok(Some(index));}
+        }
+        Ok(ready)
+    }
+
+    fn commit_message_start(&mut self,handle:u32,ready:Option<usize>) {
+        let (index,endpoint)=self.state.message_channels.port_index(handle).unwrap();
+        self.state.message_channels.channels[index][endpoint].started=true;
+        self.state.message_channels.ready=ready;
     }
 
     fn post_message(&mut self, handle: u32, data: &Value) -> Result<Value, String> {
         let (index, endpoint) = self.state.message_channels.port_index(handle).unwrap();
         let channels = &self.state.message_channels;
         if channels.channels[index].iter().any(|port| port.detached) { return Ok(Value::Undefined); }
-        if channels.queue.len() >= self.state.limits.host.timers { return Err("Queued message limit reached.".into()); }
-        let payload = data.bytes();
-        if payload > self.state.limits.host.string_bytes { return Err("Message payload exceeds the host string bound.".into()); }
-        let bytes = size_of::<Message>().saturating_add(payload);
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&channels.queue.len()>=self.state.limits.host.timers{return Err("Queued message limit reached.".into());}
+        let payload=data.bytes();
+        if payload>self.state.limits.host.string_bytes{return Err("Message payload exceeds the host string bound.".into());}
+        if payload>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Message payload exceeds retained allowance.".into());}
         self.state.copies(payload)?;
-        self.state.message_channels.queue.try_reserve(1).map_err(|_| "Could not reserve queued message.")?;
-        self.state.replace_bytes(0, bytes)?;
-        self.state.message_channels.queue.push_back(Message {
-            target: PORT_BASE + (index * 2 + (1 - endpoint)) as u32,
-            queued: Instant::now(),
-            data: data.clone(),
-            bytes,
-        });
+        let data=retained_storage::copy_value(data)?;
+        let bytes=retained_storage::value_bytes(&data);
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes).ok_or("Message payload exceeds retained allowance.")?;
+        let before=self.state.message_channels.queue.capacity();
+        let mut replacement=None;
+        let mut added=0;
+        if self.state.message_channels.queue.len()==before {
+            let slot=size_of::<Message>();
+            let growth=before.max(4).min(available/slot);
+            if growth==0{return Err("DOM retained message queue allowance exhausted.".into());}
+            let capacity=before.checked_add(growth).ok_or("Message queue capacity overflow.")?;
+            let mut next=VecDeque::new();next.try_reserve_exact(capacity).map_err(|_|"Could not reserve queued message storage.")?;
+            added=next.capacity().checked_sub(before).and_then(|slots|slots.checked_mul(slot)).filter(|bytes|*bytes<=available).ok_or("DOM retained message queue allocation exceeds allowance.")?;
+            self.state.copies(self.state.message_channels.queue.len()*slot)?;
+            replacement=Some(next);
+        }
+        self.state.copies(bytes.saturating_sub(payload))?;
+        if let Some(mut next)=replacement {next.append(&mut self.state.message_channels.queue);self.state.message_channels.queue=next;}
+        let target=PORT_BASE+(index*2+(1-endpoint)) as u32;
+        let queued=self.state.message_channels.queue.len();
+        if self.state.message_channels.ready.is_none()&&self.state.message_channels.port_ready(target){self.state.message_channels.ready=Some(queued);}
+        self.state.message_channels.queue.push_back(Message{target,queued:Instant::now(),data,bytes});
+        self.state.retained+=bytes+added;
         Ok(Value::Undefined)
     }
 
@@ -318,3 +385,7 @@ open.port1.postMessage('cancelled');
         evaluate(&mut page, &mut doc, &mut forms, "if(received!=='snap')throw 'closed or cancelled message delivered';");
     }
 }
+
+#[cfg(test)]
+#[path = "script_message_queue_tests.rs"]
+mod queue_tests;
