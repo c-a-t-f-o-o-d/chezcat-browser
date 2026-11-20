@@ -744,18 +744,14 @@ impl Runtime {
 
     #[inline(never)]
     fn reserve_generator_stack<T>(&mut self, stack: &mut Vec<T>) -> Result<(), Fault> {
-        if stack.len() >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Generator scope nesting limit reached (128)."));
-        }
         if stack.len() == stack.capacity() {
             let before = stack.capacity();
-            self.check_generator_retention(std::mem::size_of::<T>())?;
-            stack.try_reserve_exact(1).map_err(|_| Fault::new("Unable to allocate bounded generator scopes."))?;
-            let added = (stack.capacity() - before).saturating_mul(std::mem::size_of::<T>());
+            let slot = std::mem::size_of::<T>();
+            let spare = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+            self.check_generator_retention(slot)?;
+            self.work(before.saturating_mul(slot))?;
+            let added = limits::grow_suspension_stack(stack, spare)?;
             self.value_bytes += added;
-            if self.value_bytes > self.limits.heap.retained_values {
-                return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
-            }
         }
         Ok(())
     }

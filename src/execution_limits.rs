@@ -3,6 +3,48 @@
 //! the same accounting/cancellation paths without expensive hostile loops.
 //! No page API can select a profile or reset these counters.
 
+/// Grow heap-resident suspension bookkeeping geometrically. Admission uses the
+/// allocator's actual capacity, and failure leaves both contents and capacity
+/// unchanged. Only the retained replacement remains charged after the move.
+pub(super) fn grow_suspension_stack<T>(stack: &mut Vec<T>, available: usize) -> Result<usize, super::Fault> {
+    use std::mem::size_of;
+    let slot = size_of::<T>();
+    debug_assert!(slot != 0);
+    let before = stack.capacity();
+    let growth = before.max(4).min(available / slot);
+    if growth == 0 {
+        return Err(super::Fault::new("Retained value storage exhausted while growing suspended scopes."));
+    }
+    let capacity = before.checked_add(growth)
+        .ok_or_else(|| super::Fault::new("Suspended scope capacity arithmetic overflow."))?;
+    let mut replacement = Vec::new();
+    replacement.try_reserve_exact(capacity)
+        .map_err(|_| super::Fault::new("Unable to allocate suspended scope storage."))?;
+    let added = replacement.capacity().checked_sub(before)
+        .and_then(|slots| slots.checked_mul(slot))
+        .filter(|bytes| *bytes <= available)
+        .ok_or_else(|| super::Fault::new("Allocated suspended scope capacity exceeds retained value storage."))?;
+    replacement.append(stack);
+    *stack = replacement;
+    Ok(added)
+}
+
+#[test]
+fn suspended_storage_growth_uses_capacity_and_preserves_failed_reservations() {
+    let mut stack: Vec<usize> = Vec::new();
+    for i in 0..300 {
+        if stack.len() == stack.capacity() {
+            let before = stack.capacity();
+            let added = grow_suspension_stack(&mut stack, 16 * 1024).unwrap();
+            assert_eq!(added, (stack.capacity() - before) * std::mem::size_of::<usize>());
+        }
+        stack.push(i);
+    }
+    let before = (stack.clone(), stack.capacity());
+    assert!(grow_suspension_stack(&mut stack, std::mem::size_of::<usize>() - 1).is_err());
+    assert_eq!((&stack, stack.capacity()), (&before.0, before.1));
+}
+
 /// Retained entries/payloads, not a process working-set or preallocation promise.
 /// Object handles remain stable for the document lifetime; these are hard caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
