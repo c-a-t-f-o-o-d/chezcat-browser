@@ -45,7 +45,7 @@ impl Parser {
                     return Err(self.unsupported("Class-name limit reached."));
                 }
             }
-            let name = self.name()?;
+            let name = self.class_token_text(true)?;
             self.strict_binding(&name, true)?;
             Some(name)
         } else {
@@ -137,10 +137,13 @@ impl Parser {
             syntax.derived_constructor = is_constructor && heritage.is_some();
             syntax.default_constructor = false;
             if is_constructor {
+                // The constructor key is syntax-only; the class record owns
+                // the constructor template, without retaining that key text.
+                if let MemberKey::Literal(name)=&key {self.expression_storage_bytes-=name.capacity();}
                 constructor = Some(template);
             } else {
                 self.class_node_capacity(members.len().saturating_add(1))?;
-                members.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class member storage."))?;
+                self.reserve_expression_record(&mut members,None)?;
                 members.push(Member { key, template, kind, is_static });
             }
         }
@@ -163,7 +166,11 @@ impl Parser {
             })?
         };
         let index = self.program.classes.len();
-        self.program.classes.try_reserve(1).map_err(|_| self.unsupported("Unable to reserve bounded class syntax storage."))?;
+        if index==self.program.classes.capacity() {
+            let additional=self.ast_arena_growth(&self.program.classes)?;
+            self.program.classes.try_reserve_exact(additional).map_err(|_|super::compilation_storage_limit(self.capacity))?;
+            self.check_compilation_progress()?;
+        }
         self.program.class_members += members.len();
         self.program.classes.push(Class { name, constructor, heritage, members });
         Ok(ExprKind::Class(index))
@@ -177,25 +184,42 @@ impl Parser {
         }
     }
 
-    fn class_literal_key(&mut self) -> Result<String, Fault> {
-        let name = match &self.token().kind {
-            TokenKind::Word(name) | TokenKind::EscapedWord(name) | TokenKind::String(name) => {
-                if name.len() > self.capacity.property_bytes {
-                    return Err(self.unsupported("Class property-name limit reached."));
-                }
-                name.clone()
-            }
-            TokenKind::Number(number) => {
-                let name = number_text(*number);
-                if name.len() > self.capacity.property_bytes {
-                    return Err(self.unsupported("Class property-name limit reached."));
-                }
-                name
-            }
-            _ => return Err(self.error("Expected a literal public class method name.")),
+    // Admit owned text before copying token payload. The lexer keeps its own
+    // copy alive, so both allocations participate in compiler admission.
+    fn class_token_text(&mut self,identifier:bool)->Result<String,Fault> {
+        let length=match &self.token().kind {
+            TokenKind::Word(name)|TokenKind::EscapedWord(name) if !identifier||!super::reserved(name)=>name.len(),
+            TokenKind::String(name) if !identifier=>name.len(),
+            _=>return Err(self.error(if identifier{"Expected an identifier."}else{"Expected a literal public class method name."})),
         };
-        self.current += 1;
-        Ok(name)
+        self.check_compilation_progress()?;
+        self.charge_expression_text(length)?;
+        let mut text=String::new();
+        text.try_reserve_exact(length).map_err(|_|super::compilation_storage_limit(self.capacity))?;
+        let name=match &self.token().kind {
+            TokenKind::Word(name)|TokenKind::EscapedWord(name)|TokenKind::String(name)=>name,
+            _=>unreachable!(),
+        };
+        text.push_str(name);
+        self.charge_expression_text(text.capacity()-length)?;
+        self.current+=1;
+        Ok(text)
+    }
+    fn class_literal_key(&mut self) -> Result<String, Fault> {
+        self.check_compilation_progress()?;
+        if let TokenKind::Number(number)=self.token().kind {
+            // Numeric formatting has the existing scalar conversion scratch
+            // policy. Admit the returned owned key before retaining it.
+            let name=number_text(number);
+            if name.len()>self.capacity.property_bytes{return Err(self.unsupported("Class property-name limit reached."));}
+            self.charge_expression_text(name.capacity())?;
+            self.current+=1;
+            return Ok(name);
+        }
+        if let TokenKind::Word(name)|TokenKind::EscapedWord(name)|TokenKind::String(name)=&self.token().kind {
+            if name.len()>self.capacity.property_bytes{return Err(self.unsupported("Class property-name limit reached."));}
+        }
+        self.class_token_text(false)
     }
 
     // Pending members are not published in Program yet. Include that local
@@ -207,3 +231,7 @@ impl Parser {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path="class_parser_storage_tests.rs"]
+mod storage_tests;
