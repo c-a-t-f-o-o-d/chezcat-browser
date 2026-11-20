@@ -441,6 +441,15 @@ pub(super) struct CreatedEvent {
     message: bool,
 }
 
+#[cfg(test)]
+#[path = "script_event_storage_tests.rs"]
+mod storage_tests;
+
+impl CreatedEvent {
+    fn payload_bytes(&self)->usize {self.name.capacity()+owned_custom_bytes(self.custom.as_ref())}
+}
+fn owned_custom_bytes(value:Option<&Value>)->usize {value.map_or(0,retained_storage::value_bytes)}
+
 #[derive(Clone,Copy)]
 enum Interface { Base, Custom, Ui, Mouse }
 
@@ -463,7 +472,7 @@ fn copy_custom_value(value: &Value) -> Result<Value, String> {
     match value {
         Value::String(text) => {
             let mut copied = String::new();
-            copied.try_reserve(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
+            copied.try_reserve_exact(text.len()).map_err(|_| "Could not reserve CustomEvent detail text.")?;
             copied.push_str(text);
             Ok(Value::String(copied))
         }
@@ -571,47 +580,44 @@ impl Bridge<'_> {
     }
     fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>,custom:Option<&Value>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
-        let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
-            .ok_or("Event admission lookup work overflow.")?;
-        self.state.work(admission)?;
+        self.state.work(self.state.event_lookup_work(8).saturating_add(1))?;
         let Some(Value::String(source))=args.first() else {return Err("Event requires a converted type.".into());};
-        if source.len()>self.state.limits.host.event_type_bytes||source.len()>self.state.limits.host.string_bytes {
-            return Err("Event type exceeds the host event-type/string allowance.".into());
-        }
+        if self.state.event_type_refused(source.len()) {return Err("Event type exceeds the host event-type/string allowance.".into());}
         let detail_bytes=custom_bytes(custom)?;
         if detail_bytes>self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
         let bytes=source.len().checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
+        if bytes>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Event retained payload allowance exceeded.".into());}
         self.state.copies(bytes)?;
-        let retained=self.state.retained.checked_add(bytes).filter(|&n|n<=self.state.retained_limit)
-            .ok_or("Event retained text allowance exceeded.")?;
-        if self.state.created_events.len()>=self.state.limits.host.created_events {return Err("Constructed Event allowance exceeded.".into());}
-        let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE)
-            .ok_or("Event identity space exhausted.")?;
-        let mut name=String::new();
-        name.try_reserve(source.len()).map_err(|_|"Could not reserve Event type.")?;
-        name.push_str(source);
+        if self.state.created_event_limit_reached(){return Err("Constructed Event allowance exceeded.".into());}
+        let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE).ok_or("Event identity space exhausted.")?;
+        let mut name=String::new();name.try_reserve_exact(source.len()).map_err(|_|"Could not reserve Event type.")?;name.push_str(source);
         let custom=custom.map(copy_custom_value).transpose()?;
-        self.state.created_events.try_reserve(1).map_err(|_|"Could not reserve Event record.")?;
-        let flag=|key|fields.is_some_and(|fields|fields.iter().any(|(name,value)|*name==key&&value.truthy()));
+        let payload=name.capacity().checked_add(owned_custom_bytes(custom.as_ref())).ok_or("Event payload storage overflow.")?;
+        self.state.copies(payload.saturating_sub(bytes))?;
+        let (replacement,added)=self.state.prepare_created_event_storage(payload)?;
         let handle=self.state.next_event;
         let timestamp=self.event_timestamp(owner,Instant::now())?;
+        if let Some(mut records)=replacement {records.append(&mut self.state.created_events);self.state.created_events=records;}
+        let flag=|key|fields.is_some_and(|fields|fields.iter().any(|(name,value)|*name==key&&value.truthy()));
         let event=CreatedEvent {owner,composed:flag("composed"),handle,name,
             bubbles:flag("bubbles"),cancelable:flag("cancelable"),prevented:false,stopped:false,immediate:false,
             target:None,current:None,phase:0,dispatching:false,initialized:true,trusted:false,passive:false,
             timestamp,ui,mouse,custom,message:false};
         self.state.created_events.push(event);
-        self.state.retained=retained;
+        self.state.retained+=payload+added;
         self.state.next_event=next;
         Ok(Value::Host(handle))
     }
     pub(super) fn rollback_base_event(&mut self,handle:u32)->Result<(),String> {
         let Some(event)=self.state.created_events.last() else {return Err("No unpublished Event record exists.".into());};
         if event.handle!=handle||event.dispatching||event.target.is_some() {return Err("Unpublished Event rollback identity mismatch.".into());}
-        let bytes=event.name.len().checked_add(custom_bytes(event.custom.as_ref())?)
-            .ok_or("Event rollback retained text overflow.")?;
-        let retained=self.state.retained.checked_sub(bytes).ok_or("Event rollback retention mismatch.")?;
+        let bytes=event.payload_bytes();
+        self.state.retained=self.state.retained.checked_sub(bytes).ok_or("Event rollback retention mismatch.")?;
         self.state.created_events.pop();
-        self.state.retained=retained;
+        if self.state.created_events.is_empty() {
+            self.state.retained-=self.state.created_events.capacity()*std::mem::size_of::<CreatedEvent>();
+            self.state.created_events=Vec::new();
+        }
         // Identity allocation and work remain charged; no capability ID is reused.
         Ok(())
     }
@@ -641,7 +647,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_index(&self, handle: u32) -> Option<usize> {
-        (EVENT_BASE..script_class_list::BASE).contains(&handle).then(|| self.state.created_events.iter().position(|event| event.handle == handle)).flatten()
+        (EVENT_BASE..script_class_list::BASE).contains(&handle).then(|| self.state.created_events.binary_search_by_key(&handle,|event|event.handle).ok()).flatten()
     }
 
     pub(super) fn constructed_event_receiver(&self, handle: u32) -> bool {
@@ -714,7 +720,7 @@ impl Bridge<'_> {
 
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
-        Some(self.state.work(self.state.created_events.len()).map(|()| {
+        Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
             base_property(name) || self.state.created_events[id].mouse.is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].ui.is_some() && ui_property(name)
@@ -725,11 +731,14 @@ impl Bridge<'_> {
     pub(super) fn created_event_get(&mut self, object: u32, name: &str) -> Option<Result<Value, String>> {
         let id = self.created_event_index(object)?;
         Some((|| {
-            self.state.work(self.state.created_events.len())?;
+            self.state.work(self.state.event_lookup_work(8))?;
             if name == "type" {
                 let len = self.state.created_events[id].name.len();
                 self.state.copies(len)?;
-                return Ok(Value::String(self.state.created_events[id].name.clone()));
+                let mut copied=String::new();
+                copied.try_reserve_exact(len).map_err(|_|"Could not reserve Event type result.")?;
+                copied.push_str(&self.state.created_events[id].name);
+                return Ok(Value::String(copied));
             }
             if name == "detail" && self.custom_receiver(object) {
                 let bytes = custom_bytes(self.state.created_events[id].custom.as_ref())?;
@@ -783,7 +792,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn set_cancel_bubble(&mut self, object: u32, value: &Value) -> Result<(), String> {
-        self.state.work(self.state.created_events.len().max(1))?;
+        self.state.work(self.state.event_lookup_work(8))?;
         if let Some(id) = self.created_event_index(object) {
             if value.truthy() { self.state.created_events[id].stopped = true; }
         } else {
@@ -822,22 +831,21 @@ impl Bridge<'_> {
                 self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
                 self.mouse_target_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(14))?;
             }
-            if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && matches!(args.first(), Some(Value::String(name)) if name.len() > self.state.limits.host.event_type_bytes) {
-                return Err(("QuotaExceededError", "Event type exceeds 256 UTF-8 bytes.".into()));
+            if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && matches!(args.first(), Some(Value::String(name)) if self.state.event_type_refused(name.len())) {
+                return Err(("QuotaExceededError",format!("Event type exceeds {} UTF-8 bytes.",self.state.event_type_allowance())));
             }
         }
         Ok(())
     }
 
     pub(super) fn create_event(&mut self, args: &[Value]) -> Result<Value, String> {
-        let admission=self.state.created_events.len().checked_mul(8).and_then(|n|n.checked_add(1))
-            .ok_or("Event admission lookup work overflow.")?;
-        self.state.work(admission)?;
-        if let Some(Value::String(name)) = args.first() { self.state.copies(name.len())?; }
-        let interface = interface(args.first()).ok_or_else(|| unsupported_event_interface(args.first()))?;
-        if self.state.created_events.len() >= self.state.limits.host.created_events { return Err("Constructed Event limit reached (256 per document).".into()); }
-        let next = self.state.next_event.checked_add(1).filter(|next|*next <= script_class_list::BASE).ok_or("Event identity space exhausted.")?;
-        self.state.created_events.try_reserve(1).map_err(|_| "Constructed Event storage reservation failed.")?;
+        self.state.work(self.state.event_lookup_work(8).saturating_add(1))?;
+        if let Some(Value::String(name))=args.first(){self.state.copies(name.len())?;}
+        let interface=interface(args.first()).ok_or_else(||unsupported_event_interface(args.first()))?;
+        if self.state.created_event_limit_reached(){return Err("Constructed Event limit reached (256 per document).".into());}
+        let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE).ok_or("Event identity space exhausted.")?;
+        let (replacement,added)=self.state.prepare_created_event_storage(0)?;
+        if let Some(mut records)=replacement {records.append(&mut self.state.created_events);self.state.created_events=records;}
         let handle = self.state.next_event;
         let event = CreatedEvent { owner:WINDOW,composed:false,handle, name: String::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
@@ -847,6 +855,7 @@ impl Bridge<'_> {
             mouse: matches!(interface,Interface::Mouse).then(MouseData::default),
             custom: matches!(interface,Interface::Custom).then_some(Value::Null), message: false };
         self.state.created_events.push(event);
+        self.state.retained+=added;
         self.state.next_event = next;
         Ok(Value::Host(handle))
     }
@@ -854,7 +863,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_call(&mut self, object: u32, method: &str, args: &[Value]) -> Option<Result<Value, String>> {
         let id = self.created_event_index(object)?;
         Some((|| {
-            self.state.work(self.state.created_events.len())?;
+            self.state.work(self.state.event_lookup_work(8))?;
             match method {
                 "initEvent" | "initCustomEvent" | "initUIEvent" | "initMouseEvent" => {
                     if method == "initMouseEvent" && self.state.created_events[id].mouse.is_none() {
@@ -890,18 +899,20 @@ impl Bridge<'_> {
                         let detail = args.get(3).filter(|value| !matches!(value, Value::Undefined)).unwrap_or(&default_detail);
                         let bytes = custom_bytes(Some(detail))?;
                         if bytes > self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
-                        let old = self.state.created_events[id].name.len().checked_add(custom_bytes(self.state.created_events[id].custom.as_ref())?)
-                            .ok_or("CustomEvent retained text size overflow.")?;
-                        let new = name.len().checked_add(bytes).ok_or("CustomEvent retained text size overflow.")?;
-                        self.state.copies(new)?;
-                        let retained = self.state.retained.checked_sub(old).and_then(|size| size.checked_add(new))
-                            .filter(|&size| size <= self.state.retained_limit).ok_or("CustomEvent retained text allowance exceeded.")?;
-                        let detail = copy_custom_value(detail)?;
+                        let old=self.state.created_events[id].payload_bytes();
+                        let estimate=name.capacity().checked_add(bytes).ok_or("CustomEvent retained text size overflow.")?;
+                        self.state.copies(estimate)?;
+                        let occupied=self.state.retained.checked_sub(old).ok_or("CustomEvent retention mismatch.")?;
+                        if estimate>self.state.retained_limit.saturating_sub(occupied){return Err("CustomEvent retained text allowance exceeded.".into());}
+                        let detail=copy_custom_value(detail)?;
+                        let new=name.capacity().checked_add(owned_custom_bytes(Some(&detail))).ok_or("CustomEvent payload storage overflow.")?;
+                        let retained=occupied.checked_add(new).filter(|bytes|*bytes<=self.state.retained_limit).ok_or("CustomEvent retained text allowance exceeded.")?;
+                        self.state.copies(new.saturating_sub(estimate))?;
                         // All quota and fallible copying precede the one commit.
-                        self.state.retained = retained;
+                        self.state.retained=retained;
                         Some(detail)
                     } else {
-                        self.state.replace_bytes(self.state.created_events[id].name.len(), name.len())?;
+                        self.state.replace_bytes(self.state.created_events[id].name.capacity(), name.capacity())?;
                         None
                     };
                     let event = &mut self.state.created_events[id];

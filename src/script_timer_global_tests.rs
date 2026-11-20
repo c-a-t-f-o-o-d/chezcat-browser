@@ -917,3 +917,22 @@ fn browser_animation_and_timer_metadata_compete_for_the_same_owned_storage_allow
     assert_eq!(page.state.retained,baseline);
     page.state.retained_limit=limit;
 }
+
+#[test]
+fn browser_timer_bigint_arguments_retain_the_payload_allowance_and_deliver_without_underflow() {
+    let(mut doc,mut forms,mut page,start)=page(&["var payload=BigInt('123456789012345678901234567890');function receive(value){if(value!==payload)throw 'BigInt changed';document.title='BigInt timer delivered';}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"receive;").unwrap();
+    let value=execute(&mut page,&mut doc,&mut forms,"payload;").unwrap();
+    let bytes=std::mem::size_of::<Value>()+value.bytes();
+    let args=[callback,Value::Number(0.0),value];
+    page.state.set_timeout(&args).unwrap();
+    assert_eq!(page.state.timer_bytes,bytes);
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(page.state.timer_bytes,0);
+    assert_eq!(doc.title,"BigInt timer delivered");
+    let id=page.state.set_timeout(&args).unwrap();
+    assert_eq!(page.state.timer_bytes,bytes);
+    page.state.clear_timeout(&[id]).unwrap();
+    assert_eq!(page.state.timer_bytes,0);
+}

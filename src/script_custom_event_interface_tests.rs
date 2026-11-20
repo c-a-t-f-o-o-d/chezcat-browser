@@ -194,10 +194,11 @@ if(e.detail!==raw || f.detail!==e.detail || f.detail.length!==3 ||
    e.detail.charCodeAt(0)!==0xda22 || e.detail.charCodeAt(1)!==120 ||
    e.detail.charCodeAt(2)!==0xdf06)throw 'lost detail code units';
 "#);
-    assert_eq!(page.state.retained, retained + 2 * (1 + 6));
+    let backing=page.state.created_events.capacity()*std::mem::size_of::<CreatedEvent>();
+    assert_eq!(page.state.retained, retained + backing + 2 * (1 + 6));
     evaluate(&mut page, &mut doc, &mut forms,
         "f.initCustomEvent('z',false,false,'x'); if(f.detail!=='x'||e.detail!==raw)throw 'detail replacement';");
-    assert_eq!(page.state.retained, retained + 7 + 2);
+    assert_eq!(page.state.retained, retained + backing + 7 + 2);
 }
 
 #[test]
