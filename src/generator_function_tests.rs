@@ -1,6 +1,45 @@
 //! Original generator suspended-start and completed-state controls.
 use super::*;
 
+#[test]
+fn generator_scope_storage_recovers_after_admission_failure() {
+    let mut runtime = Runtime::new();
+    let mut host = NoHost::default();
+    let source = format!("function* deep(){{{}yield 1;{}}}var failed=deep();'ok';",
+        "try{".repeat(40), "}finally{}".repeat(40));
+    runtime.execute(&source, &mut host).unwrap();
+    let limit = runtime.limits.heap.retained_values;
+    let before = runtime.value_bytes;
+    runtime.limits.heap.retained_values = before + 2048;
+    let error = runtime.execute("failed.next();", &mut host).unwrap_err();
+    assert!(error.contains("Retained value"), "{error}");
+    assert!(runtime.value_bytes <= before);
+    assert!(runtime.transient_registration_is_empty());
+    runtime.limits.heap.retained_values = limit;
+    runtime.begin_job();
+    assert_eq!(runtime.execute("if(!failed.next().done)throw 'failed activation';var fresh=deep();if(fresh.next().value!==1||!fresh.return().done)throw 'recovery';'ok';", &mut host).unwrap().to_text(), "ok");
+}
+
+#[test]
+fn generator_deep_scopes_unwind_on_return_and_throw() {
+    std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+        let mut runtime = Runtime::new();
+        let source = format!(
+            "var closed=0,finished=0,keep;\
+             function* values(){{try{{yield 17;}}finally{{closed++;}}}}\
+             function* outer(){{{}let local=4;keep=()=>local;for(let item of values()){{yield item+local;}}{}}}\
+             var one=outer();if(one.next().value!==21||keep()!==4)throw 'first yield';\
+             if(one.return(9).value!==9||!one.next().done||closed!==1||finished!==192)throw 'deep return';\
+             var two=outer(),marker={{}},caught=false;if(two.next().value!==21)throw 'second yield';\
+             try{{two.throw(marker);}}catch(error){{caught=error===marker;}}\
+             if(!caught||!two.next().done||keep()!==4||closed!==2||finished!==384)throw 'deep throw';'ok';",
+            "try{".repeat(192), "}finally{finished++;}".repeat(192),
+        );
+        assert_eq!(runtime.execute(&source, &mut NoHost::default()).unwrap().to_text(), "ok");
+        assert!(runtime.transient_registration_is_empty());
+    }).unwrap().join().unwrap();
+}
+
 #[derive(Default)]
 struct NoHost {
     allow_eval: bool,

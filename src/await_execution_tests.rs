@@ -32,6 +32,67 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_storage_reentry_includes_outer_retained_operands() {
+    let mut runtime = Runtime::new();
+    succeeds(&mut runtime, &format!(
+        "var release;var gate=new Promise(r=>release=r);\
+         async function inner(){{let payload='{}';await gate;return payload;}}\
+         async function outer(){{return '{}'===await inner();}}'ok';",
+        "x".repeat(12_000), "x".repeat(12_000)));
+    let limit = runtime.limits.heap.retained_values;
+    runtime.limits.heap.retained_values = runtime.value_bytes + 20_000;
+    let error = runtime.execute("outer();", &mut NoHost).unwrap_err();
+    assert!(error.contains("Retained value"), "{error}");
+    assert_eq!(runtime.active_await_storage_bytes, 0);
+    assert!(runtime.transient_registration_is_empty());
+    runtime.limits.heap.retained_values = limit;
+    runtime.begin_job();
+    succeeds(&mut runtime, "outer();release(1);'ok';");
+    checkpoint(&mut runtime);
+}
+
+#[test]
+fn await_scope_storage_recovers_after_admission_failure() {
+    let mut runtime = Runtime::new();
+    let source = format!("async function deep(){{{}await 1;{}}}'ok';",
+        "try{".repeat(40), "}finally{}".repeat(40));
+    succeeds(&mut runtime, &source);
+    let limit = runtime.limits.heap.retained_values;
+    runtime.limits.heap.retained_values = runtime.value_bytes + 2048;
+    let error = runtime.execute("deep();", &mut NoHost).unwrap_err();
+    assert!(error.contains("Retained value"), "{error}");
+    assert_eq!(runtime.active_await_storage_bytes, 0);
+    assert!(runtime.transient_registration_is_empty());
+    runtime.limits.heap.retained_values = limit;
+    runtime.begin_job();
+    succeeds(&mut runtime, "deep();'ok';");
+    checkpoint(&mut runtime);
+    assert_eq!(runtime.active_await_storage_bytes, 0);
+}
+
+#[test]
+fn await_execution_retains_deep_scopes_through_resume_and_reentry() {
+    std::thread::Builder::new().stack_size(8 * 1024 * 1024).spawn(|| {
+        let mut runtime = Runtime::new();
+        let source = format!(
+            "var release,answer,keep,finished=0;var gate=new Promise(function(r){{release=r;}});\
+             async function inner(){{return 3;}}\
+             async function outer(){{{}let local=14;keep=()=>local;var received=await gate;var nested=await inner();return received+nested+local;{}}}\
+             outer().then(v=>answer=v);if(keep()!==14||finished!==0)throw 'suspended scope';'ok';",
+            "try{".repeat(192), "}finally{finished++;}".repeat(192),
+        );
+        succeeds(&mut runtime, &source);
+        assert_eq!(runtime.active_await_storage_bytes, 0);
+        checkpoint(&mut runtime);
+        runtime.begin_job();
+        succeeds(&mut runtime, "release(5);'ok';");
+        checkpoint(&mut runtime);
+        assert_eq!(runtime.active_await_storage_bytes, 0);
+        succeeds(&mut runtime, "if(answer!==22||keep()!==14||finished!==192)throw 'resumed scope';'ok';");
+    }).unwrap().join().unwrap();
+}
+
+#[test]
 fn await_execution_negated_logical_expression_keeps_short_circuit_and_branch_order() {
     let mut runtime = Runtime::for_test();
     succeeds(&mut runtime, r#"

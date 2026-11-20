@@ -179,6 +179,11 @@ pub(super) struct Activation {
 }
 
 impl Activation {
+    fn scope_storage_bytes(&self) -> usize {
+        self.environments.capacity() * std::mem::size_of::<usize>()
+            + self.exit_scopes.capacity() * std::mem::size_of::<ExitScope>()
+    }
+
     pub(super) fn realm(&self) -> Option<usize> {
         self.realm
     }
@@ -206,16 +211,7 @@ impl Activation {
                 self.plain_calls.capacity().saturating_mul(std::mem::size_of::<Box<PreparedPlainArguments>>()),
                 |bytes, call| bytes.saturating_add(call.retained_bytes()),
             ))
-            .saturating_add(
-                self.environments
-                    .capacity()
-                    .saturating_mul(std::mem::size_of::<usize>()),
-            )
-            .saturating_add(
-                self.exit_scopes
-                    .capacity()
-                    .saturating_mul(std::mem::size_of::<ExitScope>()),
-            )
+            .saturating_add(self.scope_storage_bytes())
             .saturating_add(self.finally_completions().fold(0usize, |bytes, completion| {
                 bytes.saturating_add(completion.retained_bytes())
             }))
@@ -393,7 +389,8 @@ impl Runtime {
         let bytes = std::mem::size_of::<Activation>()
             .saturating_add(std::mem::size_of::<usize>())
             .saturating_add(this.bytes());
-        self.await_storage(bytes, bytes.saturating_sub(this.bytes()))?;
+        self.check_await_storage(bytes, self.value_bytes)?;
+        self.work_as(bytes.saturating_sub(this.bytes()), WorkKind::ArgumentCapture)?;
         let mut environments = Vec::new();
         environments
             .try_reserve_exact(1)
@@ -459,26 +456,38 @@ impl Runtime {
         result
     }
 
-    fn await_storage(&mut self, retained: usize, work: usize) -> Result<(), Fault> {
+    fn check_await_storage(&self, retained: usize, occupied: usize) -> Result<(), Fault> {
         if retained
             > self
                 .limits
                 .heap
                 .retained_values
-                .saturating_sub(self.value_bytes)
+                .saturating_sub(occupied)
         {
             return Err(Fault::new(format!(
                 "Retained value limit reached ({} bytes).",
                 self.limits.heap.retained_values
             )));
         }
-        self.work_as(work, WorkKind::ArgumentCapture)
+        Ok(())
+    }
+
+    fn await_storage(&mut self, retained: usize, work: usize) -> Result<(), Fault> {
+        // Replace only this driver's reservation. Reentrant frames see all
+        // outer activations, including their retained operands and values.
+        let occupied = self.value_bytes - self.active_await_storage_bytes;
+        self.check_await_storage(retained, occupied)?;
+        self.work_as(work, WorkKind::ArgumentCapture)?;
+        self.value_bytes = occupied + retained;
+        self.active_await_storage_bytes = retained;
+        Ok(())
     }
 
     fn publish_await_activation(
         &mut self,
         frame: &Activation,
     ) -> Result<transient_roots::RootMarker, Fault> {
+        self.await_storage(frame.retained_bytes(), 0)?;
         let marker = self.root_marker();
         let result = (|| {
             self.work(
@@ -502,6 +511,21 @@ impl Runtime {
     }
 
     fn drive_await_body(
+        &mut self,
+        frame: Box<Activation>,
+        resumed: Option<(Value, bool)>,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.check_await_storage(frame.retained_bytes(), self.value_bytes)?;
+        let bytes = frame.retained_bytes();
+        let outer = std::mem::replace(&mut self.active_await_storage_bytes, bytes);
+        self.value_bytes += bytes;
+        let result = self.drive_active_await_body(frame, resumed, host);
+        self.value_bytes -= std::mem::replace(&mut self.active_await_storage_bytes, outer);
+        result
+    }
+
+    fn drive_active_await_body(
         &mut self,
         mut frame: Box<Activation>,
         mut resumed: Option<(Value, bool)>,
@@ -543,6 +567,9 @@ impl Runtime {
                                     self.capture_await_environment(*scope)?;
                                 }
                             }
+                            // Transfer ownership of the capacity to the
+                            // reaction/job accounting before admitting it.
+                            self.value_bytes -= std::mem::take(&mut self.active_await_storage_bytes);
                             self.suspend_await(promise, frame)
                         })();
                         self.restore_root_marker(marker);
@@ -1285,15 +1312,9 @@ impl Runtime {
 
     #[inline(never)]
     fn reserve_await_exit_scope(&mut self, frame: &mut Activation) -> Result<(), Fault> {
-        if frame.exit_scopes.len() >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Async control nesting limit reached (128)."));
-        }
         if frame.exit_scopes.len() == frame.exit_scopes.capacity() {
-            let slot = std::mem::size_of::<ExitScope>();
-            self.await_storage(frame.retained_bytes().saturating_add(slot),
-                (frame.exit_scopes.len() + 1).saturating_mul(slot))?;
-            frame.exit_scopes.try_reserve_exact(1)
-                .map_err(|_| Fault::new("Unable to allocate bounded async control stack."))?;
+            let retained = frame.retained_bytes();
+            self.grow_await_scope_stack(&mut frame.exit_scopes, retained)?;
         }
         Ok(())
     }
@@ -1551,19 +1572,22 @@ impl Runtime {
     }
 
     fn reserve_await_environment(&mut self, frame: &mut Activation) -> Result<(), Fault> {
-        if frame.environments.len() >= MAX_EVAL_DEPTH {
-            return Err(Fault::new("Async lexical nesting limit reached (128)."));
-        }
         if frame.environments.len() == frame.environments.capacity() {
-            self.await_storage(
-                frame.retained_bytes().saturating_add(std::mem::size_of::<usize>()),
-                (frame.environments.len() + 1).saturating_mul(std::mem::size_of::<usize>()),
-            )?;
-            frame.environments.try_reserve_exact(1).map_err(|_| {
-                Fault::new("Unable to allocate bounded async lexical stack.")
-            })?;
+            let retained = frame.retained_bytes();
+            self.grow_await_scope_stack(&mut frame.environments, retained)?;
         }
         Ok(())
+    }
+
+    fn grow_await_scope_stack<T>(&mut self, stack: &mut Vec<T>, retained: usize) -> Result<(), Fault> {
+        let slot = std::mem::size_of::<T>();
+        let before = stack.capacity();
+        let occupied = self.value_bytes - self.active_await_storage_bytes;
+        let spare = self.limits.heap.retained_values.saturating_sub(occupied).saturating_sub(retained);
+        self.check_await_storage(retained.saturating_add(slot), occupied)?;
+        self.work_as((before + 1).saturating_mul(slot), WorkKind::ArgumentCapture)?;
+        let added = limits::grow_suspension_stack(stack, spare)?;
+        self.await_storage(retained.saturating_add(added), 0)
     }
 
     fn unwind_await_environments(&mut self, frame: &mut Activation, depth: usize) {
