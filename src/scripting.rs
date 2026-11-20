@@ -290,8 +290,12 @@ struct Timer {
     nesting: u32,
 }
 
+#[derive(Clone,Copy)]
+enum CallbackQueue { Timer, AnimationFrame }
+
 struct AnimationFrame {
     id: u32,
+    in_batch: bool,
     callback: Value,
 }
 
@@ -459,6 +463,8 @@ struct State {
     timers: timer_queue::Queue,
     animation_frames: VecDeque<AnimationFrame>,
     next_animation_frame: u32,
+    animation_ids_reused: bool,
+    active_animation_frame: Option<u32>,
     animation_due: Option<Instant>,
     animation_callbacks: u64,
     clock_origin: Instant,
@@ -545,6 +551,8 @@ impl State {
             timers: timer_queue::Queue::default(),
             animation_frames: VecDeque::new(),
             next_animation_frame: 0,
+            animation_ids_reused: false,
+            active_animation_frame: None,
             animation_due: None,
             animation_callbacks: 0,
             clock_origin: Instant::now(),
@@ -644,38 +652,47 @@ impl State {
         Ok(())
     }
 
-    fn prepare_timer_id(&mut self)->Result<(u32,bool),String> {
-        if !self.timer_ids_reused {
-            if let Some(id)=self.next_timer.checked_add(1).filter(|id|*id<=i32::MAX as u32) {
+    fn prepare_callback_id(&mut self,queue:CallbackQueue)->Result<(u32,bool),String> {
+        let (next,reused,maximum,count,active)=match queue {
+            CallbackQueue::Timer=>(self.next_timer,self.timer_ids_reused,i32::MAX as u32,self.timers.len(),self.active_timer),
+            CallbackQueue::AnimationFrame=>(self.next_animation_frame,self.animation_ids_reused,u32::MAX,self.animation_frames.len(),self.active_animation_frame),
+        };
+        if !reused {
+            if let Some(id)=next.checked_add(1).filter(|id|*id<=maximum) {
                 return Ok((id,false));
             }
         }
         // After the native positive-ID range wraps, the pigeonhole bound gives
         // a free ID among live-count + 1 candidates. This scratch bitmap avoids
         // probing the entire ID domain or repeatedly scanning the timer heap.
-        let candidates=self.timers.len().checked_add(usize::from(self.active_timer.is_some()))
-            .and_then(|count|count.checked_add(1)).filter(|count|*count<=i32::MAX as usize)
-            .ok_or("Timer positive identifier space exhausted.")?;
+        let candidates=count.checked_add(usize::from(active.is_some()))
+            .and_then(|count|count.checked_add(1)).filter(|count|*count<=maximum as usize)
+            .ok_or("Native callback positive identifier space exhausted.")?;
         let words=candidates.div_ceil(64);
         let available=self.retained_limit.saturating_sub(self.retained);
-        if words*8>available{return Err("DOM retained timer identity scratch allowance exhausted.".into());}
-        self.work(self.timers.len().saturating_add(words.saturating_mul(2)).saturating_add(1))?;
+        if words*8>available{return Err("DOM retained callback identity scratch allowance exhausted.".into());}
+        self.work(count.saturating_add(words.saturating_mul(2)).saturating_add(1))?;
         let mut used=Vec::<u64>::new();
-        used.try_reserve_exact(words).map_err(|_|"Could not reserve timer identity scratch.")?;
+        used.try_reserve_exact(words).map_err(|_|"Could not reserve callback identity scratch.")?;
         let bytes=used.capacity()*8;
-        if bytes>available{return Err("DOM retained timer identity scratch allocation exceeds allowance.".into());}
+        if bytes>available{return Err("DOM retained callback identity scratch allocation exceeds allowance.".into());}
         self.retained+=bytes;
         used.resize(words,0);
-        for id in self.timers.iter().map(|timer|timer.id).chain(self.active_timer) {
+        let mut mark=|id:u32| {
             if id>0&&(id as usize)<=candidates {let bit=id as usize-1;used[bit/64]|=1u64<<(bit%64);}
+        };
+        match queue {
+            CallbackQueue::Timer=>self.timers.iter().for_each(|timer|mark(timer.id)),
+            CallbackQueue::AnimationFrame=>self.animation_frames.iter().for_each(|frame|mark(frame.id)),
         }
+        if let Some(id)=active {mark(id);}
         let id=used.iter().enumerate().find_map(|(word,bits)| {
             let bit=word*64+(!bits).trailing_zeros() as usize;
             (bits!=&u64::MAX&&bit<candidates).then_some((bit+1) as u32)
         });
         drop(used);
         self.retained-=bytes;
-        id.map(|id|(id,true)).ok_or_else(||"Timer positive identifier space exhausted.".into())
+        id.map(|id|(id,true)).ok_or_else(||"Native callback positive identifier space exhausted.".into())
     }
 
     fn set_timeout(&mut self, arguments: &[Value]) -> Result<Value, String> {
@@ -726,7 +743,7 @@ impl State {
         let due = Instant::now()
             .checked_add(Duration::from_millis(delay))
             .ok_or("Timer deadline overflow.")?;
-        let (id,reused_id) = self.prepare_timer_id()?;
+        let (id,reused_id) = self.prepare_callback_id(CallbackQueue::Timer)?;
         let mut copied = Vec::new();
         copied.try_reserve_exact(extra.len()).map_err(|_| "Could not reserve timer argument slots.")?;
         for value in extra {
@@ -822,23 +839,46 @@ impl State {
         let Some(callback @ Value::Function(_)) = arguments.first() else {
             return Err("requestAnimationFrame requires a function callback.".into());
         };
-        if self.animation_frames.len() >= self.limits.host.animation_frames {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.animation_frames.len() >= self.limits.host.animation_frames {
             return Err(format!("Animation frame limit reached ({} pending callbacks per document).",self.limits.host.animation_frames));
         }
-        let id = self
-            .next_animation_frame
-            .checked_add(1)
-            .ok_or("Animation frame identifier limit reached.")?;
+        let (id,reused)=self.prepare_callback_id(CallbackQueue::AnimationFrame)?;
         self.work(1)?;
-        self.animation_frames.try_reserve(1).map_err(|_|"Could not reserve animation frame callback storage.")?;
+        let before=self.animation_frames.capacity();
+        let mut added=0;
+        let mut replacement=None;
+        if self.animation_frames.len()==before {
+            let slot=std::mem::size_of::<AnimationFrame>();
+            let available=self.retained_limit.saturating_sub(self.retained);
+            let growth=before.max(4).min(available/slot);
+            if growth==0{return Err("DOM retained animation queue allowance exhausted.".into());}
+            let capacity=before.checked_add(growth).ok_or("Animation queue capacity overflow.")?;
+            let mut next=VecDeque::new();
+            next.try_reserve_exact(capacity).map_err(|_|"Could not reserve animation queue storage.")?;
+            added=next.capacity().checked_sub(before).and_then(|slots|slots.checked_mul(slot))
+                .filter(|bytes|*bytes<=available).ok_or("DOM retained animation queue allocation exceeds allowance.")?;
+            self.copies(self.animation_frames.len()*slot)?;
+            replacement=Some(next);
+        }
+        if let Some(mut next)=replacement {next.append(&mut self.animation_frames);self.animation_frames=next;}
+        self.retained+=added;
         self.animation_frames.push_back(AnimationFrame {
             id,
+            in_batch: false,
             callback: callback.clone(),
         });
         self.next_animation_frame = id;
+        self.animation_ids_reused = reused;
         self.animation_due
             .get_or_insert_with(|| Instant::now() + FRAME_INTERVAL);
         Ok(Value::Number(f64::from(id)))
+    }
+
+    fn clear_animation_frames(&mut self) {
+        self.retained-=self.animation_frames.capacity()*std::mem::size_of::<AnimationFrame>();
+        self.animation_frames=VecDeque::new();
+        self.animation_due=None;
     }
 
     fn cancel_animation_frame(&mut self, arguments: &[Value]) -> Result<Value, String> {
@@ -1261,7 +1301,7 @@ impl Page {
         self.cancel_media_selection();
         self.clear_message_tasks();
         self.state.clear_timers();
-        self.state.animation_frames.clear();
+        self.state.clear_animation_frames();
         self.state.animation_due = None;
         self.state.error("setTimeout", reason);
     }
@@ -1275,24 +1315,24 @@ impl Page {
         self.begin_job();
         let before = self.state.errors;
         let timestamp = self.state.clock_ms(now);
-        // IDs are monotonic and the queue preserves registration order. The
-        // cutoff is a snapshot without allocation: cancellation still removes
-        // live entries, and newer callbacks always wait for the next frame.
-        let cutoff = self.state.animation_frames.back().map(|frame| frame.id);
+        // Mark the current FIFO prefix after admitting its scan. New callbacks
+        // append unmarked entries, independently of recycled native IDs.
         let batch_work = self.state.animation_frames.len().checked_add(1);
         self.state.animation_due = None;
         if let Err(error) = batch_work.ok_or_else(|| "Animation frame work overflow.".to_owned()).and_then(|work| self.state.work(work)) {
-            self.state.animation_frames.clear();
+            self.state.clear_animation_frames();
             self.runtime.cancel_microtasks();
             self.cancel_media_selection();
             self.state.error("requestAnimationFrame", &error);
             return Outcome { errors: self.state.errors.saturating_sub(before), ..Outcome::default() };
         }
-        while self.state.animation_frames.front().is_some_and(|frame| cutoff.is_some_and(|last| frame.id <= last)) {
+        for frame in &mut self.state.animation_frames {frame.in_batch=true;}
+        while self.state.animation_frames.front().is_some_and(|frame|frame.in_batch) {
             let frame = self.state.animation_frames.pop_front().unwrap();
+            self.state.active_animation_frame=Some(frame.id);
             let id = frame.id;
             self.state.animation_callbacks = self.state.animation_callbacks.saturating_add(1);
-            if let Err(error) = self.runtime.invoke(
+            let result = self.runtime.invoke(
                 frame.callback,
                 &[Value::Number(timestamp)],
                 Value::Undefined,
@@ -1301,17 +1341,19 @@ impl Page {
                     forms,
                     state: &mut self.state,
                 },
-            ) {
+            );
+            self.state.active_animation_frame=None;
+            if let Err(error) = result {
                 self.state
                     .error(&format!("requestAnimationFrame callback {id}"), &error);
                 if self.runtime.invocation_failed_fatally() {
-                    self.state.animation_frames.clear();
+                    self.state.clear_animation_frames();
                     self.cancel_media_selection();
                     break;
                 }
             }
             if !self.microtask_checkpoint(doc, forms) {
-                self.state.animation_frames.clear();
+                self.state.clear_animation_frames();
                 break;
             }
         }

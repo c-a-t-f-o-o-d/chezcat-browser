@@ -85,8 +85,9 @@ if(caught!==2)throw 'conversion errors';
     assert_eq!(execute(&mut page,&mut doc,&mut forms,"var last=requestAnimationFrame(callback);last;").unwrap().to_number(),f64::from(u32::MAX));
     execute(&mut page,&mut doc,&mut forms,"cancelAnimationFrame(-1.9);").unwrap();
     assert!(page.state.animation_frames.is_empty());assert!(page.state.animation_due.is_none());
-    let error=execute(&mut page,&mut doc,&mut forms,"requestAnimationFrame(callback);").unwrap_err();
-    assert!(error.contains("identifier limit"));assert_eq!(page.state.next_animation_frame,u32::MAX);assert!(page.state.animation_frames.is_empty());
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"requestAnimationFrame(callback);").unwrap().to_number(),1.0);
+    assert_eq!(page.state.next_animation_frame,1);assert!(page.state.animation_ids_reused);
+    assert_eq!(page.state.animation_frames.len(),1);
 }
 
 #[test]
@@ -155,7 +156,7 @@ fn animation_checkpoint_rejection_scan_shares_frame_work_and_recovers() {
 
 #[test]
 fn animation_small_capacity_and_host_work_refusal_are_atomic_and_recover() {
-    let(mut doc,mut forms,mut page,start)=page(&["var callback=function(){},first=requestAnimationFrame(callback),second=requestAnimationFrame(callback);"]);
+    let(mut doc,mut forms,mut page,start)=page_with_policy(&["var callback=function(){},first=requestAnimationFrame(callback),second=requestAnimationFrame(callback);"],crate::javascript::limits::CAPACITY_REGRESSION);
     assert_eq!(start.errors,0);let due=page.state.animation_due;let ids=page.state.animation_frames.iter().map(|f|f.id).collect::<Vec<_>>();
     page.state.limits.host.animation_frames=2;
     assert!(execute(&mut page,&mut doc,&mut forms,"requestAnimationFrame(callback);").unwrap_err().contains("Animation frame limit"));
@@ -238,10 +239,13 @@ var id=requestAnimationFrame(callback);cancelAnimationFrame({valueOf:function(){
 if(cancelAnimationFrame(Infinity)!==undefined)throw 'nonfinite ID';
 for(var i=0;i<300;i++)requestAnimationFrame(callback);
 "#]);assert_eq!(start.errors,0,"{}",page.report());assert_eq!(page.state.animation_frames.len(),300);assert!(page.state.animation_frames.capacity()<page.state.limits.host.animation_frames);
-    let count=page.state.animation_frames.len();let next=page.state.next_animation_frame;page.state.limits.host.animation_frames=count;
-    assert!(execute(&mut page,&mut doc,&mut forms,"nativeFrame(callback);").unwrap_err().contains("Animation frame limit"));assert_eq!(page.state.next_animation_frame,next);assert_eq!(page.state.animation_frames.len(),count);
-    page.state.limits.host.animation_frames=crate::javascript::limits::BROWSER.host.animation_frames;page.state.next_animation_frame=u32::MAX;
-    assert!(execute(&mut page,&mut doc,&mut forms,"nativeFrame(callback);").unwrap_err().contains("identifier limit"));assert_eq!(page.state.animation_frames.len(),count);
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    while page.state.animation_frames.len()<page.state.animation_frames.capacity(){page.state.request_animation_frame(&[callback.clone()]).unwrap();}
+    let count=page.state.animation_frames.len();let next=page.state.next_animation_frame;let limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
+    assert!(execute(&mut page,&mut doc,&mut forms,"nativeFrame(callback);").unwrap_err().contains("retained animation queue"));assert_eq!(page.state.next_animation_frame,next);assert_eq!(page.state.animation_frames.len(),count);
+    page.state.retained_limit=limit;page.state.next_animation_frame=u32::MAX;
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"nativeFrame(callback);").unwrap().to_number(),1.0);
+    let count=count+1;assert_eq!(page.state.animation_frames.len(),count);
     let frame=execute(&mut page,&mut doc,&mut forms,"nativeFrame;").unwrap();let cancel=execute(&mut page,&mut doc,&mut forms,"nativeCancel;").unwrap();let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();let argument=execute(&mut page,&mut doc,&mut forms,"var effects=0;({valueOf:function(){effects++;return 1;}});").unwrap();
     doc.scripting_enabled=false;
     for (function,arg) in [(frame,callback),(cancel,argument)] {
@@ -272,7 +276,9 @@ fn execute(page: &mut Page, doc: &mut Document, forms: &mut Forms, source: &str)
 }
 
 fn poll(page: &mut Page, doc: &mut Document, forms: &mut Forms) {
-    let outcome = page.poll_timer_at(doc, forms, Instant::now() + Duration::from_secs(1)).unwrap();
+    let now=Instant::now()+Duration::from_secs(1);
+    let now=page.state.animation_due.map_or(now,|due|due.max(now));
+    let outcome = page.poll_timer_at(doc, forms, now).unwrap();
     assert_eq!(outcome.errors, 0, "{}", page.report());
 }
 
@@ -814,4 +820,100 @@ fn browser_timer_reuse_during_a_real_callback_cannot_cancel_the_new_timeout_by_t
     let out=page.poll_timer_at(&mut doc,&mut forms,Instant::now()+Duration::from_secs(61)).unwrap();
     assert_eq!(out.errors,0,"{}",page.report());
     assert_eq!(doc.title,"new timeout survived");
+}
+
+#[test]
+fn browser_animation_queue_exceeds_former_count_and_runs_real_callbacks_in_one_snapshot() {
+    let(mut doc,mut forms,mut page,start)=page(&["var hits=0,stamp=-1;function observed(time){if(stamp<0)stamp=time;else if(time!==stamp)throw 'batch clock';hits++;}for(var index=0;index<70000;index++)requestAnimationFrame(observed);"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    assert_eq!(page.state.animation_frames.len(),70000);
+    let backing=page.state.animation_frames.capacity()*std::mem::size_of::<AnimationFrame>();
+    let before=page.state.retained;
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),70000.0);
+    assert_eq!(page.state.animation_callbacks,70000);
+    assert_eq!(page.state.retained,before);
+    page.stop_timers("test native teardown");
+    assert_eq!(page.state.retained,before-backing);
+    assert_eq!(page.state.animation_frames.capacity(),0);
+}
+
+#[test]
+fn browser_animation_recycled_id_keeps_new_callbacks_after_the_current_snapshot_and_live_cancellation() {
+    let(mut doc,mut forms,mut page,start)=page(&["var log='',unused=requestAnimationFrame(function(){throw 'unused';});cancelAnimationFrame(unused);var first=requestAnimationFrame(function(){log+='first;';var fresh=requestAnimationFrame(function(){log+='new;';});if(fresh===first)throw 'active identity reused';cancelAnimationFrame(first);cancelAnimationFrame(third);});var second=requestAnimationFrame(function(){log+='second;';});var third=requestAnimationFrame(function(){throw 'cancelled old callback';});"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    page.state.next_animation_frame=u32::MAX;
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"log;").unwrap().to_text(),"first;second;");
+    assert_eq!(page.state.animation_frames.len(),1);
+    assert_eq!(page.state.animation_frames.front().unwrap().id,1);
+    assert!(!page.state.animation_frames.front().unwrap().in_batch);
+    assert!(page.state.animation_ids_reused);
+    assert_eq!(page.state.active_animation_frame,None);
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"log;").unwrap().to_text(),"first;second;new;");
+}
+
+#[test]
+fn browser_animation_active_id_stays_reserved_while_its_callback_schedules_and_cancels() {
+    let(mut doc,mut forms,mut page,start)=page(&["var active=requestAnimationFrame(function(){var fresh=requestAnimationFrame(function(){document.title='new frame survived';});if(fresh===active)throw 'active identity reused';cancelAnimationFrame(active);});"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    page.state.next_animation_frame=u32::MAX;
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"waiting");
+    assert_eq!(page.state.animation_frames.len(),1);
+    assert_eq!(page.state.animation_frames.front().unwrap().id,2);
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(doc.title,"new frame survived");
+}
+
+#[test]
+fn browser_animation_shared_storage_and_growth_work_refusal_are_atomic_and_recover() {
+    let(mut doc,mut forms,mut page,start)=page(&["function callback(){}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let before=(page.state.retained,page.state.next_animation_frame,page.state.animation_due);
+    let limit=page.state.retained_limit;
+    let slot=std::mem::size_of::<AnimationFrame>();
+    page.state.retained_limit=before.0+slot-1;
+    assert!(page.state.request_animation_frame(&[callback.clone()]).unwrap_err().contains("retained animation queue"));
+    assert_eq!((page.state.retained,page.state.next_animation_frame,page.state.animation_due),before);
+    assert_eq!(page.state.animation_frames.capacity(),0);
+    page.state.retained_limit=before.0+slot;
+    let first=page.state.request_animation_frame(&[callback.clone()]).unwrap();
+    assert_eq!(page.state.animation_frames.capacity(),1);
+    assert_eq!(page.state.retained,before.0+slot);
+    let kept=(page.state.retained,page.state.next_animation_frame,page.state.animation_due);
+    page.state.retained_limit=before.0+2*slot;
+    page.state.copy_work=slot-1;
+    assert!(page.state.request_animation_frame(&[callback.clone()]).unwrap_err().contains("string work limit"));
+    assert_eq!(page.state.copy_work,0);
+    assert_eq!((page.state.retained,page.state.next_animation_frame,page.state.animation_due),kept);
+    page.state.cancel_animation_frame(&[first]).unwrap();
+    page.state.request_animation_frame(&[callback]).unwrap();
+    assert_eq!(page.state.animation_frames.len(),1);
+    page.state.clear_animation_frames();
+    assert_eq!(page.state.retained,before.0);
+    page.state.retained_limit=limit;
+}
+
+#[test]
+fn browser_animation_and_timer_metadata_compete_for_the_same_owned_storage_allowance() {
+    let(mut doc,mut forms,mut page,start)=page(&["var hits=0;function callback(){hits++;}"]);
+    assert_eq!(start.errors,0,"{}",page.report());
+    let callback=execute(&mut page,&mut doc,&mut forms,"callback;").unwrap();
+    let baseline=page.state.retained;
+    let limit=page.state.retained_limit;
+    page.state.retained_limit=baseline+std::mem::size_of::<Timer>();
+    page.state.set_timeout(&[callback.clone(),Value::Number(0.0)]).unwrap();
+    assert!(page.state.request_animation_frame(&[callback.clone()]).unwrap_err().contains("retained animation queue"));
+    assert_eq!(page.state.timers.len(),1);
+    assert!(page.state.animation_frames.is_empty());
+    page.state.clear_timers();
+    page.state.request_animation_frame(&[callback]).unwrap();
+    poll(&mut page,&mut doc,&mut forms);
+    assert_eq!(execute(&mut page,&mut doc,&mut forms,"hits;").unwrap().to_number(),1.0);
+    page.state.clear_animation_frames();
+    assert_eq!(page.state.retained,baseline);
+    page.state.retained_limit=limit;
 }
