@@ -5,15 +5,15 @@ use super::*;
 use std::collections::BTreeSet;
 
 pub(super) const BASE: u32 = 0x8000_0000;
-const END: u32 = BASE + STYLE_BASE;
+const END: u32 = BASE + NODE_HANDLES;
 pub(super) fn element(handle: u32) -> Option<u32> {
     (BASE..END)
         .contains(&handle)
-        .then(|| handle - BASE)
+        .then(|| node_handle((handle - BASE) as usize))
         .filter(|handle| node_index(*handle).is_some())
 }
 pub(super) fn handle(element: u32) -> u32 {
-    BASE + element
+    BASE + (element - NODE_BASE)
 }
 fn whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}')
