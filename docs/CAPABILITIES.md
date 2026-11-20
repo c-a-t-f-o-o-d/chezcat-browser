@@ -191,6 +191,7 @@ physical desktop or complete live-page results.
 | Area | Current behavior | Boundary |
 | :--- | :--- | :--- |
 | **Transport** | Original HTTP/TLS/certificate handling, redirects, decompression, workers and timings | Protocol, parser, chain and admission gaps remain |
+| **Parser-loaded images** | Distinct image admission uses decoded backing bytes. Per-load reuse metadata has a separate byte eviction budget; evicting reuse entries preserves delivered pixels. Image batches retain three concurrent fetch slots and share the download allowance. | Decoder format/dimension/pixel checks, resource time and download allowances remain. DOM reference and dynamic-image queue restrictions are separate. |
 | **Local HTML source** | Opens regular local UTF-8 HTML files up to 32 MiB and retains the decoded source for inspection. | Plain-text viewing retains its separate 1 MiB bound. HTML tree node and depth bounds still apply. |
 | **Loaded HTML tree** | Local and network documents can parse up to 262,144 nodes, including the synthetic root. | Crossing the node bound or the 128-level open-element bound reports a load failure. Script-inserted fragments use their separate checks. |
 | **Classic script sources** | Parser-loaded and dynamic external scripts admit up to 32 MiB per source and 256 MiB of source per document. The loader bounds decompression and UTF-8 conversion. | Token records grow on demand within 256 MiB. Delimiter links use the token records. Compilation also shares a 768 MiB accounting budget for source copies, token payloads, and syntax storage, and checks the current job deadline. |
@@ -213,6 +214,26 @@ physical desktop or complete live-page results.
 See [explicit HTTPS trust](../trust/README.md) and the [T1 contract](FEATURE_CONTRACTS.md#t1--shared-tlstrust-and-data-coverage-baseline).
 The selected roots exclude unsupported forms and restrictions rather than
 silently broadening trust. Custom stores replace the default and remain strict.
+
+### Remaining capacity correction
+
+The storage changes above do not complete the browser-wide capacity correction.
+These confirmed production restrictions still require implementation review,
+including their App defaults and callback consumers. They are not classified as
+unavoidable safety boundaries merely because they currently have fixed values.
+
+| Family and source | Current units and restrictions | Remaining correction |
+| :--- | :--- | :--- |
+| Runtime profiles, `execution_limits.rs` | 65,536 functions, environments and arguments; 4,096 programs; 1,048,576 object identities and properties per object; 16,777,216 document properties and array length. Source/string and compilation/retention byte budgets apply separately. | Reconcile identity, metadata and sparse versus materialized storage admission and every derived lower limit. |
+| Host callbacks and queues, `BROWSER_HOST` and consumers | Examples include 4,096 listeners and 1,024 timers; events, Promise jobs, MessagePorts, image queues and host retained bytes have additional policies. | Account pending records, payload and queue capacity together across dispatch, cancellation and navigation. |
+| Collections, `collections.rs` | 4,096 entries per collection; 16,384 across the document, including weak collections. Existing retained-value accounting includes payload strings. | Account entry/index metadata and replace redundant count admission without weakening weak reachability or insertion order. |
+| Regular expressions, `regexp.rs` | 32 KiB patterns, 32,768 code entries, 32 nested groups/assertions, 16 captures, 1,000 repetitions and 1,024 backtracking choices; other repetition/name limits remain. | Replace fixed representations and recursive dependencies where required; keep checked allocation, work and cancellation. |
+| DOM and layout, `html.rs`, `layout.rs` | 128 open HTML nodes; 20,000 internal versus 262,144 loaded nodes. Layout has depth 128, 2,048 flex/positioned entries, item/run/work and coordinate bounds. | Follow fragment/inert/frame entry defaults and recursive traversals through layout, paint and hit testing. |
+| CSS, `css.rs`, `css_custom_properties.rs` | 512-byte individual selectors, nesting eight, list admission, 4,096 declarations and query results; custom-property names, map/output bytes, nesting and references are separately bounded. | Reconcile actual selector/value storage, recursive matching and aggregate style work. |
+| Execution work, `execution_limits.rs` | Production jobs use 30 seconds, one billion steps and 16 GiB cumulative copy work; startup uses 120 seconds, four billion steps and 64 GiB copy work. Host and RegExp work have separate counters. | Distinguish cooperative scheduling/cancellation from retained resources; do not describe cumulative work as physical memory. |
+| Resource loading, `loader.rs`, `http.rs` | 256 stylesheets; 256 MiB aggregate resource bodies; resource time 45 seconds; HTTP header/line/chunk/redirect/coding and body policies remain. | Follow parser/dynamic/background consumers and separate protocol rules, concurrency, cache eviction and content admission. |
+| Images, canvas and fonts, `image.rs`, `canvas_2d_bitmap.rs`, `font.rs`, `fonts.rs` | Examples include four-megapixel static output, 16,384 axes, 256 animation frames, 24 web faces, a 96-face merge bound and glyph structure/raster work limits. | Trace decoded backing and intermediate buffers; distinguish cache retention from refusal and recursive glyph safety. |
+| Media and browser state | Container/decoder dimensions, frames, samples, tracks, media tasks, tabs, history, cookies and download storage have independent bounds. | Complete their representation/resource dispositions and effective startup/default consumer review. |
 
 ## Media
 
