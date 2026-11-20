@@ -168,6 +168,8 @@ pub const BROWSER_HOST: HostCapacities = HostCapacities {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     #[cfg(test)]
+    pub(crate) test_collection_entries: Option<(usize, usize)>,
+    #[cfg(test)]
     pub(crate) test_call_depth: Option<usize>,
     #[cfg(test)]
     pub(crate) test_evaluation_frames: Option<usize>,
@@ -196,6 +198,8 @@ const BROWSER_HOST_WORK: usize = crate::css::FULL_STYLESHEET_SOURCE_WORK + 256 *
 /// Copy bytes are cumulative charged work, not reserved or retained memory.
 pub const BROWSER: Limits = Limits {
     #[cfg(test)]
+    test_collection_entries: None,
+    #[cfg(test)]
     test_call_depth: None,
     #[cfg(test)]
     test_evaluation_frames: None,
@@ -220,6 +224,7 @@ pub const BROWSER: Limits = Limits {
 /// policy. This is explicit test selection, never the normal browser default.
 #[cfg(test)]
 pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
+    test_collection_entries: Some((4096, 16384)),
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),
     test_native_evaluation_depth: Some(super::MAX_EVAL_DEPTH),
@@ -243,6 +248,7 @@ pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
 /// this constant, and compiling with cfg(test) does not change Runtime::new().
 #[cfg(test)]
 pub(crate) const REGRESSION: Limits = Limits {
+    test_collection_entries: Some((4096, 16384)),
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),
     test_native_evaluation_depth: Some(super::MAX_EVAL_DEPTH),

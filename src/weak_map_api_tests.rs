@@ -290,9 +290,11 @@ fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
             &mut NoHost,
         )
         .unwrap();
+    let Value::Object(map_id) = map else { unreachable!() };
+    let metadata = runtime.collection(map_id, Kind::WeakMap).unwrap().storage_bytes();
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (1, baseline + 5)
+        (1, baseline + metadata + 5)
     );
     runtime
         .weak_map_method(
@@ -304,7 +306,7 @@ fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
         .unwrap();
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (1, baseline + 1)
+        (1, baseline + metadata + 1)
     );
     runtime.copy_bytes = 2;
     assert!(runtime
@@ -317,7 +319,7 @@ fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
         .is_err());
     runtime.begin_job();
     let retained_limit = runtime.limits.heap.retained_values;
-    runtime.limits.heap.retained_values = baseline + 2;
+    runtime.limits.heap.retained_values = baseline + metadata + 2;
     assert!(runtime
         .weak_map_method(
             "set",
@@ -332,14 +334,14 @@ fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
     );
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (1, baseline + 1)
+        (1, baseline + metadata + 1)
     );
     runtime
         .weak_map_method("delete", &[key], map.clone(), &mut NoHost)
         .unwrap();
     assert_eq!(
         (runtime.collection_entries, runtime.value_bytes),
-        (0, baseline)
+        (0, baseline + metadata)
     );
     for index in 0..MAX_ENTRIES {
         if index % 256 == 0 {
@@ -389,6 +391,7 @@ fn weak_map_api_retained_copy_and_entry_caps_preserve_prior_values() {
 #[test]
 fn weak_map_api_shares_document_entry_limit_with_existing_strong_maps() {
     let mut runtime = Runtime::for_test();
+    runtime.limits.heap.retained_values = super::super::limits::BROWSER_HEAP.retained_values;
     let mut maps = Vec::new();
     for _ in 0..MAX_DOCUMENT_ENTRIES / MAX_ENTRIES {
         let map = runtime
@@ -432,4 +435,26 @@ fn weak_map_api_shares_document_entry_limit_with_existing_strong_maps() {
         .weak_map_method("set", &[Value::Host(1), Value::Null], another, &mut NoHost)
         .unwrap();
     assert_eq!(runtime.collection_entries, MAX_DOCUMENT_ENTRIES);
+}
+
+#[test]
+fn browser_collections_exceed_former_single_and_document_counts_with_real_iteration() {
+    let mut runtime = Runtime::new();
+    let result = runtime.execute(r#"
+        var map=new Map(),set=new Set(),weak=new WeakMap(),weakSet=new WeakSet(),keys=[];
+        for(var index=0;index<6000;index++) {
+            var key={};keys.push(key);map.set(index,index+1);set.add(index);
+            weak.set(key,index);weakSet.add(key);
+        }
+        if(map.size!==6000||set.size!==6000||weak.get(keys[5999])!==5999||!weakSet.has(keys[5999]))throw 'large collection';
+        var iterator=map.keys();if(iterator.next().value!==0)throw 'first';
+        map.delete(1);map.set(1,777);var last=-1,count=0;
+        for(var item=iterator.next();!item.done;item=iterator.next()){last=item.value;count++;}
+        if(count!==5999||last!==1||map.get(1)!==777)throw 'live insertion order';
+        weak.delete(keys[0]);weakSet.delete(keys[0]);
+        if(weak.has(keys[0])||weakSet.has(keys[0]))throw 'weak deletion';
+        'ok';
+    "#, &mut NoHost).unwrap();
+    assert!(matches!(result, Value::String(ref value) if value=="ok"));
+    assert_eq!(runtime.collection_entries, 23_998);
 }
