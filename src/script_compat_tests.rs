@@ -4029,6 +4029,23 @@ document.title='checked SVG attached';
 }
 
 #[test]
+fn template_svg_local_use_keeps_real_xlink_attributes_clone_and_owner_promotion() {
+    let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r##"
+var seed=document.createElement('template');seed.innerHTML='<svg xmlns:xlink="http://www.w3.org/1999/xlink"><defs><g id="shape"><path d="M0 0 L2 2"/></g><clipPath id="cut"><rect width="2" height="2"/></clipPath><linearGradient id="base-paint"><stop offset="0" stop-color="red"/></linearGradient><linearGradient id="paint" href="#base-paint"/></defs><use id="qualified" xlink:href="#shape" clip-path="url(#cut)" mask="none" fill="url(#paint)"/><use id="plain" href="#shape" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"/></svg>';
+var content=seed.content,svg=content.firstChild,qualified=svg.children[1],plain=svg.children[2],uri='http://www.w3.org/1999/xlink',xmlns='http://www.w3.org/2000/xmlns/',owner=qualified.ownerDocument;
+var href=qualified.attributes.getNamedItemNS(uri,'href'),decl=svg.attributes.getNamedItemNS(xmlns,'xlink');
+if(qualified.nodeName!=='use'||qualified.namespaceURI!==svg.namespaceURI||!(qualified instanceof SVGElement)||qualified.getAttribute('href')!==null||qualified.getAttribute('xlink:href')!=='#shape'||plain.getAttribute('href')!=='#shape'||qualified.getAttributeNames().join(',')!=='id,xlink:href,clip-path,mask,fill')throw 'real local use fields';
+if(href!==qualified.getAttributeNode('xlink:href')||href.namespaceURI!==uri||href.prefix!=='xlink'||href.localName!=='href'||href.name!=='xlink:href'||href.ownerElement!==qualified||href.ownerDocument!==owner||decl.prefix!=='xmlns'||decl.localName!=='xlink'||decl.value!==uri)throw 'actual foreign Attr namespaces';
+if(plain.attributes.getNamedItemNS(xmlns,'xmlns').value!==svg.namespaceURI||plain.attributes.getNamedItemNS(xmlns,'xlink').value!==uri||svg.firstChild.children[3].getAttribute('href')!=='#base-paint')throw 'local gradient reference and subtree declarations';
+var clone=content.cloneNode(true).firstChild.children[1],copy=clone.attributes.getNamedItemNS(uri,'href');
+if(clone===qualified||copy===href||copy.ownerElement!==clone||copy.value!=='#shape'||clone.getAttribute('clip-path')!=='url(#cut)'||seed.innerHTML.indexOf('xmlns:xlink="http://www.w3.org/1999/xlink"')<0||seed.innerHTML.indexOf('xlink:href="#shape"')<0)throw 'real local reference clone and serialization';
+document.getElementById('mount').appendChild(content);
+if(document.getElementById('qualified')!==qualified||!plain.isConnected||qualified.getAttribute('xlink:href')!=='#shape'||qualified.getAttribute('fill')!=='url(#paint)'||href.ownerElement!==qualified||href.ownerDocument!==document||href.value!=='#shape'||href.namespaceURI!==uri||decl.ownerDocument!==document||content.childNodes.length!==0||clone.isConnected)throw 'real reference owner promotion';
+"##]);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());let(added,removed,changed)=page.take_image_changes();assert!(added.is_empty()&&removed.is_empty()&&changed.is_empty());assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_definition_containers_keep_adjusted_names_clone_and_owner_promotion() {
     let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r##"
 var seed=document.createElement('template');seed.innerHTML='<svg><defs><clipPath id="cut" clipPathUnits="userSpaceOnUse"><path d="M0 0 L2 2"/></clipPath><linearGradient id="linear" gradientUnits="userSpaceOnUse" gradientTransform="rotate(5)" spreadMethod="pad"><stop offset="0" stop-color="#fff" stop-opacity=".5"/></linearGradient><radialGradient id="radial" fx="1" fy="2" fr="0"><stop offset="1" stop-color="red"/></radialGradient><symbol id="symbol" viewBox="0 0 2 2"><rect width="2" height="2"/></symbol></defs></svg>';
@@ -4110,7 +4127,13 @@ if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttr
         "<svg><defs><clipPath onclick='trigger()'></clipPath></defs></svg>",
         "<svg><defs><linearGradient href='/guard'></linearGradient></defs></svg>",
         "<svg><filter><feImage href='/guard'/></filter></svg>",
-        "<svg><path fill='url(#foreign)'/></svg>",
+        "<svg><path fill='url(/guard#foreign)'/></svg>",
+        "<svg><use href='https://guard.invalid/icon.svg#shape'/></svg>",
+        "<svg><use xlink:href='javascript:trigger()'/></svg>",
+        "<svg xmlns:xlink='urn:wrong'><use xlink:href='#local'/></svg>",
+        "<svg><use other:href='#local'/></svg>",
+        "<svg><path clip-path='url(https://guard.invalid/icon.svg#cut)'/></svg>",
+        "<svg><path mask='url(/guard#mask)'/></svg>",
         "<svg><image href='/guard'/></svg>",
         "<svg><g></svg>",
         "<svg><g/>",
