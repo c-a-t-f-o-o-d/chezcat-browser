@@ -176,12 +176,29 @@ impl State {
         if !self.dirty {
             return Ok(());
         }
+        let retained_on_entry=self.retained;
+        let mut stack=std::mem::take(&mut self.tree_stack);
+        stack.clear();
+        let result=self.rebuild_dom_tree_with_stack(doc,&mut stack);
+        stack.clear();
+        if result.is_err() && self.retained>retained_on_entry && self.retained>self.retained_limit {
+            // No author callback runs during a rebuild. Speculative replacement
+            // credit cannot survive a failed publication as an overdrawn cache.
+            let bytes=stack.capacity()*size_of::<tree_order::Visit>();
+            let Some(retained)=self.retained.checked_sub(bytes) else {
+                self.tree_stack=stack;
+                return Err("DOM traversal retained accounting underflow.".into());
+            };
+            self.retained=retained;stack=Vec::new();
+        }
+        self.tree_stack=stack;
+        result
+    }
+
+    fn rebuild_dom_tree_with_stack(&mut self,doc:&Document,stack:&mut Vec<tree_order::Visit>)->Result<(),String> {
         // Active lookup deliberately excludes inert subtrees; physical parent
         // links and connection state must still describe created script nodes.
         self.work(doc.nodes.len())?;
-        // Legacy traversal scratch estimate; actual scratch admission remains
-        // separate from the now-paid per-node sibling initialization.
-        self.copies(doc.nodes.len().saturating_mul(2 * std::mem::size_of::<usize>()))?;
         let states=self.prepare_rebuilt_states(doc.nodes.len())?;
         let state_bytes=states.bytes();
         let mut tree = Tree {
@@ -191,11 +208,11 @@ impl State {
             ..Tree::default()
         };
         let mut connected = states.connected;
-        let mut stack = if doc.nodes.is_empty() {
-            Vec::new()
-        } else {
-            vec![(0, None, false, usize::MAX)]
-        };
+        if !doc.nodes.is_empty() {
+            // Leave one current root order slot before optional scratch growth.
+            self.reserve_tree_stack(stack,1,state_bytes.checked_add(size_of::<usize>()).ok_or("DOM root traversal backing overflow.")?)?;
+            stack.push((0,None,false,usize::MAX));
+        }
         while let Some((node, parent, inert, slot)) = stack.pop() {
             self.work(1)?;
             if node >= doc.nodes.len() || connected[node] {
@@ -210,7 +227,11 @@ impl State {
             // leaves its fallback subtree inert and never creates a child window.
             if !inert && (!inert_children || exposes_inert_host(name, doc.nodes[node].namespace)) {
                 tree.active[node] = true;
-                tree.order.push(node);
+                let has_id=self.index_id_text(doc,node)?.is_some_and(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes);
+                let id_min=if has_id {(tree.ids.len()+1).saturating_sub(tree.ids.capacity())*size_of::<(usize,usize)>()}else{0};
+                let other=state_bytes.checked_add(tree.ids.capacity()*size_of::<(usize,usize)>()).and_then(|bytes|bytes.checked_add(id_min))
+                    .ok_or("DOM order/ID joint backing overflow.")?;
+                self.push_tree_order(&mut tree.order,node,other)?;
                 if name == "body" && tree.body.is_none() {
                     tree.body = Some(node);
                 }
@@ -223,11 +244,15 @@ impl State {
                 {
                     tree.document_element = Some(node);
                 }
-                if self.index_id_text(doc,node)?.is_some_and(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes) {
+                if has_id {
                     // The index reads document-owned text; it retains no ID copy.
-                    self.push_document_id(&mut tree.ids, node, tree.order.len() - 1, state_bytes)?;
+                    let other=state_bytes.checked_add(tree.order.capacity()*size_of::<usize>()).ok_or("DOM order/ID backing overflow.")?;
+                    self.push_document_id(&mut tree.ids, node, tree.order.len() - 1, other)?;
                 }
             }
+            let other=state_bytes.checked_add(tree.order.capacity()*size_of::<usize>())
+                .and_then(|bytes|bytes.checked_add(tree.ids.capacity()*size_of::<(usize,usize)>())).ok_or("DOM traversal metadata overflow.")?;
+            self.reserve_tree_stack(stack,doc.nodes[node].children.len(),other)?;
             stack.extend(
                 doc.nodes[node]
                     .children
@@ -258,7 +283,9 @@ impl State {
         let old_ids = self.tree.ids.capacity() * size_of::<(usize, usize)>();
         let new_ids = tree.ids.capacity() * size_of::<(usize, usize)>();
         self.retained = self.retained.checked_sub(old_ids).and_then(|bytes|bytes.checked_sub(self.node_state_bytes()))
+            .and_then(|bytes|bytes.checked_sub(self.order_bytes()))
             .and_then(|bytes|bytes.checked_add(new_ids)).and_then(|bytes|bytes.checked_add(state_bytes))
+            .and_then(|bytes|bytes.checked_add(tree.order.capacity()*size_of::<usize>()))
             .ok_or("DOM ID index retained accounting overflow.")?;
         self.tree = tree;
         self.dom.connected = connected;

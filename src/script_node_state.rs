@@ -98,7 +98,7 @@ impl State {
         self.tree.active.capacity()+self.dom.connected.capacity()+self.tree.parents.capacity()*size_of::<Option<usize>>()+self.tree.sibling_slots.capacity()*size_of::<usize>()
     }
     pub(super) fn tree_replacement_available(&self)->Result<usize,String> {
-        let old=self.node_state_bytes().checked_add(self.tree.ids.capacity()*size_of::<(usize,usize)>())
+        let old=self.node_state_bytes().checked_add(self.tree.ids.capacity()*size_of::<(usize,usize)>()).and_then(|bytes|bytes.checked_add(self.order_bytes()))
             .ok_or("DOM tree backing overflow.")?;
         self.retained_limit.checked_add(old).and_then(|limit|limit.checked_sub(self.retained))
             .ok_or("DOM retained tree replacement allowance exhausted.".into())

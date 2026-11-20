@@ -20,7 +20,7 @@ fn main_node_storage_exact_record_payload_and_movement_refuse_without_capacity_p
     let(mut doc,mut forms,mut page)=page("<html><body><p>kept</p></body></html>",0);
     let text=doc.nodes.iter().position(|node|node.kind.character_data()==Some("kept")).unwrap();
     let before=page.state.retained;let count=doc.nodes.len();let capacity=doc.nodes.capacity();
-    assert_eq!(count,capacity);assert_eq!(before,document_bytes(&doc)+page.state.node_state_bytes());
+    assert_eq!(count,capacity);assert_eq!(before,document_bytes(&doc)+page.state.tree_storage_bytes());
     let bundle=size_of::<Node>()+2+size_of::<Option<usize>>()+size_of::<usize>()+64;
     page.state.retained_limit=before+bundle-1;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
