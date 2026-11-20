@@ -157,7 +157,7 @@ impl Bridge<'_> {
                     self.state.work(text.len().saturating_mul(3))?;
                     self.state.copies(text.len().saturating_mul(2))?;
                 }
-                if attrs.iter().any(|attr| attr.name.qualified.starts_with("on")) { return Err("HTML fragment inline event-handler registration is not implemented.".into()); }
+                if attrs.iter().any(|attr| script_element_properties::event_handler_content_attribute(name,&attr.name)) { return Err("HTML fragment inline event-handler registration is not implemented.".into()); }
                 if let Some(style) = staged.attr(local, "style") { validate_style(style, self.state.limits.host.string_bytes)?; }
                 if let Some(id) = staged.attr(local, "id").filter(|id| !id.is_empty()) {
                     self.state.work(self.forms.controls.len())?;

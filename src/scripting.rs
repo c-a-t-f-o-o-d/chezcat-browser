@@ -31,6 +31,8 @@ use queries::node_list_index;
 #[cfg(test)]
 #[path = "script_parent_children_tests.rs"]
 mod parent_children_tests;
+#[path = "script_element_attribute_list.rs"]
+mod script_element_attribute_list;
 #[path = "script_parent_children.rs"]
 mod parent_children;
 #[path = "script_collections.rs"]
@@ -2941,7 +2943,8 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
-        parent_children::member(property) && self.parent_node_receiver(object)
+        matches!(property,"getAttributeNames"|"hasAttribute"|"removeAttribute") && self.attribute_names_receiver(object)
+            || parent_children::member(property) && self.parent_node_receiver(object)
             || property == "style" && self.html_element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
@@ -3360,7 +3363,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { &[(0, true), (1, true)] } else { &[(0, true)] };
         }
-        if method == "getAttribute" && self.inert_node_type(object) == Some(1) {
+        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
             return &[(0, true)];
         }
         if let Some(operation) = CanvasOperation::parse(method) {
@@ -3511,7 +3514,7 @@ impl Host for Bridge<'_> {
             return Some(object);
         }
         if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
-        if method == "getAttribute" && self.event_target_interface(object) { return Some(object); }
+        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -3556,6 +3559,7 @@ impl Host for Bridge<'_> {
         self.ordinary_event_owner(result)
     }
     fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
+    fn attribute_name_snapshot(&mut self,object:u32)->Result<Vec<String>,String>{self.attribute_names(object)}
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
@@ -3608,7 +3612,7 @@ impl Host for Bridge<'_> {
         if self.inert_factory(object, method).is_some() {
             return if method == "createElementNS" { 2 } else { 1 };
         }
-        if method == "getAttribute" && self.inert_node_type(object) == Some(1) { return 1; }
+        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) { return 1; }
         if script_inline_style::handle(object) && method == "item" { return 1; }
         if let Some(operation) = CanvasOperation::parse(method) { return operation.arity(); }
         if matches!(method, "addEventListener" | "removeEventListener") { return 2; }
@@ -4099,7 +4103,7 @@ impl Host for Bridge<'_> {
             }
         }
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver); }
-        if method == "getAttribute" {
+        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute"|"\0Element.getAttributeNames") {
             return (self.event_target_interface(object) || self.attr_element_receiver(object))
                 && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
         }
@@ -5558,8 +5562,11 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
-        if method == "getAttribute" && self.inert_node_type(object) == Some(1) {
-            return self.inert_element_attribute(object, args.first().ok_or("getAttribute requires one argument.")?);
+        if matches!(method,"getAttribute"|"hasAttribute"|"removeAttribute") && self.inert_node_type(object) == Some(1) {
+            let argument=args.first().ok_or("Attribute operation requires one argument.")?;
+            if method=="removeAttribute"{return self.remove_inert_attribute(object,argument);}
+            let value=self.inert_element_attribute(object,argument)?;
+            return Ok(if method=="hasAttribute"{Value::Bool(!matches!(value,Value::Null))}else{value});
         }
         if method == ELEMENT_INNER_HTML_GET {
             return self.get(object, "innerHTML");
