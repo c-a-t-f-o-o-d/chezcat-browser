@@ -14,6 +14,9 @@ const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 #[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
+#[cfg(test)]
+#[path = "script_template_identity_storage_tests.rs"]
+mod template_identity_storage_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
@@ -24,8 +27,13 @@ pub(super) struct Arena {
     entries: Vec<Entry>,
     adopted: HashMap<u32, InertNode>,
     generated: Vec<GeneratedNode>,
-    template_documents: HashMap<u32, u32>,
-    template_contents: HashMap<u32, u32>,
+    template_documents: identity_map::IdentityMap<u32>,
+    template_contents: identity_map::IdentityMap<u32>,
+}
+
+struct TemplateIndexGrowth {
+    documents: Option<Vec<(u32, u32)>>,
+    contents: Option<Vec<(u32, u32)>>,
 }
 
 struct DocumentNodes {
@@ -93,6 +101,7 @@ impl Arena {
     pub(super) fn backing_bytes(&self) -> usize {
         self.entries.capacity() * size_of::<Entry>()
             + self.generated.capacity() * size_of::<GeneratedNode>()
+            + self.template_documents.storage_bytes() + self.template_contents.storage_bytes()
     }
 
     fn entry(&self, handle: u32) -> Option<&Entry> {
@@ -517,11 +526,23 @@ impl Bridge<'_> {
                 })
             });
         }
+        let payload = size_of::<(u32, InertNode)>();
+        let available = self.state.retained_limit.saturating_sub(self.state.retained)
+            .checked_sub(payload).ok_or("Template adoption record allowance exhausted.")?;
+        let children = &self.state.inert_documents.node(fragment).unwrap().children;
+        let (replacement, added) = retained_storage::grow(children, 1, available)?;
+        let moved = if replacement.is_some() { children.len() } else { 0 };
+        self.state.work(moved.saturating_add(1))?;
+        let copies = payload.checked_add((moved + 1) * size_of::<u32>())
+            .ok_or("Template child-link copy work overflow.")?;
+        self.state.inert_documents.adopted.try_reserve(1).map_err(|_| "Cannot reserve an adopted template node.")?;
+        self.state.replace_storage(0, payload + added, copies)?;
         let arena = &mut self.state.inert_documents;
-        arena.adopted.try_reserve(1).map_err(|_| "Cannot reserve an adopted template node.")?;
-        arena.node_mut(fragment).unwrap().children.try_reserve(1).map_err(|_| "Cannot reserve template child links.")?;
-        self.state.replace_bytes(0, size_of::<(u32, InertNode)>() + size_of::<u32>())?;
-        let arena = &mut self.state.inert_documents;
+        if let Some(mut next) = replacement {
+            let children = &mut arena.node_mut(fragment).unwrap().children;
+            next.append(children);
+            *children = next;
+        }
         arena.adopted.insert(child, InertNode {
             kind: Kind::Parsed { source: ParsedSource::Loaded(index), initial_template: None },
             owner, parent: Some(fragment), children: Vec::new(),
@@ -543,6 +564,8 @@ impl Bridge<'_> {
     pub(super) fn template_content(&mut self, object: u32) -> Result<Value, String> {
         let (document, source) = self.template_source(object)
             .ok_or("Template content requires a genuine HTMLTemplateElement.")?;
+        self.state.work(self.state.inert_documents.template_contents.lookup_work()
+            + self.state.inert_documents.template_documents.lookup_work())?;
         if let Some(&handle) = self.state.inert_documents.template_contents.get(&object) {
             self.state.work(1)?;
             return Ok(Value::Host(handle));
@@ -564,7 +587,7 @@ impl Bridge<'_> {
         // fragment gets new inert handles and never returns active-tree IDs.
         let mut pending = vec![(source, None)];
         let mut staged = Vec::new();
-        let mut payload = 2 * std::mem::size_of::<(u32, u32)>();
+        let mut payload = 0usize;
         if existing_owner.is_none() {
             staged.push(Entry::Node(InertNode {
                 kind: Kind::TemplateDocument { implementation: first + 1 },
@@ -601,14 +624,14 @@ impl Bridge<'_> {
             }));
             index += 1;
         }
-        self.state.inert_documents.template_contents.try_reserve(1).map_err(|_| "Cannot reserve template content identity.")?;
-        if existing_owner.is_none() {
-            self.state.inert_documents.template_documents.try_reserve(1).map_err(|_| "Cannot reserve template document identity.")?;
-        }
-        let committed = self.reserve_inert_entries(staged.len(), payload, 0)?;
+        let document_link = existing_owner.is_none().then_some((document, owner));
+        let content_link = [(object, fragment)];
+        let (committed, indexes) = self.prepare_template_indexes(staged.len(), payload, 0, document_link, &content_link)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         arena.entries.extend(staged);
+        arena.template_documents.commit(indexes.documents);
+        arena.template_contents.commit(indexes.contents);
         if existing_owner.is_none() { arena.template_documents.insert(document, owner); }
         arena.template_contents.insert(object, fragment);
         Ok(Value::Host(fragment))
@@ -680,8 +703,24 @@ impl Bridge<'_> {
         self.state.copies(markup.len().saturating_mul(2))?;
         let parsed = crate::html::parse_fragment(markup, "template", self.doc.scripting_enabled)?;
 
+        self.state.work(self.state.inert_documents.template_contents.lookup_work()
+            + self.state.inert_documents.template_documents.lookup_work())?;
         let had_fragment = self.state.inert_documents.template_contents.contains_key(&object);
         let had_template_owner = self.state.inert_documents.template_documents.contains_key(&document);
+        let creates_owner_index = !had_template_owner && !matches!(
+            self.state.inert_documents.node(document).map(|node| &node.kind),
+            Some(Kind::TemplateDocument { .. }));
+        // Cleanup cannot fail once the unobservable content cache is staged.
+        // Prepay the exact old-entry shifts and future lookup depth now.
+        if !had_fragment {
+            let arena = &self.state.inert_documents;
+            let content_work = arena.template_contents.insert_work(&object);
+            let document_work = if creates_owner_index { arena.template_documents.insert_work(&document) } else { 0 };
+            let shifted = content_work - arena.template_contents.lookup_work()
+                + if creates_owner_index { document_work - arena.template_documents.lookup_work() } else { 0 };
+            self.state.work(content_work.saturating_add(document_work).saturating_add(2))?;
+            self.state.copies(shifted.saturating_mul(size_of::<(u32, u32)>()))?;
+        }
         let starting_entries = self.state.inert_documents.entries.len();
         let starting_backing = self.state.inert_documents.backing_bytes();
         let starting_bytes = self.state.retained;
@@ -691,7 +730,7 @@ impl Bridge<'_> {
             let arena = &mut self.state.inert_documents;
             arena.entries.truncate(starting_entries);
             arena.template_contents.remove(&object);
-            if !had_template_owner { arena.template_documents.remove(&document); }
+            if creates_owner_index { arena.template_documents.remove(&document); }
             // Rolled-back payload is gone; reusable backing remains allocated.
             let backing = arena.backing_bytes();
             self.state.retained = starting_bytes + (backing - starting_backing);
@@ -794,7 +833,7 @@ impl Bridge<'_> {
         self.state.tree.parents.try_reserve(parked).map_err(|_| "Cannot reserve parked template parent slots.")?;
         self.state.tree.active.try_reserve(parked).map_err(|_| "Cannot reserve parked template active slots.")?;
         self.state.dom.connected.try_reserve(parked).map_err(|_| "Cannot reserve parked template connection slots.")?;
-        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released)?;
+        let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, 0)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
@@ -956,20 +995,80 @@ impl Bridge<'_> {
                 .saturating_add(children.capacity().saturating_mul(size_of::<u32>()));
             staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
         }
-        payload = payload.saturating_add(template_links.len().saturating_mul(size_of::<(u32, u32)>()));
-        let arena = &mut self.state.inert_documents;
-        arena.template_contents.try_reserve(template_links.len()).map_err(|_| "Cannot reserve cloned template contents.")?;
-        let committed = self.reserve_inert_entries(staged.len(), payload, usize::from(generated.is_some()))?;
+        let (committed, indexes) = self.prepare_template_indexes(staged.len(), payload,
+            usize::from(generated.is_some()), None, &template_links)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         if let Some(source) = generated { arena.generated.push(source); }
         arena.entries.extend(staged);
-        arena.template_contents.extend(template_links);
+        arena.template_documents.commit(indexes.documents);
+        arena.template_contents.commit(indexes.contents);
+        for (key, value) in template_links { arena.template_contents.insert(key, value); }
         Ok(Value::Host(first))
     }
 
     fn inert_remaining_entries(&self) -> usize {
         self.inert_remaining_entries_with_release(0)
+    }
+
+    fn prepare_template_indexes(&mut self, count: usize, payload: usize, generated: usize,
+        document: Option<(u32, u32)>, contents: &[(u32, u32)]) -> Result<(u32, TemplateIndexGrowth), String>
+    {
+        let mut checks = 0usize;
+        for (map, added) in [
+            (&self.state.inert_documents.template_documents, usize::from(document.is_some())),
+            (&self.state.inert_documents.template_contents, contents.len()),
+        ] {
+            let length = map.len().checked_add(added).ok_or("Template index count overflow.")?;
+            let lookup = (usize::BITS - length.leading_zeros()) as usize + 1;
+            checks = added.checked_mul(3 * lookup + 1).and_then(|work| checks.checked_add(work))
+                .ok_or("Template index work overflow.")?;
+        }
+        self.state.work(checks)?;
+        let arena = &self.state.inert_documents;
+        let entry_minimum = arena.entries.len().checked_add(count)
+            .and_then(|required| required.saturating_sub(arena.entries.capacity()).checked_mul(size_of::<Entry>()))
+            .ok_or("Template entry storage overflow.")?;
+        let source_minimum = arena.generated.len().checked_add(generated)
+            .and_then(|required| required.saturating_sub(arena.generated.capacity()).checked_mul(size_of::<GeneratedNode>()))
+            .ok_or("Template source storage overflow.")?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained)
+            .checked_sub(payload).and_then(|bytes| bytes.checked_sub(entry_minimum))
+            .and_then(|bytes| bytes.checked_sub(source_minimum)).ok_or("Template identity bundle allowance exhausted.")?;
+        let content_minimum = arena.template_contents.minimum_growth(contents.len())?;
+        let (documents, document_bytes) = arena.template_documents.prepare(usize::from(document.is_some()),
+            available.checked_sub(content_minimum).ok_or("Template content index allowance exhausted.")?)?;
+        let (content_growth, content_bytes) = arena.template_contents.prepare(contents.len(), available - document_bytes)?;
+
+        let mut movement = 0usize;
+        let mut copies = 0usize;
+        for (map, links, grew) in [
+            (&arena.template_documents, document.as_slice(), documents.is_some()),
+            (&arena.template_contents, contents, content_growth.is_some()),
+        ] {
+            // Preparation searches, strict ordering validation and the later
+            // publication searches all spend work before any live mutation.
+            if links.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+                return Err("Template index publication requires distinct ordered identities.".into());
+            }
+            let mut shifted = 0usize;
+            for &(key, _) in links {
+                if map.contains_key(&key) { return Err("Template content identity already exists.".into()); }
+                shifted = shifted.checked_add(map.insert_work(&key) - map.lookup_work())
+                    .ok_or("Template index movement overflow.")?;
+            }
+            // Earlier keys in this ordered batch never shift for a later key.
+            let moved = shifted.checked_add(if grew { map.len() } else { 0 })
+                .ok_or("Template index movement overflow.")?;
+            movement = movement.checked_add(moved).ok_or("Template index work overflow.")?;
+            copies = moved.checked_add(links.len()).and_then(|slots| slots.checked_mul(size_of::<(u32, u32)>()))
+                .and_then(|bytes| copies.checked_add(bytes)).ok_or("Template index copy work overflow.")?;
+        }
+        self.state.work(movement)?;
+        self.state.copies(copies)?;
+        let metadata = document_bytes.checked_add(content_bytes).ok_or("Template index storage overflow.")?;
+        let handle = self.reserve_inert_storage(count, payload, generated, 0, metadata)?;
+        Ok((handle, TemplateIndexGrowth { documents, contents: content_growth }))
     }
 
     fn inert_remaining_entries_with_release(&self, released: usize) -> usize {
@@ -989,10 +1088,10 @@ impl Bridge<'_> {
     // Entry and generated-source backing grow jointly with the admitted payload.
     // Prepare both replacements before publishing either capacity or any handle.
     fn reserve_inert_entries(&mut self, count: usize, payload: usize, generated: usize) -> Result<u32, String> {
-        self.reserve_inert_storage(count, payload, generated, 0)
+        self.reserve_inert_storage(count, payload, generated, 0, 0)
     }
 
-    fn reserve_inert_storage(&mut self, count: usize, payload: usize, generated: usize, released: usize) -> Result<u32, String> {
+    fn reserve_inert_storage(&mut self, count: usize, payload: usize, generated: usize, released: usize, metadata: usize) -> Result<u32, String> {
         let arena = &self.state.inert_documents;
         let current = arena.entries.len();
         #[cfg(test)]
@@ -1012,8 +1111,9 @@ impl Bridge<'_> {
             .ok_or("Inert identity overflow.")?;
         self.state.work(count.saturating_add(generated))?;
         let retained = self.state.retained.checked_sub(released).ok_or("Inert retained storage refund underflow.")?;
+        let storage = payload.checked_add(metadata).ok_or("Inert payload/index storage overflow.")?;
         let available = self.state.retained_limit.saturating_sub(retained)
-            .checked_sub(payload).ok_or("Inert DOM retained payload allowance exhausted.")?;
+            .checked_sub(storage).ok_or("Inert DOM retained payload allowance exhausted.")?;
         let arena = &self.state.inert_documents;
         let minimum = arena.generated.len().checked_add(generated)
             .and_then(|required| required.saturating_sub(arena.generated.capacity()).checked_mul(size_of::<GeneratedNode>()))
@@ -1028,7 +1128,7 @@ impl Bridge<'_> {
             .and_then(|bytes| generated.checked_mul(size_of::<GeneratedNode>()).and_then(|sources| bytes.checked_add(sources)))
             .and_then(|bytes| bytes.checked_add(moving)).and_then(|bytes| bytes.checked_add(payload))
             .ok_or("Inert identity copy work overflow.")?;
-        let added = payload.checked_add(entry_bytes).and_then(|bytes| bytes.checked_add(source_bytes))
+        let added = storage.checked_add(entry_bytes).and_then(|bytes| bytes.checked_add(source_bytes))
             .ok_or("Inert retained storage overflow.")?;
         self.state.replace_storage(released, added, work)?;
         let arena = &mut self.state.inert_documents;

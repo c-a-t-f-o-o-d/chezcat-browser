@@ -10,8 +10,7 @@ fn page(markup: &str) -> (Document, Forms, Page) {
     (doc, forms, page)
 }
 fn backing(arena: &Arena) -> usize {
-    arena.entries.capacity() * size_of::<Entry>()
-        + arena.generated.capacity() * size_of::<GeneratedNode>()
+    arena.backing_bytes()
 }
 
 #[test]
@@ -105,9 +104,9 @@ fn browser_inert_storage_failed_template_write_keeps_paid_backing_and_recovers()
     let template = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "template")).unwrap();
     let before = page.state.retained;
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    // The first three content identities and map payload fit; the replacement
+    // The first three content identities and exact map backing fit; the replacement
     // needs two further identities and must fail after content materialization.
-    bridge.state.retained_limit = before + 4 * size_of::<Entry>() + 2 * size_of::<(u32, u32)>();
+    bridge.state.retained_limit = before + 3 * size_of::<Entry>() + 2 * size_of::<(u32, u32)>();
     assert!(bridge.set_template_html(node_handle(template), "<p>x</p>").unwrap_err().contains("template replacement"));
     let arena = &bridge.state.inert_documents;
     assert!(arena.entries.is_empty());
@@ -118,7 +117,7 @@ fn browser_inert_storage_failed_template_write_keeps_paid_backing_and_recovers()
     let Value::Host(fragment) = bridge.template_content(node_handle(template)).unwrap() else { panic!("real template content") };
     assert!(bridge.inert_children(fragment).unwrap().is_empty());
     assert_eq!(backing(&bridge.state.inert_documents), paid);
-    assert!(bridge.state.retained > before + paid);
+    assert_eq!(bridge.state.retained, before + paid);
 }
 
 #[test]
