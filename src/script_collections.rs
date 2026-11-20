@@ -1,4 +1,4 @@
-//! Live, bounded tag/class collections. Each handle retains a root
+//! Live, bounded tag/class/direct-element collections. Each handle retains a root
 //! and filter, never a snapshot of node references. Queries share DOM work
 //! limits and preserve the document's inert-subtree policy.
 //! https://dom.spec.whatwg.org/#concept-getelementsbytagname
@@ -16,12 +16,14 @@ pub(super) struct TagCollection {
 }
 
 enum Filter {
+    Children(u32),
     Tag(String),
     Classes(Vec<String>),
 }
 impl Filter {
     fn owned_bytes(&self) -> usize {
         match self {
+            Self::Children(_) => 0,
             Self::Tag(name) => name.capacity(),
             Self::Classes(names) => names.capacity()*size_of::<String>()+names.iter().map(String::capacity).sum::<usize>(),
         }
@@ -113,6 +115,7 @@ impl Bridge<'_> {
             .get(index)
             .ok_or("Invalid HTMLCollection handle.")?;
         let root = collection.root;
+        if matches!(collection.filter,Filter::Children(_)){return Err("Children views use stable native handles.".into());}
         if matches!(&collection.filter,Filter::Classes(names) if names.is_empty()){return Ok(Vec::new());}
         let mut candidates=self.query_candidates(root)?;
         if matches!(&self.state.dom.collections[index].filter,Filter::Tag(name) if name=="*"){return Ok(candidates);}
@@ -120,6 +123,7 @@ impl Bridge<'_> {
         for position in 0..candidates.len() {
             let node=candidates[position];self.state.work(1)?;
             match &self.state.dom.collections[index].filter {
+                Filter::Children(_)=>unreachable!(),
                 Filter::Tag(_)=>self.state.copies(tag(self.doc,node).len())?,
                 Filter::Classes(names)=>{
                     let count=names.len();
@@ -131,6 +135,7 @@ impl Bridge<'_> {
                 }
             }
             let matches=match &self.state.dom.collections[index].filter {
+                Filter::Children(_)=>unreachable!(),
                 Filter::Tag(name)=>tag(self.doc,node)==name,
                 Filter::Classes(names)=>{
                     let class=self.doc.attr(node,"class").unwrap_or("");
@@ -146,20 +151,18 @@ impl Bridge<'_> {
     }
 
     fn tag_collection_named(&mut self, handle: u32, name: &str) -> Result<Value, String> {
+        if let Some(owner)=self.children_collection_owner(handle){
+            if name.is_empty(){return Ok(Value::Undefined);}
+            for node in self.parent_element_nodes(owner)? {
+                if self.collection_element_named_match(node,name)?{return Ok(Value::Host(node));}
+            }
+            return Ok(Value::Undefined);
+        }
         if name.is_empty() {
             return Ok(Value::Undefined);
         }
         for node in self.tag_collection_nodes(handle)? {
-            self.state.work(1)?;
-            let id = self.doc.attr(node, "id");
-            let candidate = self.doc.attr(node, "name");
-            self.state.copies(
-                id.map_or(0, str::len)
-                    .saturating_add(candidate.map_or(0, str::len)),
-            )?;
-            if id == Some(name) || candidate == Some(name) {
-                return Ok(Value::Host(node_handle(node)));
-            }
+            if self.collection_element_named_match(node_handle(node),name)?{return Ok(Value::Host(node_handle(node)));}
         }
         Ok(Value::Undefined)
     }
@@ -169,6 +172,13 @@ impl Bridge<'_> {
         handle: u32,
         property: &str,
     ) -> Result<Value, String> {
+        if handle==DOCUMENT_IMAGES{return self.image_collection_get(property);}
+        if self.collection_prototype_member(property)&&property!="length" {return Ok(Value::Undefined);}
+        if let Some(owner)=self.children_collection_owner(handle){
+            if property=="length"{return self.parent_node_get(owner,"childElementCount");}
+            if let Some(index)=collection_index(property){return Ok(self.parent_element_nodes(owner)?.get(index).copied().map_or(Value::Undefined,Value::Host));}
+            return self.tag_collection_named(handle,property);
+        }
         if property == "length" {
             return Ok(Value::Number(
                 self.tag_collection_nodes(handle)?.len() as f64
@@ -189,15 +199,15 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<Value, String> {
+        if handle==DOCUMENT_IMAGES{return self.call(handle,method,args);}
         let argument = args
             .first()
             .ok_or("HTMLCollection methods require one argument.")?;
         let value = match method {
             "item" => {
                 let index = timer_integer(argument)? as u32 as usize;
-                self.tag_collection_nodes(handle)?
-                    .get(index)
-                    .map_or(Value::Undefined, |&node| Value::Host(node_handle(node)))
+                if let Some(owner)=self.children_collection_owner(handle){self.parent_element_nodes(owner)?.get(index).copied().map_or(Value::Undefined,Value::Host)}
+                else {self.tag_collection_nodes(handle)?.get(index).map_or(Value::Undefined, |&node| Value::Host(node_handle(node)))}
             }
             "namedItem" => {
                 let name = self.text(argument)?;
@@ -213,7 +223,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn tag_collection_keys(&mut self, handle: u32) -> Result<Vec<String>, String> {
-        let length = self.tag_collection_nodes(handle)?.len();
+        let length = if let Some(owner)=self.children_collection_owner(handle){self.parent_element_nodes(owner)?.len()}else{self.tag_collection_nodes(handle)?.len()};
         #[cfg(test)]
         if self.state.limits.test_entry_arenas&&length>4096{return Err("HTMLCollection enumeration limit reached (4096 indices).".into());}
         self.state.index_keys(length)
@@ -274,3 +284,36 @@ impl State {
 #[cfg(test)]
 #[path = "script_live_collection_storage_tests.rs"]
 mod storage_tests;
+
+impl Bridge<'_> {
+    fn collection_element_named_match(&mut self,object:u32,name:&str)->Result<bool,String>{
+        let node=if let Some((owner,node))=self.frame_contains_node(object){self.contains_child_document(owner)?.nodes.get(node)}
+            else if self.inert_node_type(object).is_some(){self.inert_collection_element_source(object)}
+            else {node_index(object).and_then(|index|self.doc.nodes.get(index))};
+        let (work,found)=if let Some(Node{namespace,kind:NodeKind::Element{attrs,..},..})=node {
+            let html=*namespace==crate::html::Namespace::Html;
+            let work=attrs.iter().fold(attrs.len(),|sum,attr|sum.saturating_add(attr.name.qualified.len()).saturating_add(attr.value.len()));
+            (work,attrs.iter().any(|attr|(attr.name.html_is("id")||html&&attr.name.html_is("name"))&&attr.value==name))
+        }else{(1,false)};
+        self.state.work(work)?;Ok(found)
+    }
+    pub(super) fn collection_receiver(&self,handle:u32)->bool {handle==DOCUMENT_IMAGES||collection_handle_index(handle).is_some_and(|index|index<self.state.dom.collections.len())}
+    pub(super) fn collection_prototype_member(&self,property:&str)->bool {matches!(property,"constructor"|"length"|"item"|"namedItem")}
+    fn children_collection_owner(&self,handle:u32)->Option<u32>{
+        let record=self.state.dom.collections.get(collection_handle_index(handle)?)?;
+        if let Filter::Children(owner)=record.filter {Some(owner)}else{None}
+    }
+    pub(super) fn collection_owner_window(&self,handle:u32)->Option<u32>{
+        if !self.collection_receiver(handle){return None;}
+        Some(self.children_collection_owner(handle).and_then(|owner|self.frame_instance_window(owner)).unwrap_or(WINDOW))
+    }
+    pub(super) fn create_children_collection(&mut self,owner:u32)->Result<Value,String>{
+        // SameObject lookup needs no second owner registry or promotion update.
+        // Pay the existing registry scan before either returning or publishing.
+        self.state.work(self.state.dom.collections.len().saturating_add(1))?;
+        if let Some(index)=self.state.dom.collections.iter().position(|record|matches!(record.filter,Filter::Children(parent) if parent==owner)){
+            return Ok(Value::Host(COLLECTION_BASE+index as u32));
+        }
+        self.store_live_collection(0,Filter::Children(owner))
+    }
+}

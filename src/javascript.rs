@@ -503,6 +503,12 @@ pub(crate) const NODE_TRAVERSAL_GETTERS: [(&str, &str); 7] = [
     ("parentNode", "\0Node.get.parentNode"),
     ("parentElement", "\0Node.get.parentElement"),
 ];
+pub(crate) const PARENT_NODE_GETTERS: [(&str, &str); 4] = [
+    ("children","\0ParentNode.get.children"),
+    ("firstElementChild", "\0ParentNode.get.firstElementChild"),
+    ("lastElementChild", "\0ParentNode.get.lastElementChild"),
+    ("childElementCount", "\0ParentNode.get.childElementCount"),
+];
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";

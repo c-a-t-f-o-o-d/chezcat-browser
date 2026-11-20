@@ -1700,7 +1700,9 @@ fn class_name_collection_accounting_failures_keep_existing_storage_and_dom() {
     let list=bridge.create_class_collection(DOCUMENT,&Value::String("a".into())).unwrap();
     let Value::Host(list)=list else {unreachable!()};
     bridge.state.host_work=0;
-    assert!(bridge.get(list,"length").is_err());
+    // Length now lives on the genuine HTMLCollection prototype. Exercise
+    // its native getter rather than the removed own-property fallback.
+    assert!(bridge.call(list,"\0HTMLCollection.get.length",&[]).is_err());
     assert_eq!(bridge.state.dom.collections.len(),1);
     assert!(bridge.doc.nodes.iter().any(|node|matches!(&node.kind,NodeKind::Element {attrs,..} if attrs.iter().any(|attr|attr.name.html_is("class")&&attr.value=="a b"))));
 }

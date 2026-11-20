@@ -161,6 +161,13 @@ impl Bridge<'_> {
             .then(||window(index))
     }
 
+    pub(super) fn frame_child_node_handle(&self,owner:u32,node:usize)->Result<u32,String> {
+        let(index,offset)=frame_handle(owner).ok_or("Unknown child Window.")?;
+        let frame=self.state.blank_frames.get(index).ok_or("Unknown child document.")?;
+        if offset!=0||node>=frame.document.nodes.len()||node>3{return Err("Child node is outside the supported initial blank document.".into());}
+        Ok(document_node(index,node))
+    }
+
     pub(super) fn frame_contains_node(&self, handle: u32) -> Option<(u32, usize)> {
         let (index, offset) = frame_handle(handle)?;
         let node = match offset { 1 => 0, 4..=6 => (offset - 3) as usize, _ => return None };
