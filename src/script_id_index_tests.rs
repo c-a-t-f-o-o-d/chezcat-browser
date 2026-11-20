@@ -49,8 +49,7 @@ fn id_index_many_real_owners_use_only_paid_record_capacity_and_borrow_wide_ids()
     let wide_id="x".repeat(32_000);
     markup.push_str(&format!("<p id='{wide_id}'></p></body></html>"));
     let(doc,_,mut page)=page(&markup);
-    let index_bytes=page.state.tree.ids.capacity()*size_of::<(usize,usize)>();
-    assert_eq!(page.state.retained,document_bytes(&doc)+page.state.node_state_bytes()+index_bytes);
+    assert_eq!(page.state.retained,document_bytes(&doc)+page.state.tree_storage_bytes());
     assert_eq!(page.state.tree.ids.len(),6_001);
     for index in [0,1,2999,5999] {
         let id=format!("key{index:05}");let node=page.state.document_id(&doc,&id).unwrap().unwrap();

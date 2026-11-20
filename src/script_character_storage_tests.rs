@@ -55,7 +55,7 @@ fn character_storage_baseline_and_shrinking_setters_refund_owned_buffers() {
     doc.title = wide("old", 32);
     let baseline = document_bytes(&doc);
     let (mut doc, mut forms, mut page) = start(doc);
-    let expected=baseline+page.state.node_state_bytes();
+    let expected=baseline+page.state.tree_storage_bytes();
     assert_eq!(page.state.retained, expected);
     assert_eq!(node_bytes(&doc.nodes[text]), 64);
     assert_eq!(node_bytes(&doc.nodes[comment]), 128);

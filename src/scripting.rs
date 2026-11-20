@@ -31,6 +31,8 @@ use queries::node_list_index;
 #[path = "script_collections.rs"]
 mod dom_collections;
 use dom_collections::collection_handle_index;
+#[path = "script_tree_order.rs"]
+mod tree_order;
 #[path = "script_node_state.rs"]
 mod node_state;
 #[path = "script_dom_tree.rs"]
@@ -92,6 +94,9 @@ mod script_class_list;
 mod script_named_map;
 #[path = "script_normalize.rs"]
 mod script_normalize;
+#[cfg(test)]
+#[path = "script_tree_order_tests.rs"]
+mod script_tree_order_tests;
 #[cfg(test)]
 #[path = "script_sibling_order_storage_tests.rs"]
 mod script_sibling_order_storage_tests;
@@ -532,6 +537,7 @@ struct State {
     #[cfg(test)]
     disable_event_factory: bool,
     tree: Tree,
+    tree_stack: Vec<tree_order::Visit>,
     dirty: bool,
     // Committed DOM writes, including detached nodes; not native form values,
     // allocations, ordinary JS properties, layout work or resource completion.
@@ -620,6 +626,7 @@ impl State {
             #[cfg(test)]
             disable_event_factory: false,
             tree: Tree::default(),
+            tree_stack: Vec::new(),
             dirty: true,
             dom_commits: Some(0),
             limits: crate::javascript::limits::BROWSER,
@@ -1643,8 +1650,9 @@ impl Page {
         }
         // Compile each attribute as an ordinary function in this small global
         // environment. Legacy implicit form/element name scope is unsupported.
-        let nodes = self.state.tree.order.clone();
-        'handlers: for node in nodes {
+        // Handler compilation invokes no author code and cannot mutate tree order.
+        'handlers: for position in 0..self.state.tree.order.len() {
+            let node=self.state.tree.order[position];
             if let Err(error) = self.state.work(1) {
                 self.state.error("inline handler scan", &error);
                 break;

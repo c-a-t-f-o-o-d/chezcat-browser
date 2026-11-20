@@ -34,16 +34,19 @@ fn main_child_storage_startup_and_clear_retain_backing_while_replacement_refunds
     let baseline = document_bytes(&doc);
     let width = child_link_bytes(&doc.nodes[parent].children);
     let (mut doc, mut forms, mut page) = start(doc);
-    let expected=baseline+page.state.node_state_bytes();
+    let expected=baseline+page.state.tree_storage_bytes();
     assert_eq!(page.state.retained, expected);
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     bridge.set_text_content(parent, String::new()).unwrap();
     assert_eq!(bridge.state.retained, expected);
     assert_eq!(child_link_bytes(&bridge.doc.nodes[parent].children), width);
+    let old_order=bridge.state.order_bytes();
     bridge.state.rebuild(bridge.doc).unwrap();
-    bridge.state.retained_limit = expected - width;
+    assert_eq!(bridge.state.retained,expected-old_order+bridge.state.order_bytes());
+    let after_clear=bridge.state.retained;
+    bridge.state.retained_limit = after_clear - width;
     bridge.set_inner_html(parent, "").unwrap();
-    assert_eq!(bridge.state.retained, expected - width);
+    assert_eq!(bridge.state.retained, after_clear - width);
     assert_eq!(bridge.doc.nodes[parent].children.capacity(), 0);
     assert_eq!(bridge.doc.nodes[text].kind.character_data(), Some("x"));
     assert!(bridge.state.detached_nodes.contains(&text));
@@ -57,6 +60,7 @@ fn main_child_storage_append_exact_and_copy_refusal_keep_parent_and_reuse_paid_s
     let child = fresh(&mut bridge, "b");
     // Isolate child-link admission from later state-array compaction refunds.
     bridge.state.dirty=true;bridge.state.rebuild(bridge.doc).unwrap();
+    let limit=bridge.state.retained_limit;
     let before = bridge.state.retained;
     bridge.state.retained_limit = before + size_of::<usize>() - 1;
     assert!(call(&mut bridge, parent, "appendChild", &[Value::Host(node_handle(child))]).is_err());
@@ -71,6 +75,9 @@ fn main_child_storage_append_exact_and_copy_refusal_keep_parent_and_reuse_paid_s
     assert_eq!(bridge.state.retained, before + size_of::<usize>());
     assert_eq!(bridge.state.copy_work, 0);
     bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    // A connected order index may grow before the later removal; this part
+    // isolates reuse of the paid child-link slot from that separate store.
+    bridge.state.retained_limit=limit;
     call(&mut bridge, parent, "removeChild", &[Value::Host(node_handle(child))]).unwrap();
     bridge.state.retained_limit = bridge.state.retained;
     call(&mut bridge, parent, "appendChild", &[Value::Host(node_handle(child))]).unwrap();

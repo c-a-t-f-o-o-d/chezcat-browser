@@ -11,7 +11,7 @@ fn capacities(state:&State)->(usize,usize,usize,usize) {(state.tree.active.capac
 fn node_state_joint_exact_metadata_refuses_before_publishing_any_vector_and_reuses_paid_spares() {
     let(mut doc,mut forms,mut page)=page();let nodes=doc.nodes.len();let core=doc.nodes.capacity();
     let before=page.state.retained;let old=capacities(&page.state);assert_eq!(old,(nodes,nodes,nodes,nodes));
-    assert_eq!(before,document_bytes(&doc)+nodes*(2+size_of::<Option<usize>>()+size_of::<usize>()));
+    assert_eq!(before,document_bytes(&doc)+page.state.tree_storage_bytes());
     let bytes=2+size_of::<Option<usize>>()+size_of::<usize>();page.state.retained_limit=before+bytes-1;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     assert!(bridge.create_dom_node(NodeKind::DocumentFragment).is_err());
