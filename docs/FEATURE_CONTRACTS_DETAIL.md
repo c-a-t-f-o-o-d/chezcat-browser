@@ -1545,3 +1545,38 @@ pixels, and actual script load/error event targets remain authoritative. This
 slice adds interface identity over those implementations, not the full image or
 script IDL, image decode promises, module execution or resource activation in
 inert documents. Prototype additions do not create new loading permission.
+
+
+## Live DOM Range boundary increment
+
+The owner realm supplies canonical Range, NodeRange and AbstractRange interface
+objects, class tags and branded accessors. Range construction and the displayed
+document's createRange start at that document with both offsets zero. Supported
+operations set either endpoint, select a node or its contents, set relative
+boundaries, collapse, clone, detach (a no-op), read the common ancestor and
+stringify selected Text. Offsets use Web IDL unsigned-long conversion and UTF-16
+code units; an exact slice can contain an unpaired surrogate. Native node
+identity and saved constructors remain authoritative after author shadowing.
+
+Native insertion/removal/moves, replacement, main and promoted inert-fragment
+insertion, character-data replacement, textContent, innerHTML and normalization
+update boundaries before infallible tree publication. Removed descendants
+retarget to the removal point; insertion shifts only offsets strictly after the
+insertion point. Normalization relocates merged-text and parent boundaries with
+UTF-16 offsets. Failed mutation preparation or storage admission preserves both
+the old tree and range state. Shared native work/copy guards cover update scans.
+
+Range records hold native handles, not interpreter values. The existing shared
+host retained-byte allowance admits actual record-vector capacity with checked
+arithmetic and fallible growth. There is no extra Range count policy: its typed
+native handle domain has a checked 24-bit index, and backing/storage admission
+normally applies first. Records remain retained until the page is torn down;
+detach does not reclaim or invalidate a live range.
+
+This increment supports accessible displayed-document nodes, including detached
+main-document nodes and fragments. Child/inert construction/endpoints, Attr
+endpoints, StaticRange, comparison/query methods, geometry, contextual fragments,
+content deletion/extraction/cloning/insertion and surrounding remain outside the
+implemented subset. Range identity is not a DOM selection, editor-selection or
+site initialization claim. Original App acceptance uses trusted input, actual
+text runs/pixels and stable neighboring editor/link hit targets.

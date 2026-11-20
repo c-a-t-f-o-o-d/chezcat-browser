@@ -5990,3 +5990,7 @@ mod derived_class_tests;
 #[cfg(test)]
 #[path = "app_document_properties_tests.rs"]
 mod document_properties_tests;
+
+#[cfg(test)]
+#[path = "app_range_tests.rs"]
+mod range_tests;
