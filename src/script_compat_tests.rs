@@ -4029,6 +4029,20 @@ document.title='checked SVG attached';
 }
 
 #[test]
+fn template_svg_presentation_attributes_keep_real_values_aliases_clone_and_guards() {
+    let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r##"
+var seed=document.createElement('template');seed.innerHTML='<svg><defs><path id="shape" d="M0 0 L2 2"/></defs><use id="presented" href="#shape" overflow="visible" stroke-linecap="round" stroke-linejoin="bevel" stroke-miterlimit="4" stroke-dasharray="1 2" stroke-dashoffset=".5" pointer-events="none" vector-effect="non-scaling-stroke" color-interpolation="sRGB" font-family="serif" font-size="12" text-anchor="middle" transform-origin="0 0"/></svg>';
+var content=seed.content,svg=content.firstChild,use=svg.children[1],map=use.attributes,overflow=use.getAttributeNode('overflow'),owner=use.ownerDocument;
+if(map.getNamedItem('overflow')!==overflow||overflow.ownerElement!==use||overflow.value!=='visible'||use.getAttributeNames().join(',')!=='id,href,overflow,stroke-linecap,stroke-linejoin,stroke-miterlimit,stroke-dasharray,stroke-dashoffset,pointer-events,vector-effect,color-interpolation,font-family,font-size,text-anchor,transform-origin')throw 'real ordered presentation attributes';
+var clone=content.cloneNode(true).firstChild.children[1];
+if(clone===use||clone.ownerDocument!==owner||clone.getAttribute('overflow')!=='visible'||clone.getAttribute('stroke-dasharray')!=='1 2'||clone.getAttribute('font-family')!=='serif'||clone.getAttribute('vector-effect')!=='non-scaling-stroke'||seed.innerHTML.indexOf('overflow="visible"')<0)throw 'presentation clone and serialization';
+document.getElementById('mount').appendChild(content);
+if(document.getElementById('presented')!==use||!use.isConnected||overflow.ownerDocument!==document||overflow.ownerElement!==use||overflow.value!=='visible'||use.getAttribute('stroke-linejoin')!=='bevel'||use.getAttribute('pointer-events')!=='none'||use.getAttribute('text-anchor')!=='middle'||clone.isConnected||content.childNodes.length!==0)throw 'presentation owner promotion';
+"##]);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());let(added,removed,changed)=page.take_image_changes();assert!(added.is_empty()&&removed.is_empty()&&changed.is_empty());assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_local_use_keeps_real_xlink_attributes_clone_and_owner_promotion() {
     let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r##"
 var seed=document.createElement('template');seed.innerHTML='<svg xmlns:xlink="http://www.w3.org/1999/xlink"><defs><g id="shape"><path d="M0 0 L2 2"/></g><clipPath id="cut"><rect width="2" height="2"/></clipPath><linearGradient id="base-paint"><stop offset="0" stop-color="red"/></linearGradient><linearGradient id="paint" href="#base-paint"/></defs><use id="qualified" xlink:href="#shape" clip-path="url(#cut)" mask="none" fill="url(#paint)"/><use id="plain" href="#shape" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"/></svg>';
@@ -4134,6 +4148,9 @@ if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttr
         "<svg><use other:href='#local'/></svg>",
         "<svg><path clip-path='url(https://guard.invalid/icon.svg#cut)'/></svg>",
         "<svg><path mask='url(/guard#mask)'/></svg>",
+        "<svg><use href='#local' overflow='visible' cursor='url(https://guard.invalid/cursor)'/></svg>",
+        "<svg><use href='#local' stroke-linecap='round' filter='url(/guard#filter)'/></svg>",
+        "<svg><use href='#local' overflow='visible' marker-start='url(#marker)'/></svg>",
         "<svg><image href='/guard'/></svg>",
         "<svg><g></svg>",
         "<svg><g/>",

@@ -30,6 +30,18 @@ pub(super) fn supported_tag(tag: &Tag) -> bool {
             || tag.attrs.iter().all(|(key,value)|!matches!(key.as_str(),"href"|"xlink:href")||crate::svg_reference::fragment(value).is_some()))
 }
 
+fn passive_presentation_attribute(name:&str)->bool{
+    // Values remain real attribute data. URI-bearing presentation attributes
+    // use separate admission below; this does not expose CSSOM/rendering APIs.
+    matches!(name,"alignment-baseline"|"baseline-shift"|"color"|"color-interpolation"|"color-interpolation-filters"|
+        "direction"|"dominant-baseline"|"flood-color"|"flood-opacity"|"font-family"|"font-size"|"font-size-adjust"|
+        "font-stretch"|"font-style"|"font-variant"|"font-weight"|"glyph-orientation-vertical"|"image-rendering"|
+        "letter-spacing"|"lighting-color"|"overflow"|"paint-order"|"pointer-events"|"shape-rendering"|
+        "stroke-dasharray"|"stroke-dashoffset"|"stroke-linecap"|"stroke-linejoin"|"stroke-miterlimit"|
+        "text-anchor"|"text-decoration"|"text-overflow"|"text-rendering"|"transform-origin"|"unicode-bidi"|
+        "vector-effect"|"white-space"|"word-spacing"|"writing-mode")
+}
+
 pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
     if !shape_element(&tag.name){return Some(("element",&tag.name));}
     if tag.duplicate_attributes{return Some(("duplicate attributes on element",&tag.name));}
@@ -51,6 +63,7 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
         // These ordinary null-namespace data/accessibility names do not bind
         // event handlers, external resources or graphics/focus APIs.
         _ if key.starts_with("aria-") || key.starts_with("data-") => true,
+        _ if passive_presentation_attribute(key) => true,
         _ => false,
     }).then_some(("attribute",key.as_str())))
 }
