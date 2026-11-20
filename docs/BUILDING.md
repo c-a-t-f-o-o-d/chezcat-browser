@@ -61,6 +61,22 @@ assets, trust data, and notices with the executable. Rust and Python are develop
 tools, not application runtime dependencies. A source ZIP is not a ready-to-run
 Windows runtime bundle.
 
+### Faster local iteration
+
+```powershell
+.\build_dev.cmd
+```
+
+This wrapper uses `Build.cmd` with LTO disabled, 16 code generation units, and
+incremental compilation enabled for this invocation. It keeps the pinned toolchain,
+license check, offline/locked build, and normal `ChezCat.exe` output.
+
+Development artifacts are reused in `target\build-dev`, or a `build-dev` child of
+your configured `CARGO_TARGET_DIR`. The first run fills this separate cache;
+subsequent edits can reuse it. Both scripts replace `ChezCat.exe` in the checkout,
+so run them sequentially. Use `.\Build.cmd` for normal release optimization before
+performance comparisons or release qualification.
+
 ## Choose the right verification scope
 
 | Work | Check | Evidence boundary |
