@@ -10,9 +10,6 @@ use super::{
 };
 use std::cmp::Ordering;
 
-pub(super) const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
-const MAX_RETAINED_BYTES: usize = 16 * 1024 * 1024;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(usize)]
 pub(super) enum Kind {
@@ -587,24 +584,34 @@ impl Runtime {
             .copy_from_slice(&bytes[..view.kind.size()]);
         Ok(())
     }
+    pub(super) fn binary_storage_available(&self) -> usize {
+        self.limits.heap.retained_values.saturating_sub(self.value_bytes)
+    }
+
+    fn check_binary_storage(&self, bytes: usize) -> Result<(), Fault> {
+        if bytes > self.binary_storage_available() {
+            return Err(Fault::new(format!("Retained value limit reached ({} bytes) allocating ArrayBuffer.", self.limits.heap.retained_values)));
+        }
+        Ok(())
+    }
+
     fn new_buffer(&mut self, length: usize) -> Result<usize, Fault> {
-        if length > MAX_BUFFER_BYTES {
-            return Err(Fault::new("ArrayBuffer byte limit reached (4 MiB)."));
-        }
-        if self.retained_binary.saturating_add(length) > MAX_RETAINED_BYTES {
-            return Err(Fault::new("Retained binary data limit reached (16 MiB)."));
-        }
+        self.check_binary_storage(length)?;
         self.ensure_global_intrinsics("ArrayBuffer")?;
+        self.check_binary_storage(length)?;
         self.work(length)?;
-        let id = self.new_object(None)?;
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(length)
             .map_err(|_| Fault::new("Unable to allocate bounded ArrayBuffer."))?;
+        let allocated = bytes.capacity();
+        self.check_binary_storage(allocated)?;
         bytes.resize(length, 0);
+        let id = self.new_object(None)?;
         self.objects[id].binary = Some(Data::Buffer(bytes));
         self.objects[id].prototype = self.binary_roots.buffer.map(Ordinary::Object);
-        self.retained_binary += length;
+        self.retained_binary += allocated;
+        self.value_bytes += allocated;
         Ok(id)
     }
     fn new_typed_view(
@@ -1724,29 +1731,52 @@ mod tests {
     }
 
     #[test]
-    fn binary_allocations_have_per_buffer_and_document_caps() {
+    fn binary_storage_shares_retained_admission_and_rejects_atomically() {
         let mut runtime = Runtime::for_test();
-        let before = runtime.objects.len();
-        assert!(runtime
-            .new_buffer(MAX_BUFFER_BYTES + 1)
-            .unwrap_err()
-            .display()
-            .contains("4 MiB"));
-        assert_eq!(runtime.objects.len(), before);
-        assert_eq!(runtime.retained_binary, 0);
-        for _ in 0..MAX_RETAINED_BYTES / MAX_BUFFER_BYTES {
-            runtime.begin_job();
-            runtime.new_buffer(MAX_BUFFER_BYTES).unwrap();
+        runtime.new_buffer(0).unwrap();
+        let baseline = runtime.value_bytes;
+        runtime.limits.heap.retained_values = baseline + 128;
+        let buffer = runtime.new_buffer(128).unwrap();
+        assert_eq!(runtime.buffer_bytes(buffer).unwrap(), &[0; 128]);
+        assert_eq!(runtime.value_bytes, baseline + runtime.retained_binary);
+        let before = (runtime.objects.len(), runtime.retained_binary, runtime.value_bytes);
+        for length in [1, usize::MAX] {
+            let error = runtime.new_buffer(length).unwrap_err();
+            assert!(error.message.contains("Retained value limit"), "{error:?}");
+            assert_eq!((runtime.objects.len(), runtime.retained_binary, runtime.value_bytes), before);
         }
-        runtime.begin_job();
-        let before = runtime.objects.len();
-        assert!(runtime
-            .new_buffer(1)
-            .unwrap_err()
-            .display()
-            .contains("16 MiB"));
-        assert_eq!(runtime.retained_binary, MAX_RETAINED_BYTES);
-        assert_eq!(runtime.objects.len(), before);
+        runtime.limits.heap.retained_values += 64;
+        assert!(runtime.new_buffer(64).is_ok());
+    }
+
+    #[test]
+    fn binary_large_script_backing_and_text_codecs_share_real_bytes() {
+        struct NoHost;
+        impl Host for NoHost {
+            fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { panic!("unexpected host read") }
+            fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { panic!("unexpected host write") }
+            fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected host call") }
+        }
+        let mut runtime = Runtime::new();
+        runtime.execute("var backing=new ArrayBuffer(5*1024*1024),bytes=new Uint8Array(backing),view=new DataView(backing);view.setUint32(bytes.length-4,0x12345678,true);if(bytes[bytes.length-4]!==0x78||view.getUint32(bytes.length-4,true)!==0x12345678)throw 'shared tail';var encoded=new TextEncoder().encode('abc');if(encoded.length!==3||new TextDecoder().decode(encoded)!=='abc')throw 'codec backing';", &mut NoHost).unwrap();
+        assert!(runtime.retained_binary >= 5 * 1024 * 1024 + 3);
+        assert!(runtime.value_bytes >= runtime.retained_binary);
+    }
+
+    #[test]
+    fn binary_storage_exceeds_former_buffer_and_document_caps() {
+        let mut runtime = Runtime::new();
+        runtime.new_buffer(0).unwrap();
+        let before = runtime.value_bytes;
+        for i in 0..4 {
+            let buffer = runtime.new_buffer(5 * 1024 * 1024).unwrap();
+            let view = runtime.new_typed_view(Kind::U8, buffer, 5 * 1024 * 1024 - 1, 1).unwrap();
+            let view = runtime.typed_view(view).unwrap();
+            runtime.typed_write(view, 0, (i + 7) as f64).unwrap();
+            assert_eq!(runtime.typed_read(view, 0).unwrap(), (i + 7) as f64);
+        }
+        assert!(runtime.retained_binary > 16 * 1024 * 1024);
+        assert_eq!(runtime.value_bytes - before, runtime.retained_binary);
     }
 
     #[test]

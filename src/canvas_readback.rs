@@ -1,5 +1,5 @@
 //! Web IDL conversion and export of a fresh, bounded canvas pixel snapshot.
-use super::{binary_data, Fault, Host, Runtime, Value};
+use super::{Fault, Host, Runtime, Value};
 use crate::canvas_2d_bitmap::{ReadbackError, ReadbackRect};
 
 pub(crate) const METHOD: &str = "\0CanvasRenderingContext2D.getImageData";
@@ -69,7 +69,7 @@ impl Runtime {
             *y as i32,
             *w as i32,
             *h as i32,
-            binary_data::MAX_BUFFER_BYTES,
+            self.binary_storage_available(),
         ) {
             Ok(rect) => rect,
             Err(ReadbackError::ZeroSize) => {
@@ -120,6 +120,7 @@ mod tests {
     struct PixelHost {
         canvas: CanvasBitmap,
         reads: usize,
+        expected_bytes: usize,
     }
 
     impl Host for PixelHost {
@@ -159,7 +160,7 @@ mod tests {
             _: u32,
             bytes: usize,
         ) -> Result<&CanvasBitmap, String> {
-            assert_eq!(bytes, 4);
+            assert_eq!(bytes, self.expected_bytes);
             self.reads += 1;
             Ok(&self.canvas)
         }
@@ -171,6 +172,7 @@ mod tests {
         let mut host = PixelHost {
             canvas: CanvasBitmap::new(1, 1),
             reads: 0,
+            expected_bytes: 4,
         };
         runtime
             .define_host_function("readPixels", 1, METHOD)
@@ -203,5 +205,21 @@ if(!caught||visits!==5)throw 'ordered transient getters';
             .execute("retain({},function(){});0;", &mut host)
             .unwrap();
         assert_eq!(roots(&runtime), (before.0 + 1, before.1 + 1));
+    }
+
+    #[test]
+    fn canvas_readback_uses_shared_storage_beyond_four_mib() {
+        let mut runtime = Runtime::new();
+        let mut host = PixelHost {
+            canvas: CanvasBitmap::new(1, 1), reads: 0, expected_bytes: 1025 * 1024 * 4,
+        };
+        runtime.define_host_function("readPixels", 1, METHOD).unwrap();
+        runtime.execute("var image=readPixels(0,0,1025,1024);if(image.width!==1025||image.height!==1024||image.data.length!==4198400||image.data[4198399]!==0)throw 'large readback';", &mut host).unwrap();
+        assert_eq!(host.reads, 1);
+        runtime.limits.heap.retained_values = runtime.value_bytes + 64;
+        let error = runtime.execute("readPixels(0,0,1025,1024);", &mut host).unwrap_err();
+        assert!(error.contains("backing limit"), "{error}");
+        assert_eq!(host.reads, 1);
+        assert!(runtime.transient_registration_is_empty());
     }
 }
