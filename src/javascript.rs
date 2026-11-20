@@ -4792,7 +4792,7 @@ impl Runtime {
     ) -> Result<Rc<Program>, Fault> {
         self.step()?;
         self.prepare_program_capacity(source.len(), 0, true)?;
-        if self.programs.len() >= self.limits.capacity.programs
+        if self.program_count_refused()
             || self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source
         {
             return Err(self.program_limit_fault(source, None, if handler { "handler" } else { "ordinary" }, Some(strict), false));
@@ -4836,7 +4836,7 @@ impl Runtime {
 
     fn retain_parsed_program(&mut self, program: Rc<Program>) -> Result<Rc<Program>, Fault> {
         self.prepare_program_capacity(program.source.len(), program.node_count(), true)?;
-        if self.programs.len() >= self.limits.capacity.programs
+        if self.program_count_refused()
             || self.retained_source.saturating_add(program.source.len()) > self.limits.capacity.retained_source
         {
             return Err(self.program_limit_fault(&program.source, Some(program.node_count()), "parsed-retention", None, false));
@@ -4853,7 +4853,13 @@ impl Runtime {
         if self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast {
             return Err(self.program_limit_fault(&program.source, Some(nodes), "parsed-retention", None, true));
         }
+        // Registry capacity is owned retained metadata. Reserve and admit
+        // movement before mutating regexp/source/AST retention or publishing
+        // the parsed program; failure drops only the unpublished reservation.
+        let growth=limits::prepare_retained_growth(&self.programs,1,self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        if growth.added!=0{self.work(self.programs.len()*std::mem::size_of::<Rc<Program>>())?;}
         self.retain_regexp(regexp_bytes)?;
+        let added=growth.added;growth.commit(&mut self.programs);self.value_bytes+=added;
         self.retained_source += program.source.len();
         self.retained_ast += nodes;
         self.programs.push(program.clone());
@@ -12062,13 +12068,13 @@ caught;
     fn sparse_padding_is_bounded_without_storing_thousands_of_holes() {
         let (mut runtime, mut host) = test_runtime();
         let properties = runtime.properties;
-        let retained = runtime.value_bytes;
+        let retained = runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>();
         let value = runtime
             .execute(r"Array(7824).join('\n');", &mut host)
             .unwrap();
         assert_eq!(value.to_text().len(), 7823);
         assert_eq!(runtime.properties, properties);
-        assert_eq!(runtime.value_bytes, retained);
+        assert_eq!(runtime.value_bytes-runtime.programs.capacity()*std::mem::size_of::<Rc<Program>>(),retained);
         assert!(
             runtime.steps > MAX_STEPS / 2,
             "Holes should not consume one full property lookup each"

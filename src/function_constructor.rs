@@ -56,7 +56,7 @@ impl Runtime {
                 ));
             }
             self.prepare_program_capacity(source.len(), 0, true)?;
-            if self.programs.len() >= self.limits.capacity.programs
+            if self.program_count_refused()
                 || self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source
             {
                 return Err(self.program_limit_fault(&source, None, "dynamic-constructor", Some(false), false));

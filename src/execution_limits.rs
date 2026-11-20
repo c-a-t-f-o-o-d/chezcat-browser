@@ -119,6 +119,8 @@ pub struct Capacities {
     #[cfg(test)]
     pub(crate) test_native_parser_depth: Option<usize>,
     pub functions: usize,
+    // Parser/dynamic loading still use this profile until their storage slice.
+    // Runtime program identities use retained backing, with test-only counts.
     pub programs: usize,
     pub environments: usize,
     pub bindings: usize,

@@ -380,6 +380,18 @@ mod retirement_tests {
 }
 
 impl Runtime {
+    pub(super) fn program_count_limit(&self)->Option<usize> {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas{return Some(self.limits.capacity.programs);}
+        None
+    }
+    pub(super) fn program_count_refused(&self)->bool {
+        self.program_count_limit().is_some_and(|limit|self.programs.len()>=limit)
+    }
+    fn program_registry_pressure(&self)->bool {
+        if self.program_count_limit().is_some(){return self.program_count_refused();}
+        self.programs.len()==self.programs.capacity()
+    }
     // A Program has no Rc<Program> edges. Functions and active evaluators own
     // independent Rc handles; the registry is the sole owner of dead entries.
     // No parser result, function identity, environment or regexp charge is reused.
@@ -394,7 +406,7 @@ impl Runtime {
         if self.program_allocation.disabled {
             return Ok(());
         }
-        if !(needs_slot && self.programs.len() >= self.limits.capacity.programs
+        if !(needs_slot && self.program_registry_pressure()
             || self.retained_source.saturating_add(source_bytes) > self.limits.capacity.retained_source
             || self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast)
         {
@@ -465,7 +477,7 @@ impl Runtime {
         let mut registry_only = 0usize;
         let mut requested_matches = 0usize;
         let mut dynamic = 0usize;
-        for (index, program) in self.programs.iter().enumerate().take(self.limits.capacity.programs) {
+        for (index, program) in self.programs.iter().enumerate().take(self.program_count_limit().unwrap_or(4096)) {
             let group = groups.entry(program.source.as_str()).or_insert((index, 0));
             group.1 += 1;
             if program.source == source {
@@ -492,14 +504,16 @@ impl Runtime {
             right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
         });
         repeated.truncate(3);
-        let count_cap = self.programs.len() >= self.limits.capacity.programs;
+        let count_cap = self.program_count_refused();
         let source_cap = self.retained_source.saturating_add(source.len()) > self.limits.capacity.retained_source;
         let ast_cap =
             nodes.is_some_and(|nodes| self.retained_ast.saturating_add(nodes) > self.limits.capacity.retained_ast);
         let prefix = if ast {
             format!("Retained AST limit reached ({} nodes).", self.limits.capacity.retained_ast)
+        } else if let Some(limit)=self.program_count_limit() {
+            format!("Retained script limit reached ({} scripts / {} MiB source).",limit,self.limits.capacity.retained_source/(1024*1024))
         } else {
-            format!("Retained script limit reached ({} scripts / {} MiB source).", self.limits.capacity.programs, self.limits.capacity.retained_source / (1024 * 1024))
+            format!("Retained script source limit reached ({} MiB source).",self.limits.capacity.retained_source/(1024*1024))
         };
         Fault::new(format!("{prefix} Count/source/AST-cap={count_cap}/{source_cap}/{ast_cap}; programs={}; source-bytes={}; AST-nodes={}; regexp-accounting-bytes={}; requested-kind={kind}; requested-input-strict={input_strict:?}; requested-bytes={}; requested-nodes={nodes:?}; active-native={}; exact-source-groups={unique}; requested-exact-source-occurrences={requested_matches}; registry-only={registry_only}; dynamic-template-programs={dynamic}; top-duplicate-first-index/count/bytes={repeated:?}. Exact source equality is attribution, not proof of a reusable compilation context.",
             self.programs.len(), self.retained_source, self.retained_ast, self.retained_regexp, source.len(), self.eval_depth))
@@ -582,3 +596,7 @@ fn retained_program_attribution_is_numeric_and_preserves_existing_guards_and_wor
         );
     }
 }
+
+#[cfg(test)]
+#[path = "program_registry_storage_tests.rs"]
+mod storage_tests;

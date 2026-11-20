@@ -20,7 +20,7 @@ impl Runtime {
             kinds[kind] += 1;
             if self.function_realms.get(index).is_some_and(Option::is_none) { main[kind] += 1; }
             if let Function::Script { program, template, .. } = function {
-                let program_id = self.programs.iter().position(|candidate| Rc::ptr_eq(candidate, program)).unwrap_or(self.limits.capacity.programs);
+                let program_id = self.programs.iter().position(|candidate| Rc::ptr_eq(candidate, program)).unwrap_or(self.programs.len());
                 *templates.entry((program_id, *template)).or_insert(0usize) += 1;
             }
         }
