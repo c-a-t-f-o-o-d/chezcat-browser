@@ -4029,6 +4029,21 @@ document.title='checked SVG attached';
 }
 
 #[test]
+fn template_svg_definition_containers_keep_adjusted_names_clone_and_owner_promotion() {
+    let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r##"
+var seed=document.createElement('template');seed.innerHTML='<svg><defs><clipPath id="cut" clipPathUnits="userSpaceOnUse"><path d="M0 0 L2 2"/></clipPath><linearGradient id="linear" gradientUnits="userSpaceOnUse" gradientTransform="rotate(5)" spreadMethod="pad"><stop offset="0" stop-color="#fff" stop-opacity=".5"/></linearGradient><radialGradient id="radial" fx="1" fy="2" fr="0"><stop offset="1" stop-color="red"/></radialGradient><symbol id="symbol" viewBox="0 0 2 2"><rect width="2" height="2"/></symbol></defs></svg>';
+var content=seed.content,svg=content.firstChild,defs=svg.firstChild,view=defs.children,clip=view[0],linear=view[1],radial=view[2],symbol=view[3],owner=clip.ownerDocument,units=clip.getAttributeNode('clipPathUnits');
+if(view.length!==4||clip.nodeName!=='clipPath'||clip.localName!=='clipPath'||linear.nodeName!=='linearGradient'||radial.nodeName!=='radialGradient'||symbol.nodeName!=='symbol'||linear.firstChild.nodeName!=='stop'||clip.namespaceURI!==svg.namespaceURI||!(clip instanceof SVGElement)||clip instanceof HTMLElement)throw 'real definition namespace and tag adjustment';
+if(clip.getAttribute('clipPathUnits')!=='userSpaceOnUse'||clip.getAttribute('clippathunits')!==null||linear.getAttributeNames().join(',')!=='id,gradientUnits,gradientTransform,spreadMethod'||linear.getAttribute('gradientTransform')!=='rotate(5)'||linear.firstChild.getAttribute('stop-opacity')!=='.5'||radial.getAttribute('fr')!=='0'||symbol.getAttribute('viewBox')!=='0 0 2 2')throw 'actual definition attribute values';
+var clone=content.cloneNode(true).firstChild.firstChild;
+if(clone.firstChild===clip||clone.firstChild.firstChild===clip.firstChild||clone.firstChild.ownerDocument!==owner||clone.children[1].nodeName!=='linearGradient'||clone.children[1].getAttribute('spreadMethod')!=='pad'||seed.innerHTML.indexOf('<clipPath ')<0||seed.innerHTML.indexOf('gradientTransform="rotate(5)"')<0)throw 'definition clone and serialization';
+document.getElementById('mount').appendChild(content);
+if(document.getElementById('cut')!==clip||!radial.isConnected||symbol.firstChild.ownerDocument!==document||defs.children!==view||view[0]!==clip||units.ownerElement!==clip||units.ownerDocument!==document||units.value!=='userSpaceOnUse'||clone.isConnected||content.childNodes.length!==0)throw 'definition native owner promotion';
+"##]);
+    assert_eq!(outcome.errors,0,"{}",page.report());assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());let(added,removed,changed)=page.take_image_changes();assert!(added.is_empty()&&removed.is_empty()&&changed.is_empty());assert!(!page.has_navigation_request());
+}
+
+#[test]
 fn template_svg_mask_container_keeps_namespace_children_clone_and_real_owners() {
     let(_,_,mut page,outcome)=page("<html><body><main id=mount></main></body></html>",&[r#"
 var seed=document.createElement('template');seed.innerHTML='<svg><defs><mask id="mask" maskUnits="userSpaceOnUse" maskContentUnits="objectBoundingBox" mask-type="alpha"><rect width="1" height="1" fill="white"/></mask></defs></svg>';
@@ -4092,6 +4107,9 @@ if(copy===svg||copy.namespaceURI!==uri||copy.getAttribute('style')!==svg.getAttr
         "<svg aria-hidden='true' xlink:href='/guard'></svg>",
         "<svg><defs><mask onclick='trigger()'></mask></defs></svg>",
         "<svg><defs><mask href='/guard'></mask></defs></svg>",
+        "<svg><defs><clipPath onclick='trigger()'></clipPath></defs></svg>",
+        "<svg><defs><linearGradient href='/guard'></linearGradient></defs></svg>",
+        "<svg><filter><feImage href='/guard'/></filter></svg>",
         "<svg><path fill='url(#foreign)'/></svg>",
         "<svg><image href='/guard'/></svg>",
         "<svg><g></svg>",

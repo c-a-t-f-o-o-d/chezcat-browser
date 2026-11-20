@@ -17,7 +17,8 @@ pub(super) fn flow_context(name: &str) -> bool {
 }
 
 pub(super) fn shape_element(name: &str) -> bool {
-    matches!(name, "svg" | "defs" | "g" | "mask" | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
+    matches!(name, "svg" | "defs" | "g" | "mask" | "clippath" | "lineargradient" | "radialgradient" | "stop" | "symbol"
+        | "circle" | "ellipse" | "line" | "path" | "polygon" | "polyline" | "rect")
 }
 
 pub(super) fn supported_tag(tag: &Tag) -> bool {
@@ -34,6 +35,8 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
     tag.attrs.iter().find_map(|(key, value)| (!match key.as_str() {
         "id" | "class" | "style" | "role" | "focusable" | "tabindex" | "viewbox" | "preserveaspectratio" | "pathlength" |
         "maskunits" | "maskcontentunits" | "mask-type" |
+        "clippathunits" | "gradientunits" | "gradienttransform" | "spreadmethod" | "offset" | "stop-color" | "stop-opacity" |
+        "opacity" | "fill-opacity" | "stroke-opacity" | "fill-rule" | "clip-rule" | "transform" | "display" | "visibility" | "fx" | "fy" | "fr" |
         "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
         "fill" | "stroke" => value.strip_prefix('#').map_or_else(
@@ -51,8 +54,11 @@ pub(super) fn publish(nodes: &mut [Node]) {
     // Arena allocation follows source order. Each completed island owns a
     // disjoint slice, including its elements and non-rendering text/comment nodes.
     for node in nodes {
-        if let NodeKind::Element { attrs, .. } = &mut node.kind {
+        if let NodeKind::Element { tag, attrs, .. } = &mut node.kind {
             node.namespace = Namespace::Svg;
+            // Same-length ASCII tag adjustment retains the admitted backing.
+            let upper=match tag.as_str(){"clippath"=>Some(4),"lineargradient"|"radialgradient"=>Some(6),_=>None};
+            if let Some(index)=upper{tag.get_mut(index..index+1).expect("ASCII SVG tag adjustment").make_ascii_uppercase();}
             for attr in attrs {
                 // The shape subset supports these adjusted, case-sensitive
                 // attribute names without implementing their graphics APIs.
@@ -62,6 +68,10 @@ pub(super) fn publish(nodes: &mut [Node]) {
                     "pathlength" => Some("pathLength"),
                     "maskunits" => Some("maskUnits"),
                     "maskcontentunits" => Some("maskContentUnits"),
+                    "clippathunits" => Some("clipPathUnits"),
+                    "gradientunits" => Some("gradientUnits"),
+                    "gradienttransform" => Some("gradientTransform"),
+                    "spreadmethod" => Some("spreadMethod"),
                     _ => None,
                 };
                 if let Some(name) = adjusted { attr.name.qualified = name.into(); }
@@ -87,9 +97,9 @@ mod tests {
     #[test]
     fn svg_namespace_balanced_islands_publish_only_scoped_elements() {
         let doc = parse("<html><body><circle id=outside></circle><svg id=root xmlns='http://www.w3.org/2000/svg'>\n\
-            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g><defs><mask id=mask maskUnits=userSpaceOnUse><rect id='mask-rect'/></mask></defs></svg>\
+            <g id=group><circle id='a'/><rect id='b'/><svg id=nested><path id=p d='M1 2'/></svg></g><defs><mask id=mask maskUnits=userSpaceOnUse><rect id='mask-rect'/></mask><clipPath id=clip clipPathUnits=userSpaceOnUse><path id='clip-path'/></clipPath></defs></svg>\
             <svg id='empty'/><div id=after xmlns='http://www.w3.org/2000/svg'></div></body></html>");
-        for id in ["root", "group", "a", "b", "nested", "p", "empty", "mask", "mask-rect"] {
+        for id in ["root", "group", "a", "b", "nested", "p", "empty", "mask", "mask-rect", "clip", "clip-path"] {
             assert_eq!(node(&doc, id).namespace, Namespace::Svg, "{id}");
         }
         for id in ["outside", "after"] { assert_eq!(node(&doc, id).namespace, Namespace::Html); }
@@ -99,6 +109,8 @@ mod tests {
         assert!(attrs.iter().any(|a| a.name.matches(Some("http://www.w3.org/2000/xmlns/"), "xmlns")));
         let NodeKind::Element{attrs,..}=&node(&doc,"mask").kind else{panic!("SVG mask")};
         assert!(attrs.iter().any(|attr|attr.name.html_is("maskUnits")&&attr.value=="userSpaceOnUse"));
+        let NodeKind::Element{tag,attrs,..}=&node(&doc,"clip").kind else{panic!("SVG clipPath")};
+        assert_eq!(tag,"clipPath");assert!(attrs.iter().any(|attr|attr.name.html_is("clipPathUnits")&&attr.value=="userSpaceOnUse"));
         assert!(doc.nodes.iter().filter(|n| matches!(n.kind, NodeKind::Text(_))).all(|n| n.namespace == Namespace::None));
         assert_eq!(Namespace::Svg.element_uri(), Some("http://www.w3.org/2000/svg"));
         assert!(Namespace::Svg.is_foreign() && Namespace::UnknownForeign.is_foreign());
