@@ -102,7 +102,7 @@ struct Snapshot {
 impl Snapshot {
     fn capture(doc:&Document,forms:&Forms,page:&Page)->Self {
         Self{tree:format!("{:?}",doc.nodes),parents:page.state.tree.parents.clone(),connected:page.state.dom.connected.clone(),
-            created:page.state.dom.created.clone(),detached:page.state.detached_nodes.clone(),
+            created:page.state.dom.created.iter().collect(),detached:page.state.detached_nodes.iter().collect(),
             native:forms.controls.iter().map(|(&node,c)|(node,c.kind,c.name.clone(),c.value.text(),c.caption.clone(),c.checked,c.dirty_value,c.owner,c.disabled,(c.value.cursor,c.value.anchor,c.value.offset))).collect(),
             defaults:forms.controls.iter().filter(|(_,c)|c.kind==Kind::Text).map(|(&node,_)|(node,forms.text_default_value(node).unwrap().to_owned())).collect(),
             attributes:page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.clone(),attr.name.namespace_uri().map(str::to_owned),attr.value.clone())).collect(),

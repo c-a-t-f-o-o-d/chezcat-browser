@@ -262,8 +262,8 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
         parents: page.state.tree.parents.clone(),
         active: page.state.tree.active.clone(),
         connected: page.state.dom.connected.clone(),
-        created: page.state.dom.created.clone(),
-        detached: page.state.detached_nodes.clone(),
+        created: page.state.dom.created.iter().collect(),
+        detached: page.state.detached_nodes.iter().collect(),
         attributes: page
             .state
             .attributes

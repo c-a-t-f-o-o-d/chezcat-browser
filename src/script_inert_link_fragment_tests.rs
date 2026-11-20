@@ -119,8 +119,8 @@ impl Snapshot {
             nodes: format!("{:?}", doc.nodes),
             parents: page.state.tree.parents.clone(),
             connected: page.state.dom.connected.clone(),
-            created: page.state.dom.created.clone(),
-            detached: page.state.detached_nodes.clone(),
+            created: page.state.dom.created.iter().collect(),
+            detached: page.state.detached_nodes.iter().collect(),
             native: forms
                 .controls
                 .iter()

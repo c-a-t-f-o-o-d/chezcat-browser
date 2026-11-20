@@ -31,14 +31,14 @@ pub(super) const MAX_DOM_DEPTH: usize = 128;
 
 #[derive(Default)]
 pub(super) struct DomState {
-    pub(super) created: HashSet<usize>,
+    pub(super) created: node_sets::NodeSet,
     pub(super) connected: Vec<bool>,
     pub(super) pending_focus: Option<usize>,
     pub(super) collections: Vec<dom_collections::TagCollection>,
     pub(super) child_lists: identity_map::IdentityMap<usize>,
     pub(super) inert_child_lists: identity_map::IdentityMap<u32>,
-    pub(super) fragment_scripts: HashSet<usize>,
-    force_async: HashSet<usize>,
+    pub(super) fragment_scripts: node_sets::NodeSet,
+    pub(super) force_async: node_sets::NodeSet,
 }
 
 pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
@@ -173,6 +173,7 @@ impl State {
     }
 
     pub(super) fn rebuild_dom_tree(&mut self, doc: &Document) -> Result<(), String> {
+        self.ensure_node_sets(doc.nodes.len())?;
         if !self.dirty {
             return Ok(());
         }
@@ -264,14 +265,15 @@ impl State {
         }
         // Saved handles and static NodeLists retain detached ordinary subtrees,
         // whose internal topology is separate from connected document lookup.
-        self.work(self.detached_nodes.len())?;
+        self.work(self.detached_nodes.scan_work())?;
         self.work(
             self.detached_nodes
                 .iter()
-                .map(|&node| doc.nodes[node].children.len())
+                .map(|node| doc.nodes[node].children.len())
                 .sum(),
         )?;
-        for &parent in &self.detached_nodes {
+        self.work(self.detached_nodes.scan_work())?;
+        for parent in self.detached_nodes.iter() {
             for (slot, &child) in doc.nodes[parent].children.iter().enumerate() {
                 if self.detached_nodes.contains(&child) {
                     tree.parents[child] = Some(parent);
@@ -1052,11 +1054,6 @@ impl Bridge<'_> {
         let available = remaining.checked_sub(bytes).ok_or_else(||format!(
             "DOM retained node/payload backing allowance exhausted ({remaining} bytes available; {bytes} payload bytes requested)."))?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
-        self.state.dom.created.try_reserve(1).map_err(|_|"DOM created identity reservation failed.")?;
-        self.state.detached_nodes.try_reserve(1).map_err(|_|"DOM detached identity reservation failed.")?;
-        if matches!(&kind,NodeKind::Element{tag,..} if tag=="script") {
-            self.state.dom.force_async.try_reserve(1).map_err(|_|"DOM script-state reservation failed.")?;
-        }
         let work = match &kind {
             NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
             NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
@@ -1309,8 +1306,6 @@ impl Bridge<'_> {
         let mut incoming_set = HashSet::new();
         incoming_set.try_reserve(incoming_nodes.len()).map_err(|_| "DOM replacement topology reservation failed.")?;
         incoming_set.extend(incoming_nodes.iter().copied());
-        let detach_count = incoming_nodes.len().checked_add(outgoing_nodes.len()).ok_or("DOM replacement detached count overflow.")?;
-        self.state.detached_nodes.try_reserve(detach_count).map_err(|_| "DOM replacement detached identity reservation failed.")?;
         let connected = self.state.dom.connected[parent];
         let changed_layout = connected || self.state.dom.connected[child];
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
@@ -1456,7 +1451,6 @@ impl Bridge<'_> {
             .and_then(|slots|slots.checked_add(if child_growth.is_some(){self.doc.nodes[parent].children.len()}else{0}))
             .and_then(|slots|slots.checked_mul(size_of::<usize>()))
             .and_then(|bytes|bytes.checked_add(form_plan.retained_bytes)).ok_or("DOM child/native copy work overflow.")?;
-        self.state.detached_nodes.try_reserve(descendants.len()).map_err(|_| "DOM detached INPUT identity reservation failed.")?;
         let bytes = child_bytes.checked_add(form_plan.retained_bytes).ok_or("DOM child/native storage overflow.")?;
         self.state.replace_storage(0,bytes,copied)?;
         if let Some(mut children) = child_growth {
@@ -1542,8 +1536,6 @@ impl Bridge<'_> {
             self.text(value)?
         };
         self.state.work(self.doc.nodes[node].children.len())?;
-        self.state.detached_nodes.try_reserve(self.doc.nodes[node].children.len())
-            .map_err(|_| "Script text detached-node reservation failed.")?;
         let (child_growth, added) = if text.is_empty() { (None, 0) } else {
             let minimum = self.main_node_minimum(1)?;
             let available = self.state.retained_limit.saturating_sub(self.state.retained)

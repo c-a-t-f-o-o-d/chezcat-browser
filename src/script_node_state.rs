@@ -9,6 +9,7 @@ pub(super) struct Growth {
     connected: Option<Vec<bool>>,
     siblings: Option<Vec<usize>>,
     required: usize,
+    sets: node_sets::Growth,
 }
 
 pub(super) struct Rebuilt {
@@ -42,17 +43,18 @@ impl Bridge<'_> {
     pub(super) fn main_node_minimum(&self,count:usize)->Result<usize,String> {
         if count==0 {return Ok(0);}
         let required=self.doc.nodes.len().checked_add(count).ok_or("DOM node count overflow.")?;
-        minimum(&self.doc.nodes,required)?.checked_add(minimum(&self.state.tree.active,required)?)
-            .and_then(|bytes|bytes.checked_add(minimum(&self.state.tree.parents,required).ok()?))
-            .and_then(|bytes|bytes.checked_add(minimum(&self.state.dom.connected,required).ok()?))
-            .and_then(|bytes|bytes.checked_add(minimum(&self.state.tree.sibling_slots,required).ok()?))
-            .ok_or("Joint DOM node-state backing overflow.".into())
+        let minima=[minimum(&self.doc.nodes,required)?,minimum(&self.state.tree.active,required)?,
+            minimum(&self.state.tree.parents,required)?,minimum(&self.state.dom.connected,required)?,
+            minimum(&self.state.tree.sibling_slots,required)?,self.state.node_sets_minimum(required)?];
+        minima.into_iter().try_fold(0usize,|total,bytes|total.checked_add(bytes).ok_or("Joint DOM node-state backing overflow.".into()))
     }
 
     pub(super) fn prepare_main_nodes(&mut self,count:usize,available:usize)->Result<(Growth,usize),String> {
         if count==0 {return Ok((Growth::default(),0));}
         let required=self.doc.nodes.len().checked_add(count).filter(|&count|count<=NODE_HANDLES as usize)
             .ok_or("24-bit DOM node identity domain exhausted.")?;
+        let set_min=self.state.node_sets_minimum(required)?;
+        let available=available.checked_sub(set_min).ok_or("DOM retained node/bitmap joint allowance exhausted.")?;
         let active_min=minimum(&self.state.tree.active,required)?;
         let parent_min=minimum(&self.state.tree.parents,required)?;
         let connected_min=minimum(&self.state.dom.connected,required)?;
@@ -72,7 +74,10 @@ impl Bridge<'_> {
         let(connected,connected_bytes)=plan(&self.state.dom.connected,required,available.checked_sub(used).and_then(|bytes|bytes.checked_sub(sibling_min)).ok_or("DOM connection-state allowance exhausted.")?)?;
         let used=used.checked_add(connected_bytes).ok_or("DOM node-state backing overflow.")?;
         let(siblings,sibling_bytes)=plan(&self.state.tree.sibling_slots,required,available.checked_sub(used).ok_or("DOM sibling-state allowance exhausted.")?)?;
-        let mut records=0usize;let mut copies=0usize;
+        let used=used.checked_add(sibling_bytes).ok_or("DOM node-state backing overflow.")?;
+        let set_budget=available.checked_sub(used).and_then(|bytes|bytes.checked_add(set_min)).ok_or("DOM node bitmap allowance overflow.")?;
+        let(sets,set_bytes,set_work,set_copies)=self.state.prepare_node_sets(required,set_budget)?;
+        let mut records=set_work;let mut copies=set_copies;
         for (work,bytes) in [movement(&self.doc.nodes,&nodes,count)?,movement(&self.state.tree.active,&active,count)?,
             movement(&self.state.tree.parents,&parents,count)?,movement(&self.state.dom.connected,&connected,count)?,
             movement(&self.state.tree.sibling_slots,&siblings,count)?] {
@@ -80,10 +85,11 @@ impl Bridge<'_> {
             copies=copies.checked_add(bytes).ok_or("DOM node-state copy overflow.")?;
         }
         self.state.work(records)?;self.state.copies(copies)?;
-        Ok((Growth{nodes,active,parents,connected,siblings,required},used.checked_add(sibling_bytes).ok_or("DOM node-state backing overflow.")?))
+        Ok((Growth{nodes,active,parents,connected,siblings,required,sets},used.checked_add(set_bytes).ok_or("DOM node-state backing overflow.")?))
     }
 
     pub(super) fn commit_main_nodes(&mut self,growth:Growth) {
+        self.state.commit_node_sets(growth.sets);
         commit(&mut self.doc.nodes,growth.nodes);
         commit(&mut self.state.tree.active,growth.active);
         commit(&mut self.state.tree.parents,growth.parents);
