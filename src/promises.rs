@@ -228,6 +228,11 @@ impl Capability {
 }
 
 impl Data {
+    fn reaction_storage_bytes(&self) -> usize {
+        self.reactions.iter().fold(self.reactions.capacity() * std::mem::size_of::<Reaction>(),
+            |bytes, reaction| bytes + reaction.payload_bytes())
+    }
+
     pub(super) fn reachability_cost(&self) -> usize {
         1 + self.reactions.iter().map(Reaction::reachability_cost).sum::<usize>()
     }
@@ -431,11 +436,16 @@ impl Runtime {
     }
 
     fn new_promise(&mut self) -> Result<usize, Fault> {
-        if self.promises.count >= self.limits.capacity.promises {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.promises.count >= self.limits.capacity.promises {
             return Err(Fault::new(format!("Promise identity limit reached ({}).", self.limits.capacity.promises)));
         }
+        let count = self.promises.count.checked_add(1).ok_or_else(|| Fault::new("Promise identity counter overflow."))?;
         self.promise_retain(std::mem::size_of::<Data>())?;
-        let object = self.new_object(None)?;
+        let object = match self.new_object(None) {
+            Ok(object) => object,
+            Err(error) => { self.value_bytes -= std::mem::size_of::<Data>(); return Err(error); }
+        };
         self.objects[object].prototype = self.promises.prototype.map(Ordinary::Object);
         self.objects[object].promise = Some(Data {
             state: State::Pending,
@@ -443,7 +453,7 @@ impl Runtime {
             handled: false,
             reported: false,
         });
-        self.promises.count += 1;
+        self.promises.count = count;
         Ok(object)
     }
 
@@ -741,11 +751,22 @@ impl Runtime {
             State::Fulfilled(value.clone())
         };
         self.promises.reactions -= reactions.len();
-        self.value_bytes -= reactions.iter().map(Reaction::retained_bytes).sum::<usize>();
-        for reaction in reactions {
-            self.promise_enqueue(reaction.into_job(value.clone(), reject))?;
-        }
-        Ok(())
+        let backing = reactions.capacity() * std::mem::size_of::<Reaction>();
+        let mut remaining: usize = reactions.iter().map(Reaction::payload_bytes).sum();
+        // Keep the old vector's capacity charged until its owning iterator is
+        // dropped. Transfer payload ownership one observer at a time; failure
+        // drops and refunds only the still-untransferred observers.
+        let result = (|| {
+            for reaction in reactions {
+                let payload = reaction.payload_bytes();
+                self.value_bytes -= payload;
+                remaining -= payload;
+                self.promise_enqueue(reaction.into_job(value.clone(), reject))?;
+            }
+            Ok(())
+        })();
+        self.value_bytes -= backing + remaining;
+        result
     }
 
     fn resolve_promise(
@@ -1565,7 +1586,7 @@ impl Runtime {
         }
         for object in &mut self.objects {
             if let Some(data) = &mut object.promise {
-                self.value_bytes -= data.reactions.iter().map(Reaction::retained_bytes).sum::<usize>();
+                self.value_bytes -= data.reaction_storage_bytes();
                 data.reactions = Vec::new();
                 data.reported = true;
             }
@@ -1687,6 +1708,109 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert!(!runtime.object_assigned_closures.contains(&id));
         assert_eq!((runtime.functions.len(), runtime.function_arena.script_created), before);
         assert_eq!(runtime.invoke(closure, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[test]
+    fn browser_promise_identities_exceed_former_count_and_deliver_the_last_value() {
+        let mut runtime=Runtime::new();
+        runtime.execute("var last,answer=-1;for(var index=0;index<70000;index++)last=Promise.resolve(index);last.then(function(value){answer=value;});",&mut NoHost).unwrap();
+        assert!(runtime.promises.count>65536);
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"answer").unwrap().to_number(),69999.0);
+    }
+
+    #[test]
+    fn browser_pending_reactions_exceed_former_count_cancel_and_recover_with_real_callbacks() {
+        let mut runtime=Runtime::new();
+        runtime.execute("var gate,hits=0;var parent=new Promise(function(resolve){gate=resolve;});function observed(){hits++;}for(var index=0;index<70000;index++)parent.then(observed);",&mut NoHost).unwrap();
+        let Value::Object(parent)=runtime.binding_value(0,"parent").unwrap() else {panic!("real pending Promise")};
+        let data=runtime.objects[parent].promise.as_ref().unwrap();
+        assert_eq!(data.reactions.len(),70000);
+        let released=data.reaction_storage_bytes();
+        let before=runtime.value_bytes;
+        assert_eq!(runtime.promises.reactions,70000);
+        assert!(!runtime.has_microtasks());
+        runtime.cancel_microtasks();
+        assert_eq!(runtime.value_bytes,before-released);
+        assert_eq!(runtime.promises.reactions,0);
+        assert_eq!(runtime.objects[parent].promise.as_ref().unwrap().reactions.capacity(),0);
+        assert!(matches!(runtime.objects[parent].promise.as_ref().unwrap().state,State::Pending));
+        runtime.begin_job();
+        runtime.execute("if(hits!==0)throw 'cancelled observer ran';gate(23);parent.then(observed);",&mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"hits").unwrap().to_number(),1.0);
+    }
+
+    #[test]
+    fn native_promise_storage_refusal_and_object_refusal_publish_no_identity_or_export() {
+        let mut runtime=Runtime::new();
+        let before=(runtime.value_bytes,runtime.objects.len(),runtime.promises.count,runtime.exported_object_roots.len());
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=runtime.value_bytes+std::mem::size_of::<Data>()-1;
+        assert!(runtime.new_native_promise().is_err());
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.promises.count,runtime.exported_object_roots.len()),before);
+        runtime.limits.heap.retained_values=limit;
+        let objects=runtime.limits.heap.objects;
+        runtime.limits.heap.objects=runtime.objects.len();
+        let copy=runtime.copy_bytes;
+        assert!(runtime.new_native_promise().is_err());
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.promises.count,runtime.exported_object_roots.len()),before);
+        assert!(runtime.copy_bytes<copy);
+        runtime.limits.heap.objects=objects;
+        let (token,_)=runtime.new_native_promise().unwrap();
+        assert!(runtime.native_promise_pending(&token).unwrap());
+        assert!(runtime.settle_native_promise(&token,NativePromiseOutcome::Fulfill).unwrap());
+        assert!(!runtime.native_promise_pending(&token).unwrap());
+    }
+
+    #[test]
+    fn reaction_storage_refusal_preserves_pending_state_and_identity_forwarding_recovers() {
+        let mut runtime=Runtime::new();
+        let parent=runtime.new_promise().unwrap();
+        let capability=runtime.new_promise_capability(Value::Function(runtime.promises.constructor.unwrap()),&mut NoHost).unwrap();
+        let Value::Object(child)=capability.promise else {panic!("real result Promise")};
+        let before=runtime.value_bytes;
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=before;
+        assert!(runtime.observe_promise(parent,Reaction::Then {capability:capability.clone(),fulfill:None,reject:None}).is_err());
+        let data=runtime.objects[parent].promise.as_ref().unwrap();
+        assert_eq!((data.reactions.len(),data.reactions.capacity()),(0,0));
+        assert!(!data.handled);
+        assert_eq!(runtime.value_bytes,before);
+        assert_eq!(runtime.promises.reactions,0);
+        runtime.limits.heap.retained_values=limit;
+        runtime.observe_promise(parent,Reaction::Then {capability,fulfill:None,reject:None}).unwrap();
+        assert!(runtime.value_bytes>before);
+        runtime.promise_settle(parent,Value::Number(17.0),false).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.promises.reactions,0);
+        assert_eq!(runtime.objects[parent].promise.as_ref().unwrap().reactions.capacity(),0);
+        assert!(matches!(&runtime.objects[child].promise.as_ref().unwrap().state,State::Fulfilled(Value::Number(value)) if *value==17.0));
+    }
+
+    #[test]
+    fn partial_await_reaction_transfer_failure_refunds_every_abandoned_frame_and_backing() {
+        let mut runtime=Runtime::for_test();
+        runtime.execute("var gate,hits=0;var parent=new Promise(function(resolve){gate=resolve;});async function wait(){await parent;hits++;}wait();wait();wait();",&mut NoHost).unwrap();
+        let Value::Object(parent)=runtime.binding_value(0,"parent").unwrap() else {panic!("real pending Promise")};
+        let data=runtime.objects[parent].promise.as_ref().unwrap();
+        assert_eq!(data.reactions.len(),3);
+        let released=data.reaction_storage_bytes();
+        assert!(released>data.reactions.capacity()*std::mem::size_of::<Reaction>());
+        let before=runtime.value_bytes;
+        let limit=runtime.limits.capacity.promises;
+        runtime.limits.capacity.promises=1;
+        let error=runtime.execute("gate(1);",&mut NoHost).unwrap_err();
+        assert!(error.contains("Microtask queue limit"),"{error}");
+        assert!(!runtime.has_microtasks());
+        assert_eq!(runtime.promises.reactions,0);
+        assert_eq!(runtime.objects[parent].promise.as_ref().unwrap().reactions.capacity(),0);
+        assert_eq!(runtime.value_bytes,before-released);
+        runtime.limits.capacity.promises=limit;
+        runtime.begin_job();
+        runtime.execute("if(hits!==0)throw 'abandoned await ran';wait();",&mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert_eq!(runtime.binding_value(0,"hits").unwrap().to_number(),1.0);
     }
 
     #[test]

@@ -26,8 +26,8 @@ impl Reaction {
         }
     }
 
-    pub(super) fn retained_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + match self {
+    pub(super) fn payload_bytes(&self) -> usize {
+        match self {
             Self::Then { .. } => 0,
             Self::Await(frame) => frame.retained_bytes(),
         }
@@ -76,12 +76,22 @@ impl Runtime {
         let data = self.objects[promise].promise.as_ref().unwrap();
         match &data.state {
             State::Pending => {
-                if self.promises.reactions >= self.limits.capacity.promises {
+                #[cfg(test)]
+                if self.limits.test_entry_arenas && self.promises.reactions >= self.limits.capacity.promises {
                     return Err(Fault::new(format!("Promise reaction limit reached ({}).", self.limits.capacity.promises)));
                 }
-                self.promise_retain(reaction.retained_bytes())?;
-                self.objects[promise].promise.as_mut().unwrap().reactions.push(reaction);
-                self.promises.reactions += 1;
+                let count = self.promises.reactions.checked_add(1).ok_or_else(|| Fault::new("Promise reaction counter overflow."))?;
+                let payload = reaction.payload_bytes();
+                let available = self.limits.heap.retained_values.checked_sub(self.value_bytes)
+                    .and_then(|bytes| bytes.checked_sub(payload)).ok_or_else(|| Fault::new("Retained value reaction storage exhausted."))?;
+                let growth = super::super::limits::prepare_retained_growth(&data.reactions, 1, available)?;
+                self.work(payload.saturating_add(std::mem::size_of::<Reaction>().saturating_mul(
+                    if growth.added == 0 { 1 } else { data.reactions.len().saturating_add(1) })))?;
+                self.value_bytes += payload + growth.added;
+                let reactions = &mut self.objects[promise].promise.as_mut().unwrap().reactions;
+                growth.commit(reactions);
+                reactions.push(reaction);
+                self.promises.reactions = count;
             }
             State::Rejected(value) | State::Fulfilled(value) => {
                 let reject = matches!(data.state, State::Rejected(_));
