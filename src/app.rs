@@ -159,15 +159,7 @@ struct SelectPopupBox {
     visible: usize,
     scale: i32,
 }
-const MAX_SESSION_HISTORY_ENTRIES: usize = 128;
-
-struct HistoryEntry {
-    location: Location,
-    scroll: i32,
-    request: crate::http::Request,
-    document: u64,
-    data: crate::scripting::HistoryData,
-}
+use crate::session_history::{Entry as HistoryEntry,Stack as SessionHistory};
 #[derive(Clone, Copy)]
 enum NavigationKind {
     New,
@@ -277,7 +269,7 @@ pub struct App {
     script_epoch: u64,
     script_navigation_count: usize,
     script_navigation_since: std::time::Instant,
-    history: Vec<HistoryEntry>,
+    history: crate::session_history::Shared,
     history_index: usize,
     zoom: f32,
     focus: Focus,
@@ -410,13 +402,13 @@ impl App {
             script_epoch: 0,
             script_navigation_count: 0,
             script_navigation_since: std::time::Instant::now(),
-            history: vec![HistoryEntry {
+            history: SessionHistory::shared(HistoryEntry {
                 location,
                 scroll: 0,
                 request: crate::http::Request::Get,
                 document: 0,
                 data: Default::default(),
-            }],
+            }).expect("fixed initial session entry"),
             history_index: 0,
             zoom: 1.0,
             focus: Focus::Page,
@@ -463,15 +455,23 @@ impl App {
         if let Ok(location) = navigation::explicit(&path) {
             if let Ok(loaded) = loader::local_with_options(&location, self.load_options()) {
                 self.home_location = location.clone();
-                self.commit(location.clone(), loaded, false, 1);
-                self.history = vec![HistoryEntry {
-                    location,
+                let entry = HistoryEntry {
+                    location: location.clone(),
                     scroll: 0,
                     request: crate::http::Request::Get,
-                    document: self.script_epoch,
+                    document: self.script_epoch.wrapping_add(1),
                     data: Default::default(),
-                }];
+                };
+                let history = match SessionHistory::shared(entry) {
+                    Ok(history) => history,
+                    Err(error) => {
+                        self.error(error);
+                        return;
+                    }
+                };
+                self.history = history;
                 self.history_index = 0;
+                self.commit(location, loaded, false);
                 self.apply_history_replacement();
             }
         }
@@ -855,9 +855,21 @@ impl App {
                     }
                     _ => None,
                 };
-                self.finish_navigation(kind, loaded, true);
-                self.committed_request = Some(id);
-                self.status.push_str(" | Loading images; Esc stops");
+                let destination = pending.location.display();
+                if self.finish_navigation(kind, loaded, true) {
+                    self.committed_request = Some(id);
+                    self.status.push_str(" | Loading images; Esc stops");
+                } else {
+                    if let Some(pending) = &mut self.pending {
+                        pending.committed = false;
+                    }
+                    self.cancel_pending();
+                    self.address.set(&self.location.display());
+                    self.last_failed_navigation = Some(format!(
+                        "{destination}\n{}\nThe previous page is still displayed.",
+                        self.status
+                    ));
+                }
                 changed = true;
             }
         }
@@ -1138,73 +1150,102 @@ impl App {
             }
         }
     }
-    fn finish_navigation(&mut self, kind: NavigationKind, loaded: Loaded, images_pending: bool) {
+    fn finish_navigation(
+        &mut self,
+        kind: NavigationKind,
+        loaded: Loaded,
+        images_pending: bool,
+    ) -> bool {
+        self.apply_history_replacement();
         self.save_scroll();
         let location = loaded.location.clone();
         let same = self.location == location && self.current_request == loaded.request;
-        let data = if loaded.document_redirected { Default::default() } else { match kind {
-            NavigationKind::Reload(_) => self.history[self.history_index].data.clone(),
-            NavigationKind::History(index, _) => self.history[index].data.clone(),
-            _ => Default::default(),
-        }};
-        let previous_document = if loaded.document_redirected { None } else { match kind {
-            NavigationKind::Reload(_) => Some(self.history[self.history_index].document),
-            NavigationKind::History(index, _) => Some(self.history[index].document),
-            _ => None,
-        }};
-        let history_length = self.history_length_after_navigation(
-            !same && matches!(kind, NavigationKind::New | NavigationKind::ScriptNew));
-        self.commit_with_history(location.clone(), loaded, images_pending, data.clone(), history_length);
+        let index = match kind {
+            NavigationKind::History(index, _) => index,
+            _ => self.history_index,
+        };
+        let restore = !loaded.document_redirected
+            && matches!(
+                kind,
+                NavigationKind::Reload(_) | NavigationKind::History(_, _)
+            );
+        let previous_document = if restore {
+            self.history
+                .borrow()
+                .entry(index)
+                .map(|entry| entry.document)
+        } else {
+            None
+        };
+        let data = if restore {
+            let copied = self
+                .history
+                .borrow()
+                .entry(index)
+                .map(|entry| entry.data.try_copy())
+                .transpose();
+            match copied {
+                Ok(data) => data.unwrap_or_default(),
+                Err(error) => {
+                    self.error(error);
+                    return false;
+                }
+            }
+        } else {
+            Default::default()
+        };
+        let request = match crate::session_history::copy_request(&loaded.request) {
+            Ok(request) => request,
+            Err(error) => {
+                self.error(error);
+                return false;
+            }
+        };
+        let append = !same && matches!(kind, NavigationKind::New | NavigationKind::ScriptNew);
+        let entry = HistoryEntry {
+            location: location.clone(),
+            scroll: 0,
+            request,
+            document: self.script_epoch.wrapping_add(1),
+            data,
+        };
+        let result = {
+            let mut history = self.history.borrow_mut();
+            history
+                .prepare_at(entry, !append, index)
+                .and_then(|change| history.commit(change))
+        };
+        if let Err(error) = result {
+            self.error(error);
+            return false;
+        }
+        self.history_index = self.history.borrow().index();
+        self.commit(location, loaded, images_pending);
+        self.history_index = self.history.borrow().index();
         match kind {
-            NavigationKind::New | NavigationKind::ScriptNew => {
-                if !same {
-                    self.history.truncate(self.history_index + 1);
-                    self.history.push(HistoryEntry {
-                        location,
-                        scroll: self.scroll,
-                        request: self.current_request.clone(),
-                        document: self.script_epoch,
-                        data: data.clone(),
-                    });
-                    if self.history.len() > MAX_SESSION_HISTORY_ENTRIES {
-                        self.history.remove(0);
-                    }
-                    self.history_index = self.history.len() - 1;
-                }
+            NavigationKind::Reload(scroll) | NavigationKind::History(_, scroll) => {
+                self.set_scroll(scroll.clamp(0, self.max_scroll()))
             }
-            NavigationKind::Reload(scroll) => {
-                self.set_scroll(scroll.clamp(0, self.max_scroll()));
-                self.history[self.history_index].location = location;
-                self.history[self.history_index].request = self.current_request.clone();
+            NavigationKind::ScriptReplace(Some(scroll)) => {
+                self.set_scroll(scroll.clamp(0, self.max_scroll()))
             }
-            NavigationKind::ScriptReplace(scroll) => {
-                if let Some(scroll) = scroll {
-                    self.set_scroll(scroll.clamp(0, self.max_scroll()));
-                }
-                self.history[self.history_index].location = location;
-                self.history[self.history_index].request = self.current_request.clone();
-            }
-            NavigationKind::History(index, scroll) => {
-                self.history_index = index;
-                self.history[index].location = location;
-                self.history[index].request = self.current_request.clone();
-                self.set_scroll(scroll.clamp(0, self.max_scroll()));
-            }
+            _ => {}
         }
         if let Some(previous) = previous_document {
-            for entry in &mut self.history {
-                let compatible = match (&entry.location.url, &self.location.url) {
-                    (Some(old), Some(current)) => old.same_origin(current),
-                    (None, None) => entry.location.path == self.location.path && entry.location.root == self.location.root,
-                    _ => false,
-                };
-                if entry.document == previous && compatible { entry.document = self.script_epoch; }
+            let result = self.history.borrow_mut().retag_document(
+                previous,
+                self.script_epoch,
+                &self.location,
+            );
+            if let Err(error) = result {
+                self.error(error);
+                return true;
             }
         }
-        self.history[self.history_index].document = self.script_epoch;
-        self.history[self.history_index].data = data;
+        self.save_scroll();
         self.apply_history_replacement();
         self.record_browsing_visit();
+        true
     }
     pub fn home(&mut self) {
         self.browser_panel = None;
@@ -1256,17 +1297,19 @@ impl App {
             return;
         }
         match loader::local_with_options(&self.location, self.load_options()) {
-            Ok(loaded) => self.finish_navigation(NavigationKind::Reload(old), loaded, false),
+            Ok(loaded) => {self.finish_navigation(NavigationKind::Reload(old), loaded, false);},
             Err(e) => self.error(e),
         }
     }
     fn save_scroll(&mut self) {
-        if let Some(entry) = self.history.get_mut(self.history_index) {
-            entry.scroll = if self.view == View::Page {
-                self.scroll
-            } else {
-                self.page_scroll
-            };
+        let scroll = if self.view == View::Page {
+            self.scroll
+        } else {
+            self.page_scroll
+        };
+        let result = self.history.borrow_mut().set_scroll(scroll);
+        if let Err(error) = result {
+            self.error(error);
         }
     }
     fn ask_resubmission(
@@ -1391,74 +1434,62 @@ impl App {
             );
             return;
         }
-        let loaded = if same_document {
-            None
-        } else {
+        if !same_document {
             match loader::local_with_options(&location, self.load_options()) {
-                Ok(loaded) => Some(loaded),
-                Err(e) => {
-                    self.navigation_error(&location.display(), e);
-                    return;
+                Ok(loaded) => {
+                    self.finish_navigation(
+                        if replace {
+                            NavigationKind::ScriptReplace(None)
+                        } else {
+                            NavigationKind::New
+                        },
+                        loaded,
+                        false,
+                    );
                 }
+                Err(error) => self.navigation_error(&location.display(), error),
             }
-        };
+            return;
+        }
         self.last_failed_navigation = None;
         self.save_scroll();
         let same = self.location == location;
-        let data = crate::scripting::HistoryData::default();
-        let history_length = self.history_length_after_navigation(!same && !replace);
-        if let Some(loaded) = loaded {
-            self.commit(location.clone(), loaded, false, history_length);
-            self.record_browsing_visit();
-        } else {
-            self.location = location.clone();
-            if let Some(page) = &mut self.scripting {
-                page.set_location(&self.location);
-                if !same { page.set_history_context(Default::default(), self.base_is_document_url, history_length); }
-            }
-            self.address.set(&self.location.display());
-            if self.view != View::Page {
-                self.view = View::Page;
-                self.alternate = None;
-                self.reflow();
-            }
-            if self.location.fragment.is_empty() {
-                self.set_scroll(0);
-            }
-            self.focus = Focus::Page;
-            self.selection = None;
-            self.drag = Drag::None;
-            self.hover = None;
-            self.menu = false;
-            self.status.clear();
-            self.failed = false;
-            self.jump_fragment();
-        }
         if !same {
-            if replace {
-                self.history[self.history_index] = HistoryEntry {
-                    location,
-                    scroll: self.scroll,
-                    request: self.current_request.clone(),
-                    document: self.script_epoch,
-                    data,
-                };
-                self.apply_history_replacement();
-                return;
-            }
-            self.history.truncate(self.history_index + 1);
-            self.history.push(HistoryEntry {
-                location,
+            let entry = HistoryEntry {
+                location: location.clone(),
                 scroll: self.scroll,
                 request: self.current_request.clone(),
                 document: self.script_epoch,
-                data,
-            });
-            if self.history.len() > MAX_SESSION_HISTORY_ENTRIES {
-                self.history.remove(0);
+                data: Default::default(),
+            };
+            let result = self.history.borrow_mut().update(entry, replace);
+            if let Err(error) = result {
+                self.error(error);
+                return;
             }
-            self.history_index = self.history.len() - 1;
+            self.history_index = self.history.borrow().index();
         }
+        self.location = location;
+        if let Some(page) = &mut self.scripting {
+            page.set_location(&self.location);
+        }
+        self.address.set(&self.location.display());
+        if self.view != View::Page {
+            self.view = View::Page;
+            self.alternate = None;
+            self.reflow();
+        }
+        if self.location.fragment.is_empty() {
+            self.set_scroll(0);
+        }
+        self.focus = Focus::Page;
+        self.selection = None;
+        self.drag = Drag::None;
+        self.hover = None;
+        self.menu = false;
+        self.status.clear();
+        self.failed = false;
+        self.jump_fragment();
         self.apply_history_replacement();
     }
     fn navigation_history_index(&self) -> usize {
@@ -1476,19 +1507,35 @@ impl App {
         self.invalidate_platform_requests();
         self.apply_history_replacement();
         let index = self.navigation_history_index() as isize + delta;
-        if index < 0 || index >= self.history.len() as isize {
+        if index < 0 || index >= self.history.borrow().len() as isize {
             return;
         }
         let index = index as usize;
-        let location = self.history[index].location.clone();
-        let scroll = self.history[index].scroll;
-        let request = self.history[index].request.clone();
+        let (location, scroll, document, request) = {
+            let history = self.history.borrow();
+            let entry = history.entry(index).unwrap();
+            (
+                entry.location.clone(),
+                entry.scroll,
+                entry.document,
+                crate::session_history::copy_request(&entry.request),
+            )
+        };
+        let request = match request {
+            Ok(request) => request,
+            Err(error) => {
+                self.error(error);
+                return;
+            }
+        };
         let compatible = match (&location.url, &self.location.url) {
             (Some(old), Some(current)) => old.same_origin(current),
-            (None, None) => location.path == self.location.path && location.root == self.location.root,
+            (None, None) => {
+                location.path == self.location.path && location.root == self.location.root
+            }
             _ => false,
         };
-        let same_document = self.history[index].document == self.script_epoch && compatible;
+        let same_document = document == self.script_epoch && compatible;
         let keep_images = same_document
             && self
                 .pending
@@ -1502,13 +1549,21 @@ impl App {
         }
         if same_document {
             self.save_scroll();
+            let result = self.history.borrow_mut().traverse(index);
+            if let Err(error) = result {
+                self.error(error);
+                return;
+            }
             self.location = location;
             if let Some(page) = &mut self.scripting {
                 page.set_location(&self.location);
-                page.set_history_context(self.history[index].data.clone(), self.base_is_document_url, self.history.len());
             }
-            if self.base_is_document_url { self.base_location = self.location.clone(); }
-            if let Some(page) = &mut self.scripting { page.set_resource_base(&self.base_location); }
+            if self.base_is_document_url {
+                self.base_location = self.location.clone();
+            }
+            if let Some(page) = &mut self.scripting {
+                page.set_resource_base(&self.base_location);
+            }
             self.address.set(&self.location.display());
             if self.view != View::Page {
                 self.view = View::Page;
@@ -1542,7 +1597,7 @@ impl App {
         }
         match loader::local_with_options(&location, self.load_options()) {
             Ok(loaded) => {
-                self.finish_navigation(NavigationKind::History(index, scroll), loaded, false)
+                self.finish_navigation(NavigationKind::History(index, scroll), loaded, false);
             }
             Err(e) => self.error(e),
         }
@@ -1554,10 +1609,7 @@ impl App {
             Err(e) => self.error(e),
         }
     }
-    fn commit(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_length: usize) {
-        self.commit_with_history(location, loaded, images_pending, Default::default(), history_length);
-    }
-    fn commit_with_history(&mut self, location: Location, loaded: Loaded, images_pending: bool, history_data: crate::scripting::HistoryData, history_length: usize) {
+    fn commit(&mut self,location:Location,loaded:Loaded,images_pending:bool){
         self.invalidate_platform_requests();
         self.cancel_embedded_video();
         self.embedded_video=None;
@@ -1632,7 +1684,7 @@ impl App {
             page.set_location(&self.location);
             page.set_cookie_session(self.cookies.clone());
             page.set_resource_base(&self.base_location);
-            page.set_history_context(history_data, self.base_is_document_url, history_length);
+            page.attach_session_history(self.history.clone(),self.script_epoch,self.base_is_document_url);
             page.set_stylesheet_sources(&self.document,&self.styles);
             page.set_initial_images(loaded.image_sources, &self.images, images_pending && self.images_enabled, self.images_enabled);
             page.set_geometry(crate::script_geometry::Geometry::new(

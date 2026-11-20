@@ -93,10 +93,10 @@ fn toolbar_icons_navigate_and_refresh_the_displayed_local_document() {
     let previous = app.history_index - 1;
     app.pending = Some(Pending {
         id: app.next_request,
-        location: app.history[previous].location.clone(),
+        location: app.history.borrow().entry(previous).unwrap().location.clone(),
         kind: NavigationKind::History(previous, 0),
         mode: crate::http::FetchMode::Normal,
-        request: app.history[previous].request.clone(),
+        request: app.history.borrow().entry(previous).unwrap().request.clone(),
         committed: false,
         scroll_target: None,
     });

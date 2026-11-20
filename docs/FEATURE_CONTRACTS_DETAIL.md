@@ -1498,3 +1498,31 @@ physical audibility and F6 service acceptance are not established by them.
 Every later feature records semantic references, original and selected conformance
 tests, security review, native/device/live checks still pending and exact final
 source/executable identity. Release notes describe only proven behavior.
+
+## Same-document session entries
+
+The native session-entry list is the authority for checked pushState and
+replaceState, Page state/length, displayed URL synchronization and native
+Back/Forward. Startup installs the destination entry before executing its
+scripts; accepted nested pushes therefore remain ordered and are not overwritten
+by a later startup publication. Branching removes only forward entries. Existing
+reload, redirect, POST resubmission, local-root and document-group rules apply.
+
+Native entry preparation admits actual vector capacity, URL/path buffers,
+primitive state and saved request payload before replacing the active entry.
+The per-App session allowance is64MiB, using the existing browser host byte policy;
+other Page stores remain separate. Truncation refunds payload without pretending
+that retained vector backing was freed. Prepared changes reject stale revisions;
+scripted movement and fallible request copies debit the active job. The original
+128-entry,1MiB state and4096 lifetime-update restrictions no longer control this
+family. This does not reopen the deferred browser-wide inventory.
+
+Checked data currently covers serializable primitives, including exact UTF-16,
+BigInt, signed zero and NaN. Symbol/function data retains DataCloneError; object,
+array and native-object serialization remains explicitly unsupported. Native
+same-document traversal restores state and scroll without fetching the route or
+replacing its live document and controls. PopStateEvent delivery and script
+traversal methods remain separate unfinished behavior; no complete History or
+website-navigation conformance is claimed.
+
+See the [History API](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-history-interface).

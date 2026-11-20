@@ -877,18 +877,18 @@ document.title='history-owner-ready';
         page.set_history_context(HistoryData::Null, false, 7);
         let outcome = page.console_eval(&mut doc, &mut forms, "if(historyRead(history)!==null||lengthRead(history)!==7)throw 'same-origin state/count';forward(method,history,url);if(coercions!==1)throw 'conversion';");
         assert_eq!(outcome.errors, 0, "{}", page.report());
-        let pending = page.state.history.pending.as_ref().unwrap().location.clone();
+        let pending = page.state.history.active.as_ref().unwrap().borrow().current().unwrap().location.clone();
         for source in ["w.history;", "w.Function('return history;')();"] {
             let outcome = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(outcome.errors, 1, "{}", page.report());
-            assert_eq!(page.state.history.pending.as_ref().unwrap().location, pending);
+            assert_eq!(page.state.history.active.as_ref().unwrap().borrow().current().unwrap().location, pending);
         }
         page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, fragment: String::new(), root: None });
         for source in ["historyRead(history);", "lengthRead(history);", "methodRead(history);", "forward(method,history,url);"] {
             let outcome = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(outcome.errors, 1, "{}", page.report());
             assert!(page.report().contains("same-origin"), "{}", page.report());
-            assert_eq!(page.state.history.pending.as_ref().unwrap().location, pending);
+            assert_eq!(page.state.history.active.as_ref().unwrap().borrow().current().unwrap().location, pending);
         }
         let outcome = page.console_eval(&mut doc, &mut forms, "if(coercions!==1||history.state!==null)throw 'denied caller changed state';");
         assert_eq!(outcome.errors, 0, "{}", page.report());

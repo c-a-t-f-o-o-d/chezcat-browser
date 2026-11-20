@@ -235,7 +235,7 @@ fn page_state(app: &App) -> PageState {
         events: app.events.clone(),
         index: app.history_index,
         session_history: app
-            .history
+            .history.borrow().entries()
             .iter()
             .map(|entry| {
                 (

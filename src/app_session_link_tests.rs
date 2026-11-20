@@ -130,7 +130,7 @@ fn save(session: &Session, tab: TabId) -> Saved {
                 raw: app.raw.clone(), title: app.document.title.clone(), location: app.location.clone(), base: app.base_location.clone(),
                 document: app.script_epoch, nodes: app.document.nodes.as_ptr(), vm: app.scripting.as_ref().map(|page| page as *const _),
                 scroll: app.scroll, page_scroll: app.page_scroll, wheel: app.wheel_remainder, size: (app.width, app.height), zoom: app.zoom.to_bits(),
-                history: app.history.iter().map(|entry| (entry.location.clone(), entry.scroll, entry.request.clone(), entry.document, format!("{:?}", entry.data))).collect(),
+                history: app.history.borrow().entries().iter().map(|entry| (entry.location.clone(), entry.scroll, entry.request.clone(), entry.document, format!("{:?}", entry.data))).collect(),
                 index: app.history_index, field: editor(&app.forms.controls[&node(app, "q")].value), address: editor(&app.address), find: editor(&app.find),
                 focus, view: match app.view { View::Page => 0, View::Source => 1, View::Resources => 2 }, surrogate: app.pending_surrogate, press,
                 request: app.current_request.clone(), next_request: app.next_request, committed_request: app.committed_request,

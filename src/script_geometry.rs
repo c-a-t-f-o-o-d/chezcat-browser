@@ -118,6 +118,8 @@ impl Geometry {
         }
     }
 
+    pub(crate) fn device_scroll_y(&self)->i32 {self.scroll}
+
     pub fn css_scroll_y(&self) -> f64 { f64::from(self.scroll)/f64::from(self.zoom) }
 
     pub fn image_dimensions(&self, node: usize) -> Option<(usize, usize)> {
