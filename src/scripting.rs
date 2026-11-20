@@ -24,7 +24,7 @@ use crate::loader::Script;
 
 #[path = "script_dom_compat.rs"]
 mod dom_compat;
-use dom_compat::{dataset_attribute, dataset_key, navigator_readonly};
+use dom_compat::{dataset_attribute, navigator_readonly};
 #[path = "script_queries.rs"]
 mod queries;
 use queries::node_list_index;
@@ -4236,21 +4236,7 @@ impl Host for Bridge<'_> {
             return self.node_list_keys(object);
         }
         if (DATASET_BASE..EVENT_BASE).contains(&object) {
-            let node = self.dataset_node(object)?;
-            let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
-                unreachable!();
-            };
-            if attrs.len() > 4096 {
-                return Err("Dataset enumeration limit reached (4096 attributes).".into());
-            }
-            self.state.work(attrs.len())?;
-            self.state
-                .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
-            return Ok(attrs
-                .iter()
-                .filter(|attr| attr.name.namespace.is_none())
-                .filter_map(|attr| dataset_key(&attr.name.qualified))
-                .collect());
+            return self.dataset_keys(object);
         }
         Err("Enumerating this native host object is not implemented.".into())
     }

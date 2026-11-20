@@ -22,21 +22,25 @@ pub(super) fn navigator_readonly(name: &str) -> bool {
     )
 }
 
-pub(super) fn dataset_key(attribute: &str) -> Option<String> {
-    let suffix = attribute.strip_prefix("data-")?;
-    if suffix.bytes().any(|byte| byte.is_ascii_uppercase()) {
-        return None;
+pub(super) fn dataset_suffix(attribute:&str)->Option<&str>{
+    let suffix=attribute.strip_prefix("data-")?;
+    (!suffix.bytes().any(|byte|byte.is_ascii_uppercase())).then_some(suffix)
+}
+pub(super) fn dataset_key_size(suffix:&str)->usize{
+    suffix.len()-suffix.as_bytes().windows(2).filter(|pair|pair[0]==b'-'&&pair[1].is_ascii_lowercase()).count()
+}
+pub(super) fn dataset_key(attribute:&str,available:usize)->Result<Option<String>,String>{
+    let Some(suffix)=dataset_suffix(attribute)else{return Ok(None)};
+    let length=dataset_key_size(suffix);
+    if length>available{return Err("DOM retained dataset key text allowance exhausted.".into());}
+    let mut key=String::new();key.try_reserve_exact(length).map_err(|_|"Cannot reserve dataset key text.")?;
+    if key.capacity()>available{return Err("DOM retained dataset key allocation exceeds allowance.".into());}
+    let mut chars=suffix.chars().peekable();
+    while let Some(ch)=chars.next(){
+        if ch=='-'&&chars.peek().is_some_and(char::is_ascii_lowercase){key.push(chars.next().unwrap().to_ascii_uppercase());}else{key.push(ch);}
     }
-    let mut key = String::with_capacity(suffix.len());
-    let mut chars = suffix.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '-' && chars.peek().is_some_and(char::is_ascii_lowercase) {
-            key.push(chars.next().unwrap().to_ascii_uppercase());
-        } else {
-            key.push(ch);
-        }
-    }
-    Some(key)
+    debug_assert_eq!(key.len(),length);
+    Ok(Some(key))
 }
 
 pub(super) fn dataset_attribute(name: &str) -> String {
@@ -164,6 +168,42 @@ impl Bridge<'_> {
             return Err("Invalid dataset handle.".into());
         }
         self.node(node_handle((handle - DATASET_BASE) as usize))
+    }
+
+    pub(super) fn dataset_keys(&mut self,handle:u32)->Result<Vec<String>,String>{
+        let node=self.dataset_node(handle)?;
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&attrs.len()>self.state.limits.host.element_attributes{return Err(format!("Dataset enumeration limit reached ({} attributes).",self.state.limits.host.element_attributes));}
+        self.state.work(attrs.len())?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let(mut count,mut payload)=(0usize,0usize);
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_none()){
+            let Some(raw)=attr.name.qualified.strip_prefix("data-")else{continue};
+            self.state.work(raw.len().checked_mul(2).ok_or("Dataset key validation work overflow.")?)?;
+            let Some(suffix)=dataset_suffix(&attr.name.qualified)else{continue};
+            // Both validation walks are prepaid even for excluded names.
+            // Eligible names also pay the length and final conversion walks.
+            self.state.work(suffix.len().checked_mul(5).ok_or("Dataset key work overflow.")?)?;
+            count=count.checked_add(1).ok_or("Dataset key count overflow.")?;
+            payload=payload.checked_add(dataset_key_size(suffix)).ok_or("Dataset key payload overflow.")?;
+            let minimum=count.checked_mul(size_of::<String>()).and_then(|bytes|bytes.checked_add(payload)).ok_or("Dataset key storage overflow.")?;
+            if minimum>available{return Err("DOM retained dataset key allowance exhausted.".into());}
+        }
+        let work=count.checked_mul(size_of::<String>()).and_then(|bytes|bytes.checked_add(payload)).ok_or("Dataset key work overflow.")?;
+        self.state.copies(work)?;
+        let mut keys=Vec::new();keys.try_reserve_exact(count).map_err(|_|"Cannot reserve dataset key records.")?;
+        let mut bytes=keys.capacity().checked_mul(size_of::<String>()).filter(|bytes|bytes.checked_add(payload).is_some_and(|total|total<=available)).ok_or("DOM retained dataset key record allowance exhausted.")?;
+        let mut remaining=payload;
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_none()){
+            let Some(suffix)=dataset_suffix(&attr.name.qualified)else{continue};
+            remaining-=dataset_key_size(suffix);
+            let spare=available.checked_sub(bytes).and_then(|bytes|bytes.checked_sub(remaining)).ok_or("DOM retained dataset key allowance exhausted.")?;
+            let key=dataset_key(&attr.name.qualified,spare)?.ok_or("Dataset key validation changed during enumeration.")?;
+            bytes=bytes.checked_add(key.capacity()).ok_or("Dataset key allocation overflow.")?;
+            keys.push(key);
+        }
+        Ok(keys)
     }
 
     pub(super) fn dataset_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
@@ -359,3 +399,7 @@ impl Bridge<'_> {
             .unwrap_or_else(|| crate::url::parse(source).is_ok())
     }
 }
+
+#[cfg(test)]
+#[path="script_dataset_storage_tests.rs"]
+mod dataset_storage_tests;
