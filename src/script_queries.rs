@@ -30,26 +30,37 @@ impl Bridge<'_> {
         node_list_index(handle).is_some_and(|index| index < self.state.node_lists.len())
     }
 
-    fn reserve_node_list(&mut self, operation: &str) -> Result<u32, String> {
-        let length = self.state.node_lists.len();
-        if length >= self.state.limits.host.node_lists {
-            return Err(format!("DOM NodeList {operation} limit reached ({} per document).", self.state.limits.host.node_lists));
+    // Reserve unpublished registry backing alongside the operation's owned
+    // payload. No identity, capacity or byte charge changes until commit.
+    fn prepare_node_list(&mut self, operation:&str, payload:usize)->Result<(u32,Option<Vec<NodeList>>,usize),String> {
+        let length=self.state.node_lists.len();
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&length>=self.state.limits.host.node_lists {
+            return Err(format!("DOM NodeList {operation} limit reached ({} per document).",self.state.limits.host.node_lists));
         }
-        if length >= NODE_LIST_HANDLES { return Err("DOM NodeList identity space exhausted.".into()); }
-        let index = u32::try_from(length).map_err(|_| "DOM NodeList identity overflow.")?;
-        let handle = NODE_LIST_BASE.checked_add(index).ok_or("DOM NodeList identity overflow.")?;
-        self.state.node_lists.try_reserve(1).map_err(|_| "DOM NodeList storage reservation failed.")?;
-        Ok(handle)
+        #[cfg(not(test))]
+        let _=operation;
+        if length>=NODE_LIST_HANDLES{return Err("DOM NodeList identity space exhausted.".into());}
+        let handle=NODE_LIST_BASE.checked_add(u32::try_from(length).map_err(|_|"DOM NodeList identity overflow.")?).ok_or("DOM NodeList identity overflow.")?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("DOM retained NodeList payload allowance exhausted.")?;
+        let (replacement,added)=retained_storage::grow(&self.state.node_lists,1,available)?;
+        if replacement.is_some(){self.state.copies(length*size_of::<NodeList>())?;}
+        Ok((handle,replacement,added))
+    }
+    fn commit_node_list(&mut self,list:NodeList,replacement:Option<Vec<NodeList>>,added:usize,payload:usize) {
+        if let Some(mut next)=replacement{next.append(&mut self.state.node_lists);self.state.node_lists=next;}
+        self.state.node_lists.push(list);self.state.retained+=added+payload;
     }
 
     pub(super) fn snapshot_mutation_node_list(&mut self, nodes: &[u32]) -> Result<u32, String> {
         self.state.work(nodes.len().saturating_add(1))?;
-        let handle = self.reserve_node_list("mutation snapshot")?;
         let mut handles = Vec::new();
         handles.try_reserve_exact(nodes.len()).map_err(|_| "Cannot reserve MutationRecord node identities.")?;
-        self.state.replace_bytes(0, handles.capacity().saturating_mul(std::mem::size_of::<u32>()))?;
+        let payload=handles.capacity()*size_of::<u32>();
+        self.state.copies(nodes.len()*size_of::<u32>())?;
+        let (handle,replacement,added)=self.prepare_node_list("mutation snapshot",payload)?;
         handles.extend_from_slice(nodes);
-        self.state.node_lists.push(NodeList::MutationSnapshot(handles));
+        self.commit_node_list(NodeList::MutationSnapshot(handles),replacement,added,payload);
         Ok(handle)
     }
 
@@ -58,16 +69,16 @@ impl Bridge<'_> {
         self.check_iframe_child_topology(root)?;
         self.state.work(1)?;
         if let Some(&handle) = self.state.dom.child_lists.get(&root) { return Ok(Value::Host(handle)); }
-        let handle = self.reserve_node_list("identity")?;
+        let payload=size_of::<usize>()+size_of::<u32>();
+        let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
         self.state.dom.child_lists.try_reserve(1).map_err(|_| "DOM childNodes identity reservation failed.")?;
-        self.state.replace_bytes(0, std::mem::size_of::<usize>() + std::mem::size_of::<u32>())?;
         let list = if self.template_receiver(object) {
             // Parsed template members are exposed only through content.
             NodeList::Snapshot(Vec::new())
         } else {
             NodeList::Children(root)
         };
-        self.state.node_lists.push(list);
+        self.commit_node_list(list,replacement,added,payload);
         self.state.dom.child_lists.insert(root, handle);
         Ok(Value::Host(handle))
     }
@@ -78,19 +89,19 @@ impl Bridge<'_> {
         if let Some(&handle) = self.state.dom.inert_child_lists.get(&object) {
             return Ok(Value::Host(handle));
         }
-        let handle = self.reserve_node_list("identity")?;
+        let payload=size_of::<(u32,u32)>();
+        let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
         self.state.dom.inert_child_lists.try_reserve(1).map_err(|_| "Inert childNodes identity reservation failed.")?;
-        self.state.replace_bytes(0, std::mem::size_of::<(u32, u32)>())?;
-        self.state.node_lists.push(NodeList::InertChildren(object));
+        self.commit_node_list(NodeList::InertChildren(object),replacement,added,payload);
         self.state.dom.inert_child_lists.insert(object, handle);
         Ok(Value::Host(handle))
     }
 
     pub(super) fn create_name_list(&mut self, value: &Value) -> Result<Value,String> {
         let name = self.text(value)?;
-        let handle = self.reserve_node_list("identity")?;
-        self.state.replace_bytes(0,name.len())?;
-        self.state.node_lists.push(NodeList::Name(name));
+        let payload=name.capacity();
+        let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
+        self.commit_node_list(NodeList::Name(name),replacement,added,payload);
         Ok(Value::Host(handle))
     }
 
@@ -231,11 +242,6 @@ impl Bridge<'_> {
             }
             _ => self.query_candidates(root)?,
         };
-        // Reserve the optional snapshot identity before the checked-state
-        // closure borrows Forms; no callback or publication occurs here.
-        let snapshot_handle = if method == "querySelectorAll" {
-            Some(self.reserve_node_list("snapshot")?)
-        } else { None };
         let checked = |node| {
             self.forms
                 .controls
@@ -243,22 +249,36 @@ impl Bridge<'_> {
                 .filter(|control| matches!(control.kind, Kind::Checkbox | Kind::Radio))
                 .map(|control| control.checked)
         };
-        if let Some(handle) = snapshot_handle {
-            let nodes = crate::css::query_all(
+        if method=="querySelectorAll" {
+            // Leave room for one complete registry slot if backing must grow.
+            // Result growth may use the remainder without forcing a geometric
+            // record increment that would reject an otherwise fitting snapshot.
+            let record=if self.state.node_lists.len()==self.state.node_lists.capacity(){size_of::<NodeList>()}else{0};
+            let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(record).ok_or("DOM retained NodeList record allowance exhausted.")?;
+            #[cfg(test)]
+            let result_limit=self.state.limits.test_entry_arenas.then_some(4096);
+            #[cfg(not(test))]
+            let result_limit=None;
+            let nodes = crate::css::query_all_with_storage(
                 self.doc,
                 source,
                 &candidates,
                 Some(&checked),
                 &mut self.state.host_work,
+                available,result_limit,&mut self.state.copy_work,
             )?;
             let references = self.state.node_list_references.checked_add(nodes.len())
                 .ok_or("DOM NodeList retained-reference accounting overflow.")?;
-            if references > self.state.limits.host.node_list_references {
+            #[cfg(test)]
+            if self.state.limits.test_entry_arenas&&references > self.state.limits.host.node_list_references {
                 return Err(format!("DOM NodeList retained-reference limit reached ({} per document).", self.state.limits.host.node_list_references));
             }
             self.state.work(nodes.len())?;
+            self.state.copies(nodes.len()*size_of::<usize>())?;
+            let payload=nodes.capacity()*size_of::<usize>();
+            let (handle,replacement,added)=self.prepare_node_list("snapshot",payload)?;
+            self.commit_node_list(NodeList::Snapshot(nodes),replacement,added,payload);
             self.state.node_list_references = references;
-            self.state.node_lists.push(NodeList::Snapshot(nodes));
             Ok(Value::Host(handle))
         } else {
             let found = crate::css::query_first(
@@ -276,3 +296,7 @@ impl Bridge<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "script_node_list_storage_tests.rs"]
+mod storage_tests;
