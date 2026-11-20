@@ -46,7 +46,7 @@ impl Runtime {
             if receiver_required {
                 match this {
                     Value::Host(receiver) if host.accepts_receiver(object,method,receiver)=>object=receiver,
-                    _=>return Err(Fault::exception("TypeError","Native method called with an incompatible receiver.")),
+                    _=>return Err(Self::incompatible_native_receiver(method,&this,host)),
                 }
             }
             self.validate_native_access(object,host)?;

@@ -6,6 +6,15 @@ fn page()->(Document,Forms,Page){
 }
 fn execute(doc:&mut Document,forms:&mut Forms,page:&mut Page,script:&str){assert_eq!(page.console_eval(doc,forms,script).errors,0,"{}",page.report());}
 #[test]
+fn inert_owner_fragment_insert_before_refusal_identifies_actual_operation_and_receiver(){
+    let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
+var owner=document.getElementById('seed').content.ownerDocument,f=owner.createDocumentFragment(),effects=0,caught=false;
+try{Node.prototype.insertBefore.call(f,owner.createDocumentFragment(),null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('Operation "insertBefore"')>=0&&error.message.indexOf('DocumentFragment (native handle 0x86')>=0;}
+if(!caught||f.childNodes.length!==0)throw 'actual inert fragment refusal diagnostic';
+caught=false;try{Node.prototype.insertBefore.call({toString:function(){effects++;throw 'coerced';}},f,null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('actual receiver: object.')>=0;}if(!caught||effects!==0)throw 'diagnostic must not coerce receiver';
+"#);
+}
+#[test]
 fn inert_owner_fragment_moves_real_mixed_children_live_views_and_imports(){
     let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
 var content=document.getElementById('seed').content,owner=content.ownerDocument,f=owner.createDocumentFragment(),e=content.firstChild,all=content.childNodes,items=content.children,children=f.children;

@@ -9671,10 +9671,7 @@ impl Runtime {
                             object = receiver;
                         }
                         _ => {
-                            return Err(Fault::exception(
-                                "TypeError",
-                                "Native method called with an incompatible receiver.",
-                            ))
+                            return Err(Self::incompatible_native_receiver(method,&this,host))
                         }
                     }
                 }
@@ -9735,6 +9732,16 @@ impl Runtime {
         }
         self.invocation = Some(InvocationContext { environment: scope });
         Ok(())
+    }
+
+    #[inline(never)]
+    #[cold]
+    fn incompatible_native_receiver(method:&str,receiver:&Value,host:&dyn Host)->Fault {
+        let receiver=if let Value::Host(handle)=receiver {
+            let name=host.instance_ancestry(*handle).and_then(|ancestry|ancestry.constructor.map(|(_,name)|name)).unwrap_or("native object");
+            format!("{name} (native handle 0x{handle:08x})")
+        }else{receiver.diagnostic_type().into()};
+        Fault::exception("TypeError",format!("Native method called with an incompatible receiver. Operation {method:?}; actual receiver: {receiver}."))
     }
 
     #[inline(never)]
