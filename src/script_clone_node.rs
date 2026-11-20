@@ -145,7 +145,7 @@ impl Bridge<'_> {
                 }, crate::html::Namespace::None, false),
                 ImportSource::Fragment => (NodeKind::DocumentFragment, crate::html::Namespace::None, false),
             };
-            let extra=copied_attribute_extra(&kind);
+            let extra=copied_payload_extra(&kind);
             bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Imported element attribute backing exceeds allowance.")?;
             self.state.copies(extra)?;
             let start = base + pending.len();
@@ -225,7 +225,7 @@ impl Bridge<'_> {
             }
             self.state.copies(size)?;
             let kind = copy_node_kind(&item.kind)?;
-            let extra=copied_attribute_extra(&kind);
+            let extra=copied_payload_extra(&kind);
             bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Copied element attribute backing exceeds allowance.")?;
             self.state.copies(extra)?;
             let unsafe_nonce = self.doc.nonce_unsafe_nodes.contains(&source);

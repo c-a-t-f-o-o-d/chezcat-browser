@@ -341,7 +341,7 @@ impl Bridge<'_> {
                 kind: script_clone_node::copy_node_kind(&raw.kind)?,
                 children: node_children,
             };
-            let extra=copied_attribute_extra(&node.kind);self.state.copies(extra)?;retained=retained.saturating_add(extra);
+            let extra=copied_payload_extra(&node.kind);self.state.copies(extra)?;retained=retained.saturating_add(extra);
             plan.try_reserve(1).map_err(|_| "Cannot reserve inert promotion plan.")?;
             indices.try_reserve(1).map_err(|_| "Cannot reserve inert promotion identities.")?;
             plan.push(Promotion { index, parent, node, unsafe_nonce });
@@ -862,7 +862,7 @@ impl Bridge<'_> {
                 }),
                 unsafe_nonce: self.doc.nonce_unsafe_nodes.contains(&index),
             });
-            let extra=copied_attribute_extra(&generated.as_ref().unwrap().node.kind);self.state.copies(extra)?;payload=payload.saturating_add(extra);
+            let extra=copied_payload_extra(&generated.as_ref().unwrap().node.kind);self.state.copies(extra)?;payload=payload.saturating_add(extra);
             (owner, Some(Kind::Parsed {
                 source: ParsedSource::Generated(generated_index),
                 initial_template: if deep { initial } else { None },

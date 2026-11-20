@@ -925,8 +925,8 @@ impl Bridge<'_> {
         }
         let bytes = match &kind {
             NodeKind::Element { tag, .. } => tag.len(),
-            NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
-            NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+            NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
+            NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             NodeKind::DocumentFragment => 0,
         };
         let node = self.doc.nodes.len();
@@ -942,7 +942,12 @@ impl Bridge<'_> {
         if matches!(&kind,NodeKind::Element{tag,..} if tag=="script") {
             self.state.dom.force_async.try_reserve(1).map_err(|_|"DOM script-state reservation failed.")?;
         }
-        self.state.replace_bytes(0, bytes)?;
+        let work = match &kind {
+            NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
+            NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+            _ => bytes,
+        };
+        self.state.replace_storage(0, bytes, work)?;
         if matches!(&kind, NodeKind::Element { tag, .. } if tag == "script") {
             self.state.dom.force_async.insert(node);
         }
@@ -1448,11 +1453,10 @@ impl Bridge<'_> {
         if let Some(attribute)=self.html_text_reflection(node,property) {
             let value=self.text(value)?;self.attribute(node,attribute,Some(value))?;return Ok(true);
         }
-        if let Some(old) = self.doc.nodes[node].kind.character_data() {
+        if let Some(old_bytes) = self.doc.nodes[node].kind.character_data_capacity() {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);
             }
-            let old_len = old.len();
             let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
@@ -1460,7 +1464,7 @@ impl Bridge<'_> {
             } else {
                 self.text(value)?
             };
-            self.state.replace_bytes(old_len, text.len())?;
+            self.state.replace_storage(old_bytes, text.capacity(), text.len())?;
             match &mut self.doc.nodes[node].kind {
                 NodeKind::Text(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
                     *data = text;
