@@ -1487,10 +1487,13 @@ var p=document.getElementById('p');p.appendChild(document.createTextNode('left')
     let t=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("t")).unwrap();
     let original=doc.nodes[p].children.clone();
     let original_retained=page.state.retained;
+    let normalized_retained=original_retained-child_link_bytes(&doc.nodes[p].children)
+        -doc.nodes[original[0]].kind.character_data_capacity().unwrap()
+        +"leftright".len()+size_of::<usize>();
     page.begin_job();
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
     for failure in 0..3 {
-        bridge.state.retained_limit=if failure==0 {original_retained} else {bridge.state.limits.host.retained_bytes};
+        bridge.state.retained_limit=if failure==0 {normalized_retained-1} else {bridge.state.limits.host.retained_bytes};
         bridge.state.copy_work=if failure==1 {0} else {bridge.state.limits.copy_bytes};
         bridge.state.host_work=if failure==2 {0} else {bridge.state.limits.host_work};
         assert!(bridge.normalize_node(node_handle(p)).is_err());

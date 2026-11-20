@@ -78,7 +78,7 @@ fn character_storage_normalize_exact_refund_keeps_detached_text_and_recovers() {
     doc.nodes[parent].children.push(second);
     let (mut doc, mut forms, mut page) = start(doc);
     let before = page.state.retained;
-    let final_bytes = before - 64 + 3;
+    let final_bytes = before - 64 + 3 - child_link_bytes(&doc.nodes[parent].children) + size_of::<usize>();
     page.state.retained_limit = final_bytes - 1;
     assert!(Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.normalize_node(node_handle(parent)).is_err());
     assert_eq!(page.state.retained, before);

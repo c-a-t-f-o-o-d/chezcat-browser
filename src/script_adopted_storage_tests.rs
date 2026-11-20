@@ -80,7 +80,9 @@ fn browser_adopted_storage_large_promotion_refunds_dropped_links_and_keeps_paid_
     assert_eq!(bridge.state.inert_documents.adopted.len(), 12_000);
     // Each real copied pair owns 'div' + 'b' and one usize link; dropping the
     // inert div's u32 link refunds its original allocation. Sources stay saved.
-    let growth = 6000 * (4 + size_of::<usize>() - size_of::<u32>());
+    let destination = (bridge.doc.nodes[body].children.len() + roots.len())
+        .saturating_sub(bridge.doc.nodes[body].children.capacity()) * size_of::<usize>();
+    let growth = 6000 * (4 + size_of::<usize>() - size_of::<u32>()) + destination;
     bridge.state.retained_limit = before + growth - 1;
     assert!(bridge.splice_checked_inert_fragment(body, fragment, None).is_err());
     assert_eq!(bridge.inert_children(fragment).unwrap(), roots);

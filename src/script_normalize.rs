@@ -30,6 +30,7 @@ impl Bridge<'_> {
         let mut removed = Vec::new();
         let mut old_bytes = 0usize;
         let mut new_bytes = 0usize;
+        let mut text_copies = 0usize;
         let mut connected = false;
         while let Some(parent) = pending.pop() {
             self.state.work(1)?;
@@ -47,6 +48,7 @@ impl Bridge<'_> {
             )?;
             let children = source.clone();
             let mut kept = Vec::new();
+            self.state.copies(source.len().checked_mul(size_of::<usize>()).ok_or("Normalize child copy work overflow.")?)?;
             kept.try_reserve(children.len())
                 .map_err(|_| "Normalize child storage reservation failed.")?;
             let mut index = 0;
@@ -98,6 +100,7 @@ impl Bridge<'_> {
                         new_bytes = new_bytes
                             .checked_add(length)
                             .ok_or("Normalize retained accounting overflow.")?;
+                        text_copies = text_copies.checked_add(length).ok_or("Normalize text copy work overflow.")?;
                         replacements.push((keeper, children[start..index].to_vec(), length));
                     }
                 }
@@ -115,6 +118,18 @@ impl Bridge<'_> {
                 }
                 self.mutation_ancestors(parent)?;
                 connected |= self.state.dom.connected[parent];
+                if kept.is_empty() {
+                    kept = Vec::new();
+                } else if kept.capacity() != kept.len() {
+                    self.state.copies(kept.len().checked_mul(size_of::<usize>()).ok_or("Normalize compact child copy work overflow.")?)?;
+                    let mut compact = Vec::new();
+                    compact.try_reserve_exact(kept.len()).map_err(|_| "Normalize compact child reservation failed.")?;
+                    compact.append(&mut kept);
+                    kept = compact;
+                }
+                old_bytes = old_bytes.checked_add(child_link_bytes(&self.doc.nodes[parent].children))
+                    .ok_or("Normalize old child storage overflow.")?;
+                new_bytes = new_bytes.checked_add(child_link_bytes(&kept)).ok_or("Normalize new child storage overflow.")?;
                 parents.push((parent, kept));
             }
         }
@@ -130,7 +145,7 @@ impl Bridge<'_> {
         if retained > self.state.retained_limit {
             return Err("DOM retained text growth limit reached during normalize.".into());
         }
-        self.state.copies(new_bytes)?;
+        self.state.copies(text_copies)?;
         let mut strings = Vec::new();
         strings
             .try_reserve(replacements.len())

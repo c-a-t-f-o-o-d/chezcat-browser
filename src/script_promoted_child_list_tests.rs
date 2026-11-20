@@ -34,6 +34,7 @@ fn browser_promoted_lists_twelve_thousand_saved_identities_fit_linear_logarithmi
     let before = bridge.state.retained;
     let source_backing = bridge.state.dom.inert_child_lists.storage_bytes();
     let destination_backing = bridge.state.dom.child_lists.storage_bytes();
+    let destination_children = child_link_bytes(&bridge.doc.nodes[body].children);
     let records = bridge.state.node_lists.len();
     // These are explicit test allowances for this one operation. The previous
     // per-record shifts need over 100 million work units on this same input.
@@ -47,7 +48,8 @@ fn browser_promoted_lists_twelve_thousand_saved_identities_fit_linear_logarithmi
     assert_eq!(bridge.state.dom.inert_child_lists.len(), 1);
     assert_eq!(bridge.state.dom.inert_child_lists.storage_bytes(), source_backing);
     let added = bridge.state.dom.child_lists.storage_bytes() - destination_backing;
-    assert_eq!(bridge.state.retained, before + added + 6000 * (4 + size_of::<usize>() - size_of::<u32>()));
+    let child_bytes = child_link_bytes(&bridge.doc.nodes[body].children) - destination_children;
+    assert_eq!(bridge.state.retained, before + added + child_bytes + 6000 * (4 + size_of::<usize>() - size_of::<u32>()));
     for index in [0, 1, 11_998, 11_999] {
         let (node, list) = saved[index];
         assert_eq!(host(bridge.create_child_list(node)), list);

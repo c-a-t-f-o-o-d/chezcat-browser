@@ -93,6 +93,9 @@ mod script_normalize;
 #[cfg(test)]
 #[path = "script_character_storage_tests.rs"]
 mod script_character_storage_tests;
+#[cfg(test)]
+#[path = "script_main_child_storage_tests.rs"]
+mod script_main_child_storage_tests;
 #[path = "script_element_properties.rs"]
 mod script_element_properties;
 #[path = "script_created_events.rs"]
@@ -2615,15 +2618,22 @@ impl Bridge<'_> {
         let retained_count = descendants.len().checked_add(usize::from(detached_parent && !text.is_empty()))
             .ok_or("textContent retained-node accounting overflow.")?;
         self.state.detached_nodes.try_reserve(retained_count).map_err(|_| "textContent detached-node reservation failed.")?;
+        let text_bytes = if text.is_empty() { 0 } else { text.capacity() };
+        let (child_growth, child_bytes) = if text.is_empty() { (None, 0) } else {
+            let available = self.state.retained_limit.saturating_sub(self.state.retained)
+                .checked_sub(text_bytes).ok_or("textContent child/text storage allowance exhausted.")?;
+            retained_storage::capacity(&self.doc.nodes[node].children, 1, available)?
+        };
         if !text.is_empty() {
             self.doc.nodes.try_reserve(1).map_err(|_| "textContent node reservation failed.")?;
-            let needed = 1usize.saturating_sub(self.doc.nodes[node].children.capacity());
-            self.doc.nodes[node].children.try_reserve(needed).map_err(|_| "textContent child reservation failed.")?;
         }
         // An empty replacement creates no retained Text, even if its incoming
         // buffer has spare capacity. Old detached children remain charged.
-        self.state.replace_storage(0, if text.is_empty() { 0 } else { text.capacity() }, text.len())?;
+        let retained = text_bytes.checked_add(child_bytes).ok_or("textContent retained storage overflow.")?;
+        let work = text.len().checked_add(if text.is_empty(){0}else{size_of::<usize>()}).ok_or("textContent copy work overflow.")?;
+        self.state.replace_storage(0, retained, work)?;
         self.state.detached_nodes.extend(descendants);
+        if let Some(children) = child_growth { self.doc.nodes[node].children = children; }
         self.doc.nodes[node].children.clear();
         if !text.is_empty() {
             let child = self.doc.nodes.len();
@@ -6047,7 +6057,10 @@ fn copied_payload_extra(kind: &NodeKind) -> usize {
     }
 }
 fn document_bytes(doc: &Document) -> usize {
-    doc.title.capacity() + doc.nodes.iter().map(node_bytes).sum::<usize>()
+    doc.title.capacity() + doc.nodes.iter().map(|node| node_bytes(node) + child_link_bytes(&node.children)).sum::<usize>()
+}
+fn child_link_bytes(children: &Vec<usize>) -> usize {
+    children.capacity() * size_of::<usize>()
 }
 fn prefix(text: &str, maximum: usize) -> &str {
     let mut end = text.len().min(maximum);

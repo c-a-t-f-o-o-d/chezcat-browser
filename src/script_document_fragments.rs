@@ -88,8 +88,9 @@ impl Bridge<'_> {
 
         let total=self.doc.nodes[parent].children.len().checked_add(roots.len()).ok_or("Fragment destination size overflow.")?;
         self.state.work(total.saturating_add(incoming.len()).saturating_add(outgoing.len()))?;
-        self.state.copies(total.checked_mul(std::mem::size_of::<usize>()).ok_or("Fragment destination copy overflow.")?)?;
-        let mut children=Vec::new();children.try_reserve(total).map_err(|_|"Fragment destination reservation failed.")?;
+        let final_count = total.checked_sub(usize::from(old.is_some())).ok_or("Fragment final child count underflow.")?;
+        self.state.copies(final_count.checked_mul(std::mem::size_of::<usize>()).ok_or("Fragment destination copy overflow.")?)?;
+        let mut children=Vec::new();children.try_reserve_exact(final_count).map_err(|_|"Fragment destination reservation failed.")?;
         let position=reference.and_then(|reference|self.doc.nodes[parent].children.iter().position(|&node|node==reference))
             .unwrap_or(self.doc.nodes[parent].children.len());
         for (index,&node) in self.doc.nodes[parent].children.iter().enumerate() {
@@ -105,7 +106,8 @@ impl Bridge<'_> {
         let connected=self.state.dom.connected[parent];
         let form_plan=self.prepare_select_form_change(None,&overrides)?;
         let images=self.prepare_image_connections(&incoming,connected)?;
-        self.state.replace_bytes(0,form_plan.retained_bytes)?;
+        let bytes = child_link_bytes(&children).checked_add(form_plan.retained_bytes).ok_or("Fragment child/native storage overflow.")?;
+        self.state.replace_storage(child_link_bytes(&self.doc.nodes[parent].children), bytes, form_plan.retained_bytes)?;
         // All validation, quota checks, allocations and native plans precede
         // the first write. No author callback or fallible work in publication.
         self.doc.nodes[donor].children.clear();

@@ -1173,14 +1173,21 @@ impl Bridge<'_> {
         // Stage the final vectors. Removing an existing sibling before locating
         // old handles either sibling order; incoming may also descend from old.
         let mut children = Vec::new();
-        children.try_reserve(self.doc.nodes[parent].children.len()).map_err(|_| "DOM replacement children reservation failed.")?;
+        let destination_count = self.doc.nodes[parent].children.len().checked_sub(usize::from(source_parent==Some(parent)))
+            .ok_or("DOM replacement child count underflow.")?;
+        self.state.copies(destination_count.checked_mul(size_of::<usize>()).ok_or("DOM replacement child copy overflow.")?)?;
+        children.try_reserve_exact(destination_count).map_err(|_| "DOM replacement children reservation failed.")?;
         for &node in &self.doc.nodes[parent].children {
             if node == child { continue; }
             children.push(if node == old { child } else { node });
         }
         let mut source_children = Vec::new();
+        let mut old_links = child_link_bytes(&self.doc.nodes[parent].children);
         if let Some(source) = source_parent.filter(|&source| source != parent) {
-            source_children.try_reserve(self.doc.nodes[source].children.len()).map_err(|_| "DOM replacement source reservation failed.")?;
+            let count = self.doc.nodes[source].children.len().checked_sub(1).ok_or("DOM replacement source child count underflow.")?;
+            self.state.copies(count.checked_mul(size_of::<usize>()).ok_or("DOM replacement source copy overflow.")?)?;
+            source_children.try_reserve_exact(count).map_err(|_| "DOM replacement source reservation failed.")?;
+            old_links = old_links.checked_add(child_link_bytes(&self.doc.nodes[source].children)).ok_or("DOM replacement old link storage overflow.")?;
             source_children.extend(self.doc.nodes[source].children.iter().copied().filter(|&node| node != child));
         }
         let mut incoming_set = HashSet::new();
@@ -1193,7 +1200,9 @@ impl Bridge<'_> {
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
 
         let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
-        self.state.replace_bytes(0,form_plan.retained_bytes)?;
+        let bytes = child_link_bytes(&children).checked_add(child_link_bytes(&source_children))
+            .and_then(|bytes|bytes.checked_add(form_plan.retained_bytes)).ok_or("DOM replacement child/native storage overflow.")?;
+        self.state.replace_storage(old_links, bytes, form_plan.retained_bytes)?;
         // No fallible work remains after publishing either parent's new list.
         if let Some(source) = source_parent.filter(|&source| source != parent) { self.doc.nodes[source].children = source_children; }
         self.doc.nodes[parent].children = children;
@@ -1321,9 +1330,23 @@ impl Bridge<'_> {
         let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
-        if method != "removeChild" { self.doc.nodes[parent].children.try_reserve(1).map_err(|_| "DOM destination children reservation failed.")?; }
+        let (child_growth, child_bytes) = if method=="removeChild" || old_parent==Some(parent) { (None, 0) } else {
+            let available = self.state.retained_limit.saturating_sub(self.state.retained)
+                .checked_sub(form_plan.retained_bytes).ok_or("DOM child/native storage allowance exhausted.")?;
+            retained_storage::grow(&self.doc.nodes[parent].children, 1, available)?
+        };
+        let copied = old_parent.map_or(0, |node| self.doc.nodes[node].children.len())
+            .checked_add(if method=="removeChild" {0}else{self.doc.nodes[parent].children.len()+1})
+            .and_then(|slots|slots.checked_add(if child_growth.is_some(){self.doc.nodes[parent].children.len()}else{0}))
+            .and_then(|slots|slots.checked_mul(size_of::<usize>()))
+            .and_then(|bytes|bytes.checked_add(form_plan.retained_bytes)).ok_or("DOM child/native copy work overflow.")?;
         self.state.detached_nodes.try_reserve(descendants.len()).map_err(|_| "DOM detached INPUT identity reservation failed.")?;
-        self.state.replace_bytes(0,form_plan.retained_bytes)?;
+        let bytes = child_bytes.checked_add(form_plan.retained_bytes).ok_or("DOM child/native storage overflow.")?;
+        self.state.replace_storage(0,bytes,copied)?;
+        if let Some(mut children) = child_growth {
+            children.append(&mut self.doc.nodes[parent].children);
+            self.doc.nodes[parent].children=children;
+        }
         if let Some(old_parent) = old_parent {
             self.doc.nodes[old_parent]
                 .children
@@ -1403,14 +1426,29 @@ impl Bridge<'_> {
             self.text(value)?
         };
         self.state.work(self.doc.nodes[node].children.len())?;
+        self.state.detached_nodes.try_reserve(self.doc.nodes[node].children.len())
+            .map_err(|_| "Script text detached-node reservation failed.")?;
+        let (child_growth, added) = if text.is_empty() { (None, 0) } else {
+            let available = self.state.retained_limit.saturating_sub(self.state.retained)
+                .checked_sub(text.capacity()).ok_or("Script text/child storage allowance exhausted.")?;
+            retained_storage::capacity(&self.doc.nodes[node].children, 1, available)?
+        };
+        // Keep the private child buffer reserved while node construction admits
+        // the Text. No callback can observe this reservation; failure refunds it.
+        self.state.replace_storage(0, added, if text.is_empty(){0}else{size_of::<usize>()})?;
         let new_child = if text.is_empty() {
             None
         } else {
-            let Value::Host(handle) = self.create_dom_node(NodeKind::Text(text))? else {
+            let created = match self.create_dom_node(NodeKind::Text(text)) {
+                Ok(value) => value,
+                Err(error) => { self.state.retained -= added; return Err(error); }
+            };
+            let Value::Host(handle) = created else {
                 unreachable!();
             };
             node_index(handle)
         };
+        if let Some(children) = child_growth { self.doc.nodes[node].children = children; }
         for child in self.doc.nodes[node].children.drain(..) {
             self.state.detached_nodes.insert(child);
             self.state.dom.connected[child] = false;

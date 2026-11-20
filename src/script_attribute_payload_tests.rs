@@ -55,7 +55,7 @@ fn browser_attribute_fragment_retains_decoded_capacity_and_clone_pays_only_compa
     let(mut doc,mut forms,mut page)=page("<html><body><div></div></body></html>");let mount=element(&doc,"div");let before=page.state.retained;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};bridge.set(node_handle(mount),"innerHTML",Value::String("<span data-key='a&amp;b'></span>".into())).unwrap();let node=element(bridge.doc,"span");
     let attr=attribute(bridge.doc,node,"data-key");assert!(attr.value.capacity()>attr.value.len());let NodeKind::Element{attrs,..}=&bridge.doc.nodes[node].kind else{unreachable!()};
-    assert_eq!(bridge.state.retained-before,attrs.capacity()*size_of::<crate::html::Attribute>()+attr.name.owned_bytes()+attr.value.capacity()+"span".len());
+    assert_eq!(bridge.state.retained-before,attrs.capacity()*size_of::<crate::html::Attribute>()+attr.name.owned_bytes()+attr.value.capacity()+"span".len()+child_link_bytes(&bridge.doc.nodes[mount].children));
     let before=bridge.state.retained;let copied=size_of::<crate::html::Attribute>()+"data-key".len()+"a&b".len()+"span".len();bridge.state.retained_limit=before+copied;
     let Value::Host(cloned)=bridge.clone_node(node_handle(node),false).unwrap()else{panic!("real clone")};let cloned=node_index(cloned).unwrap();assert_eq!(bridge.state.retained,before+copied);assert_eq!(bridge.doc.attr(cloned,"data-key"),Some("a&b"));assert_eq!(attribute(bridge.doc,cloned,"data-key").value.capacity(),3);
 }
