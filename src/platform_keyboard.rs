@@ -83,6 +83,10 @@ pub(super) unsafe fn event(key: u32, lparam: isize, down: bool, system: bool) ->
         repeat: down && lparam & (1 << 30) != 0,
         location: key_location(code),
         key_code: key,
+        caps_lock: GetKeyState(0x14) & 1 != 0,
+        num_lock: GetKeyState(0x90) & 1 != 0,
+        scroll_lock: GetKeyState(0x91) & 1 != 0,
+        alt_graph: ctrl && key_is_down(0xa5),
     }
 }
 

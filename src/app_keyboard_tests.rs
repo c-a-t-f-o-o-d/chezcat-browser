@@ -100,7 +100,7 @@ fn unprevented_keyboard_keeps_default_scrolling_and_reports_native_metadata() {
 
 #[test]
 fn native_text_is_suppressed_only_when_the_focused_form_cancels_that_keydown() {
-    let (_fixture, mut app) = Fixture::new("<input id=entry value=''><p id=report></p><script>document.getElementById('entry').addEventListener('keydown',function(e){document.getElementById('report').setAttribute('data-target',e.target.id);if(e.key==='x') e.preventDefault();}); document.getElementById('entry').addEventListener('keyup',function(e){document.getElementById('report').setAttribute('data-up',e.key);});</script>");
+    let (_fixture, mut app) = Fixture::new("<input id=entry value=''><p id=report></p><script>var preview=new KeyboardEvent('preview',{key:'x'});if(preview.key!=='x'||preview.isTrusted)throw 'real untrusted App keyboard';document.getElementById('entry').addEventListener('keydown',function(e){if(!(e instanceof KeyboardEvent)||Object.getPrototypeOf(e)!==KeyboardEvent.prototype||!e.isTrusted)throw 'real trusted App keyboard';document.getElementById('report').setAttribute('data-target',e.target.id);if(e.key==='x') e.preventDefault();}); document.getElementById('entry').addEventListener('keyup',function(e){document.getElementById('report').setAttribute('data-up',e.key);});</script>");
     let entry = node(&app, "entry");
     app.focus_control(entry);
     let (_, canceled) = app.key_event(input(true, "x", "KeyX", 0x58));

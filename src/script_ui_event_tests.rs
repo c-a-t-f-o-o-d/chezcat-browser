@@ -188,7 +188,7 @@ var mouse=document.createEvent('MouseEvent');mouse.initMouseEvent('mouse',true,t
 if(!(mouse instanceof UIEvent)||!(mouse instanceof Event)||!P.isPrototypeOf(mouse)||getView.call(mouse)!==window||getDetail.call(mouse)!==4||getWhich.call(mouse)!==2)throw 'actual Mouse UI ancestry and slots';
 P.initUIEvent.call(mouse,'borrowed',false,false,null,9);if(mouse.clientX!==5||mouse.clientY!==7||mouse.button!==1||mouse.which!==2||mouse.detail!==9||mouse.view!==null)throw 'borrowed UI method preserves Mouse state';
 var base=new Event('base'),custom=document.createEvent('CustomEvent');custom.initCustomEvent('custom');
-if(base instanceof UIEvent||custom instanceof UIEvent||typeof MouseEvent!=='function'||typeof KeyboardEvent!=='undefined')throw 'real Mouse and deferred classes with genuine negative brands';
+if(base instanceof UIEvent||custom instanceof UIEvent||typeof MouseEvent!=='function'||typeof KeyboardEvent!=='function')throw 'real Mouse and deferred classes with genuine negative brands';
 var refused=0;for(var invalid of [base,custom,{},Object.create(P),null,3]){try{getView.call(invalid);}catch(x){if(x.name==='TypeError')refused++;}}if(refused!==6)throw 'real UI getter brand';
 var b=document.getElementById('button'),native=0;
 b.addEventListener('keydown',function(e){

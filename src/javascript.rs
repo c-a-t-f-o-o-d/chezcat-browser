@@ -9209,8 +9209,9 @@ impl Runtime {
                     if let Some(string_hint)=host.dictionary_member_conversion(object,method,name).filter(|_|!matches!(member,Value::Undefined)) {
                         let primitive=self.primitive_with_hint(member,string_hint,host)?;
                         self.work(primitive.bytes())?;
-                        member=self.checked_value(if string_hint {Value::String(primitive.script_text()?)}
-                            else {Value::Number(primitive.script_number()?)})?;
+                        member=self.checked_value(if string_hint {
+                            if primitive.is_string(){primitive}else{Value::String(primitive.script_text()?)}
+                        } else {Value::Number(primitive.script_number()?)})?;
                     }
                     host.validate_dictionary_member(object,method,name,&member)
                         .map_err(|(kind,message)|Fault::exception(kind,message))?;

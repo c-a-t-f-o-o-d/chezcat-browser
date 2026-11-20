@@ -172,7 +172,7 @@ fn dispatched_base_event_expandos_share_copy_and_instruction_limits() {
 }
 
 #[test]
-fn dispatched_base_event_optin_does_not_admit_keyboard_or_forged_native_handles() {
+fn dispatched_keyboard_has_genuine_ordinary_ancestry_but_forged_handles_still_refuse() {
     let (mut doc, mut forms, mut page) = fixture("var seen=0;document.body.addEventListener('keydown',function(e){if(e.key!=='A'||e.code!=='KeyA'||!e.isTrusted||e.type!=='keydown')throw 'native keyboard fields';seen++;});");
     let outcome = page.keyboard(&mut doc, &mut forms, KeyboardInput {
         down: true, key: "A".into(), code: "KeyA".into(), key_code: 0x41, ..KeyboardInput::default()
@@ -185,8 +185,8 @@ fn dispatched_base_event_optin_does_not_admit_keyboard_or_forged_native_handles(
         let outcome = page.keyboard(&mut doc, &mut forms, KeyboardInput {
             down: true, key: "A".into(), code: "KeyA".into(), key_code: 0x41, ..KeyboardInput::default()
         });
-        assert_eq!(outcome.errors, 1, "Keyboard inspection retains its explicit boundary: {probe}");
-        assert_ne!(doc.title, "keyboard widened");
+        assert_eq!(outcome.errors, 0, "Genuine KeyboardEvent inspection: {probe}\n{}",page.report());
+        assert_eq!(doc.title, "keyboard widened");
     }
     page.runtime.define_global("forgedEvent", Value::Host(EVENT_BASE + 10_000)).unwrap();
     let outcome = page.console_eval(&mut doc, &mut forms, "forgedEvent.arbitraryMarker;");

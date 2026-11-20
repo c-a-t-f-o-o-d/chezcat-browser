@@ -1271,9 +1271,18 @@ visible results have paired document/layout/canvas pixels and zero current
 interpreter errors. That child check uses an owned loopback web origin; child
 contexts for local files remain unavailable.
 
-KeyboardEvent construction, its specialized prototype and native-input
-immediate prototypes remain unsupported. Synthetic
-Mouse dispatch/default activation from synthetic events and general native
+KeyboardEvent construction and its owner-realm UIEvent-derived prototype now
+use genuine native records. Key/code preserve UTF-16; readonly getters,
+modifiers, location constants and legacy keyCode/charCode values reflect real
+constructed state. Trusted keydown/up keep existing input, cancellation and
+callback expiry through genuine KeyboardEvent ancestry. Constructor records
+remain untrusted and synthetic dispatch does not generate native editing.
+One shared UI-family variant avoids retaining simultaneous mouse/keyboard
+payloads in each record; key/code payloads and actual record capacity are
+admitted before publication and included in unpublished rollback. Deprecated
+initKeyboardEvent and native IME/keypress delivery remain unimplemented.
+See [KeyboardEvent](https://w3c.github.io/uievents/#interface-keyboardevent).
+Synthetic Mouse dispatch/default activation from synthetic events and general native
 pointer payloads remain unsupported. The finite trusted anchor host seam is
 described in B2 and used by its guarded native link routing.
 Changing native host prototypes, arbitrary native subclassing/newTarget and

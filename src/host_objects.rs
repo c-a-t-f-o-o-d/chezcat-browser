@@ -968,7 +968,7 @@ impl Runtime {
         if self.host_objects.contains_key(&handle) {return Err(Fault::new("Native expando store conflicts with an existing host binding."));}
         let ancestry=host.instance_ancestry(handle).ok_or_else(||Fault::new("Native expando prototype provenance is unavailable."))?;
         if ancestry.window!=owner {return Err(Fault::new("Native expando prototype owner mismatch."));}
-        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent"|"CustomEvent"|"MessageEvent")) if window==owner);
+        let base_event=matches!(ancestry.constructor,Some((window,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"CustomEvent"|"MessageEvent")) if window==owner);
         let prototype=self.native_ancestry_anchor(ancestry)?;
         let id=self.new_object(None)?;
         self.objects[id].prototype=Some(prototype);
