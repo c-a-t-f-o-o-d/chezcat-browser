@@ -27,12 +27,11 @@ pub(super) fn supported_tag(tag: &Tag) -> bool {
     tag.clean_syntax && shape_element(&tag.name)
 }
 
-pub(super) fn supported_template_tag(tag: &Tag) -> bool {
-    shape_element(&tag.name) && !tag.duplicate_attributes && supported_attributes(tag)
-}
-
-fn supported_attributes(tag: &Tag) -> bool {
-    tag.clean_syntax && tag.attrs.iter().all(|(key, value)| match key.as_str() {
+pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
+    if !shape_element(&tag.name){return Some(("element",&tag.name));}
+    if tag.duplicate_attributes{return Some(("duplicate attributes on element",&tag.name));}
+    if !tag.clean_syntax{return Some(("malformed element",&tag.name));}
+    tag.attrs.iter().find_map(|(key, value)| (!match key.as_str() {
         "id" | "class" | "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
         "fill" | "stroke" => value.strip_prefix('#').map_or_else(
@@ -40,7 +39,7 @@ fn supported_attributes(tag: &Tag) -> bool {
             |digits| matches!(digits.len(), 3 | 4 | 6 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit())),
         "xmlns" => tag.name == "svg" && Some(value.as_str()) == Namespace::Svg.element_uri(),
         _ => false,
-    })
+    }).then_some(("attribute",key.as_str())))
 }
 
 pub(super) fn publish(nodes: &mut [Node]) {

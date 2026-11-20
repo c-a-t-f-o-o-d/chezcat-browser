@@ -412,10 +412,10 @@ fn parse_internal(
                 || tag.name == "noscript" && scripting {
                 return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
             }
-            if (starts_template_svg || inside_template_svg) && !tag.closing
-                && !svg_namespace::supported_template_tag(&tag)
-            {
-                return Err("Template SVG contains an unsupported element or attribute.".into());
+            if (starts_template_svg || inside_template_svg) && !tag.closing {
+                if let Some((kind,name))=svg_namespace::template_refusal(&tag){
+                    return Err(format!("Template SVG contains an unsupported {kind}: {name:.64} (element {:.64}).",tag.name));
+                }
             }
             if !tag.closing {
                 let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
