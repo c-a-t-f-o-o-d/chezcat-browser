@@ -1021,12 +1021,17 @@ fn template_inner_html_rolls_back_an_unmaterialized_fragment_on_capacity_failure
         &["var fresh=document.createElement('template');"]);
     assert_eq!(outcome.errors, 0, "{}", page.report());
     let retained = page.state.retained;
+    let backing = page.state.inert_documents.backing_bytes();
     let limit = page.state.limits.host.extra_nodes;
     page.state.limits.host.extra_nodes = 3;
     let failure = page.console_eval(&mut doc, &mut forms, "fresh.innerHTML='<b>no partial tree</b>';");
     assert_eq!(failure.errors, 1);
     assert!(page.report().contains("Inert DOM identity limit reached during template replacement"));
-    assert_eq!(page.state.retained, retained);
+    // Failed unpublished payload is gone, but reusable vector backing stays
+    // allocated and paid. The subsequent real content read must remain empty.
+    let added = page.state.inert_documents.backing_bytes() - backing;
+    assert!(added > 0);
+    assert_eq!(page.state.retained, retained + added);
     page.state.limits.host.extra_nodes = limit;
     let verified = page.console_eval(&mut doc, &mut forms,
         "if(fresh.content.firstChild!==null)throw 'partial child';fresh.innerHTML='<b>retry</b>';if(fresh.content.textContent!=='retry')throw 'failed retry';");
