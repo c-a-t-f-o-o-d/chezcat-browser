@@ -32,6 +32,58 @@ fn checkpoint(runtime: &mut Runtime) {
 }
 
 #[test]
+fn await_operand_small_test_allowance_fails_and_restores() {
+    for expression in [
+        format!("{}await gate{}", "true===(".repeat(24), ")".repeat(24)),
+        format!("{}await gate{}", "slot=(true?".repeat(24), ":0)".repeat(24)),
+        format!("{}await gate{}", "identity(".repeat(24), ")".repeat(24)),
+        format!("(await gate){}", "()".repeat(24)),
+    ] {
+        let mut runtime = Runtime::new();
+        succeeds(&mut runtime, &format!(
+            "var gate=Promise.resolve(true),slot;function identity(v){{return v;}}\
+             async function run(){{return {expression};}}'ok';"));
+        runtime.limits.test_evaluation_frames = Some(8);
+        let error = runtime.execute("run();", &mut NoHost).unwrap_err();
+        assert!(error.contains("Pending evaluation limit"), "{expression}: {error}");
+        assert_eq!(runtime.active_await_storage_bytes, 0);
+        assert!(runtime.transient_registration_is_empty());
+        runtime.limits.test_evaluation_frames = None;
+        runtime.begin_job();
+        succeeds(&mut runtime, "identity(3);'ok';");
+    }
+}
+
+#[test]
+fn await_operand_storage_exceeds_former_count_limits() {
+    for (family, expression, input, expected) in [
+        ("comparison", format!("{}await gate{}", "true===(".repeat(4200), ")".repeat(4200)), "true", "true"),
+        ("assignment", format!("{}await gate{}", "slot=(true?".repeat(4200), ":0)".repeat(4200)), "7", "7"),
+        ("call", format!("{}await gate{}", "identity(".repeat(4200), ")".repeat(4200)), "9", "9"),
+        ("followup", format!("(await gate){}", "()".repeat(4200)), "again", "again"),
+    ] {
+        let mut runtime = Runtime::new();
+        let source = format!(
+            "var release,answer,slot,calls=0;var gate=new Promise(r=>release=r);\
+             function identity(value){{calls++;return value;}}\
+             function again(){{calls++;return again;}}\
+             async function run(){{return {expression};}}\
+             run().then(value=>answer=value);'ok';");
+        let result = runtime.execute(&source, &mut NoHost);
+        assert!(result.is_ok(), "{family}: {result:?}");
+        checkpoint(&mut runtime);
+        assert_eq!(runtime.active_await_storage_bytes, 0, "{family}");
+        runtime.begin_job();
+        succeeds(&mut runtime, &format!("release({input});'ok';"));
+        checkpoint(&mut runtime);
+        succeeds(&mut runtime, &format!("if(answer!=={expected})throw 'resumed value';'ok';"));
+        if matches!(family, "call" | "followup") {
+            succeeds(&mut runtime, "if(calls!==4200)throw 'call order or replay';'ok';");
+        }
+    }
+}
+
+#[test]
 fn await_storage_reentry_includes_outer_retained_operands() {
     let mut runtime = Runtime::new();
     succeeds(&mut runtime, &format!(
