@@ -629,6 +629,24 @@ document.head.appendChild(sheet);
     }
 
     #[test]
+    fn stylesheet_replacement_reuses_current_source_allowance_instead_of_lifetime_work() {
+        let site = Site::new();
+        let mut app = open(&site, "/home");
+        wait(&mut app, |app| !app.is_loading());
+        app.document.stylesheet_limits = crate::css::StylesheetLimits {
+            sheet_bytes: 128, document_bytes: 192, rules: 8,
+        };
+        for index in 0..8 {
+            let (path, width) = if index % 2 == 0 { ("/next.css", 77) } else { ("/sheet.css", 123) };
+            eval(&mut app, &format!("sheet.onload=null;sheet.href='{path}';"));
+            wait(&mut app, |app| !app.is_loading());
+            assert_eq!(app.styles.len(), 1);
+            assert_eq!(app.scripting.as_ref().unwrap().error_count(), 0, "{}", app.scripting.as_ref().unwrap().report());
+            eval(&mut app, &format!("if(document.getElementById('target').clientWidth!=={width})throw 'replacement geometry';"));
+        }
+    }
+
+    #[test]
     fn dynamic_stylesheet_queue_and_lifetime_exceed_former_count_limit() {
         let site = Site::new();
         let mut app = open(&site, "/home");

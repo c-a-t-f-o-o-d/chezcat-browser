@@ -165,14 +165,16 @@ impl Page {
         let mut changed = false;
         if current {
             let result = result.and_then(|source| {
-                crate::css::check_stylesheet_candidate(doc,styles,request.node,&source)?;
-                let next=request.limits.accept(&source,crate::css::StylesheetUsage{bytes:self.state.stylesheets.source_bytes,rules:self.state.stylesheets.source_rules})?;
+                // The immutable fetch profile still applies to this complete
+                // source; document retention uses the current connected set.
+                request.limits.accept(&source,crate::css::StylesheetUsage::default())?;
+                let next=crate::css::check_stylesheet_candidate(doc,styles,request.node,&source)?;
                 Ok((source,next))
             });
             let event = match result {
                 Ok((source,next)) => {
-                    // Count every accepted source, even if later removed. This
-                    // prevents repeated href changes from resetting the budget.
+                    // Replaced/retired sources do not consume a lifetime byte
+                    // or rule allowance. Network and work accounting is separate.
                     self.state.stylesheets.source_bytes = next.bytes;
                     self.state.stylesheets.source_rules = next.rules;
                     if let Some(geometry) = &mut self.state.geometry {

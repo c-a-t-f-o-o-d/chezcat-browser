@@ -182,9 +182,9 @@ fn accepted_stylesheets_with<'a>(doc:&'a Document,external:&'a HashMap<usize,Str
     admit_stylesheets(doc,sources,None).expect("unbudgeted stylesheet admission")
 }
 pub(crate) fn accepted_stylesheets<'a>(doc:&'a Document,external:&'a HashMap<usize,String>)->(Vec<(usize,std::borrow::Cow<'a,str>)>,Vec<String>,StylesheetUsage) {accepted_stylesheets_with(doc,external,None)}
-pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<(),String> {
-    let (accepted,errors,_)=accepted_stylesheets_with(doc,external,Some((node,source)));
-    if accepted.iter().any(|(owner,_)|*owner==node) {return Ok(());}
+pub fn check_stylesheet_candidate(doc:&Document,external:&HashMap<usize,String>,node:usize,source:&str)->Result<StylesheetUsage,String> {
+    let (accepted,errors,usage)=accepted_stylesheets_with(doc,external,Some((node,source)));
+    if accepted.iter().any(|(owner,_)|*owner==node) {return Ok(usage);}
     let prefix=format!("CSS node {node}:");
     Err(errors.into_iter().find(|error|error.starts_with(&prefix)).unwrap_or_else(||"Stylesheet is not active in the current connected document.".into()))
 }
