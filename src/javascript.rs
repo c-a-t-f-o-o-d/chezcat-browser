@@ -4180,7 +4180,7 @@ impl Runtime {
             program_allocation: program_allocation::State::default(),
             regexp_work: limits.regexp_work,
             bindings: 0,
-            value_bytes: 0,
+            value_bytes: std::mem::size_of::<Option<Environment>>(),
             active_await_storage_bytes: 0,
             limits,
             steps: limits.steps,
@@ -4412,7 +4412,7 @@ impl Runtime {
     }
 
     fn allocate_host_function_with_length(&mut self, object: u32, method: &'static str, length: usize) -> Result<function_arena::Allocation, String> {
-        if self.function_arena.occupied >= self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             return Err(self.function_limit_fault("host").display());
         }
         let allocation = self.insert_function_slot(Function::Host {
@@ -4922,12 +4922,14 @@ impl Runtime {
         if let Some(id) = self.free_environments.pop() {
             self.environments[id] = env;
             Ok(id)
-        } else if self.environments.len() < self.limits.capacity.environments {
+        } else {
+            if self.environment_count_refused() {
+                return Err(self.environment_limit_fault("Environment", self.limits.capacity.environments));
+            }
+            self.prepare_environment_slot_storage()?;
             let id = self.environments.len();
             self.environments.push(env);
             Ok(id)
-        } else {
-            Err(self.environment_limit_fault("Environment", self.limits.capacity.environments))
         }
     }
     fn put_binding(
@@ -5232,9 +5234,10 @@ impl Runtime {
             FunctionKind::Async => Some(self.async_function_prototype()?),
             FunctionKind::Generator => Some(self.generator_function_prototype()?),
         };
-        if self.function_arena.occupied == self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             return Err(self.function_limit_fault("script"));
         }
+        self.prepare_function_slot_storage()?;
         let index = self.next_function_slot()?;
         // A named expression's private name lives outside its parameter/body
         // scope. A parameter, var, or lexical binding may shadow that name.
@@ -9667,17 +9670,17 @@ impl Runtime {
             self.invocation = lexical;
             return Ok(());
         }
+        // Reclamation precedes reservation, including explicit regression caps.
+        if self.free_environments.is_empty() && (self.environment_count_refused() || self.environments.len() == self.environments.capacity()) {
+            self.collect_function_candidates_at_entry()?;
+        }
+        self.prepare_environment_slot_storage()?;
         let retained = if derived { 0 } else { this.bytes() };
         if self.value_bytes.saturating_add(retained) > self.limits.heap.retained_values {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let this_binding = if derived { derived_context::ThisBinding::Uninitialized }
             else { derived_context::ThisBinding::Initialized(self.copy_value(this)?) };
-        // Moving the existing call scope before defaults must not skip the old
-        // entry reclamation opportunity when the environment arena is full.
-        if self.free_environments.is_empty() && self.environments.len() >= self.limits.capacity.environments {
-            self.collect_function_candidates_at_entry()?;
-        }
         let scope = self.new_environment(parent, true)?;
         self.environment_mut(scope).invocation = Some(derived_context::Data {
             callee: index, new_target, this_binding, home_object: home, derived_constructor: derived,
@@ -12114,6 +12117,9 @@ caught;
             .execute("function f(a){return a;}f;", &mut host)
             .unwrap();
         let objects = runtime.objects.len();
+        // Admit activation backing once; unused arguments must create no object.
+        runtime.invoke(function.clone(), &[Value::Undefined], Value::Undefined, &mut host).unwrap();
+        assert_eq!(runtime.objects.len(), objects);
         let bytes = runtime.value_bytes;
         let bindings = runtime.bindings;
         let value = Value::String("x".repeat(1024));
@@ -12145,6 +12151,8 @@ caught;
         let function = runtime
             .execute("function f(s){arguments=s;return 7;}f;", &mut host)
             .unwrap();
+        // Pre-admit reusable activation backing before filling payload storage.
+        runtime.invoke(function.clone(), &[Value::String(String::new())], Value::Undefined, &mut host).unwrap();
         let size = MAX_STRING_BYTES;
         let target = MAX_RETAINED_VALUES - 2 * size;
         let mut serial = 0;
@@ -13114,7 +13122,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
                     property.writable,
                     property.configurable,
                 );
-                let counts = (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes);
+                let counts = (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes - runtime.retained_arena_bytes());
                 let error = runtime.execute(source, &mut host).unwrap_err();
                 assert!(error.contains("Global var/function declarations over accessor property"), "{source}: {error}");
                 assert!(host.records.is_empty(), "{source}");
@@ -13132,7 +13140,7 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
                     property.writable,
                     property.configurable,
                 ), "{source}");
-                assert_eq!(counts, (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes), "{source}");
+                assert_eq!(counts, (runtime.bindings, runtime.functions.len(), runtime.properties, runtime.value_bytes - runtime.retained_arena_bytes()), "{source}");
             }
         }
     }

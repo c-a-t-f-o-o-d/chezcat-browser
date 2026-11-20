@@ -191,10 +191,15 @@ impl Runtime {
         #[cfg(test)]
         if self.function_arena.disable_collection { return Ok(()); }
         let include_scope = self.scope_retirement_enabled();
+        let threshold = self.functions.capacity().saturating_mul(3) / 4;
+        #[cfg(test)]
+        let threshold = if self.limits.test_entry_arenas { self.limits.capacity.functions * 3 / 4 } else { threshold };
+        let pressure = self.value_bytes >= self.limits.heap.retained_values - self.limits.heap.retained_values / 4;
+        let demand = self.function_count_refused(1) || self.function_arena.free_is_empty_and_full(self.functions.len(), self.functions.capacity());
         if self.object_assigned_closures.is_empty() && (!include_scope || self.scope_assigned_closures.is_empty())
-            || self.function_arena.occupied < self.limits.capacity.functions * 3 / 4
+            || (self.function_arena.occupied < threshold && !pressure)
             || self.function_arena.allocations < self.function_arena.next_collection_at
-                && !(allocation_demand && self.function_arena.occupied == self.limits.capacity.functions)
+                && !(allocation_demand && demand)
             || !self.active_roots_are_audited() {
             return Ok(());
         }
@@ -251,7 +256,7 @@ impl Runtime {
         self.steps = meter.remaining.unwrap();
         let (functions, environments, scope_functions, weak_refund) = prepared?;
         self.reserve_function_retirements(functions)?;
-        self.free_environments.try_reserve(environments).map_err(|_| Fault::new("Unable to reserve bounded free-environment storage."))?;
+        self.reserve_environment_retirements(environments)?;
         if Instant::now() >= self.job_deadline {
             self.steps = 0;
             return Err(Fault::new("Execution time limit reached during reachability."));
@@ -268,7 +273,10 @@ impl Runtime {
         self.function_arena.retired = self.function_arena.retired.saturating_add(functions);
         self.function_arena.environments_retired = self.function_arena.environments_retired.saturating_add(environments);
         self.function_arena.scope_retired = self.function_arena.scope_retired.saturating_add(scope_functions);
-        self.function_arena.next_collection_at = self.function_arena.allocations.saturating_add(32);
+        let interval = if functions == 0 { (self.function_arena.occupied / 4).max(32) } else { 32 };
+        #[cfg(test)]
+        let interval = if self.limits.test_entry_arenas { 32 } else { interval };
+        self.function_arena.next_collection_at = self.function_arena.allocations.saturating_add(interval);
         Ok(())
     }
 
@@ -820,6 +828,8 @@ fn replaced_cell_cycles_are_unreachable_without_losing_exported_or_live_state() 
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { panic!("unexpected call") }
     }
     let mut runtime = Runtime::new();
+    // This case audits marking against the original unreclaimed graph.
+    runtime.function_arena.disable_collection = true;
     runtime.execute("var slots=[],first;var model=Object.create(Object.prototype,{payload:{get:function(){return this.read();}}});function replace(value){var state=value;var cell=Object.create(model);cell.write=function(next){state=next;};cell.read=function(){return state;};slots[0]=cell;return cell;}for(var i=0;i<64;i++){var current=replace(i);if(i===0)first=current;current.write(i*2);if(current.payload!==i*2)throw 'state';}", &mut NoHost).unwrap();
     let exported = runtime.execute("var saved=replace(99);var outward=saved.read;saved=null;outward=null;slots[0]=current;", &mut NoHost).unwrap();
     // Capture an actual handle separately, then remove its script-visible name.

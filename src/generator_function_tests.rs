@@ -10,10 +10,12 @@ fn generator_scope_storage_recovers_after_admission_failure() {
     runtime.execute(&source, &mut host).unwrap();
     let limit = runtime.limits.heap.retained_values;
     let before = runtime.value_bytes;
+    let before_payload = runtime.value_bytes - runtime.retained_arena_bytes();
     runtime.limits.heap.retained_values = before + 2048;
     let error = runtime.execute("failed.next();", &mut host).unwrap_err();
     assert!(error.contains("Retained value"), "{error}");
-    assert!(runtime.value_bytes <= before);
+    assert!(runtime.value_bytes <= before + 2048);
+    assert!(runtime.value_bytes - runtime.retained_arena_bytes() <= before_payload);
     assert!(runtime.transient_registration_is_empty());
     runtime.limits.heap.retained_values = limit;
     runtime.begin_job();

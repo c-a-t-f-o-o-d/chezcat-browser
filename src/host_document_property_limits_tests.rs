@@ -54,7 +54,7 @@ fn document_own_properties_vm_store_creation_failure_is_unpublished_and_recovers
 fn document_own_properties_vm_property_and_retained_growth_fail_before_publication() {
     for mode in 0..3 {
         let mut runtime=fixture(false);
-        runtime.execute("document.keep='old';",&mut Native).unwrap();
+        runtime.execute("try{}catch(e){}finally{}document.keep='old';",&mut Native).unwrap();
         let id=runtime.host_objects[&42];
         let before=(runtime.properties,runtime.value_bytes,runtime.objects[id].properties.len());
         let limits=runtime.limits.heap;

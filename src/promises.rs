@@ -419,10 +419,11 @@ impl Runtime {
 
     fn promise_function(&mut self, closure: Closure) -> Result<Value, Fault> {
         self.step()?;
-        if self.function_arena.occupied >= self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             return Err(self.function_limit_fault("promise-closure"));
         }
         let length = closure.arity();
+        self.prepare_function_slot_storage()?;
         self.promise_retain(closure.retained_bytes())?;
         let allocation = self.insert_function_slot(Function::Promise(closure))?;
         self.initialize_function_properties(allocation, "", length, false)?;
@@ -2202,12 +2203,12 @@ Promise.reject('unhandled');var handled=Promise.reject('handled');queueMicrotask
             )
             .unwrap();
         assert!(runtime.value_bytes > before);
-        let queued = runtime.value_bytes;
+        let queued = runtime.value_bytes - runtime.retained_arena_bytes();
         assert!(runtime
             .microtask_checkpoint(&mut NoHost)
             .unwrap()
             .is_empty());
-        assert!(runtime.value_bytes < queued);
+        assert!(runtime.value_bytes - runtime.retained_arena_bytes() < queued);
         assert_eq!(runtime.promises.reactions, 0);
         assert!(runtime.promises.jobs.is_empty());
     }

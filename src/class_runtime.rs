@@ -61,7 +61,7 @@ impl Runtime {
         let syntax = &program.classes[class];
         let functions = syntax.members.len().checked_add(1)
             .ok_or_else(|| Fault::new("Class member capacity overflow."))?;
-        if functions > self.limits.capacity.functions.saturating_sub(self.function_arena.occupied) {
+        if self.function_count_refused(functions) {
             return Err(self.function_limit_fault("class"));
         }
         // Every callable owns one metadata object; the constructor additionally

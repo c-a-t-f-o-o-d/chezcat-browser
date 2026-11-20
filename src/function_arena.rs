@@ -19,10 +19,96 @@ pub(super) struct Arena {
     free: Vec<usize>,
 }
 
-#[derive(Clone, Copy)]
+impl Arena {
+    pub(super) fn free_is_empty_and_full(&self, length: usize, capacity: usize) -> bool {
+        self.free.is_empty() && length == capacity
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(super) struct Allocation { pub(super) id: usize, appended: bool }
 
 impl Runtime {
+    #[cfg(test)]
+    pub(super) fn retained_arena_bytes(&self) -> usize {
+        fn bytes<T>(values: &Vec<T>) -> usize { values.capacity() * std::mem::size_of::<T>() }
+        bytes(&self.functions) + bytes(&self.function_properties) + bytes(&self.function_realms)
+            + bytes(&self.function_initial_names) + bytes(&self.function_arena.free)
+            + bytes(&self.environments) + bytes(&self.free_environments) + bytes(&self.deferred_native_methods)
+    }
+
+    pub(super) fn function_count_refused(&self, additional: usize) -> bool {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas {
+            return additional > self.limits.capacity.functions.saturating_sub(self.function_arena.occupied);
+        }
+        self.function_arena.occupied.checked_add(additional).is_none()
+    }
+
+    pub(super) fn prepare_function_slot_storage(&mut self) -> Result<(), Fault> {
+        if !self.function_arena.free.is_empty() { return Ok(()); }
+        let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+        let before = self.functions.capacity();
+        let slot = std::mem::size_of::<Function>() + 2 * std::mem::size_of::<usize>()
+            + std::mem::size_of::<Option<usize>>() + std::mem::size_of::<Option<String>>();
+        let capacity = if self.functions.len() < before { before } else {
+            let growth = before.max(4).min(available / slot);
+            if growth == 0 { return Err(Fault::new("Retained value arena storage exhausted.")); }
+            before.checked_add(growth).ok_or_else(|| Fault::new("Function arena capacity overflow."))?
+        };
+        let functions = super::limits::prepare_retained_capacity(&self.functions, capacity, available)?;
+        let properties = super::limits::prepare_retained_capacity(&self.function_properties, capacity, available - functions.added)?;
+        let realms = super::limits::prepare_retained_capacity(&self.function_realms, capacity, available - functions.added - properties.added)?;
+        let names = super::limits::prepare_retained_capacity(&self.function_initial_names, capacity, available - functions.added - properties.added - realms.added)?;
+        let used = functions.added + properties.added + realms.added + names.added;
+        let free = super::limits::prepare_retained_capacity(&self.function_arena.free, functions.capacity, available - used)?;
+        let used = used + free.added;
+        if used != 0 { self.work(self.functions.len().saturating_mul(5))?; }
+        functions.commit(&mut self.functions);
+        properties.commit(&mut self.function_properties);
+        realms.commit(&mut self.function_realms);
+        names.commit(&mut self.function_initial_names);
+        free.commit(&mut self.function_arena.free);
+        self.value_bytes += used;
+        Ok(())
+    }
+
+    pub(super) fn prepare_environment_slot_storage(&mut self) -> Result<(), Fault> {
+        if !self.free_environments.is_empty() { return Ok(()); }
+        if self.environment_count_refused() { return Err(self.environment_limit_fault("Environment", self.limits.capacity.environments)); }
+        let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+        let before = self.environments.capacity();
+        let slot = std::mem::size_of::<Option<super::Environment>>() + std::mem::size_of::<usize>();
+        let capacity = if self.environments.len() < before { before } else {
+            let growth = before.max(4).min(available / slot);
+            if growth == 0 { return Err(Fault::new("Retained value arena storage exhausted.")); }
+            before.checked_add(growth).ok_or_else(|| Fault::new("Environment arena capacity overflow."))?
+        };
+        let environments = super::limits::prepare_retained_capacity(&self.environments, capacity, available)?;
+        // The permanent main global (ID zero) is never a reusable slot.
+        let free = super::limits::prepare_retained_capacity(&self.free_environments, environments.capacity.saturating_sub(1), available - environments.added)?;
+        let used = environments.added + free.added;
+        if used != 0 { self.work(self.environments.len().saturating_mul(2))?; }
+        environments.commit(&mut self.environments);
+        free.commit(&mut self.free_environments);
+        self.value_bytes += used;
+        Ok(())
+    }
+
+    pub(super) fn reserve_environment_retirements(&mut self, count: usize) -> Result<(), Fault> {
+        let growth = super::limits::prepare_retained_growth(&self.free_environments, count,
+            self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        self.value_bytes += growth.added;
+        growth.commit(&mut self.free_environments);
+        Ok(())
+    }
+
+    pub(super) fn environment_count_refused(&self) -> bool {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas { return self.environments.len() >= self.limits.capacity.environments; }
+        self.environments.len() == usize::MAX
+    }
+
     pub(super) fn function_is_occupied(&self, id: usize) -> bool {
         matches!(self.functions.get(id), Some(function) if !matches!(function, Function::Vacant))
     }
@@ -30,29 +116,18 @@ impl Runtime {
     pub(super) fn next_function_slot(&self) -> Result<usize, Fault> {
         if let Some(&id) = self.function_arena.free.last() {
             if matches!(self.functions.get(id), Some(Function::Vacant)) { return Ok(id); }
-        } else if self.functions.len() < self.limits.capacity.functions { return Ok(self.functions.len()); }
+        } else if !self.function_count_refused(1) && self.functions.len() < usize::MAX { return Ok(self.functions.len()); }
         Err(Fault::new("Invalid bounded function-slot reservation."))
     }
 
     pub(super) fn insert_function_slot(&mut self, function: Function) -> Result<Allocation, Fault> {
         if matches!(function, Function::Vacant) { return Err(Fault::new("Cannot allocate a vacant function.")); }
-        if self.function_arena.occupied >= self.limits.capacity.functions { return Err(self.function_limit_fault("function-slot")); }
+        if self.function_count_refused(1) { return Err(self.function_limit_fault("function-slot")); }
         let id = self.next_function_slot()?;
         let appended = id == self.functions.len();
         let realm = match &function { Function::Bound(bound) => self.function_realms[bound.target], _ => self.active_realm };
         if id == self.functions.len() {
-            fn reserve<T>(values: &mut Vec<T>, limit: usize) -> Result<(), Fault> {
-                if values.len() == values.capacity() {
-                    let count = values.capacity().max(8).min(limit - values.len());
-                    values.try_reserve_exact(count).map_err(|_| Fault::new("Unable to allocate bounded function-slot storage."))?;
-                }
-                Ok(())
-            }
-            let limit = self.limits.capacity.functions;
-            reserve(&mut self.functions, limit)?;
-            reserve(&mut self.function_properties, limit)?;
-            reserve(&mut self.function_realms, limit)?;
-            reserve(&mut self.function_initial_names, limit)?;
+            self.prepare_function_slot_storage()?;
             self.functions.push(function);
             self.function_properties.push(usize::MAX);
             self.function_realms.push(realm);
@@ -84,7 +159,11 @@ impl Runtime {
     }
 
     pub(super) fn reserve_function_retirements(&mut self, count: usize) -> Result<(), Fault> {
-        self.function_arena.free.try_reserve(count).map_err(|_| Fault::new("Unable to reserve bounded free-function storage."))
+        let growth = super::limits::prepare_retained_growth(&self.function_arena.free, count,
+            self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        self.value_bytes += growth.added;
+        growth.commit(&mut self.function_arena.free);
+        Ok(())
     }
 
     fn vacate_function_slot(&mut self, id: usize, appended_rollback: bool, refund_script: bool) -> Result<(), Fault> {
@@ -133,7 +212,7 @@ mod tests {
         assert_eq!(runtime.functions.len(), runtime.function_realms.len());
         assert_eq!(runtime.functions.len(), runtime.function_initial_names.len());
         assert_eq!(runtime.function_arena.occupied, runtime.functions.iter().filter(|function| !matches!(function, Function::Vacant)).count());
-        assert!(runtime.functions.len() <= MAX_FUNCTIONS);
+        if runtime.limits.test_entry_arenas { assert!(runtime.functions.len() <= runtime.limits.capacity.functions); }
     }
     fn vacant(higher: bool) -> (Runtime, usize, Option<usize>) {
         let mut runtime = Runtime::for_capacity_test();
@@ -151,6 +230,68 @@ mod tests {
         aligned(&runtime);
         (runtime, id, higher)
     }
+    #[test]
+    fn parallel_function_storage_refusal_preserves_capacities_and_reuses_retired_ids() {
+        let mut runtime = Runtime::new();
+        while runtime.functions.len() < runtime.functions.capacity() {
+            runtime.insert_function_slot(Function::Native(Builtin::IsNaN)).unwrap();
+        }
+        let snapshot = |runtime: &Runtime| (runtime.functions.len(), runtime.functions.capacity(),
+            runtime.function_properties.capacity(), runtime.function_realms.capacity(),
+            runtime.function_initial_names.capacity(), runtime.function_arena.free.capacity(), runtime.value_bytes);
+        let before = snapshot(&runtime);
+        runtime.limits.heap.retained_values = runtime.value_bytes + std::mem::size_of::<Function>();
+        assert!(runtime.insert_function_slot(Function::Native(Builtin::IsNaN)).unwrap_err().display().contains("arena storage exhausted"));
+        assert_eq!(snapshot(&runtime), before);
+        runtime.limits.heap.retained_values = runtime.value_bytes + std::mem::size_of::<Function>() + 2 * std::mem::size_of::<usize>()
+            + std::mem::size_of::<Option<usize>>() + std::mem::size_of::<Option<String>>();
+        let slot = runtime.insert_function_slot(Function::Native(Builtin::IsNaN)).unwrap();
+        let retained = runtime.value_bytes;
+        runtime.vacate_function_slot(slot.id, false, false).unwrap();
+        runtime.limits.heap.retained_values = retained;
+        let reused = runtime.insert_function_slot(Function::Native(Builtin::IsNaN)).unwrap();
+        assert_eq!(reused.id, slot.id);
+        assert_eq!(runtime.value_bytes, retained);
+        aligned(&runtime);
+    }
+
+    #[test]
+    fn parallel_environment_storage_refusal_preserves_capacities_and_reuses_completed_ids() {
+        let mut runtime = Runtime::new();
+        while runtime.environments.len() < runtime.environments.capacity() || !runtime.free_environments.is_empty() {
+            runtime.new_environment(0, false).unwrap();
+        }
+        let before = (runtime.environments.len(), runtime.environments.capacity(), runtime.free_environments.capacity(), runtime.value_bytes);
+        runtime.limits.heap.retained_values = runtime.value_bytes + std::mem::size_of::<Option<Environment>>();
+        assert!(runtime.new_environment(0, false).unwrap_err().display().contains("arena storage exhausted"));
+        assert_eq!((runtime.environments.len(), runtime.environments.capacity(), runtime.free_environments.capacity(), runtime.value_bytes), before);
+        runtime.limits.heap.retained_values = runtime.value_bytes + std::mem::size_of::<Option<Environment>>() + std::mem::size_of::<usize>();
+        let id = runtime.new_environment(0, false).unwrap();
+        let retained = runtime.value_bytes;
+        runtime.release_environment(id);
+        runtime.limits.heap.retained_values = retained;
+        assert_eq!(runtime.new_environment(0, false).unwrap(), id);
+        assert_eq!(runtime.value_bytes, retained);
+    }
+
+    #[test]
+    fn browser_retained_closures_exceed_former_function_and_environment_counts() {
+        let mut runtime = Runtime::new();
+        let result = runtime.execute(r#"
+            var saved=[];
+            function factory(value){return function(){return value;};}
+            for(var index=0;index<70000;index++){saved.push(factory(index));}
+            if(saved.length!==70000||saved[0]()!==0||saved[65536]()!==65536||saved[69999]()!==69999)throw 'retained closure';
+            'ok';
+        "#, &mut Native).unwrap();
+        assert!(matches!(result, Value::String(ref value) if value=="ok"));
+        assert!(runtime.function_arena.occupied > 65536);
+        assert!(runtime.environments.iter().flatten().count() > 65536);
+        let host = runtime.host_function(7, "checked").unwrap();
+        assert_eq!(runtime.invoke(host, &[], Value::Undefined, &mut Native).unwrap().to_number(), 7.0);
+        aligned(&runtime);
+    }
+
     #[test]
     fn reused_middle_host_method_and_constructor_keep_exact_id_and_higher_live_function() {
         for constructor in [false, true] {

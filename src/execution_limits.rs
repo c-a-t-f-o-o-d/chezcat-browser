@@ -45,6 +45,40 @@ fn suspended_storage_growth_uses_capacity_and_preserves_failed_reservations() {
     assert_eq!((&stack, stack.capacity()), (&before.0, before.1));
 }
 
+/// A fallible replacement reservation which does not mutate the live vector.
+/// Several parallel stores can be prepared under one byte allowance and then
+/// published together without allocation or failure.
+pub(super) struct RetainedGrowth<T> {
+    replacement: Option<Vec<T>>,
+    pub added: usize,
+    pub capacity: usize,
+}
+impl<T> RetainedGrowth<T> {
+    pub fn commit(self, values: &mut Vec<T>) {
+        if let Some(mut next) = self.replacement { next.append(values); *values = next; }
+    }
+}
+pub(super) fn prepare_retained_growth<T>(values: &Vec<T>, additional: usize, available: usize) -> Result<RetainedGrowth<T>, super::Fault> {
+    let before = values.capacity();
+    let required = values.len().checked_add(additional).ok_or_else(|| super::Fault::new("Arena capacity overflow."))?;
+    if required <= before { return Ok(RetainedGrowth { replacement: None, added: 0, capacity: before }); }
+    let slot = std::mem::size_of::<T>();
+    let growth = before.max(4).max(required - before).min(available / slot);
+    let capacity = before.checked_add(growth).filter(|capacity| *capacity >= required)
+        .ok_or_else(|| super::Fault::new("Retained value arena storage exhausted."))?;
+    prepare_retained_capacity(values, capacity, available)
+}
+pub(super) fn prepare_retained_capacity<T>(values: &Vec<T>, capacity: usize, available: usize) -> Result<RetainedGrowth<T>, super::Fault> {
+    let before = values.capacity();
+    if capacity <= before { return Ok(RetainedGrowth { replacement: None, added: 0, capacity: before }); }
+    let mut next = Vec::new();
+    next.try_reserve_exact(capacity).map_err(|_| super::Fault::new("Cannot allocate retained arena storage."))?;
+    let added = next.capacity().checked_sub(before).and_then(|slots| slots.checked_mul(std::mem::size_of::<T>()))
+        .filter(|bytes| *bytes <= available).ok_or_else(|| super::Fault::new("Retained value arena allocation exceeds storage allowance."))?;
+    let capacity = next.capacity();
+    Ok(RetainedGrowth { replacement: Some(next), added, capacity })
+}
+
 /// Retained entries/payloads, not a process working-set or preallocation promise.
 /// Object handles remain stable for the document lifetime; these are hard caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +202,8 @@ pub const BROWSER_HOST: HostCapacities = HostCapacities {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     #[cfg(test)]
+    pub(crate) test_entry_arenas: bool,
+    #[cfg(test)]
     pub(crate) test_collection_entries: Option<(usize, usize)>,
     #[cfg(test)]
     pub(crate) test_call_depth: Option<usize>,
@@ -198,6 +234,8 @@ const BROWSER_HOST_WORK: usize = crate::css::FULL_STYLESHEET_SOURCE_WORK + 256 *
 /// Copy bytes are cumulative charged work, not reserved or retained memory.
 pub const BROWSER: Limits = Limits {
     #[cfg(test)]
+    test_entry_arenas: false,
+    #[cfg(test)]
     test_collection_entries: None,
     #[cfg(test)]
     test_call_depth: None,
@@ -224,6 +262,7 @@ pub const BROWSER: Limits = Limits {
 /// policy. This is explicit test selection, never the normal browser default.
 #[cfg(test)]
 pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
+    test_entry_arenas: true,
     test_collection_entries: Some((4096, 16384)),
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),
@@ -248,6 +287,7 @@ pub(crate) const CAPACITY_REGRESSION: Limits = Limits {
 /// this constant, and compiling with cfg(test) does not change Runtime::new().
 #[cfg(test)]
 pub(crate) const REGRESSION: Limits = Limits {
+    test_entry_arenas: true,
     test_collection_entries: Some((4096, 16384)),
     test_call_depth: Some(super::MAX_CALL_DEPTH),
     test_evaluation_frames: Some(super::MAX_EVALUATION_FRAMES),

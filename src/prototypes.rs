@@ -54,7 +54,7 @@ impl Runtime {
     }
 
     pub(super) fn native_function(&mut self, builtin: Builtin, name: &str) -> Result<Value, Fault> {
-        if self.function_arena.occupied >= self.limits.capacity.functions {
+        if self.function_count_refused(1) {
             let requested = match builtin {
                 Builtin::ArrayMethod(_) => "native-array-method",
                 Builtin::StringMethod(_) => "native-string-method",

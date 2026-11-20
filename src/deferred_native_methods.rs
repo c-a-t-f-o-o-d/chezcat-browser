@@ -15,14 +15,17 @@ pub(super) struct NativeMethod {
 
 impl Runtime {
     pub(super) fn deferred_native_method(&mut self, owner: usize, name: &str, builtin: Builtin) -> Result<(), Fault> {
-        if self.deferred_native_methods.len() >= self.limits.capacity.functions {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.deferred_native_methods.len() >= self.limits.capacity.functions {
             return Err(Fault::new("Deferred native method metadata limit reached (1024)."));
         }
-        let bytes = std::mem::size_of::<NativeMethod>().saturating_add(name.len());
-        self.work(bytes)?;
-        if self.value_bytes.saturating_add(bytes) > self.limits.heap.retained_values {
-            return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
-        }
+        let available = self.limits.heap.retained_values.checked_sub(self.value_bytes)
+            .and_then(|bytes| bytes.checked_sub(name.len()))
+            .ok_or_else(|| Fault::new("Retained native method storage exhausted."))?;
+        let growth = super::limits::prepare_retained_growth(&self.deferred_native_methods, 1, available)?;
+        let bytes = growth.added + name.len();
+        self.work(bytes.saturating_add(if growth.added != 0 { self.deferred_native_methods.len() } else { 0 }))?;
+        growth.commit(&mut self.deferred_native_methods);
         let index = self.deferred_native_methods.len();
         self.deferred_native_methods.push(NativeMethod { builtin, name: name.into(), realm: self.active_realm, state: State::Pending });
         self.value_bytes += bytes;
