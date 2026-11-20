@@ -545,10 +545,15 @@ impl Runtime {
     }
 
     fn resolving_pair(&mut self, promise: usize) -> Result<(Value, Value), Fault> {
-        if self.promises.pairs.len() >= self.limits.capacity.functions {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.promises.pairs.len() >= self.limits.capacity.functions {
             return Err(Fault::new(format!("Promise resolving-pair limit reached ({}).", self.limits.capacity.promises)));
         }
-        self.promise_retain(std::mem::size_of::<ResolvingPair>())?;
+        let growth = super::limits::prepare_retained_growth(&self.promises.pairs, 1,
+            self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        self.work(std::mem::size_of::<ResolvingPair>().saturating_mul(if growth.added == 0 { 1 } else { self.promises.pairs.len().saturating_add(1) }))?;
+        self.value_bytes += growth.added;
+        growth.commit(&mut self.promises.pairs);
         let pair = self.promises.pairs.len();
         self.promises.pairs.push(ResolvingPair {
             promise,
@@ -626,10 +631,15 @@ impl Runtime {
                 reject,
             });
         }
-        if self.promises.capabilities.len() >= self.limits.capacity.functions {
+        #[cfg(test)]
+        if self.limits.test_entry_arenas && self.promises.capabilities.len() >= self.limits.capacity.functions {
             return Err(Fault::new(format!("Promise capability limit reached ({}).", self.limits.capacity.promises)));
         }
-        self.promise_retain(std::mem::size_of::<CapabilitySlot>())?;
+        let growth = super::limits::prepare_retained_growth(&self.promises.capabilities, 1,
+            self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+        self.work(std::mem::size_of::<CapabilitySlot>().saturating_mul(if growth.added == 0 { 1 } else { self.promises.capabilities.len().saturating_add(1) }))?;
+        self.value_bytes += growth.added;
+        growth.commit(&mut self.promises.capabilities);
         let slot = self.promises.capabilities.len();
         self.promises.capabilities.push(CapabilitySlot {
             resolve: None,
@@ -1048,10 +1058,15 @@ impl Runtime {
         let group = if matches!(op, Op::Race) {
             None
         } else {
-            if self.promises.groups.len() >= self.limits.capacity.promises {
+            #[cfg(test)]
+            if self.limits.test_entry_arenas && self.promises.groups.len() >= self.limits.capacity.promises {
                 return Err(Fault::new(format!("Promise combinator state limit reached ({}).", self.limits.capacity.promises)));
             }
-            self.promise_retain(std::mem::size_of::<Group>())?;
+            let growth = super::limits::prepare_retained_growth(&self.promises.groups, 1,
+                self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+            self.work(std::mem::size_of::<Group>().saturating_mul(if growth.added == 0 { 1 } else { self.promises.groups.len().saturating_add(1) }))?;
+            self.value_bytes += growth.added;
+            growth.commit(&mut self.promises.groups);
             let values = self.new_object(Some(0))?;
             let group = self.promises.groups.len();
             let kind = match op {
@@ -1082,12 +1097,17 @@ impl Runtime {
             }
             let next = self.call_value(resolve.clone(), &[value], constructor.clone(), host)?;
             let (fulfill, reject) = if let Some(group) = group {
-                if self.promises.elements.len() >= self.limits.capacity.promises {
+                #[cfg(test)]
+                if self.limits.test_entry_arenas && self.promises.elements.len() >= self.limits.capacity.promises {
                     return Err(Fault::new(
                         format!("Promise combinator element limit reached ({}).", self.limits.capacity.promises),
                     ));
                 }
-                self.promise_retain(std::mem::size_of::<Element>())?;
+                let growth = super::limits::prepare_retained_growth(&self.promises.elements, 1,
+                    self.limits.heap.retained_values.saturating_sub(self.value_bytes))?;
+                self.work(std::mem::size_of::<Element>().saturating_mul(if growth.added == 0 { 1 } else { self.promises.elements.len().saturating_add(1) }))?;
+                self.value_bytes += growth.added;
+                growth.commit(&mut self.promises.elements);
                 let element = self.promises.elements.len();
                 self.promises.elements.push(Element {
                     group,
@@ -1667,6 +1687,101 @@ Promise.resolve(4).then(function(){return 5;});queueMicrotask(function(){jobHits
         assert!(!runtime.object_assigned_closures.contains(&id));
         assert_eq!((runtime.functions.len(), runtime.function_arena.script_created), before);
         assert_eq!(runtime.invoke(closure, &[], Value::Undefined, &mut NoHost).unwrap().to_number(), 17.0);
+    }
+
+    #[test]
+    fn browser_thenable_resolution_exceeds_former_resolving_pair_count() {
+        let mut runtime = Runtime::new();
+        runtime.execute("var hits=0,answer=0;var item={then:function(resolve){if(++hits<70000)resolve(item);else resolve(17);}};Promise.resolve(item).then(function(value){answer=value;});", &mut NoHost).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut NoHost).unwrap().is_empty());
+        assert!(runtime.promises.pairs.len()>65536);
+        assert_eq!(runtime.execute("if(hits!==70000||answer!==17)throw 'thenable completion';'ok';",&mut NoHost).unwrap().to_text(),"ok");
+    }
+
+    #[test]
+    fn browser_custom_capabilities_and_combinator_groups_exceed_former_counts() {
+        let mut runtime = Runtime::new();
+        let result=runtime.execute("var created=0,resolved=0;function finish(){resolved++;}function Custom(executor){created++;executor(finish,finish);}Custom.resolve=finish;for(var index=0;index<70000;index++){var result=Promise.all.call(Custom,[]);if(!(result instanceof Custom))throw 'custom promise object';}if(created!==70000||resolved!==70000)throw 'custom completions';'ok';",&mut NoHost).unwrap();
+        assert_eq!(result.to_text(),"ok");
+        assert_eq!(runtime.promises.capabilities.len(),70000);
+        assert_eq!(runtime.promises.groups.len(),70000);
+        assert!(!runtime.has_microtasks());
+    }
+
+    #[test]
+    fn browser_custom_combinator_elements_exceed_former_count_and_keep_exact_order() {
+        let mut runtime = Runtime::new();
+        let result=runtime.execute("function Custom(executor){var self=this;executor(function(value){self.result=value;},function(reason){self.reason=reason;});}Custom.resolve=function(value){return {then:function(fulfill){fulfill(value);}};};var input=[];for(var index=0;index<70000;index++)input.push(index);var result=Promise.all.call(Custom,input);if(!(result instanceof Custom)||result.result.length!==70000||result.result[0]!==0||result.result[65536]!==65536||result.result[69999]!==69999)throw 'custom result order';'ok';",&mut NoHost).unwrap();
+        assert_eq!(result.to_text(),"ok");
+        assert_eq!(runtime.promises.elements.len(),70000);
+        assert!(!runtime.has_microtasks());
+    }
+
+    #[test]
+    fn combinator_metadata_refusal_emits_no_completion_and_recovers_after_restoring_storage() {
+        let mut runtime=Runtime::new();
+        let constructor=runtime.execute("var created=0,resolved=0,last;function finish(value){resolved++;last=value;}function Custom(executor){created++;executor(finish,finish);}Custom.resolve=function(value){return {then:function(fulfill){fulfill(value);}};};var empty=[],one=[1];Custom;",&mut NoHost).unwrap();
+        let empty=runtime.binding_value(0,"empty").unwrap();
+        let one=runtime.binding_value(0,"one").unwrap();
+        for _ in 0..4 {runtime.promise_combinator(Op::All,constructor.clone(),&empty,&mut NoHost).unwrap();}
+        assert_eq!(runtime.promises.groups.len(),runtime.promises.groups.capacity());
+        runtime.new_promise_capability(constructor.clone(),&mut NoHost).unwrap();
+        let before=(runtime.promises.groups.len(),runtime.promises.groups.capacity());
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=runtime.value_bytes;
+        let error=runtime.promise_combinator(Op::All,constructor.clone(),&empty,&mut NoHost).unwrap_err();
+        assert!(error.exception.is_none()&&error.message.contains("Retained value"),"{}",error.message);
+        assert_eq!((runtime.promises.groups.len(),runtime.promises.groups.capacity()),before);
+        assert_eq!(runtime.binding_value(0,"resolved").unwrap().to_number(),4.0);
+        runtime.limits.heap.retained_values=limit;
+        runtime.begin_job();
+        runtime.promise_combinator(Op::All,constructor.clone(),&empty,&mut NoHost).unwrap();
+        assert_eq!(runtime.binding_value(0,"resolved").unwrap().to_number(),5.0);
+        for _ in 0..4 {runtime.promise_combinator(Op::All,constructor.clone(),&one,&mut NoHost).unwrap();}
+        assert_eq!(runtime.promises.elements.len(),runtime.promises.elements.capacity());
+        runtime.prepare_environment_slot_storage().unwrap();
+        assert!(runtime.functions.capacity()-runtime.functions.len()>=2);
+        let before=(runtime.promises.elements.len(),runtime.promises.elements.capacity());
+        runtime.limits.heap.retained_values=runtime.value_bytes+std::mem::size_of::<Element>()-1;
+        let error=runtime.promise_combinator(Op::All,constructor.clone(),&one,&mut NoHost).unwrap_err();
+        assert!(error.exception.is_none()&&error.message.contains("Retained value"),"{}",error.message);
+        assert_eq!((runtime.promises.elements.len(),runtime.promises.elements.capacity()),before);
+        assert_eq!(runtime.binding_value(0,"resolved").unwrap().to_number(),9.0);
+        runtime.limits.heap.retained_values=limit;
+        runtime.begin_job();
+        runtime.promise_combinator(Op::All,constructor,&one,&mut NoHost).unwrap();
+        assert_eq!(runtime.binding_value(0,"resolved").unwrap().to_number(),10.0);
+        let Value::Object(values)=runtime.binding_value(0,"last").unwrap() else {panic!("real result array")};
+        assert_eq!(runtime.get_property(values,"0").unwrap().to_number(),1.0);
+    }
+
+    #[test]
+    fn promise_metadata_refusal_preserves_ids_and_recovers_for_real_callbacks() {
+        let mut runtime = Runtime::new();
+        let promise=runtime.new_promise().unwrap();
+        let before=(runtime.value_bytes,runtime.objects.len(),runtime.functions.len());
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=runtime.value_bytes;
+        assert!(runtime.resolving_pair(promise).is_err());
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.functions.len()),before);
+        assert!(runtime.promises.pairs.is_empty());
+        assert_eq!(runtime.promises.pairs.capacity(),0);
+        runtime.limits.heap.retained_values=limit;
+        let (resolve,reject)=runtime.resolving_pair(promise).unwrap();
+        runtime.call_value(resolve,&[Value::Number(17.0)],Value::Undefined,&mut NoHost).unwrap();
+        runtime.call_value(reject,&[Value::Number(99.0)],Value::Undefined,&mut NoHost).unwrap();
+        assert!(matches!(&runtime.objects[promise].promise.as_ref().unwrap().state,State::Fulfilled(Value::Number(value)) if *value==17.0));
+        let constructor=runtime.execute("var received=0;function finish(value){received=value;}function Custom(executor){executor(finish,finish);}Custom;",&mut NoHost).unwrap();
+        let before=(runtime.value_bytes,runtime.objects.len(),runtime.functions.len());
+        runtime.limits.heap.retained_values=runtime.value_bytes;
+        assert!(runtime.new_promise_capability(constructor.clone(),&mut NoHost).is_err());
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.functions.len()),before);
+        assert!(runtime.promises.capabilities.is_empty());
+        assert_eq!(runtime.promises.capabilities.capacity(),0);
+        runtime.limits.heap.retained_values=limit;
+        let capability=runtime.new_promise_capability(constructor,&mut NoHost).unwrap();
+        runtime.call_value(capability.resolve,&[Value::Number(23.0)],Value::Undefined,&mut NoHost).unwrap();
+        assert_eq!(runtime.binding_value(0,"received").unwrap().to_number(),23.0);
     }
 
     #[test]
