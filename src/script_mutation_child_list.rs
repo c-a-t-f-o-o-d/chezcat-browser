@@ -59,6 +59,19 @@ impl Bridge<'_> {
             _ => None,
         };
         let old_parent = self.state.tree.parents[source];
+        if method=="replaceChild"&&reference==Some(source)&&old_parent==Some(parent) {
+            let siblings=&self.doc.nodes[parent].children;let length=siblings.len();
+            let position=siblings.iter().position(|&node|node==source).ok_or("Self replacement observer child link is unavailable.")?;
+            let previous=position.checked_sub(1).and_then(|at|siblings.get(at)).copied().map(node_handle);
+            let next=siblings.get(position+1).copied().map(node_handle);
+            self.state.work(length)?;self.state.copies(2*std::mem::size_of::<NativeChildListChange>()+2*std::mem::size_of::<u32>())?;
+            let mut removed=Vec::new();removed.try_reserve_exact(1).map_err(|_|"Cannot reserve self replacement removal.")?;removed.push(*handle);
+            let mut added=Vec::new();added.try_reserve_exact(1).map_err(|_|"Cannot reserve self replacement insertion.")?;added.push(*handle);
+            let mut changes=Vec::new();changes.try_reserve_exact(2).map_err(|_|"Cannot reserve self replacement records.")?;
+            changes.push(NativeChildListChange{target:receiver,added:Vec::new(),removed,previous,next});
+            changes.push(NativeChildListChange{target:receiver,added,removed:Vec::new(),previous,next});
+            return Ok(changes);
+        }
         if reference == Some(source)
             || reference.is_some_and(|node| self.state.tree.parents[node] != Some(parent))
             || method == "removeChild" && old_parent != Some(parent)
