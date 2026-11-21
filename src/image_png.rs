@@ -84,15 +84,15 @@ fn decode_raw(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<(
     let mut seen_data = false;
     let mut data_finished = false;
     let mut seen_end = false;
-    let mut chunks = 0usize;
     let mut exif_seen = false;
     let mut orientation = None;
 
     while position < data.len() {
         check()?;
-        chunks += 1;
-        if chunks > 65_536 || data.len() - position < 12 {
-            return Err("PNG chunk list is truncated or exceeds the chunk limit.".into());
+        // Every chunk consumes at least 12 source bytes. The input-byte bound,
+        // checked extents and cancellation bound this scan without a count cap.
+        if data.len() - position < 12 {
+            return Err("PNG chunk list is truncated.".into());
         }
         let length = be32(&data[position..]) as usize;
         let end = position
@@ -852,6 +852,77 @@ mod animation_tests {
         }
         chunk(&mut output, b"IEND", &[]);
         output
+    }
+
+    fn with_ancillary_chunks(data: &[u8], count: usize) -> (Vec<u8>, usize) {
+        // Insert original, empty private ancillary chunks after the IHDR.
+        let header_end = 8 + 12 + 13;
+        let mut output = data[..header_end].to_vec();
+        for _ in 0..count {
+            chunk(&mut output, b"caPa", &[]);
+        }
+        let end = output.len();
+        output.extend_from_slice(&data[header_end..]);
+        (output, end)
+    }
+
+    #[test]
+    fn source_bounded_chunk_counts_preserve_png_and_apng_pixels() {
+        let frames = [frame(0, &[0xff123456], 0, 0), frame(0, &[0xffabcdef], 0, 0)];
+        let (data, _) = with_ancillary_chunks(&fixture(1, None, &frames, 2), 65_537);
+        assert_eq!(decode(&data, &|| Ok(())).unwrap().pixels, [0xff123456]);
+        let asset = crate::image::decode_asset_checked(&data, &|| Ok(())).unwrap();
+        assert_eq!((asset.bitmap.width, asset.bitmap.height), (1, 1));
+        assert_eq!(asset.bitmap.pixels, [0xff123456]);
+        let animation = asset.animation.as_ref().unwrap();
+        assert_eq!(animation.plays, Some(2));
+        assert_eq!(animation.frames.len(), 2);
+        assert_eq!(animation.frames[0].bitmap.pixels, [0xff123456]);
+        assert_eq!(animation.frames[1].bitmap.pixels, [0xffabcdef]);
+        assert_eq!(animation.frames[1].delay_ms, 70);
+    }
+
+    #[test]
+    fn source_bounded_chunk_counts_preserve_late_validation() {
+        let original = fixture(1, None, &[frame(0, &[0xff123456], 0, 0)], 1);
+        let (data, end) = with_ancillary_chunks(&original, 65_537);
+        let mut bad_crc = data.clone();
+        bad_crc[end - 1] ^= 1;
+        assert!(decode(&bad_crc, &|| Ok(()))
+            .unwrap_err()
+            .contains("checksum"));
+
+        let mut truncated = data[..end].to_vec();
+        truncated.extend_from_slice(&[0; 11]);
+        assert!(decode(&truncated, &|| Ok(()))
+            .unwrap_err()
+            .contains("chunk list is truncated"));
+
+        let mut critical = data[..end].to_vec();
+        chunk(&mut critical, b"CaPa", &[]);
+        critical.extend_from_slice(&data[end..]);
+        assert!(decode(&critical, &|| Ok(()))
+            .unwrap_err()
+            .contains("unsupported critical chunk"));
+    }
+
+    #[test]
+    fn source_bounded_chunk_scans_remain_cancelable() {
+        let original = fixture(1, None, &[frame(0, &[0xff123456], 0, 0)], 1);
+        let (data, _) = with_ancillary_chunks(&original, 100_000);
+        let calls = std::cell::Cell::new(0usize);
+        let check = || {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 150_000 {
+                Err("cancelled during PNG chunk scan".into())
+            } else {
+                Ok(())
+            }
+        };
+        assert_eq!(
+            decode(&data, &check).unwrap_err(),
+            "cancelled during PNG chunk scan"
+        );
     }
 
     #[test]
