@@ -2,7 +2,7 @@
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
 use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
-    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface, aria_reflection_interface};
@@ -501,6 +501,7 @@ impl Runtime {
         self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
         let tag=self.symbol_to_string_tag.ok_or_else(||Fault::new("Missing SVGElement class-tag symbol."))?;
         self.store_symbol_property(prototype,tag,Value::String("SVGElement".into()),Some((false,false,true)))?;
+        self.define_node_attribute(prototype,window,"style",SVG_STYLE_GET,Some(SVG_STYLE_SET))?;
         self.native_constructor_prototypes.insert((window,"SVGElement"),prototype);
         self.put_binding(self.global_environment,"SVGElement".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("SVGElement".into(),(false,true,true));

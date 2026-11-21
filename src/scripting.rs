@@ -15,7 +15,7 @@ use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
-    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
+    ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
 
 #[path = "script_promises.rs"]
@@ -3438,7 +3438,7 @@ impl Host for Bridge<'_> {
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
         if let Some((name,_,true))=crate::javascript::aria_reflection_interface::operation(method){return (self.aria_reflection_receiver(object)&&!self.is_frame_handle(object)).then_some(name);}
         if let Some((name,true))=crate::javascript::html_reflection_interface::operation(method){return (self.html_reflection_receiver(object)&&!self.is_frame_handle(object)).then_some(name);}
-        if method==ELEMENT_STYLE_SET&&self.html_element_receiver(object)&&!self.is_frame_handle(object){return Some("style");}
+        if matches!(method,ELEMENT_STYLE_SET|SVG_STYLE_SET)&&self.style_interface_receiver(object,method==SVG_STYLE_SET)&&!self.is_frame_handle(object)&&self.inert_node_type(object).is_none(){return Some("style");}
         if matches!(placeholder::operation(method),Some((interface,true)) if self.placeholder_interface(object)==Some(interface)){return Some("placeholder");}
         if self.xhr_index(object).is_some(){return crate::javascript::xhr_interface::setter(method).map(|name|match name {"timeout"=>"timeout","withCredentials"=>"withCredentials","responseType"=>"responseType","onreadystatechange"=>"onreadystatechange","onloadstart"=>"onloadstart","onprogress"=>"onprogress","onabort"=>"onabort","onerror"=>"onerror","onload"=>"onload","ontimeout"=>"ontimeout","onloadend"=>"onloadend",_=>unreachable!()});}
 
@@ -3664,7 +3664,7 @@ impl Host for Bridge<'_> {
             && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
-        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET |SVG_STYLE_GET|SVG_STYLE_SET)
             && self.event_target_interface(object) { return Some(object); }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {return Some(WINDOW);}
         if CanvasOperation::parse(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -3908,11 +3908,11 @@ impl Host for Bridge<'_> {
         if let Some((_,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return self.validate_aria_reflection(object,setter);}
         if let Some((_,setter))=crate::javascript::html_reflection_interface::operation(method){return self.validate_html_reflection(object,setter);}
         if script_content_editable::accessor(method) {return self.validate_content_editable(object);}
-        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
-            if !self.html_element_receiver(object) {
-                return Err(("TypeError", "The style accessor requires an HTMLElement.".into()));
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET |SVG_STYLE_GET|SVG_STYLE_SET) {
+            if !self.style_interface_receiver(object,matches!(method,SVG_STYLE_GET|SVG_STYLE_SET)) {
+                return Err(("TypeError", "The style accessor requires its genuine HTML or SVG interface receiver.".into()));
             }
-            if self.is_frame_handle(object) {
+            if self.is_frame_handle(object)||self.inert_node_type(object).is_some() {
                 return Err(("NotSupportedError", "Inline CSS declarations on child document nodes are unavailable.".into()));
             }
             return Ok(());
@@ -4326,8 +4326,8 @@ impl Host for Bridge<'_> {
         }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
-        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
-            return self.event_target_interface(object) && self.html_element_receiver(receiver);
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET |SVG_STYLE_GET|SVG_STYLE_SET) {
+            return self.event_target_interface(object) && self.style_interface_receiver(receiver,matches!(method,SVG_STYLE_GET|SVG_STYLE_SET));
         }
         if script_inline_style::handle(object) && script_inline_style::method(method).is_some() {
             return script_inline_style::handle(receiver) && self.attr_element_receiver(node_handle((receiver - STYLE_BASE) as usize));
@@ -5879,10 +5879,10 @@ impl Host for Bridge<'_> {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
         }
         if method == script_content_editable::GET {return self.content_editable_get(object);}
-        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
+        if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET |SVG_STYLE_GET|SVG_STYLE_SET) {
             self.state.work(1)?;
             let node = self.node(object)?;
-            if method == ELEMENT_STYLE_GET {
+            if matches!(method,ELEMENT_STYLE_GET|SVG_STYLE_GET) {
                 return Ok(Value::Host(STYLE_BASE + node as u32));
             }
             return Err("Inline style setters must use the native conversion transaction.".into());
@@ -8417,3 +8417,7 @@ mod aria_reflection_tests;
 #[cfg(test)]
 #[path="script_replace_self_tests.rs"]
 mod replacement_self_tests;
+
+#[cfg(test)]
+#[path="script_svg_style_geometry_tests.rs"]
+mod svg_style_geometry_tests;

@@ -87,6 +87,12 @@ impl Bridge<'_> {
         self.class_list_element_receiver(object) && !self.form_receiver(object)
     }
 
+    pub(super) fn style_interface_receiver(&self,object:u32,svg:bool)->bool {
+        if svg {
+            self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.doc.nodes[node].namespace==crate::html::Namespace::Svg)
+                ||self.inert_interface(object)==Some("SVGElement")
+        }else{self.html_reflection_receiver(object)&&self.inert_node_type(object).is_none()}
+    }
     pub(super) fn html_element_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
             || matches!(self.frame_node_interface(object), Some("HTMLElement" | "HTMLBodyElement" | "HTMLHtmlElement"))

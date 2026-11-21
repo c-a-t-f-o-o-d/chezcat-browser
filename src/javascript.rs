@@ -495,6 +495,8 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
 }
 
 pub(crate) const ELEMENT_STYLE_GET: &str = "\0HTMLElement.get.style";
+pub(crate) const SVG_STYLE_GET:&str="\0SVGElement.get.style";
+pub(crate) const SVG_STYLE_SET:&str="\0SVGElement.set.style";
 pub(crate) const MEDIA_QUERY_LIST: &str = "MediaQueryList";
 pub(crate) const MEDIA_QUERY_MATCHES: &str = "\0MediaQueryList.get.matches";
 pub(crate) const MEDIA_QUERY_MEDIA: &str = "\0MediaQueryList.get.media";
@@ -9109,8 +9111,8 @@ impl Runtime {
             if setter { &args[..args.len().min(1)] } else { &[][..] }
         } else {
             match method {
-                ELEMENT_STYLE_GET => &[][..],
-                ELEMENT_STYLE_SET => &args[..args.len().min(1)],
+                ELEMENT_STYLE_GET|SVG_STYLE_GET => &[][..],
+                ELEMENT_STYLE_SET|SVG_STYLE_SET => &args[..args.len().min(1)],
                 _ => args,
             }
         };
