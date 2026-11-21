@@ -33,10 +33,12 @@ fn editor(forms: &Forms, node: usize) -> (String, usize, usize, usize, bool, Opt
 }
 
 fn fixture() -> (Document, Forms, Page) {
+    fixture_with_page(Page::for_test())
+}
+fn fixture_with_page(mut page:Page)->(Document,Forms,Page) {
     let mut doc = crate::html::parse("<!doctype html><title>Original input interface</title><body><form id=f><input id=neighbor name=keep value=seed><input id=text name=q value=default><input id=box type=checkbox name=choice value=yes checked><input id=bare type=checkbox><input id=r1 type=radio name=pick value=one checked><input id=r2 type=radio name=pick value=two><input id=hidden type=hidden name=h value=secret><input id=submit type=submit value=Send><input id=reset type=reset value=Reset><input id=button type=button value=Button><input id=image type=image value=Image><input id=file type=file><textarea id=area>area</textarea><button id=apply type=button>Apply</button><div id=destination></div><span id=out>quiet</span></form></body>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     let source = location("https://input-interface.test/start");
     page.set_location(&source);
     page.set_resource_base(&source);
@@ -277,7 +279,7 @@ fn input_accessor_detached_instances_moves_and_reset_preserve_native_defaults_an
 
 #[test]
 fn input_accessor_realms_keep_distinct_intrinsics_and_cached_origin_checks_before_conversion() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_with_page(Page::with_limits(crate::javascript::limits::BROWSER));
     let kept = editor(&forms, id(&doc, "neighbor"));
     run(
         &mut doc,

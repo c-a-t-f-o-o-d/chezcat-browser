@@ -2999,6 +2999,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if self.aria_reflection_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
 
@@ -3099,6 +3100,7 @@ impl Host for Bridge<'_> {
     }
 
     fn observed_attribute_setter(&self, target: u32, property: &str) -> Option<&'static str> {
+        if self.aria_reflection_attribute(target,property){return crate::javascript::aria_reflection_interface::property(property);}
         if self.html_reflection_receiver(target){if let Some(name)=crate::javascript::html_reflection_interface::property(property){return Some(name);}}
         if self.placeholder_member(target,property){return Some("placeholder");}
         (property == "name" && self.html_slot_receiver(target)).then_some("name")
@@ -3256,6 +3258,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.aria_reflection_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
 
@@ -3350,6 +3353,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if self.aria_reflection_attribute(object,property){return true;}
         if self.placeholder_member(object,property){return true;}
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -3390,7 +3394,9 @@ impl Host for Bridge<'_> {
     }
 
     fn nullable_scalar_setter(&self,object:u32,property:&str)->bool{property=="hidden"&&self.html_reflection_receiver(object)}
+    fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.aria_reflection_attribute(object,property){return true;}
         if property!="hidden"&&crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return true;}
         if property=="style"&&self.html_element_receiver(object){return true;}
         if self.placeholder_member(object,property){return true;}
@@ -3430,6 +3436,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if let Some((name,_,true))=crate::javascript::aria_reflection_interface::operation(method){return (self.aria_reflection_receiver(object)&&!self.is_frame_handle(object)).then_some(name);}
         if let Some((name,true))=crate::javascript::html_reflection_interface::operation(method){return (self.html_reflection_receiver(object)&&!self.is_frame_handle(object)).then_some(name);}
         if method==ELEMENT_STYLE_SET&&self.html_element_receiver(object)&&!self.is_frame_handle(object){return Some("style");}
         if matches!(placeholder::operation(method),Some((interface,true)) if self.placeholder_interface(object)==Some(interface)){return Some("placeholder");}
@@ -3655,6 +3662,7 @@ impl Host for Bridge<'_> {
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
+        if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -3894,6 +3902,7 @@ impl Host for Bridge<'_> {
             }
             return Ok(());
         }
+        if let Some((_,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return self.validate_aria_reflection(object,setter);}
         if let Some((_,setter))=crate::javascript::html_reflection_interface::operation(method){return self.validate_html_reflection(object,setter);}
         if script_content_editable::accessor(method) {return self.validate_content_editable(object);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
@@ -4103,6 +4112,7 @@ impl Host for Bridge<'_> {
     ) -> Result<(), (&'static str, String)> {
         if self.xhr_index(object).is_some(){return self.xhr_validate_set(object,property,value);}
 
+        if self.aria_reflection_attribute(object,property){return self.validate_aria_reflection(object,true);}
         if crate::javascript::html_reflection_interface::property(property).is_some() && self.html_reflection_receiver(object){return self.validate_html_reflection(object,true);}
         if self.content_editable_attribute(object,property) {return self.validate_content_editable_value(object,value);}
         if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
@@ -4311,6 +4321,7 @@ impl Host for Bridge<'_> {
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
             return self.event_target_interface(object) && (self.attr_element_receiver(receiver) || self.template_receiver(receiver));
         }
+        if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
         if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) {
             return self.event_target_interface(object) && self.html_element_receiver(receiver);
@@ -5152,6 +5163,7 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if self.aria_reflection_member(object,property){return self.aria_reflection_get(object,property);}
         if self.html_reflection_member(object,property){return self.html_reflection_get(object,property);}
         if let Some(value)=self.xhr_get(object,property){return value;}
         if self.placeholder_member(object,property){return self.placeholder_get(object);}
@@ -5520,6 +5532,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
         if crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return self.html_reflection_set(object,property,&value);}
         if property=="style"&&self.html_element_receiver(object){let node=self.node(object)?;let source=self.text(&value)?;return self.set_css_text(node,&source);}
         if self.xhr_index(object).is_some(){return self.xhr_set(object,property,value).unwrap();}
@@ -5803,6 +5816,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((name,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return if setter{Err("ARIA setters require the native conversion transaction.".into())}else{self.aria_reflection_get(object,name)};}
         if let Some((name,setter))=crate::javascript::html_reflection_interface::operation(method){return if setter{Err("HTML reflection setters require the native conversion transaction.".into())}else{self.html_reflection_get(object,name)};}
         if method=="XMLHttpRequest"&&self.event_target_interface(object){return self.xhr_new(object);}
         if let Some(property)=crate::javascript::xhr_interface::getter(method){return self.xhr_get(object,property).unwrap_or_else(||Err("XHR receiver is invalid.".into()));}
@@ -8387,3 +8401,10 @@ mod html_reflector_tests;
 
 #[path="script_html_reflections.rs"]
 mod html_reflections;
+
+#[path="script_aria_reflections.rs"]
+mod aria_reflections;
+
+#[cfg(test)]
+#[path="script_aria_reflection_tests.rs"]
+mod aria_reflection_tests;

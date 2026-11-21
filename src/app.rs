@@ -6187,3 +6187,7 @@ mod p2_shell_package_tests;
 #[cfg(test)]
 #[path="app_html_reflector_tests.rs"]
 mod html_reflector_tests;
+
+#[cfg(test)]
+#[path="app_aria_reflection_tests.rs"]
+mod aria_reflection_tests;

@@ -5,7 +5,7 @@ use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
-    HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface};
+    HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface, aria_reflection_interface};
 
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
@@ -336,6 +336,7 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
+                    for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_node_attribute(prototype,window,key,get,Some(set))?;}
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;
                     }
@@ -1229,7 +1230,9 @@ impl Runtime {
     {
         self.validate_native_access(handle,host)?;
         self.reject_foreign_window(&Value::Host(handle),host)?;
-        let value = if host.nullable_scalar_setter(handle, name) {
+        let value = if host.nullable_string_setter(handle,name) && matches!(value,Value::Null|Value::Undefined) {
+            Value::Null
+        } else if host.nullable_scalar_setter(handle, name) {
             match value {
                 Value::Null | Value::Undefined => Value::Null,
                 Value::Bool(_) | Value::Number(_) | Value::String(_) => self.checked_value(value)?,

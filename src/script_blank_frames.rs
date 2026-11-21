@@ -528,10 +528,16 @@ mod tests {
     use super::*;
 
     fn start(source: &str, policy: &crate::csp::PolicySet) -> (Document, Forms, Page, Outcome) {
+        // Functional owner/realm cases must admit the real native IDL surface.
+        start_with_page(source,policy,Page::with_limits(crate::javascript::limits::BROWSER))
+    }
+    fn start_small(source:&str,policy:&crate::csp::PolicySet)->(Document,Forms,Page,Outcome) {
+        start_with_page(source,policy,Page::for_test())
+    }
+    fn start_with_page(source:&str,policy:&crate::csp::PolicySet,mut page:Page)->(Document,Forms,Page,Outcome) {
         let mut doc = crate::html::parse("<html><head></head><body><p>Original frame fixture</p></body></html>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::for_test();
         let origin = crate::navigation::Location { url: Some(crate::url::parse("https://example.test/parent/page").unwrap().0),
             path: None, fragment: String::new(), root: None };
         let base = crate::navigation::Location { url: Some(crate::url::parse("https://example.test/assets/").unwrap().0),
@@ -1465,7 +1471,7 @@ document.title='deferred-ok';
     fn first_deferred_access_in_nested_foreign_calls_is_bounded_on_one_mib() {
         std::thread::Builder::new().stack_size(1024 * 1024).spawn(|| {
             let source = format!("{CREATE}var child=w.Function('n','parent','if(n>0)return parent(n-1);return new Uint8Array([42])[0];');function parent(n){{return child(n,parent);}}if(parent(3)!==42)throw 'nested deferred allocation';");
-            let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+            let (mut doc, mut forms, mut page, result) = start_small(&source, &crate::csp::PolicySet::default());
             assert_eq!(result.errors, 0, "{}", page.report());
             // Keep the previous capacity witness as a successful case: unused
             // method deferral leaves room for its real second child URL.

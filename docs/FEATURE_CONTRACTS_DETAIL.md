@@ -2338,3 +2338,39 @@ after consumption. Network Fetch still needs its real shared transport adapter.
 An original App fixture consumes actual loopback XHR JSON through Response and
 queued Body jobs, updates real text pixels and keeps native editing/link targets.
 This is a connected fixture result, not actual-site initialization or playback.
+
+## Element ARIAMixin nullable string reflections
+
+The Element prototype owns role and the 43 ARIAMixin nullable DOMString accessor
+pairs. They are inherited by supported HTML and SVG elements, with correct getter
+and setter names/lengths and configurable/enumerable descriptors. Reflection reads
+real unqualified attributes, preserves raw strings and distinguishes absence from
+present-empty. Original null/undefined remove the attribute; other values undergo
+one String-hint conversion. False and zero become strings, distinct from hidden's
+union behavior. Wrong brands and origin access reject before observable conversion;
+unsupported child writes reject before conversion as well.
+
+Supported ordinary own author data/accessor descriptors shadow lookup independently
+of native slots. Saved canonical accessors still reach the real attributes, including
+through supported main/detached/inert HTML and main SVG nodes. Parked-template
+promotion preserves author accessors and live Attr identity; import/clone creates
+independent real sources. Inert SVG reflects actual passive attributes without
+opening its unrepresented ordinary descriptor store. Named-form reads retain their
+native precedence while canonical and inherited assignments target real attributes.
+ARIA metadata does not synthesize native disabled/checked control behavior.
+
+Native reflected writes use existing atomic attribute storage, aliases, mutation
+observation and resource/origin guards. Null removal of an absent attribute creates
+no mutation record. Scalar DOM attribute-string limitations remain explicit; no
+UTF-16 replacement or invented success is introduced. Relationship-element/FrozenArray
+attributes, ElementInternals, ariaNotify and actual accessibility-tree/platform output
+are separate unfinished contracts.
+
+An original App fixture combines an author override with saved native accessors,
+attribute observation/jobs, real label/state data, CSS selector repaint, preserved
+native editing and link activation. Functional realm fixtures use the product
+admission profile to include the expanded native IDL surface; explicit narrow
+admission/copy-work cases keep their own profiles. The unchanged 1,024-function
+adversarial profile still refuses incomplete intrinsic bootstrap and preserves main
+native state. A previously documented raw-text iframe fallback fixture still fails;
+these checks do not claim full DOM/HTML/SVG conformance or actual-site readiness.
