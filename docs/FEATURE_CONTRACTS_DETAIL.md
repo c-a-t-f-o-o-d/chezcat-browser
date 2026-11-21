@@ -1902,3 +1902,23 @@ and link targets. Mixed-resource/nested-template main adoption, dynamic SVG and
 remaining lifecycle/scheduling routes are separate unfinished P1 contracts.
 See [DOM queries](https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall)
 and [Web IDL operation functions](https://webidl.spec.whatwg.org/#es-operations).
+
+
+## Passive HTML containers through clone/import
+
+The shared ordinary-container classifier admits the same supported passive
+hyphenated HTML names already used by template preparation and promotion.
+cloneNode and importNode preserve their real tag, ordinary attributes, descendants
+and native HTMLElement ancestry. Deep copies have independent identities; import
+assigns the real main-document owner while the inert source retains its owner.
+Queries of imported main-document fragments use the checked fragment root and
+existing iframe-topology guard rather than an Element-only root path.
+
+This does not register custom elements, run upgrade reactions or expose Shadow
+DOM. Native handler attributes, customized built-ins, unsupported namespaces and
+protected native/resource children retain their admission guards. A later refused
+member publishes no prefix of the staged import. Retained/copy refusal leaves
+source and destination unchanged. Original App checks clone/import and connect
+nested passive containers, then verify real glyphs, editor state and link targets.
+Mixed native-control/resource and nested-template adoption remain unfinished P1
+work; this is not completion of the full stamping package.

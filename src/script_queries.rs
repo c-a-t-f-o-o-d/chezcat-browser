@@ -270,6 +270,8 @@ impl Bridge<'_> {
         self.state.rebuild(self.doc)?;
         let root = if object == DOCUMENT {
             0
+        } else if self.fragment_receiver(object) {
+            let root=self.dom_node(object)?;self.check_iframe_child_topology(root)?;root
         } else {
             self.node(object)?
         };
