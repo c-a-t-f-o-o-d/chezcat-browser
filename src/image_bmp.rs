@@ -5,7 +5,6 @@
 
 use super::{dimensions, le16, le32, pixel, reserved, Bitmap, ImageResult};
 
-const MAX_ICON_ENTRIES: usize = 256;
 const MAX_RLE_COMMANDS: usize = 8 * 1024 * 1024;
 
 struct Dib<'a> {
@@ -411,9 +410,11 @@ pub(super) fn icon(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageRes
     }
     let cursor = le16(&data[2..]) == 2;
     let count = le16(&data[4..]) as usize;
+    // The format's u16 count and the complete source directory bound the scan.
+    // Only the best payload is retained; each entry remains cancelable.
     let header_end = 6 + count * 16;
-    if count == 0 || count > MAX_ICON_ENTRIES || header_end > data.len() {
-        return Err("ICO/CUR directory is truncated or exceeds 256 entries.".into());
+    if count == 0 || header_end > data.len() {
+        return Err("ICO/CUR directory is empty or truncated.".into());
     }
     let mut best = None;
     for entry in data[6..header_end].as_chunks::<16>().0 {
@@ -475,5 +476,104 @@ pub(super) fn icon(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageRes
         super::png::decode(payload, check)
     } else {
         Dib::read(payload, None, Some((width, height)))?.decode(check)
+    }
+}
+
+#[cfg(test)]
+mod directory_tests {
+    use super::*;
+
+    fn icon_dib(pixels: &[u32]) -> Vec<u8> {
+        let mut data = vec![0u8; 40];
+        data[..4].copy_from_slice(&40u32.to_le_bytes());
+        data[4..8].copy_from_slice(&(pixels.len() as u32).to_le_bytes());
+        data[8..12].copy_from_slice(&2u32.to_le_bytes());
+        data[12..14].copy_from_slice(&1u16.to_le_bytes());
+        data[14..16].copy_from_slice(&32u16.to_le_bytes());
+        for pixel in pixels {
+            data.extend_from_slice(&pixel.to_le_bytes());
+        }
+        data.extend_from_slice(&[0; 4]); // One row of the icon AND mask.
+        data
+    }
+
+    fn directory(count: u16, cursor: bool) -> Vec<u8> {
+        let first = icon_dib(&[0xffff0000]);
+        let last = icon_dib(&[0xff00ff00, 0xff0000ff]);
+        let header_end = 6 + usize::from(count) * 16;
+        let mut data = vec![0, 0];
+        data.extend_from_slice(&(if cursor { 2u16 } else { 1u16 }).to_le_bytes());
+        data.extend_from_slice(&count.to_le_bytes());
+        for index in 0..count {
+            let best = index + 1 == count;
+            let payload = if best { &last } else { &first };
+            let offset = header_end + if best { first.len() } else { 0 };
+            data.extend_from_slice(&[if best { 2 } else { 1 }, 1, 0, 0]);
+            data.extend_from_slice(&(if cursor { 0u16 } else { 1u16 }).to_le_bytes());
+            data.extend_from_slice(&(if cursor { 0u16 } else { 32u16 }).to_le_bytes());
+            data.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            data.extend_from_slice(&(offset as u32).to_le_bytes());
+        }
+        data.extend_from_slice(&first);
+        data.extend_from_slice(&last);
+        data
+    }
+
+    #[test]
+    fn format_maximum_icon_and_cursor_directories_select_the_last_best_image() {
+        for cursor in [false, true] {
+            let data = directory(u16::MAX, cursor);
+            let bitmap = crate::image::decode_checked(&data, &|| Ok(())).unwrap();
+            assert_eq!((bitmap.width, bitmap.height), (2, 1));
+            assert_eq!(bitmap.pixels, [0xff00ff00, 0xff0000ff]);
+        }
+    }
+
+    #[test]
+    fn source_bounded_icon_directories_preserve_late_entry_validation() {
+        let data = directory(257, false);
+        let last = 6 + 256 * 16;
+        let mut bad_range = data.clone();
+        bad_range[last + 12..last + 16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(icon(&bad_range, &|| Ok(()))
+            .unwrap_err()
+            .contains("extends beyond the file"));
+
+        let mut bad_reserved = data.clone();
+        bad_reserved[last + 3] = 1;
+        assert!(icon(&bad_reserved, &|| Ok(()))
+            .unwrap_err()
+            .contains("Invalid ICO/CUR image directory entry"));
+
+        let mut bad_hotspot = directory(257, true);
+        bad_hotspot[last + 4..last + 6].copy_from_slice(&2u16.to_le_bytes());
+        assert!(icon(&bad_hotspot, &|| Ok(()))
+            .unwrap_err()
+            .contains("hotspot is outside"));
+
+        assert!(icon(&data[..last + 15], &|| Ok(()))
+            .unwrap_err()
+            .contains("directory is empty or truncated"));
+        assert!(icon(&[0, 0, 1, 0, 0, 0], &|| Ok(()))
+            .unwrap_err()
+            .contains("directory is empty or truncated"));
+    }
+
+    #[test]
+    fn source_bounded_icon_directory_scans_remain_cancelable() {
+        let data = directory(4096, false);
+        let calls = std::cell::Cell::new(0usize);
+        let check = || {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 1024 {
+                Err("cancelled during ICO directory scan".into())
+            } else {
+                Ok(())
+            }
+        };
+        assert_eq!(
+            icon(&data, &check).unwrap_err(),
+            "cancelled during ICO directory scan"
+        );
     }
 }
