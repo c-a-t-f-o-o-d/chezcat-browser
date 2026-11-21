@@ -415,7 +415,7 @@ impl Bridge<'_> {
         }
         let mut plan = Vec::new();
         let mut indices = Vec::new();
-        let mut stylesheet = None;
+        let mut stylesheets = Vec::new();
         let mut retained = 0usize;
         let mut released = 0usize;
         while let Some((handle, parent, depth)) = pending.pop() {
@@ -440,9 +440,7 @@ impl Bridge<'_> {
                 if let Some(attr) = attrs.iter().find(|attr| attr.name.html_is("style")) {
                     validate_style(&attr.value, self.state.limits.host.string_bytes)?;
                 }
-                if tag == "style" && stylesheet.replace(index).is_some() {
-                    return Err("Inert fragment insertion admits one inline stylesheet per splice.".into());
-                }
+                if tag=="style"{stylesheets.try_reserve(1).map_err(|_|"Cannot reserve promoted stylesheet batch.")?;stylesheets.push(index);}
                 bytes = bytes.saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
             }
             let (inert, _, _) = self.parked_template_source(handle).unwrap();
@@ -541,7 +539,8 @@ impl Bridge<'_> {
         }
         let checked = (|| {
             self.validate_button_children(parent, &indices)?;
-            let inline = stylesheet.map(|node| self.prepare_inline_sheet(node, connected)).transpose()?;
+            let mut changes=Vec::new();changes.try_reserve_exact(stylesheets.len()).map_err(|_|"Cannot reserve promoted stylesheet changes.")?;changes.extend(stylesheets.iter().map(|&node|(node,connected)));
+            let inline=self.prepare_inline_sheet_batch(changes)?;
             indices.sort_unstable();
             let shifted = self.state.inert_documents.adopted.retention_movement(|handle|
                 !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
@@ -592,7 +591,7 @@ impl Bridge<'_> {
             self.state.dom.connected[item.index] = connected;
             if !connected { self.state.detached_nodes.insert(item.index); }
         }
-        if let (Some(node), Some(inline)) = (stylesheet, inline) { self.commit_inline_sheet(node, inline); }
+        self.commit_inline_sheet_batch(inline);
         self.state.dom_committed();
         self.state.dirty = true;
         if connected { self.state.layout_changed(); }

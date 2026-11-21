@@ -53,7 +53,7 @@ impl Bridge<'_> {
         seen.try_reserve(self.doc.nodes.len()).map_err(|_|"Fragment topology reservation failed.")?;
         for &root in &roots {
             if root>=self.doc.nodes.len() || self.state.tree.parents[root]!=Some(donor) {return Err("Fragment donor child identity mismatch.".into());}
-            let(nodes,depth)=self.mutation_subtree(root)?;
+            let(nodes,depth)=self.mutation_subtree_with_styles(root)?;
             maximum_depth=maximum_depth.max(depth);
             incoming.try_reserve(nodes.len()).map_err(|_|"Fragment descendant reservation failed.")?;
             for node in nodes {
@@ -61,7 +61,7 @@ impl Bridge<'_> {
                 if node==parent {return Err("HierarchyRequestError: Fragment insertion would create a cycle.".into());}
                 if matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment)
                     || self.doc.nodes[node].namespace.is_foreign()
-                    || matches!(tag(self.doc,node),"script"|"style"|"link"|"iframe") {
+                    || matches!(tag(self.doc,node),"script"|"link"|"iframe") {
                     return Err("Fragment batch resource, nested-container or foreign insertion is not implemented; no tree was changed.".into());
                 }
                 incoming.push(node);
@@ -77,7 +77,7 @@ impl Bridge<'_> {
             ancestor=self.state.tree.parents[node];
         }
         if parent_depth.saturating_add(maximum_depth)>128 {return Err("Fragment insertion depth limit reached; no tree was changed.".into());}
-        let outgoing=if let Some(old)=old {self.mutation_subtree(old)?.0} else {Vec::new()};
+        let outgoing=if let Some(old)=old {self.mutation_subtree_with_styles(old)?.0} else {Vec::new()};
         if outgoing.iter().any(|&node|self.doc.nodes[node].namespace.is_foreign()
             || matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("Fragment replacement cannot retire foreign or script/stylesheet/frame resources; no tree was changed.".into());
@@ -102,6 +102,8 @@ impl Bridge<'_> {
         for &root in &roots {overrides.push((root,Some(parent)));}
         if let Some(old)=old {overrides.push((old,None));}
         let connected=self.state.dom.connected[parent];
+        if incoming.iter().any(|&node|tag(self.doc,node)=="style"){self.validate_style_destination(parent)?;}
+        let sheets=self.prepare_style_transfers(&incoming,&outgoing,connected)?;
         let form_plan=self.prepare_select_form_change(None,&overrides)?;
         let images=self.prepare_image_connections(&incoming,connected)?;
         let bytes = child_link_bytes(&children).checked_add(form_plan.retained_bytes).ok_or("Fragment child/native storage overflow.")?;
@@ -120,7 +122,7 @@ impl Bridge<'_> {
             self.state.dom.connected[node]=connected;
             if connected {self.state.detached_nodes.remove(&node);} else {self.state.detached_nodes.insert(node);}
         }
-        form_plan.commit(self.forms);self.commit_image_connections(images);
+        form_plan.commit(self.forms);self.commit_image_connections(images);self.commit_inline_sheet_batch(sheets);
         self.state.dom_committed();self.state.dirty=true;
         if connected {self.state.layout_changed();}
         Ok(Value::Host(old.map_or(*handle,node_handle)))

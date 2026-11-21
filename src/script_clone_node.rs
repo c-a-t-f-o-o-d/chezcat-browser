@@ -112,12 +112,13 @@ impl Bridge<'_> {
                 ImportSource::Parsed { node, .. } => {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img")) {
+                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style")) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
+                        if tag=="style"&&self.inert_children(handle).unwrap().iter().take(count).any(|&child|self.inert_node_type(child)!=Some(3)){return Err("Imported STYLE requires plain direct text children.".into());}
                         if attrs.iter().any(|attr| attr.name.namespace.is_some()
-                            || script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is")) {
+                            || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
                         }
                         metadata = tag.len().saturating_add(href.as_ref().map_or(0, String::len));
@@ -125,7 +126,7 @@ impl Bridge<'_> {
                     copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
-                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img")) {
+                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style")) {
                         return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                     }
                     tag.len()
@@ -198,9 +199,11 @@ impl Bridge<'_> {
             let offset = staged.len();
             let (source, parent, depth) = plan[offset];
             let image=tag(self.doc,source)=="img";
+            let style=tag(self.doc,source)=="style";
             if image{self.validate_plain_image(source)?;}
             let item = &self.doc.nodes[source];
             let children = if deep { item.children.as_slice() } else { &[] };
+            if style&&children.iter().any(|&child|!matches!(self.doc.nodes[child].kind,NodeKind::Text(_))){return Err("Cloned STYLE requires plain direct text children.".into());}
             self.state.work(1 + children.len())?;
             if children.len() > remaining - plan.len() {
                 return Err("DOM appended-node limit reached during cloning.".into());
@@ -217,9 +220,9 @@ impl Bridge<'_> {
                 self.state.work(attrs.len())?;
                 let textarea = tag == "textarea" && self.owned_native_textarea(source);
                 let radio = tag == "input" && self.owned_native_radio(source);
-                if item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image)
+                if item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_none()
-                        && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is"))) {
+                        && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is"))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
                 }
                 if textarea || radio {
