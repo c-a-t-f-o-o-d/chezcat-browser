@@ -3135,6 +3135,7 @@ impl Host for Bridge<'_> {
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
+        if self.inert_node_type(object)==Some(11) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(1)
             && (self.html_reflection_receiver(object) || self.inert_interface(object)==Some("SVGElement"))
         {return Some(WINDOW);}
@@ -3163,7 +3164,8 @@ impl Host for Bridge<'_> {
             || self.processing_instruction_receiver(object)
     }
     fn mutable_native_wrapper_prototype(&self, object: u32) -> bool {
-        self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
+        self.fragment_receiver(object) || self.inert_node_type(object)==Some(11)
+            || self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
             || self.ordinary_event_owner(object).is_some() && !self.ui_receiver(object)
                 && !self.custom_receiver(object) && !self.mouse_receiver(object)
     }
