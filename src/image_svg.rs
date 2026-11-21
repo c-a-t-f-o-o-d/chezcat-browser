@@ -561,6 +561,36 @@ enum Join {
     Bevel,
 }
 
+/// Typed geometry computed by the document cascade, separate from author DOM.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ComputedGeometry {
+    geometry: Option<Arc<geometry::Geometry>>,
+    font: f64,
+    root_font: f64,
+    unknown: u16,
+}
+impl ComputedGeometry {
+    pub(crate) fn new(font: f64, root_font: f64) -> Self { Self { geometry:None,font,root_font,unknown:0 } }
+    pub(crate) fn property(name: &str) -> bool { geometry::property(name).is_some() }
+    fn computed_tag(key:&str)->&'static str { if matches!(key,"cx"|"cy"|"r") {"circle"} else {"rect"} }
+    pub(crate) fn valid(_tag:&str,key:&str,text:&str,_outer:bool)->ImageResult<bool> { geometry::valid(Self::computed_tag(key),key,text,false) }
+    pub(crate) fn apply(&mut self,parent:Option<&Self>,tag:&str,key:&str,text:&str,css:bool,outer:bool)->ImageResult<()> {
+        let mut style=Style { geometry:self.geometry.take(),font_size:self.font,root_font_size:self.root_font,..Style::default() };
+        let inherited_unknown=parent.map_or(0,|p|p.unknown);
+        let parent=Style { geometry:parent.and_then(|p|p.geometry.clone()),..Style::default() };
+        let result=geometry::apply(&mut style,&parent,if css {Self::computed_tag(key)}else{tag},key,text,css,outer);
+        self.geometry=style.geometry;
+        let bit=geometry::property(key).map_or(0,|n|1<<n);
+        if result.is_err() || text.trim().eq_ignore_ascii_case("inherit") && inherited_unknown&bit!=0 {self.unknown|=bit;} else {self.unknown&=!bit;}
+        Ok(())
+    }
+    pub(crate) fn mark_unknown(&mut self,key:&str) {if let Some(n)=geometry::property(key){self.unknown|=1<<n;}}
+    pub(crate) fn resolve(&self,key:&str,reference:f64)->ImageResult<Option<f64>> {
+        if geometry::property(key).is_some_and(|n|self.unknown&(1<<n)!=0) {return Err("SVG computed geometry is unavailable.".into());}
+        geometry::resolve(&Style {geometry:self.geometry.clone(),..Style::default()},key,reference)
+    }
+}
+
 #[derive(Clone)]
 struct Style {
     color: u32,

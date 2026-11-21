@@ -186,6 +186,7 @@ fn computed_custom_readback_incomplete_snapshot_is_indeterminate_and_names_share
         HashMap::new(),
         HashMap::new(),
         Vec::new(),
+        HashMap::new(),
     );
     assert_eq!(snapshot.read(0, "--absent"), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_overflow(0), Err(ComputedStyleUnavailable));

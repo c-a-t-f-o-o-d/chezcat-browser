@@ -2473,3 +2473,28 @@ rasterization. It now checks real letterbox pixels, media auto-size restoration,
 CSSOM resize repaint, preserved editing and native link activation. Decoder cases
 cover geometry/cascade/unit/priority and guarded cancellation behavior. These are
 finite platform/fixture results, not a completed actual shell or SVG conformance.
+
+## SVG geometry in the shared document cascade
+
+The document CSS cascade now retains typed SVG geometry alongside its immutable
+computed-property snapshot. It uses the same matched external/embedded selectors,
+priority/order, inline declarations and inherited custom-property environment as
+HTML layout. Geometry presentation attributes precede CSS; unitless SVG font-size
+hints precede matched font rules. Computed font-relative lengths use final element
+and HTML-root font sizes; percentages remain unresolved until a viewport is known.
+Geometry is noninherited by default, with explicit inheritance using parent
+computed values even when the property does not affect that parent's own shape.
+
+Unsupported or resource-refused winners remain unavailable per property. Missing
+or invalid substituted variables use the geometry initial value, invalid ordinary
+syntax does not displace an earlier winner, and a later valid declaration can
+recover an unavailable property. Sparse snapshot backing and variable work use the
+existing CSS admission paths; a failed computation publishes no replacement.
+
+This is the computation boundary, not yet a connection from the shared snapshot
+to inline image painting. The painter still uses its existing geometry cascade;
+shared external descendant geometry/variable repaint remains the next increment.
+CSS math, rollback, wider units and full SVG/font/viewport semantics are unfinished.
+No author DOM/style attributes are rewritten. Six focused computation/refusal
+checks and the selected affected CSS/SVG cases do not establish actual-site shell
+readiness or complete SVG conformance.
