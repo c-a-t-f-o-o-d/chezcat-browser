@@ -12,7 +12,7 @@ pub(super) struct Island {
 pub(super) fn flow_context(name: &str) -> bool {
     matches!(name, "html" | "body" | "main" | "article" | "section" | "aside" | "nav" |
         "header" | "footer" | "figure" | "figcaption" | "div" | "span" | "p" |
-        "a" | "button" | "label" | "ul" | "ol" | "li")
+        "a" | "button" | "label" | "ul" | "ol" | "li" | "template")
         || super::valid_custom_element_name(name)
 }
 
@@ -167,12 +167,27 @@ mod tests {
             assert_eq!(node(&doc, "next").namespace, Namespace::Html, "{bad}");
         }
         for markup in ["<svg id=root><g/>", "<svg id=root><g", "<svg id=root><circle id=unquoted/></svg>",
-                       "<select><svg id=root></svg></select>", "<template><div><svg id=root></svg></div></template>",
+                       "<select><svg id=root></svg></select>", "<select><template><svg id=root></svg></template></select>",
+                       "<iframe><template><svg id=root></svg></template></iframe>",
                        "<math><svg id=root></svg></math>"] {
             assert_eq!(node(&parse(markup), "root").namespace, Namespace::UnknownForeign, "{markup}");
         }
         let doc = parse("<select><option></option></select><svg id='s'/>");
         assert_eq!(node(&doc, "s").namespace, Namespace::Svg);
+    }
+
+    #[test]
+    fn svg_namespace_balanced_shapes_in_loaded_flow_templates_keep_real_svg_identity() {
+        for markup in [
+            "<body><template><div><svg id=root viewBox='0 0 24 24'><rect id=shape width='24' height='24'></rect></svg></div></template></body>",
+            "<body><template><demo-component><template><svg id=root viewBox='0 0 24 24'><g><rect id=shape width='24' height='24'></rect></g></svg></template></demo-component></template></body>",
+        ] {
+            let doc=parse(markup);assert_eq!(node(&doc,"root").namespace,Namespace::Svg);assert_eq!(node(&doc,"shape").namespace,Namespace::Svg);
+            let NodeKind::Element{attrs,..}=&node(&doc,"root").kind else{unreachable!()};assert!(attrs.iter().any(|attr|attr.name.html_is("viewBox")));
+        }
+        for payload in ["<script></script>","<foreignObject></foreignObject>","<use href='/unrequested'></use>","<g><rect></g>"] {
+            let doc=parse(&format!("<body><template><svg id=root><rect id=shape></rect>{payload}</svg></template></body>"));assert_eq!(node(&doc,"root").namespace,Namespace::UnknownForeign,"{payload}");assert_eq!(node(&doc,"shape").namespace,Namespace::UnknownForeign,"{payload}");
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
@@ -3375,6 +3375,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if property=="activeElement"&&self.document_interface_receiver(object){return true;}
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return true;}
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return false;}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return false;}
@@ -3688,7 +3689,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -4346,7 +4347,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.event_target_interface(object) && operation.accepts(self, receiver);
         }
-        if matches!(method, "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET)
+        if matches!(method, "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET)
             && self.event_target_interface(object)
         {
             return self.document_interface_receiver(receiver);
@@ -5070,6 +5071,7 @@ impl Host for Bridge<'_> {
                     | "parentNode"
                     | "ownerDocument"
                     | "documentElement"
+                    | "activeElement"
                     | "readyState"
                     | "referrer"
                     | "defaultView"
@@ -5380,6 +5382,7 @@ impl Host for Bridge<'_> {
                     };
                     Ok(node.map_or(Value::Null, |node| Value::Host(node_handle(node))))
                 }
+                "activeElement"=>self.document_active_element(object),
                 "readyState" => Ok(Value::String(self.state.ready.into())),
                 "defaultView" => Ok(Value::Host(WINDOW)),
                 // This browser does not send Referer or populate a document
@@ -5943,6 +5946,7 @@ impl Host for Bridge<'_> {
             if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
         }
+        if method==DOCUMENT_ACTIVE_ELEMENT_GET {return self.document_active_element(object);}
         if method == DOCUMENT_CURRENT_SCRIPT_GET {
             self.state.work(1)?;
             return Ok(if object == DOCUMENT {
@@ -8436,3 +8440,10 @@ mod svg_style_geometry_tests;
 #[cfg(test)]
 #[path="script_console_diagnostics_tests.rs"]
 mod console_diagnostics_tests;
+
+#[path="script_document_active_element.rs"]
+mod document_active_element;
+
+#[cfg(test)]
+#[path="script_document_active_element_tests.rs"]
+mod document_active_element_tests;
