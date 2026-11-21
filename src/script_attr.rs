@@ -25,7 +25,7 @@ fn copy_text(text:&str)->Result<String,String>{
     let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Attr text storage reservation failed.")?;
     copied.push_str(text);Ok(copied)
 }
-fn copy_name(name:&AttributeName)->Result<AttributeName,String>{
+pub(super) fn copy_name(name:&AttributeName)->Result<AttributeName,String>{
     Ok(AttributeName{qualified:copy_text(&name.qualified)?,namespace:name.namespace.as_ref().map(|ns|Ok::<_,String>(AttributeNamespace{uri:copy_text(&ns.uri)?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?})).transpose()?})
 }
 struct Reservation {records:Option<Vec<Attr>>,index:Option<Vec<usize>>,added:usize}
@@ -226,6 +226,11 @@ impl Bridge<'_> {
     pub(super) fn attribute_observation_plan(&mut self, object: u32, method: &str, args: &[Value])
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
     {
+        if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode"){
+            let Some(Value::Host(handle))=args.first() else{return Ok(None);};let Some(id)=index(*handle).filter(|&id|self.state.attributes.get(id).is_some())else{return Ok(None);};
+            let bytes=self.state.attributes[id].name.bytes();self.state.copies(bytes)?;let name=copy_name(&self.state.attributes[id].name)?;
+            return self.attribute_change_for_name(object,&name).map(Some);
+        }
         if self.inert_node_type(object)==Some(1){return self.inert_attribute_observation_plan(object,method,args);}
         if !self.attr_element_receiver(object) || self.is_frame_handle(object) { return Ok(None); }
         let node = self.attr_element_node(object)?;
@@ -382,6 +387,13 @@ impl Bridge<'_> {
     }
 
     pub(super) fn get_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        if self.inert_node_type(object)==Some(1){
+            let namespace=namespace(args)?;let local=self.text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
+            let attrs=self.inert_element_attributes(object).ok_or("Inert attributes are unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;
+            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches(namespace,&local));let Some(slot)=slot else{return Ok(Value::Null);};
+            let length=self.inert_element_attributes(object).unwrap()[slot].value.len();if length>self.state.limits.host.string_bytes{return Err("Inert attribute value exceeds the host allowance.".into());}self.state.copies(length)?;
+            return Ok(Value::String(script_clone_node::copy_text(&self.inert_element_attributes(object).unwrap()[slot].value)?));
+        }
         let node = self.attr_element_node(object)?;
         let ns = namespace(args)?;
         let local = self.text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
@@ -409,7 +421,6 @@ impl Bridge<'_> {
     }
 
     pub(super) fn set_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
-        let node = self.attr_element_node(object)?;
         let ns = namespace(args)?;
         let qualified = self.text(args.get(1).ok_or("setAttributeNS requires three arguments.")?)?;
         let value = self.text(args.get(2).ok_or("setAttributeNS requires three arguments.")?)?;
@@ -420,11 +431,20 @@ impl Bridge<'_> {
             let namespace = AttributeNamespace { uri: uri.into(), prefix: prefix.map(str::to_owned), local: local.into() };
             AttributeName { qualified, namespace: Some(namespace) }
         } else { AttributeName::unqualified(qualified) };
+        if self.inert_node_type(object)==Some(1){self.write_inert_attribute_ns(object,name,Some(value))?;return Ok(Value::Undefined);}
+        let node=self.attr_element_node(object)?;
         self.public_attribute(node, name, Some(value))?;
         Ok(Value::Undefined)
     }
 
     pub(super) fn remove_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        if self.inert_node_type(object)==Some(1){
+            let namespace=namespace(args)?;let local=self.text(args.get(1).ok_or("removeAttributeNS requires two arguments.")?)?;
+            let attrs=self.inert_element_attributes(object).ok_or("Inert attributes are unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;
+            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches(namespace,&local));let Some(slot)=slot else{return Ok(Value::Undefined);};
+            let bytes=self.inert_element_attributes(object).unwrap()[slot].name.bytes();self.state.copies(bytes)?;let name=copy_name(&self.inert_element_attributes(object).unwrap()[slot].name)?;
+            self.write_inert_attribute_ns(object,name,None)?;return Ok(Value::Undefined);
+        }
         let node = self.attr_element_node(object)?;
         let local = self.text(args.get(1).ok_or("removeAttributeNS requires two arguments.")?)?;
         let slot = self.attribute_slot(node, namespace(args)?, &local)?;

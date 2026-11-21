@@ -6080,3 +6080,7 @@ mod inert_observation_tests;
 #[cfg(test)]
 #[path="app_content_observation_tests.rs"]
 mod content_observation_tests;
+
+#[cfg(test)]
+#[path="app_attribute_notification_tests.rs"]
+mod attribute_notification_tests;

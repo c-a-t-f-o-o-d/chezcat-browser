@@ -439,6 +439,11 @@ impl Runtime {
 
     pub(super) fn prepare_setter_observation(&mut self,handle:u32,name:&str,value:&Value,reflected:Option<&str>,host:&mut dyn Host)->Result<(Option<PreparedChange>,bool),Fault>{
         if let Some(attribute)=reflected{return self.prepare_attribute_write(handle,"setAttributeNS",&[Value::Null,Value::String(attribute.into())],host).map(|pending|(pending,true));}
+        if self.mutations.attribute_registrations!=0{
+            if let Some(generation)=host.mutation_tree_generation(){
+                if let Some((target,change))=host.mutation_attribute_setter_change(handle,name).map_err(Fault::new)?{return self.prepare_attribute_change(target,generation,change,host).map(|pending|(pending,true));}
+            }
+        }
         if self.mutations.child_list_registrations!=0{
             if let Some(target)=host.mutation_content_target(handle,name).map_err(Fault::new)?{
                 if !self.matching_observers(target,true,None,host)?.is_empty(){
@@ -458,9 +463,13 @@ impl Runtime {
     {
         if self.mutations.attribute_registrations == 0 { return Ok(None); }
         let Some(generation) = host.mutation_tree_generation() else { return Ok(None); };
-        let Some(mut change) = host.mutation_attribute_change(target, method, args).map_err(Fault::new)? else {
+        let Some(change) = host.mutation_attribute_change(target, method, args).map_err(Fault::new)? else {
             return Ok(None);
         };
+        self.prepare_attribute_change(target,generation,change,host)
+    }
+
+    fn prepare_attribute_change(&mut self,target:u32,generation:u64,mut change:NativeAttributeChange,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         let observers = self.matching_observers(target, false, Some(&change), host)?;
         if observers.is_empty() { return Ok(None); }
         let old = change.old_value.take().map_or(Value::Null, Value::String);
@@ -474,6 +483,15 @@ impl Runtime {
             }));
         }
         self.prepare_mutation_records(target, generation, entries)
+    }
+
+    pub(super) fn prepare_operation_observation(&mut self,target:u32,method:&str,args:&[Value],host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
+        if self.mutations.attribute_registrations!=0{
+            if let Some(generation)=host.mutation_tree_generation(){
+                if let Some((owner,change))=host.mutation_attribute_operation_change(target,method).map_err(Fault::new)?{return self.prepare_attribute_change(owner,generation,change,host);}
+            }
+        }
+        if matches!(method,"setAttribute"|"removeAttribute"|"setAttributeNS"|"removeAttributeNS"|"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode"){self.prepare_attribute_write(target,method,args,host)}else{self.prepare_child_list_write(target,method,args,host)}
     }
 
     fn prepare_mutation_records(&mut self, target: u32, generation: u64, entries: Vec<(usize, Record)>)
