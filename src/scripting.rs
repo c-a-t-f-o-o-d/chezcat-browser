@@ -6989,7 +6989,9 @@ document.onkeyup=function(e){if(e.key!=='A' || e.type!=='keyup')throw Error('rel
         assert_eq!(doc.title, "widu");
         let expired = page.console_eval(&mut doc, &mut forms, "saved.preventDefault()");
         assert_eq!(expired.errors, 1);
-        assert!(page.report().contains("Event handle has expired"));
+        assert!(page.report().contains("expired"), "{}", page.report());
+        assert!(page.state.event.is_none());
+        assert_eq!(doc.title, "widu");
         doc.scripting_enabled = false;
         let outcome = page.keyboard(&mut doc, &mut forms, KeyboardInput::default());
         assert_eq!(outcome.errors, 0);
@@ -8340,3 +8342,7 @@ mod css_text;
 #[cfg(test)]
 #[path="script_structural_selector_tests.rs"]
 mod structural_selector_tests;
+
+#[cfg(test)]
+#[path="script_native_focus_selector_tests.rs"]
+mod native_focus_selector_tests;

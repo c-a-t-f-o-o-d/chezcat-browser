@@ -1757,6 +1757,7 @@ impl App {
         }
     }
     fn reflow(&mut self) {
+        self.sync_native_focus_css();
         self.sync_inline_svg();
         self.anchor_geometry_scope = std::rc::Rc::new(());
         let environment=Some(self.css_media_environment());
@@ -1822,6 +1823,7 @@ impl App {
         }
         self.update_find(false);
         self.validate_control_focus();
+        if self.sync_native_focus_css(){self.reflow();}
     }
     pub fn resize(&mut self, width: i32, height: i32) {
         let width = width.clamp(1, 8192);
@@ -2044,7 +2046,25 @@ impl App {
             (202, (self.width - 356).max(20))
         }
     }
+    fn sync_native_focus_css(&mut self)->bool{
+        if self.scripting.as_mut().is_some_and(|p|p.take_native_focus_loss()) && matches!(self.focus,Focus::Control(_)){self.focus=Focus::Page;}
+        let next=if self.view==View::Page && self.alternate.is_none(){
+            if let Focus::Control(node)=self.focus{self.forms.controls.get(&node).filter(|c|c.focusable()).and_then(|_|self.page.controls.iter().any(|c|c.node==node).then_some(node))}else{None}
+        }else{None};
+        if self.document.native_focus.get()==next{return false;}
+        self.document.native_focus.set(next);self.invalidate_script_geometry();true
+    }
+    fn apply_native_focus_css(&mut self){
+        if !self.sync_native_focus_css(){return;}
+        // CSS focus changes must not discard the caret/drag committed by the
+        // native press. A vanished control still cancels its old drag owner.
+        let drag=std::mem::replace(&mut self.drag,Drag::None);
+        self.reflow();
+        let keep=match &drag{Drag::Control{node}|Drag::SelectOption{node,..}=>self.page.controls.iter().any(|c|c.node==*node),Drag::Field=>self.focus!=Focus::Page,_=>true};
+        if keep{self.drag=drag;}
+    }
     fn sync_editors(&mut self) {
+        self.apply_native_focus_css();
         self.sync_browser_panel();
         self.address
             .ensure_visible(((self.address_rect().1 - 16) / 12).max(1) as usize);
@@ -2122,7 +2142,8 @@ impl App {
         self.invalidate_platform_requests();
         self.select_popup = None;
         self.chrome.focus = None;
-        let previous=if let Focus::Control(previous)=self.focus {Some(previous)}else{None};
+        let lost=self.scripting.as_mut().is_some_and(|page|page.take_native_focus_loss());
+        let previous=if !lost{if let Focus::Control(previous)=self.focus {Some(previous)}else{None}}else{None};
         self.focus = Focus::Control(node);
         self.selection = None;
         self.pending_surrogate = None;
@@ -2144,7 +2165,9 @@ impl App {
         }
         if scroll_into_view {self.script_focus_transition(previous,Some(node));}
     }
-    fn script_focus_transition(&mut self,previous:Option<usize>,next:Option<usize>) {
+    fn script_focus_transition(&mut self,previous:Option<usize>,_next:Option<usize>) {
+        self.apply_native_focus_css();
+        let next=if let Focus::Control(node)=self.focus{Some(node)}else{None};
         if previous==next || self.script_jobs_paused() {return;}
         if let Some(page)=&mut self.scripting {
             let outcome=page.focus_transition(&mut self.document,&mut self.forms,previous,next);
@@ -6125,3 +6148,7 @@ mod inline_flex_tests;
 #[cfg(test)]
 #[path="app_structural_selector_tests.rs"]
 mod structural_selector_tests;
+
+#[cfg(test)]
+#[path="app_native_focus_selector_tests.rs"]
+mod native_focus_selector_tests;
