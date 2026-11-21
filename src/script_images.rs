@@ -366,3 +366,7 @@ fn replace_child_image_preparation_failure_preserves_both_parents_and_recovers()
 }
 
 }
+
+#[cfg(test)]
+#[path="script_image_import_tests.rs"]
+mod import_tests;

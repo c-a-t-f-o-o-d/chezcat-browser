@@ -860,3 +860,21 @@ fn history_entry_admission_refuses_network_commit_and_late_images_then_recovers(
     app.history.borrow_mut().set_limit_for_test(crate::session_history::BYTE_ALLOWANCE);app.navigate_location(site.location("/fresh"),false);wait(&mut app,|app|!app.is_loading());
     assert!(!app.failed,"{}",app.status);assert_eq!(app.document.title,"Fresh document");assert_eq!(app.history.len(),length+1);
 }
+
+
+#[test]
+fn image_import_actual_app_decodes_clones_and_paints_without_losing_editor_or_link(){
+ let site=Site::new();let mut app=open(&site,"/");wait(&mut app,|app|!app.is_loading());
+ eval(&mut app,r##"
+var sheet=document.createElement('style');sheet.textContent='#picture{display:none}#import-first{position:absolute;left:20px;top:90px;width:30px;height:20px}#import-second{position:absolute;left:80px;top:90px;width:20px;height:30px}#neighbor{position:absolute;left:20px;top:160px;width:180px;height:32px}#safe{display:block;position:absolute;left:20px;top:240px;width:180px;height:36px;background:#204060}';document.head.appendChild(sheet);
+var t=document.createElement('template');t.innerHTML='<original-images><img id="import-first" src="/one.ppm" width="30" height="20"><img id="import-second" src="/two.ppm" width="20" height="30"><input id="neighbor" value="seed"><a id="safe" href="#destination">Real link</a><div id="destination"></div></original-images>';var source=t.content,fragment=document.importNode(source,true),first=fragment.querySelector('#import-first'),second=fragment.querySelector('#import-second'),importLoads=0;
+function importedLoaded(e){if(!e.isTrusted||e.target!==this||!this.complete||this.naturalWidth===0)throw 'real decoded image event';importLoads++;document.title='imported-images-'+importLoads;}first.onload=importedLoaded;second.onload=importedLoaded;
+if(first.complete||second.complete||first.naturalWidth||second.naturalWidth)throw 'detached fake image data';
+"##);
+ assert!(!site.requested("/one.ppm")&&!site.requested("/two.ppm"));eval(&mut app,"document.body.appendChild(fragment);");
+ let id=|app:&App,name:&str|(0..app.document.nodes.len()).find(|&n|app.document.attr(n,"id")==Some(name)).unwrap();let neighbor=id(&app,"neighbor");let c=app.page.controls.iter().find(|c|c.node==neighbor).unwrap();let(x,y)=(c.x+12,app.content_top()+c.y+12-app.scroll);app.pointer_down(x,y,false);app.pointer_up(x,y);app.paste("neighbor edit");let value=&app.forms.controls[&neighbor].value;let saved=(value.text(),value.cursor,value.anchor,value.offset);
+ wait(&mut app,|app|app.document.title=="imported-images-2");let one=id(&app,"import-first");let two=id(&app,"import-second");assert_eq!(app.images[&one].pixels,[0xffff0000;2]);assert_eq!(app.images[&two].pixels,[0xff00ff00;3]);
+ eval(&mut app,"var cloned=first.cloneNode(true),cloneLoads=0;cloned.id='cloned';if(cloned.complete||cloned.naturalWidth||cloned.currentSrc!=='')throw 'loaded data aliased into clone';cloned.onload=function(e){if(e.target!==cloned||cloned.naturalWidth!==2||!cloned.complete)throw 'real clone decode';cloneLoads++;document.title='imported-image-cloned';};document.body.appendChild(cloned);");
+ wait(&mut app,|app|app.document.title=="imported-image-cloned");let clone=id(&app,"cloned");assert_eq!(app.images[&clone].pixels,[0xffff0000;2]);let value=&app.forms.controls[&neighbor].value;assert_eq!((value.text(),value.cursor,value.anchor,value.offset),saved);
+ let canvas=app.draw();let pixel=|x:usize,y:i32|canvas.pixels[(app.content_top()+y-app.scroll) as usize*canvas.width+x]&0xffffff;assert_eq!(pixel(30,100),0xff0000);assert_eq!(pixel(90,100),0x00ff00);let link=id(&app,"safe");assert_eq!(app.page.link_node_at(40,255),Some(link));assert_eq!(app.page.link_at(40,255),Some("#destination"));let y=app.content_top()+255-app.scroll;app.pointer_down(40,y,false);app.pointer_up(40,y);assert_eq!(app.location.fragment,"destination");assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
+}
