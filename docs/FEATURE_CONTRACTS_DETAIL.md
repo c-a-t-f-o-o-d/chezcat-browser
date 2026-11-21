@@ -2190,3 +2190,21 @@ establish real-site initialization, complete native textarea creation or claim
 complete editing/form APIs.
 See [textarea placeholder](https://html.spec.whatwg.org/multipage/form-elements.html#attr-textarea-placeholder)
 and [input placeholder](https://html.spec.whatwg.org/multipage/input.html#attr-input-placeholder).
+
+
+## Shared variable sizing and existing layout grammars
+
+The guarded custom-property resolver now supplies supported width/min/max sizing,
+display, box-sizing, flex factors/basis/flow and gap consumers. Literal and
+substituted sizes use the same strict finite token grammar. A winning var()
+declaration whose result is missing, cyclic or invalid computes to the initial
+component instead of reviving an older declaration. CSS-wide values reset or
+inherit the selected fields, including parent metrics for inherited em/rem sizes.
+
+Original CSS fixtures cover supported values, cascade/fallback/cycles, token
+boundaries and relative inheritance. The actual App fixture changes width and
+gap custom properties through a trusted callback, checks changed native geometry
+and exact pixels, preserves editing and activates the link at its new hit target.
+Existing substitution/storage/work refusal guards are retained. This does not
+add general typed math, viewport lengths, inline-flex or complete CSSOM/layout,
+and does not establish real-site shell improvement.

@@ -6097,3 +6097,7 @@ mod transient_observation_tests;
 #[cfg(test)]
 #[path="app_placeholder_tests.rs"]
 mod placeholder_tests;
+
+#[cfg(test)]
+#[path="app_layout_variable_tests.rs"]
+mod layout_variable_tests;
