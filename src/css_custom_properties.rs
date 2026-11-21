@@ -420,6 +420,7 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
     let result=substituted.ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
     let inherited=matches!(declaration.name.as_str(),"color"|"font-size");
+    if value.contains("calc("){let (work,copies)=sizing_math::cost(&value);if budget.work(work).and_then(|_|budget.copy(copies)).is_err(){reset_box(style,parent,&declaration.name,inherited);return true;}}
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
         // The finite background shorthand can inherit an existing single image
         // layer. Charge its URL copy; substitution does not introduce URL syntax.

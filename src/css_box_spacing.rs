@@ -46,12 +46,13 @@ mod tests {
     #[test]
     fn box_spacing_rejects_other_types_operators_and_malformed_components() {
         for value in ["calc(-1 * 0)", "calc(2 * 3)", "calc(2px * 3%)", "calc(2 * 1vh)",
-            "calc(2 * auto)", "calc(1rem * 2 * 3)", "calc(1px + 2px)", "calc(1px / 2)",
-            "calc(calc(1px * 2) * 2)", "calc(1. * 2px)", "calc(1e * 2px)", "calc(1px * nan)",
+            "calc(2 * auto)", "calc(1rem * 2px * 3)", "calc(1px + 2)", "calc(1px / 0)",
+            "calc(calc(1px * 2px) * 2)", "calc(1. * 2px)", "calc(1e * 2px)", "calc(1px * nan)",
             "calc(1e999 * 0px)", "calc(2 * 3 px)", "calc(2 * 3\u{00a0}px)",
             "calc(2 * 3px)more", "calc(2 * 3px", "calc(2 * )", "0 px"] {
             assert_eq!(length(value, true), None, "{value}");
         }
+        for (source,expected) in [("calc(1rem * 2 * 3)",Length::Rem(6.0)),("calc(1px + 2px)",Length::Px(3.0)),("calc(1px / 2)",Length::Px(0.5)),("calc(calc(1px * 2) * 2)",Length::Px(4.0))]{assert_eq!(length(source,true),Some(expected),"{source}");}
         assert!(length(&format!("calc({}1px*2)", " ".repeat(2048)), true).is_none());
         assert!(shorthand("1px 2px 3px 4px 5px", true).is_none());
         assert!(shorthand(&"calc(".repeat(9), false).is_none());
@@ -80,9 +81,9 @@ mod tests {
         let style = computed("#test{width:31px;width:calc(3px*2);top:7px;top:calc(3px*2); \
             gap:5px;gap:calc(3px*2);border:3px solid red;border-width:calc(3px*2); \
             font-size:12px;font-size:calc(3px*2);padding-left:calc(3px*2)}");
-        assert_eq!(style.width, Length::Px(31.0));
+        assert_eq!(style.width, Length::Px(6.0));
         assert_eq!(style.inset[0], Length::Px(7.0));
-        assert_eq!(style.gap, [Length::Px(5.0); 2]);
+        assert_eq!(style.gap, [Length::Px(6.0); 2]);
         assert_eq!(style.border_width, [Length::Px(3.0); 4]);
         assert_eq!(style.font_size, 12.0);
         assert_eq!(style.padding[3], Length::Px(6.0));

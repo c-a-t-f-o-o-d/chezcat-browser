@@ -90,7 +90,7 @@ fn expression(source: &str) -> Option<Value> {
     let mut operators = Vec::new();
     // Existing declaration bytes bound the maximum token/stack storage.
     values.try_reserve_exact(source.len() / 2 + 1).ok()?;
-    operators.try_reserve_exact(source.len() / 2 + 1).ok()?;
+    operators.try_reserve_exact(source.len()).ok()?;
     while index < bytes.len() {
         if bytes[index].is_ascii_whitespace() {
             index += 1;
@@ -181,6 +181,14 @@ fn expression(source: &str) -> Option<Value> {
         reduce(&mut values, op)?;
     }
     (values.len() == 1).then(|| values[0])
+}
+pub(super) fn cost(source: &str) -> (usize, usize) {
+    // Two validation/application passes, including typed operand and operator
+    // backing. Existing declaration bytes bound both iterative stacks.
+    (
+        source.len().saturating_mul(16),
+        source.len().saturating_mul(64),
+    )
 }
 pub(super) fn length(source: &str, negative: bool) -> Option<Length> {
     let source = source.trim_ascii();

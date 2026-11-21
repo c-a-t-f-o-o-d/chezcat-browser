@@ -6105,3 +6105,7 @@ mod layout_variable_tests;
 #[cfg(test)]
 #[path="app_computed_presentation_tests.rs"]
 mod computed_presentation_tests;
+
+#[cfg(test)]
+#[path="app_sizing_math_tests.rs"]
+mod sizing_math_tests;
