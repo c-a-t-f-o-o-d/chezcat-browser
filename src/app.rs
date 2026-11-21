@@ -6221,3 +6221,7 @@ mod console_diagnostics_tests;
 #[cfg(test)]
 #[path="app_svg_shared_paint_tests.rs"]
 mod svg_shared_paint_tests;
+
+#[cfg(test)]
+#[path="app_flat_behavior_tests.rs"]
+mod flat_behavior_tests;

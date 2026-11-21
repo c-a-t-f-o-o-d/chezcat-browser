@@ -1440,3 +1440,7 @@ var failed=false;try{a.flat();}catch(e){failed=e.name==='TypeError';}if(!failed)
         }
     }
 }
+
+#[cfg(test)]
+#[path="array_flat_workspace_tests.rs"]
+mod flat_workspace_tests;
