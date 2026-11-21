@@ -9732,6 +9732,9 @@ impl Runtime {
                 }
                 let (mut object, method, receiver_required) =
                     (*object, *method, *receiver_required);
+                // Namespace console operations have no interface receiver brand.
+                // Their saved holder still undergoes owner/origin validation.
+                let receiver_required=receiver_required&&host.console_message_limit(object,method).is_none();
                 if host.promise_returning_operation(object,method) {
                     return self.call_host_promise(object,method,receiver_required,this,host);
                 }

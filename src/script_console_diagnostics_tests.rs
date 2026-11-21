@@ -36,7 +36,7 @@ fn console_native_error_origin_survives_author_getters_and_keeps_actual_identity
 #[test]
 fn console_native_error_constructor_and_ordinary_proxy_objects_do_not_run_getters_or_coercions() {
     let (mut doc, mut forms, mut page) = fixture();
-    let out=page.console_eval(&mut doc,&mut forms,"var hits=0,e=TypeError('constructed');var fake={name:'TypeError',message:'private object field',toString:function(){hits++;return 'coercion';}};Object.defineProperty(fake,'message',{get:function(){hits++;return 'getter';}});var proxy=new Proxy(fake,{get:function(){hits++;throw 'proxy read';}});console.warn(e);console.info(fake,proxy);Object.defineProperty(e,'message',{get:function(){hits++;throw 'message getter';}});console.log(e);if(hits!==0)throw 'printer invoked author code';");
+    let out=page.console_eval(&mut doc,&mut forms,"var hits=0,e=TypeError('constructed');var fake={name:'TypeError',message:'private object field',toString:function(){hits++;return 'coercion';}};Object.defineProperty(fake,'message',{get:function(){hits++;return 'getter';}});var proxy=new Proxy(fake,{get:function(){hits++;throw 'proxy read';}});console.warn(e);var print=console.error;if(typeof print!=='function'||print!==console.error||print.name!=='error'||print.length!==0||Object.getPrototypeOf(print)!==Function.prototype)throw 'console function identity';print(e);print.call(null,e);print.apply({},[e]);print.bind(0)(e);console.info(fake,proxy);Object.defineProperty(e,'message',{get:function(){hits++;throw 'message getter';}});console.log(e);if(hits!==0)throw 'printer invoked author code';");
     assert_eq!(out.errors, 0, "{}", page.report());
     let lines = page
         .state
@@ -61,7 +61,7 @@ fn console_native_error_constructor_and_ordinary_proxy_objects_do_not_run_getter
 #[test]
 fn console_native_error_child_realm_details_are_opaque_after_origin_change() {
     let (mut doc, mut forms, mut page) = fixture();
-    let out=page.console_eval(&mut doc,&mut forms,"var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,childError=new w.TypeError('child-owned-message');console.error(childError);");
+    let out=page.console_eval(&mut doc,&mut forms,"var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,childError=new w.TypeError('child-owned-message'),foreign=w.Function('fn','arg','return fn(arg);');console.error(childError);foreign(console.error,childError);");
     assert_eq!(out.errors, 0, "{}", page.report());
     assert!(page
         .state
@@ -87,4 +87,10 @@ fn console_native_error_child_realm_details_are_opaque_after_origin_change() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(lines, "console.error: [script object]");
+    page.clear_console();
+    let out=page.console_eval(&mut doc,&mut forms,"foreign(console.error,childError);");
+    assert_eq!(out.errors,1,"foreign saved console must revalidate before printing: {}",page.report());
+    assert!(page.state.logs.iter().all(|line|!line.starts_with("console.")));
+    assert!(page.report().contains("origin")||page.report().contains("Security"));
+
 }

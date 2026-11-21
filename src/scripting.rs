@@ -3342,7 +3342,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
-        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
+        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|CONSOLE|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -3643,6 +3643,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.console_message_limit(object,method).is_some(){return Some(WINDOW);}
         if placeholder::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
 
@@ -4222,6 +4223,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
 
         if self.attribute_method_member(object,property){return None;}
