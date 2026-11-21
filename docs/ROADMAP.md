@@ -64,8 +64,9 @@ live ParentNode views and finite child moves/import are integrated. Inert select
 queries and passive HTML clone/import are integrated. Supported native control
 default import and connection is integrated. Plain image clone/import and guarded
 loader activation is integrated. Inline style clone/import and cumulative mixed
-stamping is the current resource increment. Remaining native families and other
-resources, nested-template adoption,
+stamping is integrated. Main-document template import/clone with appropriate
+inert content owners is the current increment. Remaining native families and
+resources, broader same-identity adoption,
 namespace-aware SVG and remaining mutation/lifecycle scheduling stay open.
 The last actual clean `fff35f8` run at November 21, 04:13 UTC completed all 43
 script executions and 61 callbacks without escaped errors but still rendered the

@@ -7,6 +7,8 @@ use std::rc::Rc;
 mod mutation;
 #[path="script_inert_selectors.rs"]
 mod selectors;
+#[path="script_template_imports.rs"]
+mod template_imports;
 
 #[path = "script_dom_parser.rs"]
 pub(super) mod parser;

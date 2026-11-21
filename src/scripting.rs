@@ -2657,7 +2657,7 @@ impl Bridge<'_> {
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
-                if !text_container(tag) || tag == "button" {
+                if (!text_container(tag) || tag == "button")&&!self.movable_template_host(child) {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
