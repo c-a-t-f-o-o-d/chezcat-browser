@@ -360,6 +360,14 @@ impl App {
                 .is_some_and(|pending| !pending.committed)
     }
 
+    /// A completed page event has drained its observer/Promise jobs. Apply its
+    /// latest focus request against current layout before the next native edit.
+    pub(super) fn apply_script_focus(&mut self)->bool {
+        if self.script_jobs_paused(){return false;}
+        let Some(node)=self.scripting.as_mut().and_then(|page|page.take_focus_request()) else{return false;};
+        self.focus_control(node);
+        true
+    }
     pub(super) fn process_script_requests(&mut self) -> bool {
         self.apply_media_pause();
         let effects=self.poll_media_promise_cleanup();

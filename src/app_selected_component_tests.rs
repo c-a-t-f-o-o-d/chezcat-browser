@@ -81,7 +81,7 @@ root.addEventListener('component-connected',function(event){if(event.isTrusted||
     assert_eq!(pixel(&mut app, 320, 110), 0xe03040);
     assert_eq!(pixel(&mut app, 20, 20), 0xddeeff);
     app.paste("typed");
-    app.key(0x0d,false,false,false);
+    app.key(0x0d, false, false, false);
     assert_eq!(
         app.document.title,
         "Lifecycle 2",
@@ -110,4 +110,94 @@ root.addEventListener('component-connected',function(event){if(event.isTrusted||
         "{}",
         app.scripting.as_ref().unwrap().report()
     );
+}
+
+#[test]
+fn selected_component_keyboard_focus_jobs_apply_before_native_edit_and_reject_invalid_targets() {
+    for mode in ["valid", "hidden", "disabled", "detached"] {
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let file = Fixture(std::env::temp_dir().join(format!(
+            "chezcat-focus-boundary-{}-{mode}.html",
+            std::process::id()
+        )));
+        let source=r#"<html><head><style>html,body{margin:0}input{position:absolute;width:160px;height:30px}#a{left:10px;top:10px}#b{left:10px;top:60px}</style></head><body><input id=a value=first><input id=b value=second><script>var mode='MODE',a=document.getElementById('a'),b=document.getElementById('b');a.addEventListener('keydown',function(event){if(event.key==='Enter'){event.preventDefault();Promise.resolve().then(function(){b.focus();if(mode==='hidden')b.hidden=true;if(mode==='disabled')b.disabled=true;if(mode==='detached')b.parentNode.removeChild(b);});}});</script></body></html>"#.replace("MODE",mode);
+        std::fs::write(&file.0, source).unwrap();
+        let mut app = App::new();
+        app.resize(400, 320);
+        app.set_javascript_enabled(true);
+        app.open(&file.0);
+        assert!(!app.failed && !app.is_loading(), "{}", app.status);
+        let id = |app: &App, name: &str| {
+            (0..app.document.nodes.len())
+                .find(|&n| app.document.attr(n, "id") == Some(name))
+                .unwrap()
+        };
+        let a = id(&app, "a");
+        let b = id(&app, "b");
+        let r = app.page.controls.iter().find(|r| r.node == a).unwrap();
+        let (x, y) = (r.x + 10, app.content_top() + r.y + 10 - app.scroll);
+        app.pointer_down(x, y, false);
+        app.pointer_up(x, y);
+        let before = {
+            let v = &app.forms.controls[&a].value;
+            (v.text(), v.cursor, v.anchor, v.offset)
+        };
+        app.key(0x0d, false, false, false);
+        let expected = if mode == "valid" { b } else { a };
+        assert!(
+            matches!(app.focus,Focus::Control(node) if node==expected),
+            "{mode}: {}",
+            app.scripting.as_ref().unwrap().report()
+        );
+        app.paste("typed");
+        assert!(app.forms.controls[&expected].value.text().contains("typed"));
+        if mode == "valid" {
+            let v = &app.forms.controls[&a].value;
+            assert_eq!((v.text(), v.cursor, v.anchor, v.offset), before);
+        } else {
+            let out = app.scripting.as_mut().unwrap().console_eval(
+                &mut app.document,
+                &mut app.forms,
+                "b.hidden=false;b.disabled=false;if(!b.parentNode)document.body.appendChild(b);",
+            );
+            assert_eq!(
+                out.errors,
+                0,
+                "{}",
+                app.scripting.as_ref().unwrap().report()
+            );
+            app.reflow_preserving_drag();
+            app.poll_load();
+            assert!(
+                matches!(app.focus,Focus::Control(node) if node==a),
+                "refused focus must not resurrect later: {mode}"
+            );
+        }
+        let out = app.scripting.as_mut().unwrap().console_eval(
+            &mut app.document,
+            &mut app.forms,
+            if mode == "valid" {
+                "if(document.activeElement!==b)throw 'committed target';"
+            } else {
+                "if(document.activeElement!==a)throw 'preserved focus';"
+            },
+        );
+        assert_eq!(
+            out.errors,
+            0,
+            "{mode}: {}",
+            app.scripting.as_ref().unwrap().report()
+        );
+        assert_eq!(
+            app.scripting.as_ref().unwrap().error_count(),
+            0,
+            "{mode}: {}",
+            app.scripting.as_ref().unwrap().report()
+        );
+    }
 }
