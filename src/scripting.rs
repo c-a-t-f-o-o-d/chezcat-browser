@@ -2990,7 +2990,7 @@ impl Bridge<'_> {
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
 
         if script_element_properties::ordinary_interface_member(property) && self.form_named_control(object,property) {return false;}
-        self.ordinary_attribute_method(object,property)
+        self.placeholder_member(object,property) || self.ordinary_attribute_method(object,property)
             || parent_children::member(property) && self.parent_node_receiver(object)
             || property == "style" && self.html_element_expando_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -3086,6 +3086,7 @@ impl Host for Bridge<'_> {
     }
 
     fn observed_attribute_setter(&self, target: u32, property: &str) -> Option<&'static str> {
+        if self.placeholder_member(target,property){return Some("placeholder");}
         (property == "name" && self.html_slot_receiver(target)).then_some("name")
     }
 
@@ -3333,6 +3334,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if self.placeholder_member(object,property){return true;}
         script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
             || property == "textContent" && self.text_content_receiver(object)
@@ -3372,6 +3374,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.placeholder_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return property=="responseType";}
         if property=="textContent"&&self.text_content_receiver(object){return true;}
         if property=="name"&&self.html_slot_receiver(object){return true;}
@@ -3408,6 +3411,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if matches!(placeholder::operation(method),Some((interface,true)) if self.placeholder_interface(object)==Some(interface)){return Some("placeholder");}
         if self.xhr_index(object).is_some(){return crate::javascript::xhr_interface::setter(method).map(|name|match name {"timeout"=>"timeout","withCredentials"=>"withCredentials","responseType"=>"responseType","onreadystatechange"=>"onreadystatechange","onloadstart"=>"onloadstart","onprogress"=>"onprogress","onabort"=>"onabort","onerror"=>"onerror","onload"=>"onload","ontimeout"=>"ontimeout","onloadend"=>"onloadend",_=>unreachable!()});}
 
         if method == ELEMENT_INNER_HTML_SET && (self.attr_element_receiver(object) || self.template_receiver(object)) {
@@ -3602,6 +3606,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if placeholder::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
@@ -4239,6 +4244,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
             let Some((_,upload))=self.xhr_index(receiver) else{return false};
             let name=crate::javascript::xhr_interface::getter(method).or_else(||crate::javascript::xhr_interface::setter(method));
@@ -5121,6 +5127,7 @@ impl Host for Bridge<'_> {
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         if let Some(value)=self.xhr_get(object,property){return value;}
+        if self.placeholder_member(object,property){return self.placeholder_get(object);}
 
         if self.range_owner(object).is_some() { self.state.work(1)?;return Ok(Value::Undefined); }
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(Value::Undefined);}
@@ -5486,6 +5493,7 @@ impl Host for Bridge<'_> {
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
         if self.xhr_index(object).is_some(){return self.xhr_set(object,property,value).unwrap();}
+        if self.placeholder_member(object,property){return self.placeholder_set(object,&value);}
 
         if property == "innerHTML" && self.template_receiver(object) {
             let source = if matches!(value, Value::Null) { String::new() } else { self.text(&value)? };
@@ -5792,6 +5800,7 @@ impl Host for Bridge<'_> {
         if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
         if method == script_inert_documents::parser::PARSE && self.inert_parser(object) { return self.parse_inert_document(args); }
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
+        if matches!(placeholder::operation(method),Some((_,false))){return self.placeholder_get(object);}
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
         if self.inert_factory(object, method).is_some() { return self.inert_create_node(object, method, args); }
         if self.inert_node_type(object)==Some(1)&&matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"){return match method{"getAttributeNS"=>self.get_attribute_ns(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"setAttributeNS"=>self.set_attribute_ns(object,args),_=>self.remove_attribute_ns(object,args)};}
@@ -8305,3 +8314,10 @@ mod style_slot_notification_tests;
 #[cfg(test)]
 #[path="script_transient_observation_tests.rs"]
 mod transient_observation_tests;
+
+#[cfg(test)]
+#[path="script_placeholder_tests.rs"]
+mod placeholder_tests;
+
+#[path="script_placeholder.rs"]
+mod placeholder;

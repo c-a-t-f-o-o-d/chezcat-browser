@@ -3,6 +3,14 @@
 use super::*;
 use std::ops::Range;
 
+pub(super) fn hint_lines(text:&str)->impl Iterator<Item=&str>{
+    let mut pending=Some(text);
+    std::iter::from_fn(move||{let text=pending.take()?;if let Some(index)=text.find(['\r','\n']){let mut end=index+1;if text.as_bytes()[index]==b'\r'&&text.as_bytes().get(end)==Some(&b'\n'){end+=1;}pending=Some(&text[end..]);Some(&text[..index])}else{Some(text)}})
+}
+pub(super) fn single_line_hint(text:&str)->std::borrow::Cow<'_,str>{
+    if text.contains(['\r','\n']){std::borrow::Cow::Owned(text.chars().filter(|&ch|ch!='\r'&&ch!='\n').collect())}else{std::borrow::Cow::Borrowed(text)}
+}
+
 fn line_height(rect: &layout::ControlBox) -> i32 {
     rect.text_font
         .as_ref()
@@ -168,18 +176,10 @@ pub(super) fn draw(
     let caret_row = row_for(&rows, value.cursor);
     let available_rows = ((rect.height - 4) / height).max(1) as usize + 1;
     if value.chars.is_empty() && !focused {
-        if let Some(font) = &rect.text_font {
-            font.shape(&font.fit(placeholder, (rect.width - 12).max(0)))
-                .draw(canvas, rect.x + 6, y + 4, 0x75818b);
-        } else {
-            let cells = ((rect.width - 12) / (GLYPH_ADVANCE * rect.scale).max(1)).max(0) as usize;
-            canvas.text(
-                rect.x + 6,
-                y + 4,
-                &fit_text(placeholder, cells),
-                rect.scale,
-                0x75818b,
-            );
+        for (index,hint) in hint_lines(placeholder).take(available_rows).enumerate(){
+            let top=y+4+index as i32*height;
+            if let Some(font)=&rect.text_font{font.shape(&font.fit(hint,(rect.width-12).max(0))).draw(canvas,rect.x+6,top,0x75818b);}
+            else{let cells=((rect.width-12)/(GLYPH_ADVANCE*rect.scale).max(1)).max(0)as usize;canvas.text(rect.x+6,top,&fit_text(hint,cells),rect.scale,0x75818b);}
         }
     }
     for (index, row) in rows

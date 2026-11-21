@@ -4213,7 +4213,8 @@ fn draw_control_text(
         let origin = x + 6 - shape.x(value.offset);
         let text_y = y + (height - shape.height()) / 2;
         if value.chars.is_empty() && !focused {
-            let hint = font.shape(&font.fit(placeholder, (width - 12).max(0)));
+            let hint_text=textarea::single_line_hint(placeholder);
+            let hint = font.shape(&font.fit(&hint_text, (width - 12).max(0)));
             hint.draw(canvas, x + 6, y + (height - hint.height()) / 2, 0x75818b);
         }
         let selected = value.range();
@@ -4444,7 +4445,7 @@ fn draw_control(
             canvas.text(
                 x + 6,
                 text_y,
-                &fit_text(placeholder, cells),
+                &fit_text(&textarea::single_line_hint(placeholder), cells),
                 scale,
                 0x75818b,
             );
@@ -6092,3 +6093,7 @@ mod style_slot_notification_tests;
 #[cfg(test)]
 #[path="app_transient_observation_tests.rs"]
 mod transient_observation_tests;
+
+#[cfg(test)]
+#[path="app_placeholder_tests.rs"]
+mod placeholder_tests;
