@@ -19,6 +19,24 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T03:42:22Z** used clean
+[`0f24be5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/0f24be5cb6de6c6194ac210185f8d4dab82faaf6),
+including genuine WheelEvent records. JavaScript was enabled and images off;
+saved HTML reports `LOGGED_IN=false`. All 43 script executions succeeded. The
+inspected page still shows the skeleton without usable header/guide/search.
+A DOMContentLoaded callback fails in checked HTML fragment parsing through the
+native innerHTML wrapper at 81:621; there are 47 listeners and one escaped error,
+with invocation counts 49 attempted, 48 successful and one failed.
+
+A separate bounded diagnostic on that source plus a tag/context-only error
+message change identifies a nested template start tag in a template context.
+It is development evidence, not a clean integrated-source rerun. The connected
+increment implements real nested inert content rather than suppressing that
+refusal. Existing transport/trust/resource guards remain active. External script
+body hashes are unavailable and later journey milestones remain unproved.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T03:28:33Z** used clean
 [`d8957da`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/d8957da57a583220b915165afe87e6f18c130702),
 including attribute-specific supported-token queries. JavaScript was enabled and

@@ -8220,3 +8220,7 @@ mod animation_event_tests;
 #[cfg(test)]
 #[path="script_wheel_event_tests.rs"]
 mod wheel_event_tests;
+
+#[cfg(test)]
+#[path="script_nested_template_tests.rs"]
+mod nested_template_tests;
