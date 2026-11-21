@@ -1702,3 +1702,20 @@ intersection through ancestors and pointer-stream suppression remain open;
 mouse selection, control activation and link activation are unaffected. See
 [Pointer Events](https://www.w3.org/TR/pointerevents4/#the-touch-action-css-property)
 and the [compatibility value grammar](https://compat.spec.whatwg.org/#touch-action).
+
+
+## HTMLAnchorElement native identity
+
+Each Window realm installs its own canonical HTMLAnchorElement constructor and
+HTMLElement-derived prototype over actual HTML anchor nodes. Parsed, created,
+cloned, inert and imported anchors keep the correct owner and real node identity;
+SVG anchors and unrelated elements do not acquire the HTML brand. Global deletion
+or replacement does not retarget saved canonical constructors or native ancestry.
+Ordinary prototype and own properties use the existing native object protocol.
+Direct interface construction remains illegal; no dummy node is fabricated.
+
+Existing hyperlink URL mutation/reflection and activation guards remain intact.
+An original actual-App check uses a trusted anchor callback, saved interface
+identity and a real changed target through the native guarded activation path.
+This is an identity increment, not completion of every anchor IDL member or
+unrestricted navigation. See the [HTML anchor interface](https://html.spec.whatwg.org/multipage/text-level-semantics.html#htmlanchorelement).

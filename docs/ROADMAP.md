@@ -58,13 +58,12 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `305725e` at November 21, 02:20 UTC
-still renders a skeleton. It first fails on a rejected CSS `touchAction` write
-at 33256:127. The genuine buffered XHR increment is integrated; the optional
-nonstandard prototype.fetch member remains absent. The next connected increment
-supplies real touch-action declaration/cascade/readback. Native touchscreen
-panning/zooming remains separate work. These implementation checks do not prove
-a usable shell. The
+The latest isolated Windows check on clean `e5b3d7b` at November 21, 02:31 UTC
+still renders a skeleton. It first fails on missing `HTMLAnchorElement` in
+endpointLink metadata at 31124:299. The next connected increment gives real
+native anchors their canonical owner-realm interface over the existing URL and
+activation backend. The XHR and touch-action increments are integrated; these
+checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
 

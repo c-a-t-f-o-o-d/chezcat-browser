@@ -19,6 +19,21 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T02:31:00Z** used clean
+[`e5b3d7b`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e5b3d7bb6805ff13a43c9606d1d5f265f0667842),
+including the touch-action CSS increment. JavaScript was enabled and images off;
+saved HTML reports `LOGGED_IN=false`. Actual pixels remain a skeleton without
+usable header/guide/search. The first original failure is missing
+`HTMLAnchorElement` at 31124:299 in `endpointLink` type metadata; 2222:68 is the
+rethrow. There were 44 script executions (43 successful), 45 listeners and one
+error. This run selected a different `base_module_set` script family, so it is
+not an identical-input comparison with the earlier `kevlar_base` cohort; external
+JavaScript body hashes are unavailable. Existing trust, TLS, CSP, origin,
+credential and native-resource guards remain active. Query/results, watch/Back
+and playback remain unproved.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T02:20:42Z** used clean
 [`305725e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/305725e5643fa6af76a6e37626b4431a8a5d44bd),
 including the genuine buffered XHR increment. With JavaScript enabled and images

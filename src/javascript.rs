@@ -464,6 +464,7 @@ pub struct NativeAncestry {
 
 /// Ordinary element interfaces installed directly on each realm's HTMLElement chain.
 pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
+    ("a", "HTMLAnchorElement"),
     ("body", "HTMLBodyElement"),
     ("button", "HTMLButtonElement"),
     ("canvas", "HTMLCanvasElement"),
