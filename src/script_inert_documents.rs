@@ -152,6 +152,74 @@ impl Arena {
 }
 
 impl Bridge<'_> {
+    fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
+        let owner = self
+            .state
+            .inert_documents
+            .node(object)
+            .ok_or("Inert Node base owner is unavailable.")?
+            .owner;
+        if owner == DOCUMENT {
+            return self.main_node_base_uri();
+        }
+        let document = self
+            .state
+            .inert_documents
+            .node(owner)
+            .and_then(|node| match &node.kind {
+                Kind::Document(document) => Some(document),
+                _ => None,
+            });
+        let Some(document) = document else {
+            return self.string("about:blank");
+        };
+        let length = document.url.len();
+        self.state.work(length)?;
+        self.state.copies(length)?;
+        let fallback = match &self.state.inert_documents.node(owner).unwrap().kind {
+            Kind::Document(document) => document.url.clone(),
+            _ => unreachable!(),
+        };
+        // Use the actual current inert tree and native attributes, never an
+        // author-overridden query/getAttribute or an activating resource path.
+        let base = self.inert_selector_query(owner, "querySelector", "base[href]")?;
+        let Value::Host(base) = base else {
+            return self.string(&fallback);
+        };
+        let Value::String(href) =
+            self.inert_element_attribute(base, &Value::String("href".into()))?
+        else {
+            return self.string(&fallback);
+        };
+        let cost = dom_compat::url_copy_cost(&href, None)?
+            .checked_add(
+                fallback
+                    .len()
+                    .checked_mul(20)
+                    .ok_or("Inert base URL accounting overflow.")?,
+            )
+            .ok_or("Inert base URL accounting overflow.")?;
+        self.state.work(cost)?;
+        self.state.copies(cost)?;
+        // HTML rejects these two base schemes before selecting a document
+        // base. Do not route them through the narrower HTTP(S) URL-value API.
+        let blocked = href
+            .trim_matches(|c| c <= '\u{20}')
+            .split_once(':')
+            .is_some_and(|(scheme, _)| {
+                let bytes = scheme
+                    .bytes()
+                    .filter(|b| !matches!(b, b'\t' | b'\n' | b'\r'))
+                    .map(|b| b.to_ascii_lowercase());
+                bytes.clone().eq(b"data".iter().copied()) || bytes.eq(b"javascript".iter().copied())
+            });
+        if blocked {
+            return self.string(&fallback);
+        }
+        let resolved = crate::javascript::anchor_url_project(&href, Some(&fallback), "href")?
+            .unwrap_or(fallback);
+        self.string(&resolved)
+    }
     pub(super) fn inert_document(&self, object: u32) -> bool {
         self.state.inert_documents.node(object)
             .is_some_and(|node| matches!(node.kind, Kind::Document(_) | Kind::TemplateDocument { .. }))
@@ -227,7 +295,7 @@ impl Bridge<'_> {
     pub(super) fn inert_owns_property(&self, object: u32, name: &str) -> bool {
         // Real inherited Node getters permit author prototype overrides while
         // saved native accessors keep immutable receiver/owner validation.
-        if matches!(name, "ownerDocument" | "isConnected") { return false; }
+        if matches!(name, "ownerDocument" | "isConnected" | "baseURI") { return false; }
         if self.inert_factory(object, name).is_some() { return true; }
         let Some(node) = self.state.inert_documents.node(object) else { return false; };
         if matches!(name, "ownerDocument" | "isConnected" | "nodeValue" | "baseURI") {
@@ -1542,6 +1610,7 @@ impl Bridge<'_> {
         if property=="name"&&self.html_slot_receiver(object){let value=self.inert_element_attribute(object,&Value::String("name".into()))?;return Ok(if matches!(value,Value::Null){Value::String(String::new())}else{value});}
         self.state.work(1)?;
         if self.inert_implementation(object) || self.inert_parser(object) { return Ok(Value::Undefined); }
+        if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
@@ -1624,13 +1693,6 @@ impl Bridge<'_> {
                     let sibling = if property == "nextSibling" { Some(at + 1) } else { at.checked_sub(1) }?;
                     parent.children.get(sibling).copied()
                 }))
-            }
-            "baseURI" => {
-                let owner = self.state.inert_documents.node(node.owner);
-                match owner.map(|owner| &owner.kind) {
-                    Some(Kind::Document(document)) => string(&document.url),
-                    _ => string("about:blank"),
-                }
             }
             "isConnected" => {
                 let mut id = object;

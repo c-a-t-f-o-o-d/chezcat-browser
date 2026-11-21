@@ -5,7 +5,7 @@ fn location(source: &str) -> crate::navigation::Location {
 }
 fn fixture(explicit: bool) -> (Document, Forms, Page) {
     let mut doc =
-        crate::html::parse("<html><body><p id=loaded>native<!--comment--></p></body></html>");
+        crate::html::parse("<html><body><p id=loaded>native<!--comment--></p><form id=owner><input id=field name=baseURI value=kept></form></body></html>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
     let mut page = Page::with_limits(crate::javascript::limits::BROWSER);
@@ -34,7 +34,8 @@ fn node_base_uri_main_represented_nodes_saved_getter_readonly_and_author_overrid
 var d=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI');if(!d||typeof d.get!=='function'||d.get.length!==0||d.get.name!=='get baseURI'||d.set!==undefined||!d.enumerable||!d.configurable)throw 'real Node base getter';var get=d.get,p=document.getElementById('loaded'),text=p.firstChild,fragment=document.createDocumentFragment(),attr=document.createAttribute('data-original');
 for(var node of [document,p,text,text.nextSibling,fragment,attr,document.createElement('span'),document.createTextNode('made'),document.createProcessingInstruction('target','data')])if(node.baseURI!=='https://node-base.test/assets/?base=1#base'||get.call(node)!==node.baseURI)throw 'actual owner base';
 if(document.URL!=='https://node-base.test/folder/index.html?doc=1#source'||new URL('icons/mark.svg',p.baseURI).href!=='https://node-base.test/assets/icons/mark.svg')throw 'resource base is not document URL';
-var effects=0,bad={toString:function(){effects++;throw 'coerced';}};fragment.baseURI=bad;if(effects||Object.hasOwn(fragment,'baseURI')||fragment.baseURI!==document.baseURI)throw 'readonly';var strict=0;try{(function(){'use strict';fragment.baseURI=bad;})();}catch(e){if(e instanceof TypeError)strict++;else throw e;}if(strict!==1||effects)throw 'strict readonly';Object.defineProperty(fragment,'baseURI',{value:'author',configurable:true});if(fragment.baseURI!=='author'||get.call(fragment)!==document.baseURI)throw 'author versus native';delete fragment.baseURI;delete Node.prototype.baseURI;if(fragment.baseURI!==undefined||get.call(fragment)!=='https://node-base.test/assets/?base=1#base')throw 'deleted getter fallback';Object.defineProperty(Node.prototype,'baseURI',d);
+var effects=0,bad={toString:function(){effects++;throw 'coerced';}};fragment.baseURI=bad;if(effects||Object.hasOwn(fragment,'baseURI')||fragment.baseURI!==document.baseURI)throw 'readonly';var strict=0;try{(function(){'use strict';fragment.baseURI=bad;})();}catch(e){if(e instanceof TypeError)strict++;else throw e;}if(strict!==1||effects)throw 'strict readonly';Object.defineProperty(fragment,'baseURI',{value:'author',configurable:true});if(fragment.baseURI!=='author'||get.call(fragment)!==document.baseURI)throw 'author versus native';delete fragment.baseURI;delete Node.prototype.baseURI;if(fragment.baseURI!==undefined||document.baseURI!==undefined||get.call(fragment)!=='https://node-base.test/assets/?base=1#base')throw 'deleted getter fallback';Object.defineProperty(Node.prototype,'baseURI',d);
+var form=document.getElementById('owner'),field=document.getElementById('field');if(form.baseURI!==field||get.call(form)!==document.baseURI||field.form!==form||field.value!=='kept')throw 'legacy form named URI field';field.setAttribute('name','renamed');if(form.baseURI!==document.baseURI||get.call(form)!==document.baseURI)throw 'native getter after named control rename';
 for(var receiver of [{},window,Node.prototype]){var caught=0;try{get.call(receiver);}catch(e){if(e instanceof TypeError)caught++;else throw e;}if(caught!==1)throw 'brand';}
 "#,
     );
@@ -47,9 +48,9 @@ fn node_base_uri_inert_document_first_base_live_attributes_import_and_promotion(
         &mut forms,
         &mut page,
         r#"
-var get=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get,parsed=new DOMParser().parseFromString('<html><head><base href="https://inert-node-base.test/one/"><base href="https://ignored-node-base.test/"></head><body><p id="p">inert</p></body></html>','text/html'),p=parsed.getElementById('p'),base=parsed.head.firstChild;
-if(parsed.baseURI!=='https://inert-node-base.test/one/'||p.baseURI!==parsed.baseURI||get.call(p.firstChild)!==parsed.baseURI)throw 'inert actual first base';base.setAttribute('href','https://inert-node-base.test/two/');if(p.baseURI!=='https://inert-node-base.test/two/')throw 'live inert base attribute';base.setAttribute('href','data:text/plain,blocked');if(p.baseURI!=='about:blank')throw 'disallowed base scheme fallback';
-var template=document.createElement('template');template.innerHTML='<span>staged</span>';var staged=template.content.firstChild,owner=staged.ownerDocument;if(staged.baseURI!=='about:blank'||owner.baseURI!=='about:blank')throw 'template owner base';var imported=document.importNode(p,true);if(imported.baseURI!==document.baseURI||p.baseURI!=='about:blank')throw 'import owner';document.body.appendChild(template.content);if(staged.ownerDocument!==document||staged.baseURI!==document.baseURI)throw 'promoted owner base';
+var get=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get,parsed=new DOMParser().parseFromString('<html><head><base href="https://inert-node-base.test/one/"><base href="https://ignored-node-base.test/"></head><body><p id="p">inert</p></body></html>','text/html'),p=parsed.querySelector('#p'),base=parsed.head.firstChild;
+if(parsed.baseURI!=='https://inert-node-base.test/one/'||p.baseURI!==parsed.baseURI||get.call(p.firstChild)!==parsed.baseURI)throw 'inert actual first base';base.setAttribute('href','https://inert-node-base.test/two/');if(p.baseURI!=='https://inert-node-base.test/two/')throw 'live inert base attribute';base.setAttribute('href','data:text/plain,blocked');if(p.baseURI!==parsed.URL)throw 'disallowed base scheme fallback';
+var template=document.createElement('template');template.innerHTML='<span>staged</span>';var staged=template.content.firstChild,owner=staged.ownerDocument;if(staged.baseURI!=='about:blank'||owner.baseURI!=='about:blank')throw 'template owner base';var imported=document.importNode(p,true);if(imported.baseURI!==document.baseURI||p.baseURI!==parsed.URL)throw 'import owner';document.body.appendChild(template.content);if(staged.ownerDocument!==document||staged.baseURI!==document.baseURI)throw 'promoted owner base';
 "#,
     );
 }
@@ -89,4 +90,51 @@ var get=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get,frame=docu
         assert!(page.report().contains("origin") || page.report().contains("Security"));
     }
     run(&mut doc,&mut forms,&mut page,"if(!own()||document.baseURI!=='https://node-base.test/assets/?base=1#base')throw 'actual child owner or main recovery';");
+}
+
+#[test]
+fn node_base_uri_local_serialization_copy_work_size_refusal_and_fresh_job_recovery() {
+    let (mut doc, mut forms, mut page) = fixture(true);
+    let before = (doc.nodes.len(), page.state.dom_commits, page.state.retained);
+    for kind in ["copy", "work", "size"] {
+        let old = (
+            page.state.copy_work,
+            page.state.host_work,
+            page.state.limits.host.string_bytes,
+        );
+        match kind {
+            "copy" => page.state.copy_work = 0,
+            "work" => page.state.host_work = 0,
+            _ => page.state.limits.host.string_bytes = 4,
+        }
+        let result = Bridge {
+            doc: &mut doc,
+            forms: &mut forms,
+            state: &mut page.state,
+        }
+        .get(DOCUMENT, "baseURI");
+        assert!(result.is_err(), "{kind}: {result:?}");
+        assert_eq!(
+            (doc.nodes.len(), page.state.dom_commits, page.state.retained),
+            before
+        );
+        (
+            page.state.copy_work,
+            page.state.host_work,
+            page.state.limits.host.string_bytes,
+        ) = old;
+    }
+    run(&mut doc,&mut forms,&mut page,"if(document.baseURI!=='https://node-base.test/assets/?base=1#base')throw 'fresh getter job';");
+    let path = std::env::temp_dir().join("original node base #percent%.html");
+    let local = crate::navigation::Location {
+        root: path.parent().map(|p| p.to_path_buf()),
+        path: Some(path),
+        url: None,
+        fragment: "section with space".into(),
+    };
+    page.set_location(&local);
+    page.set_resource_base(&local);
+    run(&mut doc,&mut forms,&mut page,"if(document.baseURI!==location.href||document.body.baseURI!==document.baseURI||document.baseURI.indexOf('file:')!==0||document.baseURI.indexOf('%20')<0||document.baseURI.indexOf('%23')<0||document.baseURI.indexOf('%25')<0)throw 'native file URI serialization';");
+    assert!(page.take_dynamic_scripts().is_empty());
+    assert!(page.take_dynamic_stylesheets().is_empty());
 }

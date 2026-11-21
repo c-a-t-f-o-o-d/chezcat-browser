@@ -3009,11 +3009,13 @@ impl Bridge<'_> {
     }
 
     fn node_metadata_property(&self, object:u32, property:&str)->bool {
-        matches!(property,"ownerDocument"|"isConnected") && self.text_content_receiver(object)
+        matches!(property,"ownerDocument"|"isConnected"|"baseURI") && self.text_content_receiver(object)
+            && (property!="baseURI" || !self.form_named_control(object,property))
     }
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if property=="baseURI" && self.form_named_control(object,property) {return false;}
         if self.node_metadata_property(object,property) {return true;}
         if self.aria_reflection_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
@@ -3288,6 +3290,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if property=="baseURI" && self.form_named_control(object,property) {return true;}
         if self.node_metadata_property(object,property) {return false;}
         if self.aria_reflection_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
@@ -4435,7 +4438,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && parent_children::operation(method).is_some() {
             return self.parent_node_receiver(receiver);
         }
-        if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected") {
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected"|"\0Node.get.baseURI") {
             return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
@@ -5205,6 +5208,8 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if property=="baseURI" && self.form_named_control(object,property) {return self.named_form_property(node_index(object).unwrap(),property);}
+        if property=="baseURI" && self.text_content_receiver(object) {return self.node_base_uri_get(object);}
         if self.aria_reflection_member(object,property){return self.aria_reflection_get(object,property);}
         if self.html_reflection_member(object,property){return self.html_reflection_get(object,property);}
         if let Some(value)=self.xhr_get(object,property){return value;}
@@ -5911,6 +5916,7 @@ impl Host for Bridge<'_> {
             return self.html_text_reflection_get(node, "name");
         }
         if let Some(property)=parent_children::operation(method) {return self.parent_node_get(object,property);}
+        if method=="\0Node.get.baseURI" {return self.node_base_uri_get(object);}
         if let Some(property) = node_traversal_property(method) {
             return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
@@ -7203,7 +7209,7 @@ var l=location;
 if(l!==window.location || l!==document.location || l!==self.location || l!==globalThis.location)throw Error('location identity');
 if(document.URL!==l.href || document.documentURI!==l.href)throw Error('document URL');
 if(!('location' in window) || !('location' in document) || !('URL' in document) || !('documentURI' in document))throw Error('URL presence');
-if('baseURI' in document || !('assign' in l) || !('replace' in l) || !('reload' in l))throw Error('Location capability mismatch');
+if(!('baseURI' in document)||document.baseURI!==l.href||!('assign' in l)||!('replace' in l)||!('reload' in l))throw Error('Location capability mismatch');
 var stringify=l.toString;
 if(typeof stringify!=='function' || stringify!==l.toString || stringify.call(l)!==l.href)throw Error('native string method');
 var rejected=false;try{stringify.call(window);}catch(e){rejected=e.name==='TypeError';}
@@ -8488,3 +8494,6 @@ mod fragment_author_prototype_tests;
 #[cfg(test)]
 #[path="script_node_base_uri_tests.rs"]
 mod node_base_uri_tests;
+
+#[path="script_node_base_uri.rs"]
+mod node_base_uri;
