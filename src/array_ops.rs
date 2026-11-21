@@ -16,7 +16,7 @@ struct FlattenFrame {
     next: usize,
     depth: f64,
     map: bool,
-    root:super::transient_roots::RootMarker,
+    root: super::transient_roots::RootMarker,
 }
 
 impl Runtime {
@@ -242,68 +242,213 @@ impl Runtime {
 
     // Root registrations use the existing shared root storage. Pay its actual
     // backing growth, movement and new identity writes before author reentry.
-    fn flat_root(&mut self,value:&Value)->Result<(),Fault>{
-        let before=self.root_storage_bytes();let length=self.transient_roots.roots.len();
+    fn flat_root(&mut self, value: &Value) -> Result<(), Fault> {
+        let before = self.root_storage_bytes();
+        let length = self.transient_roots.roots.len();
         self.push_transient_value(value)?;
-        let added=self.root_storage_bytes().checked_sub(before).ok_or_else(||Fault::new("Array flatten root storage arithmetic failed."))?;
-        let moved=if added!=0 {length.checked_mul(std::mem::size_of::<super::function_reachability::Edge>())}else{Some(0)}.ok_or_else(||Fault::new("Array flatten root movement overflow."))?;
-        let writes=self.transient_roots.roots.len().checked_sub(length).and_then(|n|n.checked_mul(std::mem::size_of::<super::function_reachability::Edge>())).ok_or_else(||Fault::new("Array flatten root write overflow."))?;
-        self.work(added.checked_add(moved).and_then(|n|n.checked_add(writes)).ok_or_else(||Fault::new("Array flatten root work overflow."))?)
+        let added = self
+            .root_storage_bytes()
+            .checked_sub(before)
+            .ok_or_else(|| Fault::new("Array flatten root storage arithmetic failed."))?;
+        let moved = if added != 0 {
+            length.checked_mul(std::mem::size_of::<super::function_reachability::Edge>())
+        } else {
+            Some(0)
+        }
+        .ok_or_else(|| Fault::new("Array flatten root movement overflow."))?;
+        let writes = self
+            .transient_roots
+            .roots
+            .len()
+            .checked_sub(length)
+            .and_then(|n| n.checked_mul(std::mem::size_of::<super::function_reachability::Edge>()))
+            .ok_or_else(|| Fault::new("Array flatten root write overflow."))?;
+        self.work(
+            added
+                .checked_add(moved)
+                .and_then(|n| n.checked_add(writes))
+                .ok_or_else(|| Fault::new("Array flatten root work overflow."))?,
+        )
     }
     #[allow(clippy::too_many_arguments)]
-    fn push_flat_frame(&mut self,frames:&mut Vec<FlattenFrame>,owned:&mut usize,id:usize,length:usize,depth:f64,map:bool)->Result<(),Fault>{
-        let root=self.root_marker();self.flat_root(&Value::Object(id))?;
-        let available=self.limits.heap.retained_values.checked_sub(self.value_bytes).ok_or_else(||Fault::new("Array flatten retained-value limit reached."))?;
-        let growth=super::limits::prepare_retained_growth(frames,1,available)?;
-        let movement=if growth.added!=0 {frames.len().checked_mul(std::mem::size_of::<FlattenFrame>())}else{Some(0)}.ok_or_else(||Fault::new("Array flatten frame movement overflow."))?;
-        self.work(growth.added.checked_add(movement).and_then(|n|n.checked_add(std::mem::size_of::<FlattenFrame>())).ok_or_else(||Fault::new("Array flatten frame work overflow."))?)?;
-        let next=self.value_bytes.checked_add(growth.added).ok_or_else(||Fault::new("Array flatten retained storage overflow."))?;
-        let active=self.array_flat_workspace_bytes.checked_add(growth.added).ok_or_else(||Fault::new("Array flatten workspace overflow."))?;
-        let owned_next=owned.checked_add(growth.added).ok_or_else(||Fault::new("Array flatten owned storage overflow."))?;
-        growth.commit(frames);self.value_bytes=next;self.array_flat_workspace_bytes=active;*owned=owned_next;
-        frames.push(FlattenFrame{id,length,next:0,depth,map,root});Ok(())
+    fn push_flat_frame(
+        &mut self,
+        frames: &mut Vec<FlattenFrame>,
+        owned: &mut usize,
+        id: usize,
+        length: usize,
+        depth: f64,
+        map: bool,
+    ) -> Result<(), Fault> {
+        let root = self.root_marker();
+        self.flat_root(&Value::Object(id))?;
+        let available = self
+            .limits
+            .heap
+            .retained_values
+            .checked_sub(self.value_bytes)
+            .ok_or_else(|| Fault::new("Array flatten retained-value limit reached."))?;
+        let growth = super::limits::prepare_retained_growth(frames, 1, available)?;
+        let movement = if growth.added != 0 {
+            frames
+                .len()
+                .checked_mul(std::mem::size_of::<FlattenFrame>())
+        } else {
+            Some(0)
+        }
+        .ok_or_else(|| Fault::new("Array flatten frame movement overflow."))?;
+        self.work(
+            growth
+                .added
+                .checked_add(movement)
+                .and_then(|n| n.checked_add(std::mem::size_of::<FlattenFrame>()))
+                .ok_or_else(|| Fault::new("Array flatten frame work overflow."))?,
+        )?;
+        let next = self
+            .value_bytes
+            .checked_add(growth.added)
+            .ok_or_else(|| Fault::new("Array flatten retained storage overflow."))?;
+        let active = self
+            .array_flat_workspace_bytes
+            .checked_add(growth.added)
+            .ok_or_else(|| Fault::new("Array flatten workspace overflow."))?;
+        let owned_next = owned
+            .checked_add(growth.added)
+            .ok_or_else(|| Fault::new("Array flatten owned storage overflow."))?;
+        growth.commit(frames);
+        self.value_bytes = next;
+        self.array_flat_workspace_bytes = active;
+        *owned = owned_next;
+        frames.push(FlattenFrame {
+            id,
+            length,
+            next: 0,
+            depth,
+            map,
+            root,
+        });
+        Ok(())
     }
-    pub(super) fn array_flat(&mut self,source:Value,map:bool,args:&[Value],host:&mut dyn Host)->Result<Value,Fault>{
-        let marker=self.root_marker();let mut frames=Vec::new();let mut owned=0usize;
-        let result=(||{
+    pub(super) fn array_flat(
+        &mut self,
+        source: Value,
+        map: bool,
+        args: &[Value],
+        host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let marker = self.root_marker();
+        let mut frames = Vec::new();
+        let mut owned = 0usize;
+        let result = (|| {
             // These handles remain live through length/depth/species getters,
             // mapper callbacks and property creation, including nested flat.
-            self.flat_root(&source)?;for value in args.iter().take(if map{2}else{1}){self.flat_root(value)?;}
-            let ordinary=self.ordinary_required(&source)?;let id=self.ordinary_id(ordinary)?;
-            let length=self.array_like_length(id,host)?;
-            let callback=args.first().unwrap_or(&Value::Undefined);
-            if map&&!matches!(callback,Value::Function(_)){return Err(Fault::exception("TypeError","Array flatMap callback must be callable."));}
-            let depth=if map||matches!(args.first(),None|Some(Value::Undefined)){1.}else{self.binary_integer(args.first(),0.,host)?.max(0.)};
-            let target=self.flatten_target(id,host)?;self.flat_root(&target)?;
-            let receiver=args.get(1).unwrap_or(&Value::Undefined);
-            self.push_flat_frame(&mut frames,&mut owned,id,length,depth,map)?;
-            let mut output=0usize;
-            while let Some(frame)=frames.last_mut(){
+            self.flat_root(&source)?;
+            for value in args.iter().take(if map { 2 } else { 1 }) {
+                self.flat_root(value)?;
+            }
+            let ordinary = self.ordinary_required(&source)?;
+            let id = self.ordinary_id(ordinary)?;
+            let length = self.array_like_length(id, host)?;
+            let callback = args.first().unwrap_or(&Value::Undefined);
+            if map && !matches!(callback, Value::Function(_)) {
+                return Err(Fault::exception(
+                    "TypeError",
+                    "Array flatMap callback must be callable.",
+                ));
+            }
+            let depth = if map || matches!(args.first(), None | Some(Value::Undefined)) {
+                1.
+            } else {
+                self.binary_integer(args.first(), 0., host)?.max(0.)
+            };
+            let target = self.flatten_target(id, host)?;
+            if length == 0 {
+                return Ok(target);
+            }
+            self.flat_root(&target)?;
+            let receiver = args.get(1).unwrap_or(&Value::Undefined);
+            self.push_flat_frame(&mut frames, &mut owned, id, length, depth, map)?;
+            let mut output = 0usize;
+            while let Some(frame) = frames.last_mut() {
                 self.step()?;
-                if frame.next==frame.length{let root=frame.root;frames.pop();self.restore_root_marker(root);continue;}
-                let(id,index,depth,map)=(frame.id,frame.next,frame.depth,frame.map);frame.next+=1;
-                if !self.array_has_index(id,index)?{continue;}
-                let mut value=self.array_get_index(id,index,host)?;
-                if map{let receiver=self.copy_value(receiver)?;value=self.call_value(callback.clone(),&[value,Value::Number(index as f64),source.clone()],receiver,host)?;}
-                if let Value::Object(child)=value {if depth>0. {if let Some(length)=self.object(child)?.length{
-                    // No index can be visited in an empty child. In particular,
-                    // this needs neither a depth guard nor an extra work frame.
-                    if length!=0{self.push_flat_frame(&mut frames,&mut owned,child,length,depth-1.,false)?;}continue;
-                }}}
-                if output==self.limits.heap.array_length{return Err(Fault::new(format!("Array flatten length limit reached ({}).",self.limits.heap.array_length)));}
-                let value_marker=self.root_marker();self.flat_root(&value)?;
-                let created=self.create_data_property(&target,PropertyKey::String(output.to_string()),value,host);
-                self.restore_root_marker(value_marker);created?;
-                output=output.checked_add(1).ok_or_else(||Fault::new("Array flatten output index overflow."))?;
+                if frame.next == frame.length {
+                    let root = frame.root;
+                    frames.pop();
+                    self.restore_root_marker(root);
+                    continue;
+                }
+                let (id, index, depth, map) = (frame.id, frame.next, frame.depth, frame.map);
+                frame.next += 1;
+                if !self.array_has_index(id, index)? {
+                    continue;
+                }
+                let mut value = self.array_get_index(id, index, host)?;
+                if map {
+                    let receiver = self.copy_value(receiver)?;
+                    value = self.call_value(
+                        callback.clone(),
+                        &[value, Value::Number(index as f64), source.clone()],
+                        receiver,
+                        host,
+                    )?;
+                }
+                if let Value::Object(child) = value {
+                    if depth > 0. {
+                        if let Some(length) = self.object(child)?.length {
+                            // No index can be visited in an empty child. In particular,
+                            // this needs neither a depth guard nor an extra work frame.
+                            if length != 0 {
+                                self.push_flat_frame(
+                                    &mut frames,
+                                    &mut owned,
+                                    child,
+                                    length,
+                                    depth - 1.,
+                                    false,
+                                )?;
+                            }
+                            continue;
+                        }
+                    }
+                }
+                if output == self.limits.heap.array_length {
+                    return Err(Fault::new(format!(
+                        "Array flatten length limit reached ({}).",
+                        self.limits.heap.array_length
+                    )));
+                }
+                let value_marker = self.root_marker();
+                self.flat_root(&value)?;
+                let created = self.create_data_property(
+                    &target,
+                    PropertyKey::String(output.to_string()),
+                    value,
+                    host,
+                );
+                self.restore_root_marker(value_marker);
+                created?;
+                output = output
+                    .checked_add(1)
+                    .ok_or_else(|| Fault::new("Array flatten output index overflow."))?;
             }
             Ok(target)
         })();
         // Only this invocation's actual frame backing is refunded. Callback
         // allocations and observable partial species writes remain intact.
         drop(frames);
-        let refund=self.value_bytes.checked_sub(owned).zip(self.array_flat_workspace_bytes.checked_sub(owned));
+        let refund = self
+            .value_bytes
+            .checked_sub(owned)
+            .zip(self.array_flat_workspace_bytes.checked_sub(owned));
         self.restore_root_marker(marker);
-        if let Some((values,active))=refund{self.value_bytes=values;self.array_flat_workspace_bytes=active;}else{return Err(Fault::new("Array flatten workspace refund accounting failed."));}
+        if let Some((values, active)) = refund {
+            self.value_bytes = values;
+            self.array_flat_workspace_bytes = active;
+        } else {
+            return Err(Fault::new(
+                "Array flatten workspace refund accounting failed.",
+            ));
+        }
         result
     }
 

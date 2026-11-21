@@ -130,8 +130,13 @@ fn c06_flat_workspace_abrupt_species_mapper_and_live_captured_lengths_keep_obser
 }
 thread_local! {static EXPECTED:std::cell::Cell<(usize,usize)>=const{std::cell::Cell::new((usize::MAX,usize::MAX))};static ROOT_CHECKED:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
 fn inspect_flat_roots(runtime: &Runtime, callee: usize, _: &[Value], _: &Value) {
-    let name=runtime.objects[runtime.function_properties[callee]].properties["name"].value.as_value().unwrap();
-    if !matches!(name,Value::String(name) if name=="collect"){return;}
+    let name = runtime.objects[runtime.function_properties[callee]].properties["name"]
+        .value
+        .as_value()
+        .unwrap();
+    if !matches!(name,Value::String(name) if name=="collect") {
+        return;
+    }
     let (parent, keep) = EXPECTED.with(|value| value.get());
     let contains = |id| {
         runtime.transient_roots.roots.iter().any(|edge|matches!(edge,super::super::function_reachability::Edge::Object(value) if *value==id))
@@ -168,6 +173,78 @@ fn c06_flat_workspace_detached_parent_and_partial_target_are_rooted_across_gette
     runtime.execute("var result=source.flat(Infinity);if(result.length!==3||result[0]()!==42||result[1]!==1||result[2]()!==43)throw 'live functions after source detachment';0;",&mut NoHost).unwrap();
     runtime.transient_roots.script_input_observer = None;
     assert!(ROOT_CHECKED.with(|value| value.get()));
+    assert_eq!(runtime.array_flat_workspace_bytes, 0);
+    assert!(runtime.transient_registration_is_empty());
+}
+
+thread_local! {static OUTER_BYTES:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};static NESTED_CHECKS:std::cell::Cell<usize>=const{std::cell::Cell::new(0)};}
+fn inspect_nested_workspace(runtime: &Runtime, callee: usize, _: &[Value], _: &Value) {
+    let name = runtime.objects[runtime.function_properties[callee]].properties["name"]
+        .value
+        .as_value()
+        .unwrap();
+    let Value::String(name) = name else {
+        return;
+    };
+    match name.as_str() {
+        "outerProbe" => {
+            assert!(runtime.array_flat_workspace_bytes > 0);
+            OUTER_BYTES.with(|value| value.set(runtime.array_flat_workspace_bytes));
+        }
+        "afterProbe" => {
+            assert_eq!(
+                runtime.array_flat_workspace_bytes,
+                OUTER_BYTES.with(|value| value.get())
+            );
+            NESTED_CHECKS.with(|value| value.set(value.get() + 1));
+        }
+        "innerProbe" => {
+            assert!(runtime.array_flat_workspace_bytes > OUTER_BYTES.with(|value| value.get()));
+            assert!(runtime.value_bytes >= runtime.array_flat_workspace_bytes);
+            NESTED_CHECKS.with(|value| value.set(value.get() + 1));
+        }
+        _ => {}
+    }
+}
+#[test]
+fn c06_flat_workspace_nested_reentry_keeps_outer_charge_through_inner_failure_and_success() {
+    let mut runtime = Runtime::with_limits(super::super::limits::BROWSER);
+    runtime.execute("var marker={},bad=[0],good=[0];function outerProbe(){}function afterProbe(){}function innerProbe(){}Object.defineProperty(bad,'0',{get:function(){throw marker;}});Object.defineProperty(good,'0',{get:function(){innerProbe();return 7;}});function mapper(){outerProbe();try{bad.flat(Infinity);}catch(e){if(e!==marker)throw 'inner identity';}afterProbe();return good.flat(Infinity);}0;",&mut NoHost).unwrap();
+    OUTER_BYTES.with(|value| value.set(0));
+    NESTED_CHECKS.with(|value| value.set(0));
+    runtime.transient_roots.script_input_observer = Some(inspect_nested_workspace);
+    runtime.begin_job();
+    assert_eq!(
+        runtime
+            .execute("[1].flatMap(mapper)[0];", &mut NoHost)
+            .unwrap()
+            .to_number(),
+        7.
+    );
+    runtime.transient_roots.script_input_observer = None;
+    assert_eq!(NESTED_CHECKS.with(|value| value.get()), 2);
+    assert_eq!(runtime.array_flat_workspace_bytes, 0);
+    assert!(runtime.transient_registration_is_empty());
+}
+#[test]
+fn c06_flat_workspace_empty_sources_keep_species_order_without_allocating_frames() {
+    check("var calls=0,maps=0,target={},empty=[];empty.constructor={};empty.constructor[Symbol.species]=function(n){if(n!==0)throw 'species length';calls++;return target;};if(empty.flat()!==target||empty.flatMap(function(){maps++;})!==target||calls!==2||maps!==0)throw 'empty species and mapping';'ok';");
+    let mut runtime = Runtime::for_test();
+    runtime
+        .execute(
+            "var empty=[],ctor=empty.constructor,species=ctor[Symbol.species];0;",
+            &mut NoHost,
+        )
+        .unwrap();
+    let source = runtime.execute("empty;", &mut NoHost).unwrap();
+    let before = runtime.value_bytes;
+    runtime.limits.heap.retained_values = before;
+    let result = runtime.array_flat(source, false, &[], &mut NoHost).unwrap();
+    let Value::Object(id) = result else {
+        panic!("array")
+    };
+    assert_eq!(runtime.objects[id].length, Some(0));
+    assert_eq!(runtime.value_bytes, before);
     assert_eq!(runtime.array_flat_workspace_bytes, 0);
     assert!(runtime.transient_registration_is_empty());
 }
