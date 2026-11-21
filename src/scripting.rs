@@ -3032,6 +3032,15 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn console_message_limit(&self,object:u32,method:&str)->Option<usize>{
+        (object==CONSOLE&&matches!(method,"log"|"info"|"warn"|"error")).then_some(MAX_LOG_LINE)
+    }
+    fn print_console(&mut self,object:u32,method:&str,message:&str)->Result<Value,String>{
+        if self.console_message_limit(object,method).is_none(){return Err("Native console receiver or operation is invalid.".into());}
+        self.state.copies(message.len())?;
+        self.state.log(&format!("console.{method}: {message}"));
+        Ok(Value::Undefined)
+    }
     fn prepare_request_call(&mut self,object:u32,method:&str,args:&[Value],binary:Option<Vec<u8>>)->Result<crate::javascript::xhr_interface::Call,crate::javascript::xhr_interface::Error>{self.xhr_call(object,method,args,binary)}
     fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
     fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
@@ -3333,7 +3342,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
-        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
+        self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|CONSOLE|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
         if !self.class_list_element_receiver(object) { return None; }
@@ -3634,6 +3643,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.console_message_limit(object,method).is_some(){return Some(WINDOW);}
         if placeholder::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
 
@@ -4213,6 +4223,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
 
         if self.attribute_method_member(object,property){return None;}
@@ -8421,3 +8432,7 @@ mod replacement_self_tests;
 #[cfg(test)]
 #[path="script_svg_style_geometry_tests.rs"]
 mod svg_style_geometry_tests;
+
+#[cfg(test)]
+#[path="script_console_diagnostics_tests.rs"]
+mod console_diagnostics_tests;

@@ -73,7 +73,7 @@ if(childDefine(cachedRoot,'temporaryDefined',dataDescriptor)!==cachedRoot||cache
 delete cachedRoot.temporaryDefined;
 if(childKeys(cachedRoot).indexOf('securityState')<0||childNames(cachedRoot).indexOf('guardedState')<0||childSymbols(cachedRoot)[0]!==ownSymbol||childRead(cachedRoot,ownSymbol)!==71)throw 'same-origin own inspection';
 if(!childOwn()||document.body.nodeType!==1)throw 'native owner prefix';
-"#, true, crate::javascript::limits::CAPACITY_REGRESSION);
+"#, true, crate::javascript::limits::BROWSER);
     page.set_location(&location("https://other-document.test/changed"));
     for source in [
         "childRead(cachedRoot,'securityState');",
@@ -110,7 +110,7 @@ var childWrite=ChildFunction('document.childOwnProbe=41;');
 var childOwn=ChildFunction('return window===self&&document.body.nodeType===1&&location.href==="about:blank";');
 var childCompile=ChildFunction('source','try{Function(source);return false;}catch(error){if(error.name!=="EvalError")throw error;return window===self&&document.body.nodeType===1;}');
 if(childDocument.body.nodeType!==1||!childOwn()||document.policyState!==savedState)throw 'real child/native prefix';
-"#, true, crate::javascript::limits::CAPACITY_REGRESSION);
+"#, true, crate::javascript::limits::BROWSER);
     for changed_origin in [false, true] {
         if changed_origin { page.set_location(&location("https://other-document.test/changed")); }
         denied(&mut page, &mut doc, &mut forms, "childWrite();",
