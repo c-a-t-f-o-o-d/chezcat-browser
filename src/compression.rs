@@ -4,9 +4,6 @@
 
 pub const MAX_INPUT_BYTES: usize = 512 * 1024 * 1024;
 pub const MAX_OUTPUT_BYTES: usize = 512 * 1024 * 1024;
-const MAX_BLOCKS: usize = 16_384;
-const MAX_GZIP_MEMBERS: usize = 128;
-const MAX_GZIP_HEADER_BYTES: usize = 65_536;
 const CHECK_INTERVAL: usize = 8192;
 
 type DecodeResult<T> = Result<T, String>;
@@ -280,7 +277,6 @@ struct Output<'a> {
     bytes: Vec<u8>,
     limit: usize,
     next_check: usize,
-    blocks_left: usize,
     check: &'a dyn Fn() -> DecodeResult<()>,
 }
 
@@ -309,7 +305,6 @@ impl<'a> Output<'a> {
             bytes: Vec::new(),
             limit,
             next_check: CHECK_INTERVAL,
-            blocks_left: MAX_BLOCKS,
             check,
         })
     }
@@ -397,11 +392,10 @@ fn inflate(data: &[u8], output: &mut Output<'_>, window: usize) -> DecodeResult<
     let mut bits = Bits::new(data);
     let mut fixed = None;
     loop {
+        // Every block consumes header bits from the admitted input, including
+        // empty blocks. Keep cancellation at that boundary instead of imposing
+        // a separate count limit on valid streams.
         (output.check)()?;
-        if output.blocks_left == 0 {
-            return Err("DEFLATE stream exceeds the aggregate block-count limit.".into());
-        }
-        output.blocks_left -= 1;
         let last = bits.read(1)? != 0;
         match bits.read(2)? {
             0 => {
@@ -488,8 +482,8 @@ pub fn zlib(
 fn header_advance(data: &[u8], position: &mut usize, count: usize) -> DecodeResult<()> {
     let end = position
         .checked_add(count)
-        .filter(|&end| end <= data.len() && end <= MAX_GZIP_HEADER_BYTES)
-        .ok_or("Truncated gzip header or header exceeds 64 KiB.")?;
+        .filter(|&end| end <= data.len())
+        .ok_or("Truncated gzip header.")?;
     *position = end;
     Ok(())
 }
@@ -499,17 +493,18 @@ fn header_string(
     position: &mut usize,
     check: &dyn Fn() -> DecodeResult<()>,
 ) -> DecodeResult<()> {
-    let end = data.len().min(MAX_GZIP_HEADER_BYTES);
-    let mut scanned = 0;
-    for chunk in data[*position..end].chunks(CHECK_INTERVAL) {
+    // Names and comments are terminated by NUL, with no format-defined length
+    // field. Scan the admitted input without copying or reserving header bytes.
+    let remaining = data.get(*position..).ok_or("Truncated gzip header.")?;
+    for chunk in remaining.chunks(CHECK_INTERVAL) {
         check()?;
         if let Some(index) = chunk.iter().position(|&byte| byte == 0) {
-            *position += scanned + index + 1;
+            header_advance(data, position, index + 1)?;
             return Ok(());
         }
-        scanned += chunk.len();
+        header_advance(data, position, chunk.len())?;
     }
-    Err("Gzip filename/comment is unterminated or exceeds the 64 KiB header limit.".into())
+    Err("Gzip filename/comment is unterminated.".into())
 }
 
 fn gzip_header(data: &[u8], check: &dyn Fn() -> DecodeResult<()>) -> DecodeResult<usize> {
@@ -546,8 +541,8 @@ fn gzip_header(data: &[u8], check: &dyn Fn() -> DecodeResult<()>) -> DecodeResul
 }
 
 /// Decode all RFC 1952 gzip members. Each member has independent history and
-/// checksums; all members share the same output and work limits. No partial
-/// result escapes if a later member, trailer, cancellation or checksum fails.
+/// checksums; all members share the same output budget and cancellation check.
+/// No partial result escapes if a later member, trailer or checksum fails.
 pub fn gzip(
     data: &[u8],
     limit: usize,
@@ -558,16 +553,19 @@ pub fn gzip(
         return Err("Truncated gzip stream.".into());
     }
     let mut position = 0;
-    let mut members = 0;
     while position < data.len() {
+        // Each successful member advances through a header, DEFLATE stream and
+        // trailer. Input admission and cancellation also bound empty members;
+        // all decoded bytes still share the caller's output budget.
         check()?;
-        members += 1;
-        if members > MAX_GZIP_MEMBERS {
-            return Err("Gzip stream exceeds the 128-member limit.".into());
-        }
-        position += gzip_header(&data[position..], check)?;
+        let header_len = gzip_header(&data[position..], check)?;
+        header_advance(data, &mut position, header_len)?;
         let member_start = output.bytes.len();
-        position += inflate(&data[position..], &mut output, 32_768)?;
+        let consumed = inflate(&data[position..], &mut output, 32_768)?;
+        position = position
+            .checked_add(consumed)
+            .filter(|&end| end <= data.len())
+            .ok_or("Truncated gzip DEFLATE stream.")?;
         let end = position
             .checked_add(8)
             .filter(|&end| end <= data.len())
@@ -664,27 +662,126 @@ mod tests {
     }
 
     #[test]
-    fn gzip_header_member_and_aggregate_block_limits() {
+    fn gzip_many_members_keep_the_final_payload_and_shared_output_budget() {
         let empty = member(b"", false);
-        assert!(gzip(&empty.repeat(MAX_GZIP_MEMBERS), 0, &|| Ok(())).is_ok());
-        assert!(gzip(&empty.repeat(MAX_GZIP_MEMBERS + 1), 0, &|| Ok(())).is_err());
-        let mut header = empty[..10].to_vec();
-        header[3] = 8;
-        header.resize(MAX_GZIP_HEADER_BYTES - 1, b'a');
-        header.push(0);
-        header.extend_from_slice(&empty[10..]);
-        assert!(gzip(&header, 0, &|| Ok(())).is_ok());
-        header.insert(MAX_GZIP_HEADER_BYTES - 1, b'a');
-        assert!(gzip(&header, 0, &|| Ok(())).is_err());
+        let raw = b"last member";
+        let mut data = empty.repeat(256);
+        data.extend_from_slice(&member(raw, false));
+        assert_eq!(gzip(&data, raw.len(), &|| Ok(())).unwrap(), raw);
+        assert!(gzip(&data, raw.len() - 1, &|| Ok(()))
+            .unwrap_err()
+            .contains("output limit"));
 
-        let mut many = empty[..10].to_vec();
-        for n in 0..MAX_BLOCKS {
-            many.extend_from_slice(&[u8::from(n == MAX_BLOCKS - 1), 0, 0, 255, 255]);
+        // Cancellation still reaches work after the former 128-member cutoff,
+        // even though the empty members add no bytes to the output budget.
+        let checks = Cell::new(0);
+        let check = || {
+            checks.set(checks.get() + 1);
+            if checks.get() == 300 { Err("cancelled".into()) } else { Ok(()) }
+        };
+        assert_eq!(gzip(&data, raw.len(), &check).unwrap_err(), "cancelled");
+        assert_eq!(checks.get(), 300);
+        let crc_offset = data.len() - 8;
+        data[crc_offset] ^= 1;
+        assert!(gzip(&data, raw.len(), &|| Ok(()))
+            .unwrap_err()
+            .contains("CRC-32"));
+    }
+
+    #[test]
+    fn many_deflate_blocks_check_the_tail_cancellation_and_output_budget() {
+        let raw = b"final block";
+        // More than twice the former aggregate 16,384-block limit. All early
+        // blocks are empty, so progress must be governed by input, not output.
+        let prefix = [0, 0, 0, 255, 255].repeat(32_768);
+        let gzip_tail = member(raw, false);
+        let mut gzip_data = gzip_tail[..10].to_vec();
+        gzip_data.extend_from_slice(&prefix);
+        gzip_data.extend_from_slice(&gzip_tail[10..]);
+        let mut zlib_data = vec![0x78, 1];
+        zlib_data.extend_from_slice(&prefix);
+        zlib_data.extend_from_slice(&stored(raw));
+        zlib_data.extend_from_slice(&adler32(raw).to_be_bytes());
+
+        for (is_gzip, mut data, header_len) in [(true, gzip_data, 10), (false, zlib_data, 2)] {
+            let decode = |bytes: &[u8], limit, check: &dyn Fn() -> DecodeResult<()>| {
+                if is_gzip { gzip(bytes, limit, check) } else { zlib(bytes, limit, check) }
+            };
+            assert_eq!(decode(&data, raw.len(), &|| Ok(())).unwrap(), raw);
+            assert!(decode(&data, raw.len() - 1, &|| Ok(()))
+                .unwrap_err()
+                .contains("output limit"));
+            let checks = Cell::new(0);
+            let check = || {
+                checks.set(checks.get() + 1);
+                if checks.get() == 17_000 { Err("cancelled".into()) } else { Ok(()) }
+            };
+            assert_eq!(decode(&data, raw.len(), &check).unwrap_err(), "cancelled");
+            assert_eq!(checks.get(), 17_000);
+
+            // A reserved final block after the old ceiling must fail, rather
+            // than return an apparently successful prefix.
+            data[header_len + prefix.len()] = 7;
+            assert!(decode(&data, raw.len(), &|| Ok(()))
+                .unwrap_err()
+                .contains("Reserved DEFLATE block type"));
         }
-        many.extend_from_slice(&[0; 8]);
-        assert!(gzip(&many, 0, &|| Ok(())).is_ok());
-        many.extend_from_slice(&empty);
-        assert!(gzip(&many, 0, &|| Ok(())).is_err());
+    }
+
+    #[test]
+    fn gzip_maximum_extra_field_preserves_format_length_and_truncation_checks() {
+        let raw = b"extra field tail";
+        let tail = member(raw, false);
+        let mut data = tail[..10].to_vec();
+        data[3] = 4;
+        data.extend_from_slice(&u16::MAX.to_le_bytes());
+        // One unknown, well-formed subfield occupies the full legal XLEN.
+        data.extend_from_slice(&[b'O', b'B']);
+        data.extend_from_slice(&(u16::MAX - 4).to_le_bytes());
+        data.resize(12 + usize::from(u16::MAX), b'x');
+        let header_len = data.len();
+        assert!(header_len > 65_536);
+        data.extend_from_slice(&tail[10..]);
+        assert_eq!(gzip(&data, raw.len(), &|| Ok(())).unwrap(), raw);
+        assert!(gzip(&data[..header_len - 1], raw.len(), &|| Ok(()))
+            .unwrap_err()
+            .contains("Truncated gzip header"));
+    }
+
+    #[test]
+    fn gzip_long_metadata_keeps_termination_header_crc_and_cancellation_checks() {
+        let raw = b"metadata tail";
+        let tail = member(raw, false);
+        for flag in [8, 16] {
+            let mut data = tail[..10].to_vec();
+            data[3] = flag | 2;
+            data.resize(10 + 131_073, b'n');
+            let terminator = data.len();
+            assert!(gzip(&data, raw.len(), &|| Ok(()))
+                .unwrap_err()
+                .contains("unterminated"));
+            data.push(0);
+            let crc_offset = data.len();
+            data.extend_from_slice(&(crc32(&data) as u16).to_le_bytes());
+            data.extend_from_slice(&tail[10..]);
+            assert_eq!(gzip(&data, raw.len(), &|| Ok(())).unwrap(), raw);
+
+            let checks = Cell::new(0);
+            let check = || {
+                checks.set(checks.get() + 1);
+                if checks.get() == 12 { Err("cancelled".into()) } else { Ok(()) }
+            };
+            assert_eq!(gzip(&data, raw.len(), &check).unwrap_err(), "cancelled");
+            assert_eq!(checks.get(), 12);
+            assert!(gzip(&data[..crc_offset + 1], raw.len(), &|| Ok(()))
+                .unwrap_err()
+                .contains("Truncated gzip header"));
+            // A changed byte beyond 64 KiB must still be authenticated by FHCRC.
+            data[terminator - 1] ^= 1;
+            assert!(gzip(&data, raw.len(), &|| Ok(()))
+                .unwrap_err()
+                .contains("header CRC"));
+        }
     }
 
     #[test]
