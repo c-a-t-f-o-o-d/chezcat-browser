@@ -213,9 +213,7 @@ if(span.assignedSlot!==null||text.assignedSlot!==null||slot.assignedSlot!==null|
     assert_eq!(page.state.dom_commits, commits);
     run(&mut doc, &mut forms, &mut page,
         "delete TP.assignedSlot; Object.defineProperty(EP,'assignedSlot',{value:23,writable:true,configurable:true});");
-    let out = page.console_eval(&mut doc, &mut forms, "text.assignedSlot=41;");
-    assert_eq!(out.errors, 1, "{}", page.report());
-    assert!(page.report().contains("own data property"), "{}", page.report());
+    run(&mut doc, &mut forms, &mut page, "text.assignedSlot=41;var textOwn=Object.getOwnPropertyDescriptor(text,'assignedSlot');if(!textOwn||textOwn.value!==41||!textOwn.writable||!textOwn.enumerable||!textOwn.configurable||TD.get.call(text)!==null)throw 'Text ordinary own property after getter deletion';delete text.assignedSlot;");
     run(&mut doc, &mut forms, &mut page, r#"
 slot.assignedSlot=41;
 var slotOwn=Object.getOwnPropertyDescriptor(slot,'assignedSlot');
@@ -226,9 +224,7 @@ Object.defineProperty(TP,'assignedSlot',TD);Object.defineProperty(EP,'assignedSl
 if(slot.assignedSlot!==null||text.assignedSlot!==null)throw 'native getter restoration';
 "#);
     run(&mut doc, &mut forms, &mut page, "if(text.unrelatedTextProperty!==undefined)throw 'unexpected Text field';");
-    let out = page.console_eval(&mut doc, &mut forms, "text.unrelatedTextProperty=17;");
-    assert_eq!(out.errors, 1, "{}", page.report());
-    run(&mut doc,&mut forms,&mut page,"if(text.unrelatedTextProperty!==undefined||text.assignedSlot!==null||slot.assignedSlot!==null||text.data!=='Parsed'||document.getElementById('neighbor').value!=='edited neighbor')throw 'unrelated Text property refusal changed native state';");
+    run(&mut doc,&mut forms,&mut page,"text.unrelatedTextProperty=17;if(text.unrelatedTextProperty!==17||text.assignedSlot!==null||slot.assignedSlot!==null||text.data!=='Parsed'||document.getElementById('neighbor').value!=='edited neighbor')throw 'ordinary Text property changed native state';delete text.unrelatedTextProperty;");
     assert_eq!(native(&forms), before);
     assert_eq!(page.state.dom_commits, commits);
 }

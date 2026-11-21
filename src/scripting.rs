@@ -2988,6 +2988,17 @@ fn node_traversal_property(operation: &str) -> Option<&'static str> {
 }
 
 impl Bridge<'_> {
+    /// Author data uses VM backing only for represented CharacterData owners.
+    /// Native content/resource mutation eligibility remains independently checked.
+    fn character_data_author_receiver(&self, object: u32) -> bool {
+        if matches!(self.inert_node_type(object), Some(3 | 7 | 8)) {
+            return true;
+        }
+        node_index(object).is_some_and(|node| {
+            self.dom_accessible(node)
+                && self.doc.nodes.get(node).is_some_and(|node| node.kind.character_data().is_some())
+        })
+    }
     fn text_or_comment_receiver(&self, object: u32) -> bool {
         self.comment_receiver(object) || self.slottable(object) == Some(Slottable::Text)
     }
@@ -3123,6 +3134,7 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
+        if self.character_data_author_receiver(object) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(1) && self.html_reflection_receiver(object){return Some(WINDOW);}
         if self.named_map_receiver(object){return Some(WINDOW);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
@@ -3299,9 +3311,9 @@ impl Host for Bridge<'_> {
         if object==DOCUMENT {return self.document_native_property(property);}
         if self.element_expando_receiver(object) {return self.element_native_property(object,property);}
         if self.attr_receiver(object) { return self.attr_native_member(property); }
-        if self.text_or_comment_receiver(object) {
+        if self.character_data_author_receiver(object) {
             return matches!(property, "data" | "length" | "nodeValue" | "ownerDocument" | "isConnected" | "baseURI")
-                || matches!(property, "isDefaultNamespace" | "compareDocumentPosition")
+                || matches!(property, "normalize" | "isDefaultNamespace" | "compareDocumentPosition")
                 || dom_tree::node_constant(property).is_some();
         }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }
@@ -8447,3 +8459,7 @@ mod document_active_element;
 #[cfg(test)]
 #[path="script_document_active_element_tests.rs"]
 mod document_active_element_tests;
+
+#[cfg(test)]
+#[path="script_character_data_properties_tests.rs"]
+mod character_data_properties_tests;
