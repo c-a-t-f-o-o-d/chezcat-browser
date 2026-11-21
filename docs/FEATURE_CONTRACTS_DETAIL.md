@@ -2625,3 +2625,50 @@ witness is test-only. Parser/lexer and RegExp structural/storage work remains
 separate, as do the wider capacity inventory and architectural work. The global
 parser guard is unchanged. See the
 [FlattenIntoArray algorithm](https://tc39.es/ecma262/multipage/indexed-collections.html#sec-flattenintoarray).
+
+## Loaded flow-template SVG and connected component focus
+
+Balanced supported SVG in loaded HTML templates under represented ordinary flow
+contexts retains real SVG namespace identity, including nested templates and
+custom HTML containers. Previously the template ancestor marked the SVG island
+as unrepresented foreign content, so inert queries refused before preparation.
+Namespace stamping still requires the existing balanced supported shape tree;
+unsafe/unrepresented foreign content, links, unsupported ancestor contexts and
+recovery remain guarded. Templates stay inert, and import/connection still use
+normal namespace, resource and CSP admission. This does not implement the full
+HTML template/table/foreign-content tree builder.
+
+Document.prototype supplies a configurable enumerable readonly activeElement
+accessor over committed main-document native focus. Connected focused elements
+retain actual identity; otherwise the real body, document element or null is
+returned. Supported inert documents and read-only blank child prefixes use their
+actual document fallback. Saved accessors retain Document brands, holder and
+receiver owner/origin validation. Supported main Document author shadows and
+prototype deletion remain distinct from the saved native getter.
+
+Settled page and keyboard events now consume their latest queued focus request
+after their observer/Promise jobs and layout/scroll processing. The existing native
+control focus path performs eligibility checks and editor/focus-event updates;
+the next native edit reaches the requested control without a separate idle poll.
+Hidden, disabled or detached targets are refused, and a consumed invalid request
+does not later resurrect after the target is restored. This preserves committed
+focus readback rather than implementing all synchronous/reentrant focusing steps,
+ShadowRoot retargeting or interactive child-frame focus.
+
+An original connected DOM-layer fixture combines nested inert preparation, saved
+Node-method wrappers and WeakMap identity, declarative-attribute removal, deep
+import, style cloning/placement, author/native ARIA forwarding, a Text-node
+MutationObserver scheduler, Promise jobs, event registration, real controls/icons,
+focus, immediate typing and link activation. Observer callbacks remain deferred.
+The source first reproduced the namespace refusal and then immediate typing at
+the old button; the corrected fixture passes without a manual focus repair.
+A keyboard fixture checks a valid redirect and hidden/disabled/detached rejection.
+
+The fixture models required DOM calls for the selected noPatch path. It does not
+execute a matching deployed polyfill, provide native Custom Elements/Shadow DOM,
+or demonstrate a usable actual site. Functional child FocusEvent and offsetParent
+owner cases use the browser profile to reach their assertions after the expanded
+native interface bootstrap; explicit narrow quota fixtures remain unchanged.
+Focus and parsing semantics follow the
+[HTML focus management APIs](https://html.spec.whatwg.org/multipage/interaction.html#focus-management-apis)
+and [template parsing](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-intemplate).

@@ -28,7 +28,7 @@ if (document.documentElement.offsetParent !== null || document.body.offsetParent
 
 #[test]
 fn offset_parent_saved_getter_revalidates_both_document_owners() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_page(Page::with_limits(crate::javascript::limits::BROWSER));
     run(
         &mut doc,
         &mut forms,
@@ -85,6 +85,9 @@ fn id(doc: &Document, name: &str) -> usize {
         .unwrap()
 }
 fn fixture() -> (Document, Forms, Page) {
+    fixture_page(Page::for_test())
+}
+fn fixture_page(mut page:Page)->(Document,Forms,Page){
     let mut doc = crate::html::parse(concat!(
         "<!doctype html><html id=root><head><title>Original offset parent</title><link id=sheet rel=stylesheet href=theme.css></head><body id=body>",
         "<div id=outer class=positioned><div id=middle><button id=button type=button>Toggle</button>",
@@ -109,7 +112,6 @@ fn fixture() -> (Document, Forms, Page) {
         .to_owned(),
     );
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     let source = crate::navigation::address(
         "https://offset-parent.test/original",
         &crate::navigation::Location::home(),

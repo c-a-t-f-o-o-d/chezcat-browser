@@ -1,10 +1,12 @@
 //! Original FocusEvent identity, conversion, realm and native transition checks.
 use super::*;
 fn fixture(source: &str) -> (Document, Forms, Page) {
+    fixture_page(source,Page::for_test())
+}
+fn fixture_page(source:&str,mut page:Page)->(Document,Forms,Page){
     let mut doc=crate::html::parse("<html><body><div id=parent><input id=a value=original><textarea id=b>second</textarea></div></body></html>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     page.set_location(
         &crate::navigation::address(
             "https://focus-event.test/control",
@@ -104,12 +106,13 @@ for(var name of ['blur','focusout','focus','focusin']){(function(type){document.
 }
 #[test]
 fn focus_event_child_realm_genuine_targets_and_saved_owner() {
-    let (mut doc, mut forms, mut page) = fixture(
+    let (mut doc, mut forms, mut page) = fixture_page(
         r#"
 var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow,C=w.FocusEvent;
 var e=new C('focus',{view:w,relatedTarget:w.document.body});if(C===FocusEvent||Object.getPrototypeOf(C)!==w.UIEvent||Object.getPrototypeOf(C.prototype)!==w.UIEvent.prototype||Object.getPrototypeOf(e)!==C.prototype||e.relatedTarget!==w.document.body||e.view!==w||e instanceof FocusEvent||!(e instanceof w.UIEvent)||Object.getOwnPropertyDescriptor(e,'isTrusted').configurable)throw 'focus owner realm';
 var main=new FocusEvent('focus',{relatedTarget:w.document.body});if(main.relatedTarget!==w.document.body)throw 'same origin focus target';
 "#,
+        Page::with_limits(crate::javascript::limits::BROWSER),
     );
     run(&mut doc,&mut forms,&mut page,"var e=new FocusEvent('x',{relatedTarget:undefined});if(e.relatedTarget!==null)throw 'undefined focus target';");
     page.set_location(
