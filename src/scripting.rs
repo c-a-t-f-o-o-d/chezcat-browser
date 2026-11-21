@@ -78,6 +78,8 @@ mod script_attr;
 mod script_hidden_inputs;
 #[path = "script_text_inputs.rs"]
 mod script_text_inputs;
+#[path="script_iframe_sandbox.rs"]
+mod script_iframe_sandbox;
 #[path = "script_textarea_interface.rs"]
 mod script_textarea_interface;
 #[path = "script_input_accessors.rs"]
@@ -3002,6 +3004,7 @@ impl Bridge<'_> {
             || self.scroll_offset_member(object, property)
             || self.input_accessor_member(object, property)
             || self.textarea_value_member(object, property)
+            || self.iframe_sandbox_member(object, property)
             || self.canvas_member(object, property)
             || property == "getContext" && self.canvas_receiver(object)
             || self.text_prototype_property(object, property)
@@ -3357,6 +3360,7 @@ impl Host for Bridge<'_> {
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.xhr_index(object).is_some(){return property=="responseType";}
 
+        if self.iframe_sandbox_member(object,property) {return true;}
         if self.textarea_value_member(object,property) {return true;}
         if property == "innerHTML" && self.template_receiver(object) { return true; }
         if object == DOCUMENT && property == "textContent" {return true;}
@@ -3397,6 +3401,7 @@ impl Host for Bridge<'_> {
         if let Some((name, true)) = script_canvas::accessor(method) {
             return self.canvas_receiver(object).then_some(name);
         }
+        if script_iframe_sandbox::accessor(method)==Some(true) {return self.iframe_sandbox_receiver(object).then_some("sandbox");}
         if script_textarea_interface::accessor(method)==Some(true) {return self.textarea_value_receiver(object).then_some("value");}
         if let Some((name, true)) = script_input_accessors::accessor(method) {
             return self.input_receiver(object).then_some(name);
@@ -3580,6 +3585,7 @@ impl Host for Bridge<'_> {
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
 
+        if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if method==crate::javascript::HTML_FORM_SUBMIT && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
@@ -3854,6 +3860,7 @@ impl Host for Bridge<'_> {
                 else { Err(("TypeError", "Canvas operation requires its genuine native receiver.".into())) };
         }
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
+        if script_iframe_sandbox::accessor(method).is_some() {return self.validate_iframe_sandbox(object);}
         if script_textarea_interface::accessor(method).is_some() {return self.validate_textarea_value(object);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
@@ -4215,6 +4222,7 @@ impl Host for Bridge<'_> {
             return !upload||name.is_some_and(|name|self.xhr_handler_event(receiver,name).is_some());
         }
 
+        if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return self.iframe_sandbox_receiver(receiver)||self.inert_interface(receiver)==Some("HTMLIFrameElement");}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
@@ -5563,6 +5571,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         let node = self.node(object)?;
+        if self.iframe_sandbox_member(object,property){return self.iframe_sandbox_set(object,value);}
         if property == "classList" {
             if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }
             let value = self.text(&value)?;
@@ -5783,6 +5792,7 @@ impl Host for Bridge<'_> {
         if let Some((name, false)) = script_canvas::accessor(method) {
             return self.canvas_dimension_get(object, name);
         }
+        if script_iframe_sandbox::accessor(method)==Some(false) {return self.iframe_sandbox_get(object);}
         if script_textarea_interface::accessor(method)==Some(false) {return self.get(object,"value");}
         if let Some((name, false)) = script_input_accessors::accessor(method) {
             self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;

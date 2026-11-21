@@ -1761,3 +1761,28 @@ This constructor/record increment does not implement CSS animation timelines,
 keyframes or native animation lifecycle delivery. Legacy createEvent and
 initAnimationEvent are not exposed. See the
 [CSS AnimationEvent interface](https://drafts.csswg.org/css-animations/#interface-animationevent).
+
+
+## Native iframe sandbox attribute list
+
+A canonical HTMLIFrameElement prototype getter returns one stable live token
+list per real main-document iframe; its setter forwards to that list's value.
+Reading the property does not create the attribute or a child context. Raw
+setAttribute/removeAttribute, value assignment and supported token operations
+share the same native attribute and storage transaction. Ordered unique tokens,
+raw string conversion, indices, item/contains and add/remove follow the existing
+finite class-token backend. Borrowed methods use the receiver's attribute kind.
+Class and sandbox lists have disjoint typed identities with real owner checks.
+
+Wrong receivers fail before string conversion; invalid tokens and quota/copy
+refusal preserve the attribute. Raw sandbox attribute writes use the same frame
+guard as list writes. Unsupported sandboxed-frame insertion refuses before
+publishing topology or a context, including allow-scripts/allow-same-origin
+combinations. Connected frame-policy mutations remain refused with existing
+window/document identities unchanged. Original App checks cover actual callback
+metadata/DOM/glyph changes and stable neighboring editor/link targets.
+
+This is attribute-list support, not implementation of sandboxed browsing
+contexts or permission-relaxation flags. Inert lists and supports/toggle/replace/
+iteration remain explicitly unsupported. No supported-token success or child
+context is fabricated. See the [HTML sandbox IDL](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#dom-iframe-sandbox).

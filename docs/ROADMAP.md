@@ -58,13 +58,14 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `88e5509` at November 21, 02:46 UTC
-still renders a skeleton. It first fails on missing `AnimationEvent` in handler
-type metadata at 39130:80. The next connected increment supplies a genuine
-Event-derived constructor, retained fields and synthetic dispatch. This does
-not establish CSS animation playback or native animation lifecycle events.
-Anchor identity, XHR, touch-action and computed font size are integrated;
-these checks do not prove a usable shell. The
+The latest isolated Windows check on clean `ae478b5` at November 21, 02:57 UTC
+still renders a skeleton. It first fails on an unsupported iframe `sandbox`
+property read at 6503:24. The next connected increment supplies a live native
+sandbox attribute token list with canonical SameObject/PutForwards accessors.
+Sandboxed contexts and connected policy changes retain their explicit refusal;
+this increment does not claim iframe sandbox relaxation/permission semantics.
+AnimationEvent, anchor identity, XHR, touch-action and computed font size are
+integrated; these checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
 

@@ -6,12 +6,18 @@ use std::collections::BTreeSet;
 
 pub(super) const BASE: u32 = 0x8000_0000;
 const END: u32 = BASE + NODE_HANDLES;
-pub(super) fn element(handle: u32) -> Option<u32> {
-    (BASE..END)
-        .contains(&handle)
-        .then(|| node_handle((handle - BASE) as usize))
-        .filter(|handle| node_index(*handle).is_some())
+const SANDBOX_BASE:u32=0x8100_0000;
+const SANDBOX_END:u32=SANDBOX_BASE+NODE_HANDLES;
+pub(super) fn attribute(handle:u32)->Option<&'static str> {
+    if (BASE..END).contains(&handle){Some("class")}
+    else if (SANDBOX_BASE..SANDBOX_END).contains(&handle){Some("sandbox")}
+    else {None}
 }
+pub(super) fn element(handle:u32)->Option<u32> {
+    let base=match attribute(handle)? {"class"=>BASE,_=>SANDBOX_BASE};
+    let element=node_handle((handle-base)as usize);node_index(element).map(|_|element)
+}
+pub(super) fn sandbox_handle(element:u32)->u32 {SANDBOX_BASE+(element-NODE_BASE)}
 pub(super) fn handle(element: u32) -> u32 {
     BASE + (element - NODE_BASE)
 }
@@ -36,7 +42,7 @@ impl Bridge<'_> {
                 .is_some_and(|node| self.doc.nodes[node].namespace == crate::html::Namespace::Html)
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|element| self.class_list_element_receiver(element))
+        element(object).is_some_and(|element| self.class_list_element_receiver(element) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
     }
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
@@ -44,24 +50,25 @@ impl Bridge<'_> {
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
             return Err("Class token list requires known attribute namespace provenance.".into());
         }
+        if !self.class_list_receiver(object){return Err("Invalid attribute token list receiver.".into());}
         Ok(node)
     }
-    fn class_value(&mut self, node: usize) -> Result<Value, String> {
+    fn class_value(&mut self, node: usize, attribute:&str) -> Result<Value, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             unreachable!()
         };
         self.state.work(attrs.len())?;
         self.state
             .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
-        let raw = self.doc.attr(node, "class").unwrap_or("");
+        let raw = self.doc.attr(node, attribute).unwrap_or("");
         if raw.len() > self.state.limits.host.string_bytes {
             return Err("Class attribute exceeds the host string bound.".into());
         }
         self.state.copies(raw.len())?;
         Ok(Value::String(raw.to_owned()))
     }
-    fn class_tokens(&mut self, node: usize) -> Result<Vec<String>, String> {
-        let Value::String(raw) = self.class_value(node)? else {
+    fn class_tokens(&mut self, node: usize, attribute:&str) -> Result<Vec<String>, String> {
+        let Value::String(raw) = self.class_value(node,attribute)? else {
             unreachable!()
         };
         self.state.work(raw.len())?;
@@ -110,11 +117,12 @@ impl Bridge<'_> {
     }
     pub(super) fn class_list_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
         let node = self.class_list_node(object)?;
+        let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         if property == "value" {
-            return self.class_value(node);
+            return self.class_value(node,attribute);
         }
         if property == "length" || collection_index(property).is_some() {
-            let tokens = self.class_tokens(node)?;
+            let tokens = self.class_tokens(node,attribute)?;
             return if property == "length" {
                 Ok(Value::Number(tokens.len() as f64))
             } else {
@@ -139,11 +147,12 @@ impl Bridge<'_> {
         value: Value,
     ) -> Result<(), String> {
         let node = self.class_list_node(object)?;
+        let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         if property != "value" {
             return Err("DOMTokenList property write is not implemented.".into());
         }
         let value = self.text(&value)?;
-        self.attribute(node, "class", Some(value))
+        self.attribute(node, attribute, Some(value))
     }
     pub(super) fn class_list_call(
         &mut self,
@@ -152,12 +161,13 @@ impl Bridge<'_> {
         args: &[Value],
     ) -> Result<Value, String> {
         let node = self.class_list_node(object)?;
+        let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         self.class_list_validate(object, method, args)
             .map_err(|(_, message)| message)?;
         if method == "toString" {
-            return self.class_value(node);
+            return self.class_value(node,attribute);
         }
-        let mut tokens = self.class_tokens(node)?;
+        let mut tokens = self.class_tokens(node,attribute)?;
         match method {
             "add" => {
                 for value in args {
@@ -171,7 +181,7 @@ impl Bridge<'_> {
                         tokens.push(token.clone());
                     }
                 }
-                self.update_class_tokens(node, &tokens)?;
+                self.update_class_tokens(node, attribute, &tokens)?;
                 Ok(Value::Undefined)
             }
             "remove" => {
@@ -183,7 +193,7 @@ impl Bridge<'_> {
                     })
                     .collect();
                 tokens.retain(|token| !removed.contains(token.as_str()));
-                self.update_class_tokens(node, &tokens)?;
+                self.update_class_tokens(node, attribute, &tokens)?;
                 Ok(Value::Undefined)
             }
             "contains" => {
@@ -206,8 +216,8 @@ impl Bridge<'_> {
             )),
         }
     }
-    fn update_class_tokens(&mut self, node: usize, tokens: &[String]) -> Result<(), String> {
-        if tokens.is_empty() && self.doc.attr(node, "class").is_none() {
+    fn update_class_tokens(&mut self, node: usize, attribute:&str, tokens: &[String]) -> Result<(), String> {
+        if tokens.is_empty() && self.doc.attr(node, attribute).is_none() {
             return Ok(());
         }
         let length = tokens
@@ -220,11 +230,12 @@ impl Bridge<'_> {
             return Err("Class token serialization exceeds the host string bound.".into());
         }
         self.state.copies(length)?;
-        self.attribute(node, "class", Some(tokens.join(" ")))
+        self.attribute(node, attribute, Some(tokens.join(" ")))
     }
     pub(super) fn class_list_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
         let node = self.class_list_node(object)?;
-        let tokens = self.class_tokens(node)?;
+        let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
+        let tokens = self.class_tokens(node,attribute)?;
         self.state.work(tokens.len())?;
         self.state.copies(
             tokens

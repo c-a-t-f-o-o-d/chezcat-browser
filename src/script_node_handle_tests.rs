@@ -7,6 +7,12 @@ fn node_handle_domains_round_trip_every_boundary_without_wrapping_wrappers() {
         let node = node_handle(index);
         assert_eq!(node_index(node), Some(index));
         let tokens = script_class_list::handle(node);
+        let sandbox=script_class_list::sandbox_handle(node);
+        assert_eq!(script_class_list::element(sandbox),Some(node));
+        assert_eq!(script_class_list::attribute(tokens),Some("class"));
+        assert_eq!(script_class_list::attribute(sandbox),Some("sandbox"));
+        assert!((0x8100_0000..0x8200_0000).contains(&sandbox));
+        assert_ne!(sandbox,tokens);
         let attrs = script_named_map::handle(node);
         assert_eq!(script_class_list::element(tokens), Some(node));
         assert_eq!(script_named_map::element(attrs), Some(node));
@@ -18,7 +24,7 @@ fn node_handle_domains_round_trip_every_boundary_without_wrapping_wrappers() {
             assert!(script_named_map::element(foreign).is_none());
         }
     }
-    for end in [0x8100_0000, 0xc100_0000] {
+    for end in [0x8200_0000, 0xc100_0000] {
         assert!(script_class_list::element(end).is_none());
         assert!(script_named_map::element(end).is_none());
     }

@@ -500,6 +500,7 @@ impl Bridge<'_> {
         let content_editable = key == "contenteditable" && self.content_editable_receiver(node_handle(node));
         let canvas_attribute = matches!(key, "width" | "height") && crate::html_canvas::element(self.doc, node);
         let slot_name = key == "name" && self.html_slot_receiver(node_handle(node));
+        let sandbox_attribute=key=="sandbox"&&self.iframe_sandbox_receiver(node_handle(node));
         // Custom hyphenated HTML names are ordinary DOM data, including names
         // used by attribute selectors. The standard hyphenated native names
         // retain their explicit policy; foreign attributes retain their paths.
@@ -512,7 +513,7 @@ impl Bridge<'_> {
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
-            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute {
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
