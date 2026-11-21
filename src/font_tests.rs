@@ -272,11 +272,11 @@ fn sfnt(tables: BTreeMap<[u8; 4], Vec<u8>>) -> Vec<u8> {
     let n = tables.len();
     let mut out = vec![0u8; 12 + n * 16];
     put32(&mut out, 0, 0x00010000);
-    put16(&mut out, 4, n as u16);
+    put16(&mut out, 4, u16::try_from(n).unwrap());
     let power = 1usize << n.ilog2();
-    put16(&mut out, 6, (power * 16) as u16);
-    put16(&mut out, 8, power.ilog2() as u16);
-    put16(&mut out, 10, (n * 16 - power * 16) as u16);
+    put16(&mut out, 6, u16::try_from(power * 16).unwrap());
+    put16(&mut out, 8, u16::try_from(power.ilog2()).unwrap());
+    put16(&mut out, 10, u16::try_from(n * 16 - power * 16).unwrap());
     let mut head = None;
     for (index, (tag, data)) in tables.into_iter().enumerate() {
         let at = 12 + index * 16;
@@ -304,9 +304,8 @@ pub(crate) fn fixture_font() -> Vec<u8> {
     sfnt(tables())
 }
 
-pub(crate) fn fixture_woff() -> Vec<u8> {
-    let font = fixture_font();
-    let n = usize::from(u16_at(&font, 4).unwrap());
+fn woff_from_sfnt(font: &[u8]) -> Vec<u8> {
+    let n = usize::from(u16_at(font, 4).unwrap());
     let mut out = vec![0u8; 44 + n * 20];
     out[..4].copy_from_slice(b"wOFF");
     put32(&mut out, 4, 0x00010000);
@@ -316,14 +315,14 @@ pub(crate) fn fixture_woff() -> Vec<u8> {
     for index in 0..n {
         let source = 12 + index * 16;
         let target = 44 + index * 20;
-        let start = u32_at(&font, source + 8).unwrap() as usize;
-        let len = u32_at(&font, source + 12).unwrap() as usize;
+        let start = u32_at(font, source + 8).unwrap() as usize;
+        let len = u32_at(font, source + 12).unwrap() as usize;
         let offset = out.len();
         out[target..target + 4].copy_from_slice(&font[source..source + 4]);
         put32(&mut out, target + 4, offset as u32);
         put32(&mut out, target + 8, len as u32);
         put32(&mut out, target + 12, len as u32);
-        put32(&mut out, target + 16, u32_at(&font, source + 4).unwrap());
+        put32(&mut out, target + 16, u32_at(font, source + 4).unwrap());
         out.extend_from_slice(&font[start..start + len]);
         while !out.len().is_multiple_of(4) {
             out.push(0);
@@ -332,6 +331,142 @@ pub(crate) fn fixture_woff() -> Vec<u8> {
     let len = out.len();
     put32(&mut out, 8, len as u32);
     out
+}
+
+pub(crate) fn fixture_woff() -> Vec<u8> {
+    woff_from_sfnt(&fixture_font())
+}
+
+fn tables_with_directory_count(count: usize) -> BTreeMap<[u8; 4], Vec<u8>> {
+    let mut data = tables();
+    assert!(count >= data.len());
+    // Original custom tables use distinct printable, uppercase tags and a
+    // four-byte payload. BTreeMap keeps the actual directory in tag order.
+    for index in 0..count - data.len() {
+        let tag: [u8; 4] = format!("X{index:03X}").as_bytes().try_into().unwrap();
+        assert!(data.insert(tag, (index as u32).to_be_bytes().to_vec()).is_none());
+    }
+    data
+}
+
+#[test]
+fn font_directory_capacity_restores_glyphs_and_search_fields_above_256() {
+    let baseline = Font::parse(&fixture_font()).unwrap();
+    let expected_raster = baseline.rasterize(2, 37.0).unwrap();
+    for (count, search_fields) in [(257, [4096, 8, 16]), (4095, [32768, 11, 32752])] {
+        let ttf = sfnt(tables_with_directory_count(count));
+        let woff = woff_from_sfnt(&ttf);
+        let restored = decode_woff(&woff).unwrap();
+        assert_eq!(restored, ttf, "All tables survive WOFF reconstruction at {count}");
+        assert_eq!(u16_at(&restored, 4).unwrap(), count as u16);
+        for (index, expected) in search_fields.into_iter().enumerate() {
+            assert_eq!(u16_at(&restored, 6 + index * 2).unwrap(), expected);
+        }
+        for encoded in [&ttf, &woff] {
+            let font = Font::parse(encoded).unwrap();
+            assert_eq!(font.glyph_index('A'), 2);
+            assert_eq!(font.glyph_index('😀'), 7);
+            assert!((font.advance(2, 20.0) - 13.6).abs() < 0.001);
+            assert!((font.kerning(2, 3, 20.0) + 1.6).abs() < 0.001);
+            assert_eq!(font.metrics(20.0).ascent, 18.0);
+            let raster = font.rasterize(2, 37.0).unwrap();
+            assert_eq!((raster.left, raster.top, raster.width, raster.height),
+                (expected_raster.left, expected_raster.top, expected_raster.width, expected_raster.height));
+            assert_eq!(raster.coverage, expected_raster.coverage);
+        }
+    }
+}
+
+#[test]
+fn font_directory_capacity_rejects_unrepresentable_search_fields_before_expansion() {
+    let ttf = sfnt(tables_with_directory_count(4095));
+    let woff = woff_from_sfnt(&ttf);
+    for count in [0, 4096, u16::MAX] {
+        let expected = if count == 0 { "at least one table" } else { "sfnt search fields" };
+        // These counts cannot describe a reconstructable sfnt search header;
+        // reject that representation before reserving a declared directory.
+        let mut invalid_ttf = ttf.clone();
+        put16(&mut invalid_ttf, 4, count);
+        assert!(Font::parse(&invalid_ttf).unwrap_err().contains(expected));
+        let mut invalid_woff = woff.clone();
+        put16(&mut invalid_woff, 12, count);
+        assert!(Font::parse(&invalid_woff).unwrap_err().contains(expected));
+    }
+}
+
+#[test]
+fn font_directory_capacity_keeps_late_sfnt_record_validation() {
+    let count = 4095;
+    let original = sfnt(tables_with_directory_count(count));
+    let directory_end = 12 + count * 16;
+    assert!(Font::parse(&original[..directory_end - 1]).unwrap_err().contains("Truncated font data"));
+    let last = 12 + (count - 1) * 16;
+    for (at, value, expected) in [
+        (last, u32_at(&original, 12).unwrap(), "Invalid or duplicate TrueType table"),
+        (last + 8, u32::MAX, "Truncated font data"),
+        (last + 8, u32_at(&original, last + 8).unwrap() - 1, "Invalid or duplicate TrueType table"),
+        (last + 8, u32_at(&original, 20).unwrap(), "Overlapping TrueType tables"),
+        (last + 12, u32::MAX, "Truncated font data"),
+    ] {
+        let mut invalid = original.clone();
+        put32(&mut invalid, at, value);
+        assert!(Font::parse(&invalid).unwrap_err().contains(expected), "offset={at}: {expected}");
+    }
+}
+
+#[test]
+fn font_directory_capacity_keeps_late_woff_extent_order_and_checksum_validation() {
+    let count = 4095;
+    let original = woff_from_sfnt(&sfnt(tables_with_directory_count(count)));
+    let last = 44 + (count - 1) * 20;
+    for (at, value, expected) in [
+        (last, u32_at(&original, 44).unwrap(), "Invalid WOFF table directory"),
+        (last, u32::from_be_bytes(*b"AAAA"), "Invalid WOFF table directory"),
+        (last + 4, u32::MAX & !3, "Truncated font data"),
+        (last + 4, u32_at(&original, last + 4).unwrap() - 1, "Invalid WOFF table directory"),
+        (last + 4, u32_at(&original, 48).unwrap(), "Overlapping WOFF blocks"),
+        (last + 8, u32_at(&original, last + 12).unwrap() + 1, "Invalid WOFF table directory"),
+        (last + 16, u32_at(&original, last + 16).unwrap() ^ 1, "WOFF table checksum"),
+    ] {
+        let mut invalid = original.clone();
+        put32(&mut invalid, at, value);
+        assert!(Font::parse(&invalid).unwrap_err().contains(expected), "offset={at}: {expected}");
+    }
+    let directory_end = 44 + count * 20;
+    let mut truncated = original[..directory_end - 1].to_vec();
+    let len = truncated.len();
+    put32(&mut truncated, 8, len as u32);
+    assert!(Font::parse(&truncated).unwrap_err().contains("Truncated font data"));
+}
+
+#[test]
+fn font_directory_capacity_keeps_font_byte_admission_and_decoded_size_validation() {
+    assert!(Font::parse(&vec![0; MAX_FONT_BYTES + 1]).unwrap_err().contains("16 MiB limit"));
+    let original = woff_from_sfnt(&sfnt(tables_with_directory_count(257)));
+    for (size, expected) in [
+        ((MAX_FONT_BYTES + 4) as u32, "16 MiB limit"),
+        (u32_at(&original, 16).unwrap() + 4, "totalSfntSize"),
+    ] {
+        let mut invalid = original.clone();
+        put32(&mut invalid, 16, size);
+        assert!(Font::parse(&invalid).unwrap_err().contains(expected));
+    }
+}
+
+#[test]
+fn font_directory_capacity_preserves_existing_required_table_and_raw_header_behavior() {
+    let mut stored_fields = sfnt(tables_with_directory_count(257));
+    stored_fields[6..12].fill(0xff);
+    // The raw reader derives admissibility from numTables and continues to
+    // ignore the stored optimization fields rather than trusting or using them.
+    assert_eq!(Font::parse(&stored_fields).unwrap().glyph_index('A'), 2);
+    let mut missing = tables_with_directory_count(4095);
+    missing.remove(b"head");
+    assert!(Font::parse(&sfnt(missing)).unwrap_err().contains("Missing TrueType head table"));
+    let mut variable = tables_with_directory_count(4095);
+    variable.remove(b"X000");
+    variable.insert(*b"fvar", Vec::new());
+    assert!(Font::parse(&sfnt(variable)).unwrap_err().contains("Variable TrueType fonts"));
 }
 
 #[test]
