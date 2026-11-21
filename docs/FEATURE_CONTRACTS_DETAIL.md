@@ -2096,3 +2096,26 @@ queued observer, and checks actual pixels, editing and anchor activation. Existi
 unknown foreign, SVG text-shape and native-resource retirement guards remain.
 This does not establish live-site initialization or finish property/transient
 observation routes.
+
+
+## Namespaced inert writes and attribute notifications
+
+The canonical Element namespace methods reuse genuine main/inert attribute
+storage and ordered conversions. setAttributeNS admits a new expanded name;
+attached Attr alias writes still require the existing entry. URI/prefix/local
+metadata and the first entry's ordered identity survive reads, updates and
+removal. SVG writes retain passive/local-reference checks. Invalid namespace
+qualification produces a native DOMException before any publication.
+
+Supported Attr value writes and native Attr adoption/removal, class-token
+add/remove/value and selected id/className/title reflections preflight a record
+for the actual Element rather than the alias/token wrapper. Old values and
+namespace filters follow actual attributes after argument conversion, including
+reentrant detachment. Native refusal discards pending records. No synchronous
+observer callback is introduced.
+
+The original App fixture creates SVG in an inert document with genuine namespace
+writes, imports it, and changes actual rendered pixels through an Attr alias and
+queued observer callback. Native editing and anchor activation stay intact.
+Other reflected-property routes and transient subtree registrations remain
+separate unfinished work; this is not a live-site initialization claim.
