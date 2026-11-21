@@ -18,6 +18,9 @@ pub(crate) fn serialize_media_query_list(source: &str) -> String {
 pub(crate) fn media_query_list_matches(query: &str, environment: Option<MediaEnvironment>) -> bool {
     query.is_empty() || media::matches(query, environment)
 }
+#[path="css_sizing_math.rs"]
+mod sizing_math;
+pub use sizing_math::CalculatedLength;
 #[path="css_custom_properties.rs"]
 mod custom_properties;
 #[path="css_computed_style.rs"]
@@ -214,9 +217,11 @@ pub enum Length {
     Percent(f32),
     Em(f32),
     Rem(f32),
+    Calc(CalculatedLength),
 }
 
 impl Length {
+    pub fn has_percentage(self)->bool{matches!(self,Self::Percent(_))||matches!(self,Self::Calc(value)if value.percentage)}
     pub fn resolve(self, reference: f32, font: f32, root_font: f32) -> Option<f32> {
         let value = match self {
             Self::Auto => return None,
@@ -224,6 +229,7 @@ impl Length {
             Self::Percent(value) => reference * value / 100.0,
             Self::Em(value) => font * value,
             Self::Rem(value) => root_font * value,
+            Self::Calc(value)=>value.resolve(reference,font,root_font).clamp(-100_000.0,100_000.0)as f32,
         };
         Some(value.clamp(-100_000.0, 100_000.0))
     }
@@ -3037,10 +3043,10 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "color" | "background-color" if !inline_color_value(&value) => continue,
             "animation-timing-function" if !inline_easing_value(&value) => continue,
             "touch-action" if touch_action::specified(&value).is_none() => continue,
-            "width" | "height" | "min-width" | "min-height" if !variable && !wide && parse_length(&value, true, false).is_none() => continue,
-            "max-width" | "max-height" if !variable && !wide && value != "none" && parse_length(&value, false, false).is_none() => continue,
+            "width" | "height" | "min-width" | "min-height" if !variable && !wide && sizing_value(&value,Length::Auto).is_none() => continue,
+            "max-width" | "max-height" if !variable && !wide && max_sizing_value(&value).is_none() => continue,
             "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
-            "row-gap" | "column-gap" if !variable && !wide && value != "normal" && parse_length(&value, false, false).is_none() => continue,
+            "row-gap" | "column-gap" if !variable && !wide && value != "normal" && max_sizing_value(&value).is_none() => continue,
             s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
             s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
             _ => std::slice::from_ref(&name),
@@ -3066,8 +3072,8 @@ pub(crate) fn inline_color_value(value: &str) -> bool {
 }
 
 fn gap_values(value: &str) -> Option<[Length; 2]> {
-    let mut parts = value.split_ascii_whitespace();
-    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else {parse_length(part, false, false)};
+    let grouped=border_parts(value)?;let mut parts=grouped.iter().copied();
+    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else if part.starts_with("calc("){sizing_math::length(part,false)}else{parse_length(part, false, false)};
     let row = length(parts.next()?)?;
     let column = match parts.next() { Some(part) => length(part)?, None => row };
     parts.next().is_none().then_some([row, column])
@@ -3325,7 +3331,7 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
     let mut basis = None;
     let mut factors_ended = false;
     let mut count = 0;
-    for part in value.split_ascii_whitespace() {
+    for part in border_parts(value)? {
         count += 1;
         if count > 3 {
             return None;
@@ -3342,7 +3348,7 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
         if basis.is_some() {
             return None;
         }
-        basis = Some(parse_length(part, true, false)?);
+        basis = Some(sizing_value(part,Length::Auto)?);
         factors_ended = !factors.is_empty();
     }
     if count == 0 {
@@ -3365,6 +3371,7 @@ fn flex_flow_value(value:&str)->Option<(FlexDirection,bool)>{
 }
 fn max_sizing_value(value:&str)->Option<Option<Length>>{
     let value=value.trim();if value.eq_ignore_ascii_case("none"){return Some(None);}
+    if value.starts_with("calc("){return sizing_math::length(value,false).map(Some);}
     if !value.is_ascii()||value.bytes().any(|b|b.is_ascii_whitespace()){return None;}
     parse_length(value,false,false).map(Some)
 }
@@ -3377,6 +3384,7 @@ fn sizing_value(value: &str, parent: Length) -> Option<Length> {
     if value.eq_ignore_ascii_case("initial") || value.eq_ignore_ascii_case("unset") {
         return Some(Length::Auto);
     }
+    if value.to_ascii_lowercase().starts_with("calc("){return sizing_math::length(value,false);}
     if !value.is_ascii() || value.bytes().any(|byte|byte.is_ascii_whitespace()) { return None; }
     parse_length(value,true,false)
 }
@@ -3788,7 +3796,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             if let Some(value) = if value == "normal" {
                 Some(Length::Px(0.0))
             } else {
-                parse_length(&value, false, false)
+                if value.starts_with("calc("){sizing_math::length(&value,false)}else{parse_length(&value,false,false)}
             } {
                 style.gap[usize::from(declaration.name == "column-gap")] = value;
             }
@@ -5280,3 +5288,7 @@ mod attribute_substring_tests;
 #[cfg(test)]
 #[path="css_layout_variable_tests.rs"]
 mod layout_variable_tests;
+
+#[cfg(test)]
+#[path="css_sizing_math_tests.rs"]
+mod sizing_math_tests;

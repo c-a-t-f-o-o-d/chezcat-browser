@@ -497,6 +497,7 @@ fn length_text(length: Length) -> String {
         Length::Em(number) => (number, "em"),
         Length::Rem(number) => (number, "rem"),
         Length::Auto => unreachable!("transform grammar never admits auto"),
+        Length::Calc(value)=>return value.text(),
     };
     format!("{}{unit}", if number == 0.0 { 0.0 } else { number })
 }
@@ -597,7 +598,7 @@ fn computed(parsed: Translation, font: f32, root: f32) -> Option<Transform> {
             let pixels = value * basis;
             (pixels.is_finite() && pixels.abs() <= 100_000.0).then_some(Length::Px(pixels))
         }
-        Length::Auto => None,
+        Length::Auto|Length::Calc(_) => None,
     };
     Some(Transform::Translate {
         x: resolve(parsed.x)?,

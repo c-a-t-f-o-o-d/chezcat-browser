@@ -1,36 +1,7 @@
-//! Physical margin and padding lengths, including one typed calc() product.
-use super::{border_parts, four, length_with_unit, parse_length, translate, Length, MAX_GROUPED_BOX_BYTES};
+//! Physical margin and padding lengths share guarded typed sizing arithmetic.
+use super::{border_parts, four, parse_length, Length};
 
-// Keep the number and its unit distinct. In calc(), even zero without a unit
-// is a number. Substitution must not turn separate tokens into a dimension.
-fn operand(source: &str) -> Option<(f64, &str)> {
-    let token = source.trim_ascii();
-    let end = translate::number_end(token)?;
-    let number = token[..end].parse::<f64>().ok()?;
-    number.is_finite().then_some((number, &token[end..]))
-}
-
-pub(super) fn length(value: &str, margin: bool) -> Option<Length> {
-    let value = value.trim_ascii();
-    let Some(rest) = value.strip_prefix("calc(") else {
-        if value.chars().any(char::is_whitespace) { return None; }
-        return parse_length(value, margin, margin);
-    };
-    if value.len() > MAX_GROUPED_BOX_BYTES { return None; }
-    let (left, right) = rest.strip_suffix(')')?.split_once('*')?;
-    let (a, left_unit) = operand(left)?;
-    let (b, right_unit) = operand(right)?;
-    let unit = match (left_unit, right_unit) {
-        ("", unit) | (unit, "") if !unit.is_empty() => unit,
-        _ => return None,
-    };
-    let product = a * b;
-    if !product.is_finite() { return None; }
-    // Range-check the result, not either operand: a negative padding product
-    // computes to zero, while a negative padding literal is invalid syntax.
-    let minimum = if margin { -10_000.0 } else { 0.0 };
-    length_with_unit(product.clamp(minimum, 10_000.0) as f32, unit)
-}
+pub(super) fn length(value:&str,margin:bool)->Option<Length>{let value=value.trim_ascii();if value.to_ascii_lowercase().starts_with("calc("){return super::sizing_math::length(value,margin);}if value.chars().any(char::is_whitespace){return None;}parse_length(value,margin,margin)}
 
 pub(super) fn shorthand(value: &str, margin: bool) -> Option<[Length; 4]> {
     let parts = border_parts(value)?;

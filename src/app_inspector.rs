@@ -2597,6 +2597,7 @@ fn length(value: crate::css::Length) -> String {
         crate::css::Length::Percent(value) => format!("{value}%"),
         crate::css::Length::Em(value) => format!("{value}em"),
         crate::css::Length::Rem(value) => format!("{value}rem"),
+        crate::css::Length::Calc(value)=>value.text(),
     }
 }
 

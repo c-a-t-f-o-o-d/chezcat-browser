@@ -1304,8 +1304,8 @@ impl Engine<'_> {
             };
             let style = &self.styles[node];
             let container = self.containing_block(node, false);
-            let vertical = |offset| {
-                if matches!(offset, Length::Percent(_)) && !container.definite_height {
+            let vertical = |offset:Length| {
+                if offset.has_percentage() && !container.definite_height {
                     None
                 } else {
                     self.length(offset, container.height, style)
@@ -1927,7 +1927,7 @@ impl Engine<'_> {
         style: &Style,
         edges: i32,
     ) -> Option<i32> {
-        if matches!(length, Length::Percent(_)) && reference.is_none() {
+        if length.has_percentage() && reference.is_none() {
             return None;
         }
         self.length(length, reference.unwrap_or(0), style)
@@ -2897,16 +2897,16 @@ impl Engine<'_> {
             NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.canvas(node) || self.inline_svg(node) || self.loaded_image_control(node) => {
                 let width = if self.canvas(node) {
                     let mut intrinsic_style = style.clone();
-                    if matches!(intrinsic_style.width, Length::Percent(_)) {
+                    if intrinsic_style.width.has_percentage() {
                         intrinsic_style.width = Length::Auto;
                     }
                     self.image_dimensions(node, &intrinsic_style, 0).0
                 } else if tag != "img" && !self.video(node) && !self.inline_svg(node) {
                     let mut intrinsic_style = style.clone();
-                    if matches!(intrinsic_style.width, Length::Percent(_)) {
+                    if intrinsic_style.width.has_percentage() {
                         intrinsic_style.width = Length::Auto;
                     }
-                    if matches!(intrinsic_style.max_width, Some(Length::Percent(_))) {
+                    if intrinsic_style.max_width.is_some_and(Length::has_percentage) {
                         intrinsic_style.max_width = None;
                     }
                     self.image_control_dimensions(node, &intrinsic_style, 0).0
@@ -3125,7 +3125,10 @@ impl Engine<'_> {
     // Round only when the line's cumulative sizes become physical rectangles;
     // rounding each 50% item early makes two halves overflow an odd-sized row.
     fn flex_dimension(&self, length: Length, reference: Option<i32>, style: &Style, edges: i32) -> Option<f64> {
-        let physical=if let Length::Percent(percent)=length {
+        let physical=if let Length::Calc(value)=length{
+            let reference=if length.has_percentage(){reference? as f32/self.zoom}else{0.0};
+            Some(value.resolve(reference,style.font_size,style.root_font_size)*f64::from(self.zoom))
+        }else if let Length::Percent(percent)=length {
             // Avoid a lossy CSS/physical round trip: two exact halves must not
             // exceed their reference because of division by fractional zoom.
             let css_limit=100_000.0*f64::from(self.zoom);
@@ -3369,7 +3372,7 @@ impl Engine<'_> {
                     }
                 }
                 if child_style.height == Length::Auto
-                    || (height.is_none() && matches!(child_style.height, Length::Percent(_)))
+                    || (height.is_none() && child_style.height.has_percentage())
                 {
                     if let Some(value) = hint("height") {
                         child_style.height = value;
@@ -3683,7 +3686,7 @@ impl Engine<'_> {
             group.style.flex_direction,
             FlexDirection::RowReverse | FlexDirection::ColumnReverse
         );
-        let row_gap = if matches!(group.style.gap[0], Length::Percent(_)) && height.is_none() {
+        let row_gap = if group.style.gap[0].has_percentage() && height.is_none() {
             0
         } else {
             self.length(group.style.gap[0], height.unwrap_or(0), &group.style)
@@ -4472,7 +4475,7 @@ impl Engine<'_> {
         } else {
             style.width
         };
-        let height = if matches!(style.height, Length::Auto | Length::Percent(_)) {
+        let height = if (matches!(style.height,Length::Auto)||style.height.has_percentage()) {
             hint("height").unwrap_or(style.height)
         } else {
             style.height
@@ -4632,7 +4635,7 @@ impl Engine<'_> {
         let explicit_width = self
             .length(style.width, available, style)
             .or_else(|| attribute("width"));
-        let explicit_height = (if matches!(style.height, Length::Percent(_)) {
+        let explicit_height = (if style.height.has_percentage() {
             None
         } else {
             self.length(style.height, 0, style)
