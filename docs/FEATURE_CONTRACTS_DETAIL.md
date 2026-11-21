@@ -2142,3 +2142,28 @@ content, queues a real style callback after Promise work, and verifies text/vect
 pixels, preserved editing and real anchor navigation. Scheduled-peer and same-
 value callback cases exercise the native microtask queue. This does not establish
 live-site initialization or complete transient subtree observation.
+
+
+## Transient subtree mutation observation
+
+Checked native removals, moves and whole-content replacement retain transient
+observer sources for the actual detached roots. Descendant attribute/text/child
+changes continue through those sources until notification. Multiple paths share
+the original registration options and deduplicate records by observer. Updating
+observe options clears only transients from that registration; disconnect clears
+all sources for that observer. Delivery removes sources before callback code,
+even when child-list records were not requested or takeRecords drained the queue.
+
+Native transient metadata uses paid, geometrically growing backing and sorted
+lookup. Temporary/replacement backing and notification admission precede DOM
+commit; failed mutation drops unpublished sources and records. Cleared backing
+remains honestly retained for reuse, without a new arbitrary transient count cap.
+The focused fixtures cover propagation, deduplication, moves, replacement,
+option changes and native backing/refusal recovery.
+
+An original App fixture mutates a genuinely detached template subtree, then
+imports mixed native content in its queued observer callback. It verifies cleanup
+before callback mutation, real vector/text paint, stable editing and anchor
+navigation. Other reflected-property and broader DOM observation routes remain
+explicit subsets; this does not establish live-site initialization.
+See [DOM transient registered observers](https://dom.spec.whatwg.org/#concept-node-add-transient-registered-observers).

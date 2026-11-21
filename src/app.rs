@@ -6088,3 +6088,7 @@ mod attribute_notification_tests;
 #[cfg(test)]
 #[path="app_style_slot_notification_tests.rs"]
 mod style_slot_notification_tests;
+
+#[cfg(test)]
+#[path="app_transient_observation_tests.rs"]
+mod transient_observation_tests;

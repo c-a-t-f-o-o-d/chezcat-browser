@@ -374,11 +374,13 @@ impl Runtime {
         let mut interested = BTreeMap::new();
         let mut current = Some(target);
         while let Some(node) = current {
-            let count=self.mutations.registrations_at(node).count();
+            let count=self.mutations.registration_count_at(node);
+            let passes=if attribute.is_some_and(|change|change.namespace.is_none()){2}else{1};
+            self.work(count.saturating_add(self.mutations.transient_lookup_work(node)).saturating_mul(passes).saturating_add(1))?;
             let filter_work=if let Some(change)=attribute.filter(|change|change.namespace.is_none()){
                 self.mutations.registrations_at(node).filter(|reg|node==target||reg.subtree).filter_map(|reg|reg.attribute_filter.as_ref()).map(|filter|filter.len().saturating_mul(change.local_name.len().saturating_add(1))).fold(0usize,usize::saturating_add)
             }else{0};
-            self.work(count.saturating_add(filter_work).saturating_add(self.mutations.transient_lookup_work(node)).saturating_add(1))?;
+            self.work(filter_work)?;
             for registration in self.mutations.registrations_at(node){
                 if node!=target&&!registration.subtree{continue;}
                 let (matches,old)=if let Some(change)=attribute{

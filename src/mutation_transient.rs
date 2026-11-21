@@ -46,6 +46,12 @@ impl Arena {
                 .filter_map(|entry| self.source_registration(*entry)),
         )
     }
+    pub(super) fn registration_count_at(&self, node: u32) -> usize {
+        self.targets
+            .get(&node)
+            .map_or(0, Vec::len)
+            .saturating_add(self.transient_at(node).len())
+    }
     pub(super) fn transient_lookup_work(&self, node: u32) -> usize {
         let search = usize::BITS - self.transients.len().leading_zeros();
         self.transient_at(node)
