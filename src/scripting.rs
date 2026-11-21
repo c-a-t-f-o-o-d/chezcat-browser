@@ -3313,7 +3313,7 @@ impl Host for Bridge<'_> {
         if self.attr_receiver(object) { return self.attr_native_member(property); }
         if self.character_data_author_receiver(object) {
             return matches!(property, "data" | "length" | "nodeValue" | "ownerDocument" | "isConnected" | "baseURI")
-                || matches!(property, "isDefaultNamespace" | "compareDocumentPosition")
+                || matches!(property, "normalize" | "isDefaultNamespace" | "compareDocumentPosition")
                 || dom_tree::node_constant(property).is_some();
         }
         if self.constructed_event_receiver(object) { return self.event_native_member(object,property); }

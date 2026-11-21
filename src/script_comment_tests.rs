@@ -2,8 +2,11 @@
 use super::*;
 
 fn fixture(markup:&str,source:&str)->(Document,Forms,Page) {
+    fixture_page(markup,source,Page::for_test())
+}
+fn fixture_page(markup:&str,source:&str,mut page:Page)->(Document,Forms,Page) {
     let mut doc=crate::html::parse(markup);doc.scripting_enabled=true;
-    let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    let mut forms=Forms::new(&doc);
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/comments").unwrap().0),path:None,root:None,fragment:String::new()});
     let out=page.start(&mut doc,&mut forms,&[Script {node:0,source:source.into(),label:"Original genuine Comment factory".into()}]);
     assert_eq!(out.errors,0,"{}",page.report());(doc,forms,page)
@@ -221,11 +224,11 @@ p.appendChild(c);if(p.textContent!==''||c.nodeType!==8||p.querySelectorAll('*').
 
 #[test]
 fn comment_factory_owner_guard_precedes_conversion_and_admission_failure_is_atomic() {
-    let (mut doc,mut forms,mut page)=fixture("<html><head></head><body></body></html>",r#"
+    let (mut doc,mut forms,mut page)=fixture_page("<html><head></head><body></body></html>",r#"
 var maker=document.createComment,converted=0,value={toString:function(){converted++;return 'created';}},frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
 var invoke=frame.contentWindow.Function('maker','doc','value','return maker.call(doc,value);');
 if(invoke(maker,document,value).nodeType!==8||converted!==1)throw 'same-origin real factory';converted=0;
-"#);
+"#,Page::with_limits(crate::javascript::limits::BROWSER));
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
     let nodes=doc.nodes.len();let retained=page.state.retained;
     let out=page.console_eval(&mut doc,&mut forms,"invoke(maker,document,value);");assert_eq!(out.errors,1);assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.retained,retained);
