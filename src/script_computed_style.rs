@@ -170,6 +170,7 @@ pub(super) struct Declaration {
 
 #[derive(Clone, Copy)]
 enum ComputedProperty {
+    FontSize,
     TouchAction,
     Opacity,
     Position,
@@ -181,6 +182,7 @@ enum ComputedProperty {
 impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
+            "fontSize" => Some(Self::FontSize),
             "touchAction" => Some(Self::TouchAction),
             "opacity" => Some(Self::Opacity),
             "position" => Some(Self::Position),
@@ -192,7 +194,9 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("touch-action") {
+        if name.eq_ignore_ascii_case("font-size") {
+            Some(Self::FontSize)
+        } else if name.eq_ignore_ascii_case("touch-action") {
             Some(Self::TouchAction)
         } else if name.eq_ignore_ascii_case("opacity") {
             Some(Self::Opacity)
@@ -438,6 +442,15 @@ impl Bridge<'_> {
                 &mut self.state.host_work,
                 &mut self.state.copy_work,
             )?;
+        if matches!(property, ComputedProperty::FontSize) {
+            let Some(size)=snapshot.read_font_size(node).map_err(|_|"Computed font-size unavailable within CSS cascade limits.")? else {return Ok(Value::String(String::new()));};
+            if !size.is_finite() {return Err("Computed font-size is not finite.".into());}
+            self.state.work(64)?;
+            let mut text=transform::NumberText::new();
+            std::fmt::write(&mut text,format_args!("{size}px")).map_err(|_|"Computed font-size serialization overflow.")?;
+            self.state.copies(text.text().len())?;
+            let mut result=String::new();result.try_reserve_exact(text.text().len()).map_err(|_|"Computed font-size reservation failed.")?;result.push_str(text.text());return Ok(Value::String(result));
+        }
         if matches!(property, ComputedProperty::Opacity) {
             let Some(opacity) = snapshot.read_opacity(node)
                 .map_err(|_| "Computed opacity unavailable within the CSS cascade limits.")?
@@ -452,6 +465,7 @@ impl Bridge<'_> {
             return Ok(Value::String(result));
         }
         let (first, second) = match property {
+            ComputedProperty::FontSize => unreachable!("font-size uses actual native pixel serialization"),
             ComputedProperty::TouchAction => {
                 let value=snapshot.read_touch_action(node).map_err(|_|"Computed touch-action unavailable within CSS cascade limits.")?;
                 (value.map_or("",|value|value.as_str()),None)

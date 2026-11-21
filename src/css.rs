@@ -1022,6 +1022,7 @@ fn compute_cascade(
     let mut position_known = vec![true; doc.nodes.len()];
     let mut canvas_foregrounds = HashMap::new();
     let mut touch_actions: HashMap<usize, Option<TouchAction>> = HashMap::new();
+    let mut font_sizes: HashMap<usize, Option<f32>> = HashMap::new();
     // Default opacity 1 requires no retained per-node allocation. A None entry
     // records an indeterminate winner rather than fabricating that default.
     let mut opacities: HashMap<usize, Option<f64>> = HashMap::new();
@@ -1036,6 +1037,7 @@ fn compute_cascade(
     let mut variable_budget = custom_properties::Budget::default();
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
+    let mut root_font_known = true;
     for &index in &order {
         let node = &doc.nodes[index];
         if let Some(meter) = meter.as_deref_mut() {
@@ -1278,6 +1280,8 @@ fn compute_cascade(
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
+        let parent_font_known=parents[index].and_then(|parent|font_sizes.get(&parent)).is_none_or(Option::is_some);
+        let mut font_known=parent_font_known;
         let mut sheet_touch_action = Some(TouchAction::AUTO);
         let mut touch_action = Some(TouchAction::AUTO);
         let parent_touch_action = parents[index].and_then(|parent| touch_actions.get(&parent)).copied().unwrap_or(Some(TouchAction::AUTO));
@@ -1290,6 +1294,15 @@ fn compute_cascade(
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
+            if declaration.name == "font-size" {
+                let apply=|budget:&mut custom_properties::Budget| custom_properties::apply_font_size(&mut style,&parent,declaration,&variables[index],budget,&mut font_known,parent_font_known,root_font_known);
+                if let Some(meter)=meter.as_deref_mut() {meter.variables(&mut variable_budget,apply)?;}
+                else if let Some(meter)=transform_meter.as_deref_mut() {
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget,apply)?;
+                } else {let mut apply=apply;apply(&mut variable_budget);}
+                continue;
+            }
             if declaration.name == "touch-action" {
                 let apply = |budget: &mut custom_properties::Budget| touch_action::apply(&mut touch_action, &mut sheet_touch_action, parent_touch_action, declaration, priority.1, &variables[index], budget);
                 if let Some(meter)=meter.as_deref_mut() {meter.variables(&mut variable_budget,apply)?;}
@@ -1316,7 +1329,7 @@ fn compute_cascade(
             }
             if declaration.name == "font" {
                 let value = declaration.value.trim().to_ascii_lowercase();
-                if apply_font(&mut style,&parent,declaration,&value) && !priority.1 {
+                if apply_font_with_availability(&mut style,&parent,declaration,&value,&mut font_known,parent_font_known,root_font_known) && !priority.1 {
                     sheet_line_height = style.line_height;
                 }
                 continue;
@@ -1351,6 +1364,7 @@ fn compute_cascade(
         style.overflow = style.overflow.computed();
         if tag == "html" {
             root_font_size = style.font_size;
+            root_font_known = font_known;
             style.root_font_size = root_font_size;
         }
         style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
@@ -1404,6 +1418,12 @@ fn compute_cascade(
             canvas_foregrounds.try_reserve(1).map_err(|_| "Canvas foreground snapshot reservation failed.")?;
             canvas_foregrounds.insert(index, style.color);
         }
+        if !font_known || style.font_size != INITIAL_FONT_SIZE {
+            if let Some(meter)=meter.as_deref_mut() {meter.font_size(font_sizes.is_empty())?;}
+            else if let Some(meter)=transform_meter.as_deref_mut() {meter.font_size(font_sizes.is_empty())?;}
+            font_sizes.try_reserve(1).map_err(|_|"Font-size snapshot reservation failed.")?;
+            font_sizes.insert(index,font_known.then_some(style.font_size));
+        }
         if touch_action != Some(TouchAction::AUTO) {
             if let Some(meter)=meter.as_deref_mut() {meter.touch_action(touch_actions.is_empty())?;}
             else if let Some(meter)=transform_meter.as_deref_mut() {meter.touch_action(touch_actions.is_empty())?;}
@@ -1432,7 +1452,7 @@ fn compute_cascade(
     }
     check_css_deadline(meter.as_deref().and_then(CssBudget::deadline)
         .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline)))?;
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions), stylesheet_cache:prepared.cache })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -3354,8 +3374,17 @@ fn font_size_value(value:&str,parent:f32,root:f32)->Option<f32> {
 
 /// Apply the existing finite font shorthand once. Its line-height component
 /// participates in the same stylesheet checkpoint as the longhand.
+fn font_size_available(value:&str,parent:bool,root:bool)->bool {
+    if value.ends_with("rem") {root}
+    else if value.ends_with("em") || value.ends_with('%') || matches!(value,"inherit"|"unset"|"larger"|"smaller") {parent}
+    else {true}
+}
 fn apply_font(style: &mut Style, parent: &Style, declaration: &Declaration, value: &str) -> bool {
+    apply_font_with_availability(style,parent,declaration,value,&mut true,true,true)
+}
+fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Declaration,value:&str,known:&mut bool,parent_known:bool,root_known:bool)->bool {
     if matches!(value, "inherit" | "unset") {
+        *known=parent_known;
         style.font_size = parent.font_size;
         style.font_families = parent.font_families.clone();
         style.font_weight = parent.font_weight;
@@ -3363,6 +3392,7 @@ fn apply_font(style: &mut Style, parent: &Style, declaration: &Declaration, valu
         style.italic = parent.italic;
         style.line_height = parent.line_height;
     } else if value == "initial" {
+        *known=true;
         style.font_size = INITIAL_FONT_SIZE;
         style.font_families = vec!["serif".into()];
         style.font_weight = 400;
@@ -3372,6 +3402,7 @@ fn apply_font(style: &mut Style, parent: &Style, declaration: &Declaration, valu
     } else if let Some((size, line, families, weight, italic)) =
         font_shorthand(&declaration.value, parent.font_weight)
     {
+        *known=font_size_available(&size.to_ascii_lowercase(),parent_known,root_known);
         style.font_families = families;
         style.font_weight = weight;
         style.bold = weight >= 600;

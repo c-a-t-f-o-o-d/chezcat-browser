@@ -7,18 +7,18 @@ use std::fmt::Write as _;
 // smallest nonzero value in fixed-point notation) fits this stack buffer.
 // No heap string is produced before charging the final CSSOM serialization.
 const NUMBER_BYTES: usize = 64;
-struct NumberText {
+pub(super) struct NumberText {
     bytes: [u8; NUMBER_BYTES],
     length: usize,
 }
 impl NumberText {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             bytes: [0; NUMBER_BYTES],
             length: 0,
         }
     }
-    fn text(&self) -> &str {
+    pub(super) fn text(&self) -> &str {
         std::str::from_utf8(&self.bytes[..self.length]).expect("formatted numbers are ASCII")
     }
 }
