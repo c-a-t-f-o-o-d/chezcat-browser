@@ -6171,3 +6171,7 @@ mod native_hover_tests;
 
 #[path="app_native_hover.rs"]
 mod native_hover;
+
+#[cfg(test)]
+#[path="app_visibility_hit_tests.rs"]
+mod visibility_hit_tests;

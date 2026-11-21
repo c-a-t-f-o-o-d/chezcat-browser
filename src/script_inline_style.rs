@@ -54,6 +54,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "padding-left",
     "padding-right",
     "padding-top",
+    "pointer-events",
     "position",
     "right",
     "row-gap",
@@ -64,6 +65,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "touch-action",
     "transform",
     "vertical-align",
+    "visibility",
     "white-space",
     "width",
 ];
@@ -140,6 +142,10 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             // Charge this actual candidate here, not an unrelated whole style.
             state.work(crate::css::easing_source_cost(specified.len()).0)?;
             if !crate::css::inline_easing_value(specified) { continue; }
+        }
+        if matches!(name,"visibility"|"pointer-events"){
+            state.work(specified.len())?;state.copies(specified.len())?;
+            if !crate::css::inline_interaction_value(name,specified){continue;}
         }
         if name == "touch-action" {
             state.work(specified.len())?;

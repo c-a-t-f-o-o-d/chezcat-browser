@@ -35,17 +35,12 @@ impl App {
             return;
         }
         let mut selected = HashMap::new();
-        for item in &self.page.items {
-            if let PaintItem::Background { node, image, .. } = item {
-                if selected.try_reserve(1).is_err() {
-                    self.discard_background_plan(
-                        "BACKGROUND IMAGE: cannot reserve selection storage.",
-                    );
-                    return;
-                }
-                selected.insert(*node, image.clone());
-            }
+        let mut selection_failed=false;
+        for (node,image) in self.page.background_sources(){
+            if selected.try_reserve(1).is_err(){selection_failed=true;break;}
+            selected.insert(node,image.clone());
         }
+        if selection_failed{self.discard_background_plan("BACKGROUND IMAGE: cannot reserve selection storage.");return;}
         let removals = self
             .background_requests
             .keys()

@@ -393,6 +393,8 @@ pub struct Style {
     pub transform: Transform,
     /// Computed physical axes; scrollbars and scroll APIs are separate.
     pub overflow: Overflow,
+    pub visible:bool,
+    pub pointer_events:bool,
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
@@ -465,6 +467,7 @@ impl Default for Style {
             position: Position::Static,
             transform: Transform::None,
             overflow: Overflow::default(),
+            visible:true,pointer_events:true,
             inset: [Length::Auto; 4],
             color: 0x26364a,
             opacity: 1.0,
@@ -528,6 +531,7 @@ impl Style {
 
     fn inherited(parent: &Self) -> Self {
         Self {
+            visible:parent.visible,pointer_events:parent.pointer_events,
             color: parent.color,
             image_rendering: parent.image_rendering,
             font_size: parent.font_size,
@@ -1302,6 +1306,7 @@ fn compute_cascade(
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
+        let mut sheet_interaction=[parent.visible,parent.pointer_events];
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
         let parent_font_known=parents[index].and_then(|parent|font_sizes.get(&parent)).is_none_or(Option::is_some);
         let mut font_known=parent_font_known;
@@ -1358,7 +1363,8 @@ fn compute_cascade(
                 continue;
             }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if grid_alignment::apply(&mut style,&parent,declaration,priority.1,&mut sheet_grid_alignment,&variables[index],budget) {
+                if interaction_style::apply(&mut style,&parent,declaration,priority.1,&mut sheet_interaction,&variables[index],budget){true}
+                else if grid_alignment::apply(&mut style,&parent,declaration,priority.1,&mut sheet_grid_alignment,&variables[index],budget) {
                     true
                 } else if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
                     true
@@ -1486,7 +1492,7 @@ fn compute_cascade(
         presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
         let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
         if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
-        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color}));
+        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events}));
     }
     Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
 }
@@ -3089,6 +3095,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "font" | "overflow" | "text-decoration" => {
                 return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
             }
+            "visibility"|"pointer-events" if !interaction_style::valid(name,&decl.value)=>continue,
             "color" | "background-color" if !inline_color_value(&value) => continue,
             "animation-timing-function" if !inline_easing_value(&value) => continue,
             "touch-action" if touch_action::specified(&value).is_none() => continue,
@@ -3156,6 +3163,9 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
     }
     Ok(result)
 }
+
+pub(crate) fn inline_interaction_value(name:&str,value:&str)->bool{interaction_style::valid(name,value)}
+pub(crate) fn specified_interaction_value(name:&str,value:&str)->Option<String>{if !interaction_style::valid(name,value){return None;}Some(if custom_properties::has_var(value){value.trim_ascii().to_owned()}else{value.trim_ascii().to_ascii_lowercase()})}
 
 pub(crate) fn inline_color_value(value: &str) -> bool {
     let value = value.trim().to_ascii_lowercase();
@@ -5398,3 +5408,6 @@ mod structural_tests;
 
 #[path="css_structural.rs"]
 mod structural;
+
+#[path="css_interaction_style.rs"]
+mod interaction_style;

@@ -6,7 +6,7 @@ use std::rc::Rc;
 pub(crate) struct ComputedStyleUnavailable;
 
 #[derive(Clone,Copy)]
-pub(crate) struct ComputedPresentation {pub display:&'static str,pub color:u32}
+pub(crate) struct ComputedPresentation {pub display:&'static str,pub color:u32,pub visible:bool,pub pointer_events:bool}
 pub(crate) fn display_css(value:Display)->&'static str{match value{Display::None=>"none",Display::Block=>"block",Display::Inline=>"inline",Display::InlineBlock=>"inline-block",Display::InlineFlex=>"inline-flex",Display::Flex=>"flex",Display::Grid=>"grid",Display::Table=>"table",Display::TableRowGroup=>"table-row-group",Display::TableRow=>"table-row",Display::TableCell=>"table-cell"}}
 
 pub(super) fn style_display(style:&Style)->&'static str{match (style.display,style.display_alias){(Display::Block,Some("list-item"))=>"list-item",(Display::TableRowGroup,Some("table-header-group"))=>"table-header-group",(Display::TableRowGroup,Some("table-footer-group"))=>"table-footer-group",_=>display_css(style.display)}}

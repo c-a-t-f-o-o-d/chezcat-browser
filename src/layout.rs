@@ -381,6 +381,7 @@ pub struct BorderRect {
 }
 
 pub struct Layout {
+    pub(crate) unpainted_backgrounds:Vec<(usize,css::BackgroundImage)>,
     pub(crate) has_hover_styles:bool,
     pub(crate) root_hit_node:Option<usize>,
     pub(crate) computed_properties: css::ComputedProperties,
@@ -436,6 +437,7 @@ impl Layout {
             && hit.width > 0 && hit.height > 0 && hit.x < width && hit.x.saturating_add(hit.width) > 0
             && hit.y < scroll.saturating_add(height) && hit.y.saturating_add(hit.height) > scroll).count()
     }
+    pub(crate) fn background_sources(&self)->impl Iterator<Item=(usize,&css::BackgroundImage)>{self.items.iter().filter_map(|item|if let PaintItem::Background{node,image,..}=item{Some((*node,image))}else{None}).chain(self.unpainted_backgrounds.iter().map(|(node,image)|(*node,image)))}
     pub(crate) fn element_node_at(&self,x:i32,y:i32)->Option<usize>{
         self.hits.iter().rev().find(|h|ClipRect::new(h.x,h.y,h.width,h.height).contains(x,y)).and_then(|h|(h.node!=0).then_some(h.node))
     }
@@ -525,20 +527,7 @@ impl Layout {
 
     /// Native video controls occupy their image item, including its paint order.
     /// A later painted/hit box at this point prevents activation through it.
-    pub(crate) fn image_topmost_at(&self,node:usize,x:i32,y:i32)->bool {
-        for (index,item) in self.items.iter().enumerate().rev(){
-            if self.paint_clip(index).is_some_and(|clip|!clip.contains(x,y)){continue;}
-            let rect=match item {
-                PaintItem::Image {node:owner,x:left,y:top,width,height,..}=>{if ClipRect::new(*left,*top,*width,*height).contains(x,y){return *owner==node;}continue;},
-                PaintItem::Rect {x,y,width,height,..} | PaintItem::RoundedRect {x,y,width,height,..} | PaintItem::Background {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
-                PaintItem::HitBox {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
-                PaintItem::Text(i)=>{let r=&self.runs[*i];ClipRect::new(r.x,r.y,r.width(),r.height())},
-                PaintItem::Control(i)=>{let r=&self.controls[*i];ClipRect::new(r.x,r.y,r.width,r.height)},
-            };
-            if rect.contains(x,y){return false;}
-        }
-        false
-    }
+    pub(crate) fn image_topmost_at(&self,node:usize,x:i32,y:i32)->bool {self.element_node_at(x,y)==Some(node)}
 
     pub fn run_clip(&self, run_index: usize) -> Option<ClipRect> {
         self.run_clips.get(run_index).copied().flatten()
@@ -851,8 +840,9 @@ fn build_viewport_with_fonts_inner(
             meter.copies(doc.nodes.len().saturating_mul(std::mem::size_of::<OffsetParent>()))?;
         }
     }
-    let root_hit_node=doc.nodes.first().and_then(|root|root.children.iter().copied().find(|&node|doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html&&matches!(&n.kind,NodeKind::Element{tag,..}if tag=="html"))&&styles.get(node).is_some_and(|s|s.display!=Display::None)));
+    let root_hit_node=doc.nodes.first().and_then(|root|root.children.iter().copied().find(|&node|doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html&&matches!(&n.kind,NodeKind::Element{tag,..}if tag=="html"))&&styles.get(node).is_some_and(|s|s.display!=Display::None&&s.visible&&s.pointer_events)));
     let mut page = Layout {
+        unpainted_backgrounds:Vec::new(),
         has_hover_styles:has_hover,root_hit_node,
         computed_properties,
         stylesheet_cache,
@@ -1091,9 +1081,11 @@ fn build_viewport_with_fonts_inner(
         .clamp(16, MAX_HEIGHT);
     engine.finish_decorations();
     engine.order_positioned_paint();
+    engine.filter_visibility_paint(budget.as_deref_mut())?;
     engine.finish_opacity();
     engine.build_hits();
     engine.restore_source_order();
+    engine.finish_visibility_outputs(budget.as_deref_mut())?;
     let indices = |flags: &[bool]| {
         flags
             .iter()
@@ -1810,6 +1802,8 @@ impl Engine<'_> {
         let atom_fixed = std::mem::take(&mut self.layout.fixed_hits);
         self.layout.hits.clear();
         for (index, item) in self.layout.items.iter().enumerate() {
+            let owner=self.paint_owner(item);
+            if owner!=0&&!self.styles.get(owner).is_some_and(|s|s.visible&&s.pointer_events){continue;}
             let (mut hit, fixed) = match item {
                 PaintItem::Rect {node,x,y,width,height,..}
                 | PaintItem::RoundedRect {node,x,y,width,height,..}
@@ -6432,3 +6426,6 @@ mod inline_flex_tests;
 #[cfg(test)]
 #[path="layout_native_hover_tests.rs"]
 mod native_hover_tests;
+
+#[path="layout_visibility.rs"]
+mod visibility;
