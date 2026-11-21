@@ -3481,7 +3481,7 @@ impl Host for Bridge<'_> {
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
         }
         if self.class_list_receiver(object) {
-            return match method { "item"=>&[(0,false)], "contains"=>&[(0,true)], _=>&[] };
+            return match method { "item"=>&[(0,false)], "contains"|"supports"=>&[(0,true)], _=>&[] };
         }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
@@ -3547,6 +3547,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
         if self.inert_factory(object, method).is_some() {
             return Some(if method == "createDocumentFragment" { 0 } else if method == "createElementNS" { 2 } else { 1 });
         }
@@ -3740,7 +3741,7 @@ impl Host for Bridge<'_> {
         if object == HISTORY && matches!(method,"replaceState"|"pushState") { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attr_element_receiver(object) && method == "setAttributeNS" { return 3; }
-        if self.class_list_receiver(object) && matches!(method,"item"|"contains") { return 1; }
+        if self.class_list_receiver(object) && matches!(method,"item"|"contains"|"supports") { return 1; }
         if self.attr_element_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()

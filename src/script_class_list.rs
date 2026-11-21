@@ -24,11 +24,15 @@ pub(super) fn handle(element: u32) -> u32 {
 fn whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}')
 }
+pub(super) fn supported_tokens(object:u32)->Option<&'static [&'static str]>{
+    (attribute(object)==Some("sandbox")).then_some(script_iframe_sandbox::SUPPORTED_TOKENS)
+}
 pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
         "add" => Some("add"),
         "remove" => Some("remove"),
         "contains" => Some("contains"),
+        "supports" => Some("supports"),
         "item" => Some("item"),
         "toString" => Some("toString"),
         _ => None,
@@ -94,6 +98,7 @@ impl Bridge<'_> {
                 "DOMTokenList requires a real Element token list.".into(),
             ));
         }
+        if method=="supports" && supported_tokens(object).is_none(){return Err(("TypeError","This token attribute does not define supported tokens.".into()));}
         if matches!(method, "add" | "remove") {
             for value in args {
                 let Value::String(token) = value else {
@@ -132,7 +137,7 @@ impl Bridge<'_> {
             };
         }
         match property {
-            "toggle" | "replace" | "supports" | "entries" | "keys" | "values" | "forEach" => Err(
+            "toggle" | "replace" | "entries" | "keys" | "values" | "forEach" => Err(
                 format!("DOMTokenList operation {property:?} is not implemented."),
             ),
             // Ordinary absent properties can inherit from Object.prototype.
@@ -166,6 +171,12 @@ impl Bridge<'_> {
             .map_err(|(_, message)| message)?;
         if method == "toString" {
             return self.class_value(node,attribute);
+        }
+        if method=="supports" {
+            let Value::String(token)=args.first().ok_or("supports requires a converted DOMString token.")? else{return Err("supports requires a converted DOMString token.".into());};
+            let supported=supported_tokens(object).ok_or("This token attribute has no supported token set.")?;
+            self.state.work(token.len().saturating_mul(supported.len().max(1)))?;
+            return Ok(Value::Bool(supported.iter().any(|name|token.eq_ignore_ascii_case(name))));
         }
         let mut tokens = self.class_tokens(node,attribute)?;
         match method {

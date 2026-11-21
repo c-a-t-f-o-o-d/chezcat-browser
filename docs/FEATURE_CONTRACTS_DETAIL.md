@@ -1783,6 +1783,23 @@ window/document identities unchanged. Original App checks cover actual callback
 metadata/DOM/glyph changes and stable neighboring editor/link targets.
 
 This is attribute-list support, not implementation of sandboxed browsing
-contexts or permission-relaxation flags. Inert lists and supports/toggle/replace/
-iteration remain explicitly unsupported. No supported-token success or child
+contexts or permission-relaxation flags. Inert lists and toggle/replace/iteration remain explicitly unsupported. No supported-token success or child
 context is fabricated. See the [HTML sandbox IDL](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#dom-iframe-sandbox).
+
+
+## Attribute-specific supported-token queries
+
+DOMTokenList supports converts the token to DOMString and queries the receiver's
+actual attribute support set without mutating metadata or creating a context.
+The HTML sandbox set comprises allowed tokens actually supported by the user
+agent. Native sandboxed contexts and permission-relaxation flags remain
+unsupported, so that set is currently empty: stored tokens are not evidence of
+native support. Class attributes define no supported-token set and throw a
+TypeError, including when a method is borrowed from a sandbox list. Wrong
+receivers fail before conversion, while conversion exceptions retain identity.
+
+The native frame admission policy remains unchanged. An actual App check probes
+this truthful unsupported set alongside live stored metadata; owner, connected
+mutation, quota and context-publication guards remain active. See the
+[HTML supported-token definition](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#dom-iframe-sandbox)
+and [DOM token validation](https://dom.spec.whatwg.org/#concept-domtokenlist-validation).

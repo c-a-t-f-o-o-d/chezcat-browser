@@ -1,5 +1,10 @@
 //! Genuine sandbox attribute lists; unsupported sandboxed contexts stay refused.
 use super::*;
+// HTML defines the supported set as allowed values actually supported by the
+// user agent. Native admission still refuses every sandboxed context, so none
+// of the permission-relaxation flags is supported. Merely storing a token does
+// not add it to this set. Add future entries only with real enforcement.
+pub(super) const SUPPORTED_TOKENS:&[&str]=&[];
 pub(super) fn accessor(method: &str) -> Option<bool> {
     match method {
         crate::javascript::IFRAME_SANDBOX_GET => Some(false),
@@ -196,10 +201,7 @@ if(get.call(f)!==f.sandbox||f.sandbox===f.classList)throw 'saved child accessor 
 "#,
         );
         let before = page.state.dom_commits;
-        for source in [
-            "f.sandbox.supports('allow-scripts');",
-            "f.sandbox.toggle('allow-scripts');",
-        ] {
+        for source in ["f.sandbox.toggle('allow-scripts');"] {
             let out = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(out.errors, 1, "{}", page.report());
             assert_eq!(page.state.dom_commits, before);
@@ -219,4 +221,27 @@ if(get.call(f)!==f.sandbox||f.sandbox===f.classList)throw 'saved child accessor 
             page.report()
         );
     }
+    #[test]
+    fn iframe_sandbox_supports_uses_actual_capability_set_not_stored_tokens() {
+        let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var f=document.createElement('iframe'),s=f.sandbox,changes=0;f.sandbox='allow-scripts allow-same-origin arbitrary';var before=f.getAttribute('sandbox');
+if(typeof s.supports!=='function'||s.supports.length!==1||s.supports.name!=='supports')throw 'real query shape';
+for(var token of ['allow-scripts','ALLOW-SCRIPTS','allow-same-origin','allow-forms','allow-popups','allow-presentation','arbitrary','','bad token'])if(s.supports(token)!==false)throw 'unsupported native flag advertised';
+if(!s.contains('allow-scripts')||s.value!==before||f.contentWindow!==null||f.isConnected)throw 'stored token conflated with capability';
+if(s.supports({toString:function(){changes++;return 'allow-scripts';}})!==false||changes!==1)throw 'DOMString conversion';
+var caught=false;try{f.classList.supports({toString:function(){changes++;return 'ordinary';}});}catch(e){caught=e instanceof TypeError;}if(!caught||changes!==2)throw 'undefined supported set TypeError after conversion';
+var method=f.classList.supports;if(method.call(s,'allow-scripts')!==false)throw 'actual borrowed receiver attribute';
+var effects=0;try{method.call({}, {toString:function(){effects++;return 'x';}});}catch(e){if(!(e instanceof TypeError))throw e;}if(effects!==0)throw 'wrong brand converted token';
+if(s.value!==before||f.getAttribute('sandbox')!==before)throw 'query changed metadata';
+"#);
+    }
+    #[test]
+    fn iframe_sandbox_supports_conversion_exceptions_preserve_native_state() {
+        let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var f=document.createElement('iframe'),s=f.sandbox,marker={},caught=false;
+try{s.supports({toString:function(){throw marker;}});}catch(e){caught=e===marker;}if(!caught||f.hasAttribute('sandbox'))throw 'conversion exception identity or mutation';
+var rejected=false;try{s.supports(Symbol('bad'));}catch(e){rejected=e instanceof TypeError;}if(!rejected||s.value!==''||f.contentWindow!==null)throw 'symbol query mutated state';
+"#);
+    }
+
 }

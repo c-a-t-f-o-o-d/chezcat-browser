@@ -19,6 +19,27 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T03:15:00Z** used clean
+[`e3f721d`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e3f721d8cef5d175618318040c5c941348aee62c),
+including live sandbox attribute lists. JavaScript was enabled and images off;
+saved HTML reports `LOGGED_IN=false`. Pixels still show a skeleton without usable
+header/guide/search. Main execution first fails on missing `WheelEvent` at
+40735:73 in handler metadata (5966:53 rethrow). Two later failures, from
+DOMContentLoaded and timer 42, read the unsupported token-list `supports` method
+at 6503:35. There were 43 script executions (42 successful), 42 listeners and
+three errors; invocation counts were 26 attempted, 24 successful and two failed.
+This distinct live cohort has no exported JavaScript body hashes. Existing
+security/resource guards remain active; later journey milestones are unproved.
+
+The owner's separate clean `ae478b5` navigation at **03:06:04Z** still shows the
+skeleton and the same original WheelEvent metadata failure, plus the earlier
+sandbox-property failure. A later owner console adds timer 7 calling undefined
+`Hq(64,N)` at 461:80. The binding and its relationship to aborted startup are
+unproved; it is not identified as a specific BigInt API. That later owner error
+is distinct from the two token-query failures above.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T02:57:49Z** used clean
 [`ae478b5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ae478b5fe86fe93db83104852e5249755e8470b6),
 including genuine AnimationEvent construction. JavaScript was enabled and images

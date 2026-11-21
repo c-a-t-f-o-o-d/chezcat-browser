@@ -17,7 +17,7 @@ html,body{margin:0;background:#ffffff}#run{position:absolute;left:20px;top:20px;
 #out{position:absolute;left:20px;top:100px;width:400px;height:40px;color:#123456;font-size:24px}#link{display:block;position:absolute;left:20px;top:180px;width:180px;height:36px;background:#204060}
 </style></head><body><button id=run type=button>Set sandbox metadata</button><input id=neighbor value=seed><div id=out>Original</div><a id=link href=#destination>Real link</a><div id=destination></div><script>
 var f=document.createElement('iframe'),list=f.sandbox;if(f.contentWindow!==null||f.hasAttribute('sandbox'))throw 'read fabricated sandbox context';
-document.getElementById('run').onclick=function(e){if(!e.isTrusted)throw 'native click';f.sandbox='allow-scripts';list.add('allow-same-origin');if(f.sandbox!==list||f.getAttribute('sandbox')!=='allow-scripts allow-same-origin'||f.contentWindow!==null||f.isConnected)throw 'real sandbox attribute only';document.getElementById('out').textContent='Actual sandbox metadata';document.title='Sandbox metadata changed';};
+document.getElementById('run').onclick=function(e){if(!e.isTrusted)throw 'native click';f.sandbox='allow-scripts';list.add('allow-same-origin');if(list.supports('allow-scripts')!==false||list.supports('allow-same-origin')!==false||f.sandbox!==list||f.getAttribute('sandbox')!=='allow-scripts allow-same-origin'||f.contentWindow!==null||f.isConnected)throw 'real sandbox attribute only';document.getElementById('out').textContent='Actual sandbox metadata';document.title='Sandbox metadata changed';};
 </script></body></html>"#).unwrap();
     let mut app = App::new();
     app.resize(640, 360);
