@@ -2226,3 +2226,21 @@ cache state and counters on failure. No second cascade or inline approximation
 is introduced. An original App fixture checks that live reads agree with actual
 text paint, changed geometry, stable editing and native anchor hit/navigation.
 Other CSSOM/display/color families and full website usability remain unfinished.
+
+
+## Shared typed sizing calculations
+
+Supported sizing, flex basis, gaps, margin and padding use one original iterative
+calc parser. Length-percentage sums/subtraction, number products/division and
+parentheses preserve dimensional type. Mixed px/percentage/em/rem coefficients
+resolve against real reference/font metrics; canceled percentage terms retain
+indefinite-reference behavior. Shorthands split balanced components rather than
+whitespace inside functions. Substitution cannot join separate number/unit tokens.
+
+Invalid type combinations, zero divisors, nonfinite values and malformed syntax
+stay refused. Existing declaration bytes and result ranges remain bounded; actual
+substitution calculation work and temporary typed-token backing are charged.
+An original App fixture changes calculated width/gap values and checks real
+geometry, exact pixels, stable native editing and the moved link hit/navigation.
+Viewport units, broader algebra/functions and other property consumers remain
+unfinished. This is not evidence of live-site shell initialization.

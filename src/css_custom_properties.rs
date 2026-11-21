@@ -332,7 +332,7 @@ fn valid_box(name:&str,value:&str)->bool {
     !parts.is_empty() && parts.len()<=if shorthand{4}else{1} && parts.iter().all(|part|valid(part))
 }
 fn inherited_layout_length(value:Length,parent:&Style)->Length{
-    let pixels=match value{Length::Em(value)=>value as f64*parent.font_size as f64,Length::Rem(value)=>value as f64*parent.root_font_size as f64,_=>return value};
+    let pixels=match value{Length::Calc(value)=>return Length::Calc(value.inherited(parent)),Length::Em(value)=>value as f64*parent.font_size as f64,Length::Rem(value)=>value as f64*parent.root_font_size as f64,_=>return value};
     Length::Px(pixels.clamp(-(f32::MAX as f64),f32::MAX as f64)as f32)
 }
 pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
@@ -420,6 +420,7 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
     let result=substituted.ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
     let inherited=matches!(declaration.name.as_str(),"color"|"font-size");
+    if value.contains("calc("){let (work,copies)=sizing_math::cost(&value);if budget.work(work).and_then(|_|budget.copy(copies)).is_err(){reset_box(style,parent,&declaration.name,inherited);return true;}}
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
         // The finite background shorthand can inherit an existing single image
         // layer. Charge its URL copy; substitution does not introduce URL syntax.

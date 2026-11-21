@@ -122,7 +122,7 @@ impl Engine<'_> {
                     f64::from(value) * f64::from(if horizontal { rect.width } else { rect.height })
                         / 100.0
                 }
-                Length::Auto => return None,
+                Length::Auto|Length::Calc(_) => return None,
             };
             (value.is_finite() && value.abs() <= f64::from(MAX_HEIGHT)).then_some(value)
         };
