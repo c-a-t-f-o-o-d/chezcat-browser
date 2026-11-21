@@ -116,8 +116,8 @@ fn fetch_headers_retained_failure_is_atomic_and_immutable_guard_is_real() {
             .to_text(),
         "ok"
     );
-    if let Some(Data::List { immutable, .. }) = &mut runtime.objects[id].headers {
-        *immutable = true;
+    if let Some(Data::List { guard, .. }) = &mut runtime.objects[id].headers {
+        *guard = Guard::Immutable;
     }
     assert_eq!(runtime.execute("var called=0,caught=false;try{h.set('x',{toString:function(){called++;return 'new';}});}catch(e){caught=e instanceof TypeError;}if(!caught||called!==1||h.get('x')!=='old')throw 'immutable validates after conversion';'ok';",&mut NoHost).unwrap().to_text(),"ok");
 }

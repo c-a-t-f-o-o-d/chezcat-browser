@@ -546,3 +546,12 @@ impl Runtime {
         self.decode_text_bytes(&mut decoder,bytes,false).map_err(Fault::display)
     }
 }
+
+impl Runtime {
+    /// Fetch Body always decodes UTF-8 (with its BOM), never XHR MIME sniffing.
+    pub(super) fn decode_body_utf8(&mut self,bytes:&[u8])->Result<String,Fault> {
+        self.work(bytes.len())?;
+        let mut decoder=Decoder{encoding:Encoding::Utf8,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0};
+        self.decode_text_bytes(&mut decoder,bytes,false)
+    }
+}

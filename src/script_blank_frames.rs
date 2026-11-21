@@ -545,6 +545,19 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn fetch_response_relevant_realm_clone_binary_results_and_borrowed_promises_are_real() {
+        let source=format!("{CREATE}{}",r#"
+var child=new w.Response('native'),copy=Response.prototype.clone.call(child),count=0;
+if(Object.getPrototypeOf(copy)!==w.Response.prototype||Object.getPrototypeOf(copy.headers)!==w.Headers.prototype||child.headers===copy.headers)throw 'clone relevant realm';
+var p=Response.prototype.arrayBuffer.call(child);if(Object.getPrototypeOf(p)!==Promise.prototype)throw 'callee Promise realm';p.then(function(buffer){if(Object.getPrototypeOf(buffer)!==w.ArrayBuffer.prototype||new w.Uint8Array(buffer)[0]!==110)throw 'response binary relevant realm';count++;});
+copy.text().then(function(text){if(text!=='native')throw 'native copied bytes';count++;});
+"#);
+        let (mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(count!==2)throw 'actual native body results';").errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn fetch_headers_native_values_have_independent_child_realm_roots_and_saved_methods() {
         let source=format!("{CREATE}{}",r#"
 var main=new Headers({x:'main'}),child=new w.Headers({x:'child'}),get=w.Headers.prototype.get;

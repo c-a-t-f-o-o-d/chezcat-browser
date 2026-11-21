@@ -547,6 +547,21 @@ impl Runtime {
         result.map_err(|error| self.display_fault(error))
     }
 
+    /// Native value results use ordinary Promise resolution, including an
+    /// observable then getter and queued thenable assimilation. Fatal resource
+    /// faults retain their original channel.
+    pub(super) fn resolved_native_operation(&mut self, result:Result<Value,Fault>, host:&mut dyn Host)->Result<Value,Fault> {
+        let value=match result {Ok(value)=>value,Err(fault)=>return self.rejected_native_operation(fault)};
+        let marker=self.root_marker();
+        let result=self.push_transient_value(&value).and_then(|()| {
+            let (token,promise)=self.new_native_promise()?;
+            self.finish_async_result(token.object,Ok(value),host)?;
+            Ok(promise)
+        });
+        self.restore_root_marker(marker);
+        result
+    }
+
     /// Promise-returning native operations reject ordinary exceptions. A typed
     /// resource or capability failure must continue through the fatal path.
     pub(super) fn rejected_native_operation(&mut self, fault: Fault) -> Result<Value, Fault> {

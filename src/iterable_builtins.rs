@@ -72,6 +72,7 @@ impl Runtime {
                     | Builtin::Date(super::date::Op::Constructor)
                     | Builtin::Url(super::url_api::Op::Constructor(_))
                     | Builtin::Headers(super::headers_api::Op::Constructor)
+                    | Builtin::Response(super::response_api::Op::Constructor)
                     | Builtin::Rect(super::rect_api::Op::Constructor(_))
                     | Builtin::ImageData(super::image_data_api::Op::Constructor)
                     | Builtin::DomException(super::dom_exception::Op::Constructor)
