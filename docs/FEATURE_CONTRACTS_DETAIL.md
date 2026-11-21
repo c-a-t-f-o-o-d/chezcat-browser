@@ -2167,3 +2167,26 @@ before callback mutation, real vector/text paint, stable editing and anchor
 navigation. Other reflected-property and broader DOM observation routes remain
 explicit subsets; this does not establish live-site initialization.
 See [DOM transient registered observers](https://dom.spec.whatwg.org/#concept-node-add-transient-registered-observers).
+
+
+## Native text-control placeholder reflection
+
+HTMLInputElement and HTMLTextAreaElement define canonical placeholder accessors.
+Supported genuine main and inert elements reflect their actual null-namespace
+attribute, with DOMString conversion, defining-interface brands and real Attr /
+MutationObserver behavior. Hint writes do not change current values, defaults,
+child text, selection or neighboring native editors. Removal restores the empty
+hint. Existing fresh/inert editor-admission boundaries remain explicit.
+
+The original App fixture sets hints through a trusted callback, checks distinct
+textarea hint-line pixels, types actual text, verifies the hint no longer paints
+over that value, preserves a neighboring editor and activates a real anchor.
+Textarea CR/LF/CRLF sequences render as hint line breaks; input hints render on
+one line while raw attribute data stays intact. Retained refusal and Symbol
+conversion leave editor/data/notification state unchanged, with recovery.
+
+This shared increment addresses a connected startup metadata gap; it does not
+establish real-site initialization, complete native textarea creation or claim
+complete editing/form APIs.
+See [textarea placeholder](https://html.spec.whatwg.org/multipage/form-elements.html#attr-textarea-placeholder)
+and [input placeholder](https://html.spec.whatwg.org/multipage/input.html#attr-input-placeholder).

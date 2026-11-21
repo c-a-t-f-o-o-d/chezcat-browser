@@ -520,6 +520,7 @@ impl Bridge<'_> {
         // accepted activation resolves their current raw values.
         let anchor_attribute = self.doc.nodes[node].namespace == crate::html::Namespace::Html
             && tag(self.doc, node) == "a" && matches!(key, "href" | "download");
+        let placeholder_attribute=key=="placeholder"&&self.placeholder_interface(node_handle(node)).is_some();
         let input_attribute = matches!(key,"name"|"value") && (self.native_text_input(node) || self.fresh_text_input(node))
             || matches!(key,"name"|"value") && (self.owned_native_checkbox(node) || self.owned_native_radio(node))
             || key == "checked" && self.input_receiver(node_handle(node));
@@ -539,7 +540,7 @@ impl Bridge<'_> {
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
-            && !inert_attribute_name(key) && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
+            && !inert_attribute_name(key) && !placeholder_attribute && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
             && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }

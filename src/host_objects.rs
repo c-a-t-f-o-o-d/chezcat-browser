@@ -571,6 +571,7 @@ impl Runtime {
             if name == "HTMLIFrameElement" {
                 self.define_node_attribute(prototype,window,"sandbox",super::IFRAME_SANDBOX_GET,Some(super::IFRAME_SANDBOX_SET))?;
             }
+            if matches!(name,"HTMLTextAreaElement"|"HTMLInputElement"){let (get,set)=if name=="HTMLTextAreaElement"{("\0HTMLTextAreaElement.get.placeholder","\0HTMLTextAreaElement.set.placeholder")}else{("\0HTMLInputElement.get.placeholder","\0HTMLInputElement.set.placeholder")};self.define_node_attribute(prototype,window,"placeholder",get,Some(set))?;}
             if name == "HTMLTextAreaElement" {
                 self.define_node_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
             }
