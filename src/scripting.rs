@@ -2891,7 +2891,10 @@ impl Bridge<'_> {
         let clean;
         let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
         let specified = crate::css::declaration_priority(raw).0;
-        let value = if name == "touch-action" {
+        let value = if matches!(name,"visibility"|"pointer-events"){
+            self.state.work(specified.len().saturating_mul(2))?;self.state.copies(specified.len().saturating_mul(2))?;
+            crate::css::specified_interaction_value(name,specified).ok_or("Invalid selected interaction declaration.")?
+        } else if name == "touch-action" {
             self.state.work(specified.len())?;
             crate::css::specified_touch_action(specified).ok_or("Invalid selected touch-action.")?.to_owned()
         } else if name == "opacity" {
@@ -2912,6 +2915,7 @@ impl Bridge<'_> {
         priority: &str,
     ) -> Result<(), String> {
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
+
         if matches!(name, "color" | "background-color") && !value.is_empty() && !crate::css::inline_color_value(value) {
             return Ok(());
         }
@@ -2937,6 +2941,10 @@ impl Bridge<'_> {
                 }
             };
             specified.as_str()
+        } else if matches!(name,"visibility"|"pointer-events")&&!value.is_empty(){
+            if !priority.is_empty()&&!priority.eq_ignore_ascii_case("important"){return Ok(());}
+            self.state.work(value.len().saturating_mul(2))?;self.state.copies(value.len().saturating_mul(2))?;
+            specified=match crate::css::specified_interaction_value(name,value){Some(value)=>value,None=>return Ok(())};specified.as_str()
         } else if name == "animation-timing-function" && !value.is_empty() {
             if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") { return Ok(()); }
             specified = match script_inline_style::normalize_easing(value, self.state, script_inline_style::EasingText::Specified)? { Some(value) => value, None => return Ok(()) };
@@ -3388,7 +3396,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if matches!(property, "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -3727,7 +3735,7 @@ impl Host for Bridge<'_> {
         if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
-            || matches!(property, "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -8346,3 +8354,7 @@ mod structural_selector_tests;
 #[cfg(test)]
 #[path="script_native_focus_selector_tests.rs"]
 mod native_focus_selector_tests;
+
+#[cfg(test)]
+#[path="script_visibility_hit_tests.rs"]
+mod visibility_hit_tests;

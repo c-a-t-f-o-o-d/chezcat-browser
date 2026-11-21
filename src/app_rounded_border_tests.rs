@@ -94,7 +94,7 @@ html,body{margin:0;padding:0;background:#c86432}
 #reference{left:220px;background:#1464dc;border:0}
 .under,.clear{display:block;position:absolute;box-sizing:border-box;top:100px;width:80px;height:40px}
 .under{background:#336699}#under,#clear{left:20px}#under2,#clear2{left:120px}
-.clear{border:4px solid rgba(0,0,0,.2)}#clear{border-radius:8px}#clear2{border-radius:0}
+.clear{pointer-events:none;border:4px solid rgba(0,0,0,.2)}#clear{border-radius:8px}#clear2{border-radius:0}
 </style></head><body><div id=actual class=box></div><div id=equal class=box></div><div id=reference class=box></div>
 <a id=under class=under href=#one></a><a id=under2 class=under href=#two></a><div id=clear class=clear></div><div id=clear2 class=clear></div></body></html>"#);
     let app = fixture.open(640);
@@ -120,7 +120,7 @@ html,body{margin:0;padding:0;background:#c86432}
     assert!(partial, "The invariant must exercise actual partial boundary coverage");
     assert_eq!(pixel(&app, &canvas, 20, 100), 0x29527a);
     assert_eq!(pixel(&app, &canvas, 60, 120), 0x336699);
-    assert_eq!(app.page.link_node_at(60, 120), Some(id(&app, "under")), "No full-box hit occluder may be introduced for a transparent background");
+    assert_eq!(app.page.link_node_at(60, 120), Some(id(&app, "under")), "Pointer-disabled decoration must not introduce a hit occluder");
     assert_eq!(app.page.link_node_at(160, 120), Some(id(&app, "under2")));
 }
 
