@@ -2,6 +2,20 @@
 use super::*;
 
 impl Bridge<'_> {
+    pub(in crate::scripting) fn inert_text_replacement_receiver(&self, object: u32) -> bool {
+        if self.inert_node_type(object) == Some(11) {
+            return true;
+        }
+        !self.template_receiver(object)
+            && match self.inert_import_source(object) {
+                Some(ImportSource::Element(_)) => true,
+                Some(ImportSource::Parsed { node, .. }) => {
+                    node.namespace == crate::html::Namespace::Html
+                        && matches!(node.kind, NodeKind::Element { .. })
+                }
+                _ => false,
+            }
+    }
     pub(in crate::scripting) fn existing_template_content(
         &mut self,
         object: u32,
@@ -85,7 +99,7 @@ impl Bridge<'_> {
         object: u32,
         text: String,
     ) -> Result<(), String> {
-        if !matches!(self.inert_node_type(object), Some(1 | 11)) || self.template_receiver(object) {
+        if !self.inert_text_replacement_receiver(object) {
             return Err("Inert text replacement requires a supported Element or fragment.".into());
         }
         let root = self

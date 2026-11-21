@@ -5488,7 +5488,7 @@ impl Host for Bridge<'_> {
             return self.set_template_html(object, &source);
         }
         if self.inert_interface(object).is_some() {
-            if property=="textContent"&&matches!(self.inert_node_type(object),Some(1|11))&&!self.template_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(&value)?};return self.replace_inert_text_content(object,text);}
+            if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(&value)?};return self.replace_inert_text_content(object,text);}
             if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=self.text(&value)?;return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));

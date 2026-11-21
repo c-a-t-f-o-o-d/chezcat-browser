@@ -2,6 +2,12 @@
 use super::*;
 use crate::javascript::NativeChildListChange;
 
+fn future_main_identity(index: usize) -> Result<u32, String> {
+    if index >= (STYLE_BASE - NODE_BASE) as usize {
+        return Err("Content replacement exceeds native Node identity space.".into());
+    }
+    Ok(node_handle(index))
+}
 impl Bridge<'_> {
     pub(super) fn content_observation_target(
         &mut self,
@@ -14,10 +20,9 @@ impl Bridge<'_> {
         if property == "innerHTML" && self.template_receiver(object) {
             return self.existing_template_content(object);
         }
-        if let Some(kind) = self.inert_node_type(object) {
+        if self.inert_node_type(object).is_some() {
             return Ok((property == "textContent"
-                && matches!(kind, 1 | 11)
-                && !self.template_receiver(object))
+                && self.inert_text_replacement_receiver(object))
             .then_some(object));
         }
         self.state.rebuild(self.doc)?;
@@ -79,12 +84,13 @@ impl Bridge<'_> {
                 added.extend(parsed.nodes[0].children.iter().map(|&node| handles[node]));
             } else {
                 let base = self.doc.nodes.len();
-                added.extend(
-                    parsed.nodes[0]
-                        .children
-                        .iter()
-                        .map(|&node| node_handle(base + node - 1)),
-                );
+                for &node in &parsed.nodes[0].children {
+                    added.push(future_main_identity(
+                        base.checked_add(node)
+                            .and_then(|n| n.checked_sub(1))
+                            .ok_or("Content identity projection overflow.")?,
+                    )?);
+                }
             }
         } else if !text.is_empty() {
             added
@@ -94,7 +100,7 @@ impl Bridge<'_> {
             added.push(if self.inert_node_type(target).is_some() {
                 self.next_inert_text_identity()?
             } else {
-                node_handle(self.doc.nodes.len())
+                future_main_identity(self.doc.nodes.len())?
             });
         }
         let count = if let Some(children) = self.inert_children(target) {

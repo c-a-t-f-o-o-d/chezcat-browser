@@ -931,7 +931,6 @@ impl Bridge<'_> {
         let generated_base = arena.generated.len();
         // Leave immutable raw sources in the inert arena. A separate reserved
         // document slot keeps the Node identity stable across owner changes.
-        let base = self.doc.nodes.len();
         let (handles,parked)=self.template_replacement_handles(fragment,&parsed)?;
         let mut template_links=Vec::new();template_links.try_reserve_exact(nested.len()).map_err(|_|"Cannot reserve nested template indexes.")?;
         let mut nested_roots=Vec::new();nested_roots.try_reserve_exact(parsed.nodes.len()).map_err(|_|"Cannot reserve nested template roots.")?;nested_roots.resize(parsed.nodes.len(),None);

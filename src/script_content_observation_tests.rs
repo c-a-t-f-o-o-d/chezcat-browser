@@ -80,3 +80,25 @@ fn content_observation_template_inert_identity_fallback_and_refusal_are_atomic()
     p.state.retained_limit = retained_limit;
     run(&mut d,&mut f,&mut p,"if(content.firstChild!==first||content.lastChild!==last||obs.takeRecords().length)throw 'template refusal leaked records or nodes';seed.innerHTML='<span>Recovery</span>';var records=obs.takeRecords();if(records.length!==1||records[0].removedNodes[0]!==first||records[0].removedNodes[1]!==last||records[0].addedNodes[0]!==content.firstChild)throw 'template replacement recovery';");
 }
+
+#[test]
+fn content_observation_main_fragment_and_inert_element_keep_guards_and_copy_independence() {
+    let (mut d, mut f, mut p) = fixture();
+    run(
+        &mut d,
+        &mut f,
+        &mut p,
+        r#"
+var owner=document.implementation.createHTMLDocument('text'),element=owner.createElement('div'),old=owner.createTextNode('Old');element.appendChild(old);var obs=new MutationObserver(function(){throw 'drained text replacements';});obs.observe(element,{childList:true});element.textContent='New';var current=element.firstChild,copy=element.cloneNode(true);element.textContent=null;var records=obs.takeRecords();if(records.length!==2||records[0].removedNodes[0]!==old||records[0].addedNodes[0]!==current||records[1].removedNodes[0]!==current||records[1].addedNodes.length||old.parentNode!==null||current.ownerDocument!==owner||copy.textContent!=='New'||element.childNodes.length)throw 'inert Element text replacement';
+var fragment=document.createDocumentFragment(),span=document.createElement('span');fragment.appendChild(span);obs.observe(fragment,{childList:true});fragment.textContent='Fragment';var text=fragment.firstChild;fragment.textContent='';records=obs.takeRecords();if(records.length!==2||records[0].removedNodes[0]!==span||records[0].addedNodes[0]!==text||records[1].removedNodes[0]!==text||records[1].addedNodes.length||text.data!=='Fragment'||text.ownerDocument!==document||fragment.childNodes.length)throw 'main fragment text records';
+var protectedFragment=document.createDocumentFragment(),input=document.createElement('input');input.value='edited';protectedFragment.appendChild(input);obs.observe(protectedFragment,{childList:true});
+"#,
+    );
+    let generation = p.state.dom_commits;
+    let before = d.nodes.len();
+    let out = p.console_eval(&mut d, &mut f, "protectedFragment.textContent='blocked';");
+    assert_eq!(out.errors, 1);
+    assert_eq!(p.state.dom_commits, generation);
+    assert_eq!(d.nodes.len(), before);
+    run(&mut d,&mut f,&mut p,"if(protectedFragment.firstChild!==input||input.value!=='edited'||obs.takeRecords().length)throw 'native-control text retirement guard';");
+}
