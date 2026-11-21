@@ -20,6 +20,7 @@ impl Bridge<'_> {
             // VM guards property access from its current realm, and the call
             // rechecks the incumbent before accessing either document.
             "contains" => self.root_node_receiver(object) || self.frame_contains_node(object).is_some(),
+            "replaceChild" if self.inert_replace_receiver(object) => true,
             "appendChild" if self.template_fragment_receiver(object) => true,
             "appendChild" | "insertBefore" | "removeChild" if self.inert_mutation_receiver(object) => true,
             _ if dom_tree::node_mutation_method(name) => self.node_mutation_receiver(object),
