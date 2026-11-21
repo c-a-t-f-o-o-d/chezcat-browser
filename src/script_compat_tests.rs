@@ -1256,7 +1256,8 @@ var second=new MutationObserver(function(records){
 var types=0;
 try {first.observe(text,{characterData:false,characterDataOldValue:true});} catch(e){if(e instanceof TypeError)types++;}
 try {first.observe(navigator,{characterData:true});} catch(e){if(e instanceof TypeError)types++;}
-try {first.observe(document.implementation.createHTMLDocument('inert'),{attributes:true});} catch(e){if(e.name==='NotSupportedError')types++;}
+first.observe(document.implementation.createHTMLDocument('inert'),{attributes:true});
+try {first.observe({},{attributes:true});} catch(e){if(e instanceof TypeError)types++;}
 try {MutationObserver.prototype.takeRecords.call({});} catch(e){if(e instanceof TypeError)types++;}
 try {new MutationRecord();} catch(e){if(e instanceof TypeError)types++;}
 if(types!==5)throw 'validation';
