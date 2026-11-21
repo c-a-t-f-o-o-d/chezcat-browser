@@ -2432,3 +2432,44 @@ lifecycle remains bounded by the existing supported mutation paths.
 An original RED case reproduced the missing records on the old early return.
 Focused observer/Range/refusal cases and an actual App trusted-keyboard/editor/
 focus-style/link case qualify the correction. This is not actual-site acceptance.
+
+## SVG CSS geometry core and actual inline viewport
+
+The original SVG image renderer handles x/y/cx/cy/r/rx/ry/width/height where those
+properties apply to the supported element. It combines presentation attributes,
+its supported embedded selectors and inline declarations with source/specificity
+and important priority. Inapplicable geometry declarations do not disable path
+painting. Geometry is not inherited by default; explicit inheritance and initial/
+unset values are separate. Percentages use the appropriate SVG viewport axis or
+normalized diagonal, and absolute plus em/rem values use computed font context.
+Auto radii resolve from their counterpart; negative geometry follows the SVG2
+initial-value handling rather than becoming a fabricated resource failure.
+
+Numeric token syntax is separate from the existing coordinate refusal. Source,
+node, segment, coordinate, transform, work/layer and cancellation guards remain;
+the negative-radius fixture now checks transparent output, with a distinct actual
+coordinate-refusal witness. Unimplemented expressions, transform/d geometry and
+wider units/rollback retain the renderer's finite boundaries. No limit increase,
+SVG library, remote resource loader or page stylesheet rewrite was added.
+
+App source snapshots retain separate intrinsic dimensions and rendered viewports.
+After real shared layout, a changed inline SVG viewport is rasterized using that
+used box and viewBox/preserveAspectRatio mapping. Its bitmap size cannot become
+the next natural size; media resizing back to auto geometry uses the intrinsic
+cache. Source and viewport invalidation share the existing render deadline and
+decoded-image allowance, and failed replacement discards stale paint. Root sizing
+from supported external HTML CSS participates through actual layout. External
+SVG descendant geometry and variables still require the shared computed cascade
+bridge and are not claimed complete by this increment.
+
+SVGElement.prototype owns its CSSInlineStyle getter/forwarding setter and distinct
+native functions, keeping SameObject style identity and ordinary own shadows.
+Saved SVG/HTML accessors enforce their own interface receiver brands before value
+conversion; unrepresented inert/child stores remain guarded. The supported CSSOM
+property subset and passive/local SVG paint-server policies remain explicit.
+
+An original App reduction reproduced aspect distortion before used-viewport
+rasterization. It now checks real letterbox pixels, media auto-size restoration,
+CSSOM resize repaint, preserved editing and native link activation. Decoder cases
+cover geometry/cascade/unit/priority and guarded cancellation behavior. These are
+finite platform/fixture results, not a completed actual shell or SVG conformance.
