@@ -8501,3 +8501,7 @@ mod node_base_uri_tests;
 
 #[path="script_node_base_uri.rs"]
 mod node_base_uri;
+
+#[cfg(test)]
+#[path="script_custom_host_content_tests.rs"]
+mod custom_host_content_tests;
