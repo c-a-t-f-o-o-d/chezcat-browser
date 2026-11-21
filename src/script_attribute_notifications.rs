@@ -84,7 +84,7 @@ impl Bridge<'_> {
         object: u32,
         property: &str,
     ) -> Result<Option<(u32, NativeAttributeChange)>, String> {
-        if script_inline_style::handle(object) && css_name(property).is_ok() {
+        if script_inline_style::handle(object) && (property=="cssText"||css_name(property).is_ok()) {
             return self.style_attribute_change(object);
         }
         if self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent") {
@@ -109,6 +109,7 @@ impl Bridge<'_> {
         let html = self.doc.nodes[node].namespace == crate::html::Namespace::Html;
         let svg = self.doc.nodes[node].namespace == crate::html::Namespace::Svg;
         let key = match property {
+            "style" if html => "style",
             "id" if html || svg => "id",
             "className" if html => "class",
             "classList" if self.class_list_element_receiver(object) => "class",

@@ -53,7 +53,7 @@ p.style.backgroundImage='URL("Pixels/MiXeD.PPM?Token=Keep;Part=Two!Bang")';
 p.style.backgroundRepeat='no-repeat';p.style.backgroundPosition='right bottom';p.style.backgroundSize='cover';
 if(p.style.backgroundImage!=='URL("Pixels/MiXeD.PPM?Token=Keep;Part=Two!Bang")'||p.style.getPropertyValue('background-image')!==p.style.backgroundImage)throw Error('raw URL identity');
 if(p.style.backgroundRepeat!=='no-repeat'||p.style.backgroundPosition!=='right bottom'||p.style.backgroundSize!=='cover')throw Error('implemented longhand reflection');
-if(p.getAttributeNode('style')!==styleAttr||!('backgroundImage' in p.style)||!('background-size' in p.style)||'madeUpProperty' in p.style||'cssText' in p.style)throw Error('identity/property scope');
+if(p.getAttributeNode('style')!==styleAttr||!('backgroundImage' in p.style)||!('background-size' in p.style)||'madeUpProperty' in p.style||!('cssText' in p.style))throw Error('identity/property scope');
 "#,
     );
     let node = target(&doc);
@@ -172,7 +172,7 @@ var p=document.getElementById('target');p.style.backgroundImage='url("Kept/Origi
         r#"p.style.backgroundImage='url("Escaped\\Name.PPM")';"#,
         r#"p.setAttribute('style','background-image:url(Valid.PPM);not-supported-property:1');"#,
         r#"p.style.setProperty('made-up-property','red');"#,
-        r#"p.style.cssText='background-image:url(Unexpected.PPM)';"#,
+        r#"p.style.cssText='background-image:url(First.PPM),url(Second.PPM)';"#,
     ] {
         let outcome = page.console_eval(&mut doc, &mut forms, source);
         assert_eq!(

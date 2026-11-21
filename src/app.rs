@@ -6113,3 +6113,7 @@ mod sizing_math_tests;
 #[cfg(test)]
 #[path="app_viewport_sizing_tests.rs"]
 mod viewport_sizing_tests;
+
+#[cfg(test)]
+#[path="app_css_text_tests.rs"]
+mod css_text_tests;
