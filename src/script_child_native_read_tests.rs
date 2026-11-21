@@ -2,10 +2,13 @@
 use super::*;
 
 fn start(source:&str)->(Document,Forms,Page) {
+    start_with(source,crate::javascript::limits::BROWSER)
+}
+fn start_with(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page) {
     let mut doc=crate::html::parse("<html><head></head><body><p>Original caller-read fixture</p></body></html>");
     doc.scripting_enabled=true;
     let mut forms=Forms::new(&doc);
-    let mut page=Page::for_test();
+    let mut page=Page::with_limits(limits);
     page.set_location(&location("https://example.test/parent/page"));
     let source=format!("var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;{source}");
     let outcome=page.start(&mut doc,&mut forms,&[Script {node:0,label:"Original caller-aware native reads".into(),source}]);
@@ -155,7 +158,7 @@ var unsupported=w.Function('return window.frames;'),own=w.Function('return windo
 
 #[test]
 fn child_native_explicit_host_read_keeps_internal_default_and_single_work_charge() {
-    let(mut doc,mut forms,mut page)=start("");
+    let(mut doc,mut forms,mut page)=start_with("",crate::javascript::limits::CAPACITY_REGRESSION);
     diverge(&mut page);
     let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
     bridge.state.host_work=10;

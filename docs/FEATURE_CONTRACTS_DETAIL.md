@@ -2514,3 +2514,34 @@ CSS math, rollback, wider units and full SVG/font/viewport semantics are unfinis
 No author DOM/style attributes are rewritten. Focused computation, renderer-context and connected App/refusal
 checks and the selected affected CSS/SVG cases do not establish actual-site shell
 readiness or complete SVG conformance.
+
+## Native Error console provenance and saved namespace operations
+
+The implemented console log/info/warn/error methods are real cached function
+values in the native holder's owner realm. Saved, unbound, call/apply and bound
+uses retain that owner and its origin validation. Namespace calls ignore their
+JavaScript this value; interface method receiver checks remain in place.
+
+An explicit native printer boundary receives bounded text, with no access to the
+interpreter's object arena. The runtime describes genuine Error identities using
+its private native-origin record when retained, including original fault position
+and source excerpt. Constructed Errors can expose an existing own string message;
+author accessors, ordinary object fields, proxies and coercion hooks are never run
+for inspection. Unavailable or inaccessible details remain opaque. Original Error
+identity, author descriptors and exception/rethrow behavior are unchanged.
+
+The formatter counts bounded output, reserves it under the current copy budget,
+then renders without cloning an unbounded script string. Admission failure emits
+no console record; ordinary native calls keep their original argument values.
+The existing diagnostic/log retention and native-origin sampling bounds remain.
+An original App fixture combines a trusted native event, intrinsic Promise job,
+original native fault, console record and real text/background update while
+preserving edited input and native link activation.
+
+This finite printer does not implement the full console Formatter, arbitrary
+object inspection, all namespace descriptors or automatic global ErrorEvent
+reporting. It cannot infer that an earlier opaque site object was a native Error,
+identify an unknown deployed binding, or establish actual-site success without a
+source-bound product checkpoint. The relevant specifications are the
+[Console printer](https://console.spec.whatwg.org/#printer) and
+[Web IDL namespaces](https://webidl.spec.whatwg.org/#namespace-object).
