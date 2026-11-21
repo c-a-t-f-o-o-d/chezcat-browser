@@ -19,6 +19,19 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T02:46:27Z** used clean
+[`88e5509`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/88e5509688dbe691d2770e69080df9e3e0a57b91),
+including renderer-backed computed font size. JavaScript was enabled and images
+off; saved HTML reports `LOGGED_IN=false`. It still renders a skeleton without
+usable header/guide/search. The first original error is missing `AnimationEvent`
+at 39130:80 in animation-handler type metadata; 5966:53 is the rethrow. There
+were 43 script executions (42 successful), 43 listeners and one error. The earlier
+computed-font-size refusal is absent in this distinct live response cohort;
+external JavaScript body hashes remain unavailable. Existing security/resource
+guards remain active. Query/results, watch/Back and playback are unproved.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T02:37:21Z** used clean
 [`44ef2a1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/44ef2a1bd8e5df0a5db28323897938dfcf2aabc9),
 including genuine anchor interface identity. JavaScript was enabled and images

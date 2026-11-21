@@ -6022,3 +6022,7 @@ mod range_tests;
 #[cfg(test)]
 #[path="app_xhr_tests.rs"]
 mod xhr_tests;
+
+#[cfg(test)]
+#[path="app_animation_event_tests.rs"]
+mod animation_event_tests;
