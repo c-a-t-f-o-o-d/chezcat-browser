@@ -4,6 +4,10 @@ use super::function_reachability::Edge;
 use super::*;
 use std::collections::HashMap;
 
+#[path="mutation_transient.rs"]
+mod transient;
+use transient::{Transient,TransientPlan};
+
 const MAX_OBSERVERS: usize = 4_096;
 const MAX_REGISTRATIONS: usize = 65_536;
 const MAX_PENDING_RECORDS: usize = 65_536;
@@ -38,6 +42,8 @@ pub(super) struct Arena {
     registrations: usize,
     child_list_registrations: usize,
     attribute_registrations: usize,
+    subtree_registrations: usize,
+    transients: Vec<Transient>,
     pending_records: usize,
     queued: bool,
 }
@@ -98,6 +104,7 @@ pub(super) struct PreparedChange {
     entries: Vec<(usize, Record)>,
     retained: usize,
     new_job: bool,
+    transient: Option<TransientPlan>,
 }
 
 impl Arena {
@@ -205,12 +212,14 @@ impl Runtime {
                 Ok(Value::Undefined)
             }
             Op::Disconnect => {
+                self.clear_transient_observer(id)?;
                 for target in std::mem::take(&mut self.mutations.observers.get_mut(&id).unwrap().targets) {
                     let registrations = self.mutations.targets.get_mut(&target).unwrap();
                     registrations.retain(|registration| {
                         if registration.observer != id { return true; }
                         self.mutations.child_list_registrations -= usize::from(registration.child_list);
                         self.mutations.attribute_registrations -= usize::from(registration.attributes);
+                        self.mutations.subtree_registrations -= usize::from(registration.subtree);
                         self.value_bytes -= registration.retained_bytes();
                         false
                     });
@@ -269,6 +278,7 @@ impl Runtime {
             old_value: old.truthy(), attribute_old_value: attribute_old.truthy(), attribute_filter,
         };
         let bytes = requested.retained_bytes();
+        self.work(self.mutations.transients.len())?;
         if let Some(registration) = self.mutations.targets.get_mut(target)
             .and_then(|registrations| registrations.iter_mut().find(|registration| registration.observer == id))
         {
@@ -280,7 +290,10 @@ impl Runtime {
             self.mutations.child_list_registrations += usize::from(children);
             self.mutations.attribute_registrations -= usize::from(registration.attributes);
             self.mutations.attribute_registrations += usize::from(attributes);
+            self.mutations.subtree_registrations -= usize::from(registration.subtree);
+            self.mutations.subtree_registrations += usize::from(subtree);
             *registration = requested;
+            self.clear_transient_source(id,*target);
             self.value_bytes = retained;
             return Ok(());
         }
@@ -311,6 +324,7 @@ impl Runtime {
         self.mutations.registrations += 1;
         self.mutations.child_list_registrations += usize::from(children);
         self.mutations.attribute_registrations += usize::from(attributes);
+        self.mutations.subtree_registrations += usize::from(subtree);
         self.value_bytes += bytes;
         Ok(())
     }
@@ -360,31 +374,18 @@ impl Runtime {
         let mut interested = BTreeMap::new();
         let mut current = Some(target);
         while let Some(node) = current {
-            let registrations = self.mutations.targets.get(&node);
-            let count = registrations.map_or(0, Vec::len);
-            let filter_work = if let Some(change) = attribute.filter(|change| change.namespace.is_none()) {
-                registrations.into_iter().flatten().filter(|registration| node == target || registration.subtree)
-                    .filter_map(|registration| registration.attribute_filter.as_ref())
-                    .map(|filter| filter.len().saturating_mul(change.local_name.len().saturating_add(1)))
-                    .fold(0usize, usize::saturating_add)
-            } else { 0 };
-            self.work(count.saturating_add(filter_work).saturating_add(1))?;
-            if let Some(registrations) = self.mutations.targets.get(&node) {
-                for registration in registrations {
-                    if node != target && !registration.subtree { continue; }
-                    let (matches, old) = if let Some(change) = attribute {
-                        let passes_filter = registration.attribute_filter.as_ref().is_none_or(|filter|
-                            change.namespace.is_none() && filter.iter().any(|name| name == &change.local_name));
-                        (registration.attributes && passes_filter, registration.attribute_old_value)
-                    } else if child_list {
-                        (registration.child_list, false)
-                    } else {
-                        (registration.character_data, registration.old_value)
-                    };
-                    if matches {
-                        *interested.entry(registration.observer).or_insert(false) |= old;
-                    }
-                }
+            let count=self.mutations.registrations_at(node).count();
+            let filter_work=if let Some(change)=attribute.filter(|change|change.namespace.is_none()){
+                self.mutations.registrations_at(node).filter(|reg|node==target||reg.subtree).filter_map(|reg|reg.attribute_filter.as_ref()).map(|filter|filter.len().saturating_mul(change.local_name.len().saturating_add(1))).fold(0usize,usize::saturating_add)
+            }else{0};
+            self.work(count.saturating_add(filter_work).saturating_add(self.mutations.transient_lookup_work(node)).saturating_add(1))?;
+            for registration in self.mutations.registrations_at(node){
+                if node!=target&&!registration.subtree{continue;}
+                let (matches,old)=if let Some(change)=attribute{
+                    let passes=registration.attribute_filter.as_ref().is_none_or(|filter|change.namespace.is_none()&&filter.iter().any(|name|name==&change.local_name));
+                    (registration.attributes&&passes,registration.attribute_old_value)
+                }else if child_list{(registration.child_list,false)}else{(registration.character_data,registration.old_value)};
+                if matches{*interested.entry(registration.observer).or_insert(false)|=old;}
             }
             current = host.mutation_observation_parent(node);
         }
@@ -414,7 +415,7 @@ impl Runtime {
     pub(super) fn prepare_child_list_write(&mut self, target: u32, method: &str, args: &[Value], host: &mut dyn Host)
         -> Result<Option<PreparedChange>, Fault>
     {
-        if self.mutations.child_list_registrations == 0 { return Ok(None); }
+        if !self.mutations.observes_tree_mutations() { return Ok(None); }
         let Some(generation) = host.mutation_tree_generation() else { return Ok(None) };
         let changes = host.mutation_child_list_changes(target, method, args).map_err(Fault::new)?;
         self.prepare_child_list_changes(target,generation,changes,host)
@@ -422,6 +423,7 @@ impl Runtime {
 
     fn prepare_child_list_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         if changes.is_empty() { return Ok(None); }
+        let transient=self.prepare_transient_changes(&changes,host)?;
         let mut entries = Vec::new();
         for change in changes {
             let observers = self.matching_observers(change.target, true, None, host)?;
@@ -434,7 +436,7 @@ impl Runtime {
                 }));
             }
         }
-        self.prepare_mutation_records(target, generation, entries)
+        self.prepare_mutation_effects(target,generation,entries,transient)
     }
 
     pub(super) fn prepare_setter_observation(&mut self,handle:u32,name:&str,value:&Value,reflected:Option<&str>,host:&mut dyn Host)->Result<(Option<PreparedChange>,bool),Fault>{
@@ -444,9 +446,9 @@ impl Runtime {
                 if let Some((target,change))=host.mutation_attribute_setter_change(handle,name).map_err(Fault::new)?{return self.prepare_attribute_change(target,generation,change,host).map(|pending|(pending,true));}
             }
         }
-        if self.mutations.child_list_registrations!=0{
+        if self.mutations.observes_tree_mutations(){
             if let Some(target)=host.mutation_content_target(handle,name).map_err(Fault::new)?{
-                if !self.matching_observers(target,true,None,host)?.is_empty(){
+                if self.has_subtree_sources(target,host)?||!self.matching_observers(target,true,None,host)?.is_empty(){
                     if let Some(generation)=host.mutation_tree_generation(){
                         let changes=host.mutation_content_changes(handle,name,value).map_err(Fault::new)?;
                         return self.prepare_child_list_changes(target,generation,changes,host).map(|pending|(pending,true));
@@ -497,12 +499,15 @@ impl Runtime {
     fn prepare_mutation_records(&mut self, target: u32, generation: u64, entries: Vec<(usize, Record)>)
         -> Result<Option<PreparedChange>, Fault>
     {
-        if entries.is_empty() { return Ok(None); }
+        self.prepare_mutation_effects(target,generation,entries,None)
+    }
+    fn prepare_mutation_effects(&mut self,target:u32,generation:u64,entries:Vec<(usize,Record)>,transient:Option<TransientPlan>)->Result<Option<PreparedChange>,Fault>{
+        if entries.is_empty()&&transient.is_none(){return Ok(None);}
         if self.mutations.pending_records.saturating_add(entries.len()) > MAX_PENDING_RECORDS {
             return Err(Fault::new("MutationObserver pending-record limit reached."));
         }
         let mut counts = BTreeMap::new();
-        let mut retained = 0usize;
+        let mut retained = transient.as_ref().map_or(0,TransientPlan::retained_bytes);
         for (observer, record) in &entries {
             *counts.entry(*observer).or_insert(0) += 1;
             retained = retained.saturating_add(record.retained_bytes());
@@ -522,7 +527,7 @@ impl Runtime {
                 return Err(error);
             }
         }
-        Ok(Some(PreparedChange { target, generation, entries, retained, new_job }))
+        Ok(Some(PreparedChange { target, generation, entries, retained, new_job, transient }))
     }
 
     pub(super) fn finish_character_data_write(
@@ -544,6 +549,7 @@ impl Runtime {
 
     fn finish_mutation_records(&mut self, pending: PreparedChange, committed: bool) -> Result<(), Fault> {
         if committed {
+            if let Some(transient)=pending.transient{self.commit_transient_changes(transient);}
             self.mutations.queued = true;
             self.mutations.pending_records += pending.entries.len();
             for (id, record) in pending.entries {
@@ -566,6 +572,7 @@ impl Runtime {
     }
 
     pub(super) fn cancel_mutation_observers(&mut self) {
+        self.mutations.transients.clear();
         self.mutations.queued = false;
         self.mutations.pending_records = 0;
         for observer in self.mutations.observers.values_mut() {
@@ -638,6 +645,7 @@ impl Runtime {
         let batch: Vec<_> = self.mutations.observers.iter_mut()
             .filter_map(|(&id, observer)| std::mem::take(&mut observer.scheduled).then_some(id)).collect();
         for id in batch {
+            self.clear_transient_observer(id)?;
             let observer = &self.mutations.observers[&id];
             if observer.pending.is_empty() { continue; }
             let callback = observer.callback.clone();
