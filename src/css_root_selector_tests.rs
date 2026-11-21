@@ -45,7 +45,7 @@ fn css_root_specificity_groups_negation_and_combinators_share_the_real_cascade()
         "<html id=root class=theme><head><style>",
         ":root{color:#112233;background:#aabbcc}html{color:#445566}.theme{background:#334455}",
         ":root,[data-bs-theme=light]{--ink:#123456}",
-        ":root,:hover{color:red;--ink:red}",
+        ":root,:active{color:red;--ink:red}",
         ":root > body > .target:not(:root){color:var(--ink)}",
         "</style></head><body id=body><div id=target class=target>Original</div></body></html>"
     ));
@@ -54,12 +54,14 @@ fn css_root_specificity_groups_negation_and_combinators_share_the_real_cascade()
     assert_eq!(styles[root].color, 0x112233, "Root pseudo-class outranks a later type selector");
     assert_eq!(styles[root].background, Some(0x334455), "A later class ties root's specificity");
     assert_eq!(styles[id(&doc, "target")].color, 0x123456, "Grouped theme variables reach an ordinary descendant through negation/combinators");
-    for source in [":root", "html:root", ":root,[data-bs-theme=light]", ":not(:root)", ":not(:not(:root))"] {
+    for source in [":root,:hover", ":not(:root,:hover)", ":root", "html:root", ":root,[data-bs-theme=light]", ":not(:root)", ":not(:not(:root))"] {
         assert!(valid_query_selector(source), "{source}");
     }
-    for source in [":root()", "::root", ":root,:hover", ":not(:root,:hover)", ":root >"] {
+    for source in [":root()", "::root", ":root,:active", ":not(:root,:active)", ":root >"] {
         assert!(!valid_query_selector(source), "{source}");
     }
+    assert_eq!(query(&doc, ":root,:hover", &[root,id(&doc,"body"),id(&doc,"target")]),vec![root]);
+    assert_eq!(query(&doc, ":not(:root,:hover)", &[root,id(&doc,"body"),id(&doc,"target")]),vec![id(&doc,"body"),id(&doc,"target")]);
     assert_eq!(query(&doc, ":not(:not(:root))", &[root, id(&doc, "body"), id(&doc, "target")]), vec![root]);
 }
 

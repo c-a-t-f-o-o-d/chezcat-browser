@@ -13,7 +13,7 @@ fn selector_negation_dom_invalid_nested_member_keeps_query_and_native_state_atom
     let count=page.state.node_lists.len();let refs=page.state.node_list_references;let nodes=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;
     let outcome=page.console_eval(&mut doc,&mut forms,r#"
 var refused=0;
-for(var selector of ['.safe,.target:not(.missing,:hover)','.safe,.target:not(:not(.missing,:hover))','.safe,.target:not(::before)']){
+for(var selector of ['.safe,.target:not(.missing,:active)','.safe,.target:not(:not(.missing,:active))','.safe,.target:not(::before)']){
  try{document.querySelectorAll(selector);throw 'invalid list published a partial match';}catch(error){if(error.name!=='SyntaxError')throw error;refused++;}
 }
 if(refused!==3||saved.length!==2||saved[0]!==safe||saved[1]!==target||document.getElementById('neighbor').value!=='edited neighbor'||document.getElementById('neighbor').defaultValue!=='original')throw 'invalid list changed saved state';
