@@ -3008,8 +3008,13 @@ impl Bridge<'_> {
             || self.inert_children(object).is_some()
     }
 
+    fn node_metadata_property(&self, object:u32, property:&str)->bool {
+        matches!(property,"ownerDocument"|"isConnected") && self.text_content_receiver(object)
+    }
+
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if self.node_metadata_property(object,property) {return true;}
         if self.aria_reflection_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
@@ -3283,6 +3288,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.node_metadata_property(object,property) {return false;}
         if self.aria_reflection_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
@@ -4428,6 +4434,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object) && parent_children::operation(method).is_some() {
             return self.parent_node_receiver(receiver);
+        }
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected") {
+            return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
             return self.node_traversal_receiver(receiver);

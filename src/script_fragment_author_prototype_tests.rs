@@ -69,3 +69,88 @@ for(var getter of [owner.get,connected.get]){var caught=0;try{getter.call({});}c
 "#,
     );
 }
+
+#[test]
+fn fragment_author_prototype_invalid_chains_and_other_native_targets_stay_guarded() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        r#"
+var fragment=document.createDocumentFragment(),P=Object.create(DocumentFragment.prototype),traps=0,proxy=new Proxy(P,{getPrototypeOf:function(){traps++;return DocumentFragment.prototype;}});Object.setPrototypeOf(fragment,P);var rejected=0;
+for(var invalid of [Object.prototype,Array.prototype,null,proxy,Object.create(proxy)]){try{Object.setPrototypeOf(fragment,invalid);}catch(e){if(e instanceof TypeError)rejected++;else throw e;}}
+if(rejected!==5||traps!==0||Object.getPrototypeOf(fragment)!==P||fragment.childNodes.length||typeof ShadowRoot!=='undefined')throw 'real native anchor guard';
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var list=document.body.childNodes,text=document.createTextNode('guard');
+"#,
+    );
+    for receiver in ["document", "frame", "list", "text"] {
+        let out = page.console_eval(
+            &mut doc,
+            &mut forms,
+            &format!("Object.setPrototypeOf({receiver},P);"),
+        );
+        assert_eq!(out.errors, 1, "{receiver}: {}", page.report());
+        assert!(page
+            .report()
+            .contains("Native host object prototypes cannot be changed"));
+    }
+    run(&mut doc,&mut forms,&mut page,"if(Object.getPrototypeOf(fragment)!==P||text.data!=='guard'||frame.contentDocument.body.ownerDocument!==frame.contentDocument)throw 'protected targets unchanged';");
+}
+
+#[test]
+fn fragment_author_prototype_metadata_attr_child_getters_and_foreign_saved_operations_validate_owner(
+) {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        r#"
+var owner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get,connected=Object.getOwnPropertyDescriptor(Node.prototype,'isConnected').get,attr=document.createAttribute('data-original');if(owner.call(attr)!==document||connected.call(attr))throw 'real Attr Node metadata';
+var fragment=document.createDocumentFragment(),hits=0,state={},P=Object.create(DocumentFragment.prototype,{binding:{get:function(){hits++;return state;}}});Object.setPrototypeOf(fragment,P);
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,d=frame.contentDocument,b=d.body;if(owner.call(d)!==null||owner.call(b)!==d||!connected.call(d)||!connected.call(b))throw 'real read-only child metadata';
+var read=w.Function('node','return node.binding;'),set=w.Function('node','proto','return Object.setPrototypeOf(node,proto);'),native=w.Function('getter','node','return getter.call(node);');if(read(fragment)!==state||hits!==1||set(fragment,P)!==fragment||native(owner,fragment)!==document)throw 'same origin saved operations';
+"#,
+    );
+    page.set_location(
+        &crate::navigation::address(
+            "https://other-fragment-prototype.test/",
+            &crate::navigation::Location::home(),
+        )
+        .unwrap(),
+    );
+    for source in [
+        "read(fragment);",
+        "set(fragment,P);",
+        "native(owner,fragment);",
+        "owner.call(b);",
+    ] {
+        let out = page.console_eval(&mut doc, &mut forms, source);
+        assert_eq!(out.errors, 1, "{source}: {}", page.report());
+        assert!(page.report().contains("origin") || page.report().contains("Security"));
+    }
+    run(&mut doc,&mut forms,&mut page,"if(hits!==1||fragment.ownerDocument!==document||fragment.isConnected||Object.getPrototypeOf(fragment)!==P)throw 'foreign author effects';");
+}
+
+#[test]
+fn fragment_author_prototype_metadata_readonly_own_shadow_delete_and_quota_refusal() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        r#"
+var fragment=document.createDocumentFragment(),P=Object.create(DocumentFragment.prototype);Object.setPrototypeOf(fragment,P);var owner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument'),connected=Object.getOwnPropertyDescriptor(Node.prototype,'isConnected'),effects=0,bad={toString:function(){effects++;throw 'coerced';}};
+fragment.ownerDocument=bad;fragment.isConnected=bad;if(effects||fragment.ownerDocument!==document||fragment.isConnected||Object.hasOwn(fragment,'ownerDocument'))throw 'readonly Node metadata';var rejected=0;try{(function(){'use strict';fragment.isConnected=bad;})();}catch(e){if(e instanceof TypeError)rejected++;else throw e;}if(rejected!==1||effects)throw 'strict readonly';
+Object.defineProperty(fragment,'isConnected',{value:true,configurable:true});if(!fragment.isConnected||connected.get.call(fragment))throw 'ordinary shadow versus native';delete fragment.isConnected;if(fragment.isConnected)throw 'ordinary deletion';delete Node.prototype.ownerDocument;if(fragment.ownerDocument!==undefined||owner.get.call(fragment)!==document)throw 'deleted native getter fallback';Object.defineProperty(Node.prototype,'ownerDocument',owner);
+"#,
+    );
+    let commits = page.state.dom_commits;
+    let limit = page.runtime.event_property_allowance_for_test(0);
+    let out = page.console_eval(&mut doc, &mut forms, "fragment.unpublishedState=17;");
+    page.runtime.event_property_allowance_for_test(limit);
+    assert_eq!(out.errors, 1, "{}", page.report());
+    assert_eq!(page.state.dom_commits, commits);
+    run(&mut doc,&mut forms,&mut page,"if(Object.hasOwn(fragment,'unpublishedState')||Object.getPrototypeOf(fragment)!==P||fragment.ownerDocument!==document)throw 'failed property publication';fragment.recoveredState=37;if(fragment.recoveredState!==37)throw 'next job recovery';");
+}
