@@ -8469,3 +8469,7 @@ mod character_data_properties_tests;
 #[cfg(test)]
 #[path="script_svg_author_properties_tests.rs"]
 mod svg_author_properties_tests;
+
+#[cfg(test)]
+#[path="script_fragment_author_prototype_tests.rs"]
+mod fragment_author_prototype_tests;
