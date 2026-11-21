@@ -17,6 +17,7 @@ impl Bridge<'_> {
         if !matches!(method, "appendChild" | "insertBefore" | "removeChild" | "replaceChild") {
             return Ok(Vec::new());
         }
+        if method=="replaceChild"&&self.inert_replace_receiver(receiver){return self.inert_replace_changes(receiver,args);}
         if self.inert_mutation_receiver(receiver){return self.inert_child_list_change_plan(receiver,method,args);}
         self.state.rebuild(self.doc)?;
         let Some(parent) = node_index(receiver).filter(|&node| self.dom_accessible(node)) else {

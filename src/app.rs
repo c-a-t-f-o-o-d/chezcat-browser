@@ -6191,3 +6191,7 @@ mod html_reflector_tests;
 #[cfg(test)]
 #[path="app_aria_reflection_tests.rs"]
 mod aria_reflection_tests;
+
+#[cfg(test)]
+#[path="app_inert_replace_tests.rs"]
+mod inert_replace_tests;

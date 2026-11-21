@@ -381,12 +381,16 @@ impl Bridge<'_> {
         }
     }
 
-    fn parked_template_source(&self, handle: u32) -> Option<(&InertNode, &GeneratedNode, usize)> {
-        let index = node_index(handle)?;
-        let arena = &self.state.inert_documents;
-        let node = arena.adopted.get(&handle)?;
-        let Kind::Parsed { source: ParsedSource::Generated(source), .. } = node.kind else { return None; };
-        Some((node, arena.generated.get(source)?, index))
+    fn parked_template_source(&self, handle:u32)->Option<(&InertNode,ParsedSource,usize)> {
+        let index=node_index(handle)?;let arena=&self.state.inert_documents;
+        let node=arena.adopted.get(&handle)?;
+        let Kind::Parsed{source,..}=node.kind else{return None;};
+        match source {
+            ParsedSource::Loaded(original) if original==index && self.doc.nodes.get(original).is_some()=>{},
+            ParsedSource::Generated(source) if arena.generated.get(source).is_some()=>{},
+            _=>return None,
+        }
+        Some((node,source,index))
     }
 
     /// Promote the measured safe HTML subset from template markup. The
@@ -433,8 +437,23 @@ impl Bridge<'_> {
                 .ok_or("Inert fragment contains unsupported active markup.")?;
             released = inert.children.capacity().checked_mul(size_of::<u32>())
                 .and_then(|bytes| released.checked_add(bytes)).ok_or("Promoted inert child-link refund overflow.")?;
-            let raw = Rc::clone(&source.node);
-            let unsafe_nonce = source.unsafe_nonce;
+            // The reserved main slot can still own its original leaf payload.
+            // Promotion replaces that slot, so refund exactly its dropped data
+            // whether the current inert source is loaded or generated.
+            let previous=&self.doc.nodes[index];
+            let mut previous_bytes=node_bytes(previous).checked_add(child_link_bytes(&previous.children)).ok_or("Promotion prior slot storage overflow.")?;
+            if let NodeKind::Element{tag,href,..}=&previous.kind {previous_bytes=previous_bytes.checked_add(tag.capacity()).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::capacity))).ok_or("Promotion prior element storage overflow.")?;}
+            released=released.checked_add(previous_bytes).ok_or("Promotion prior slot refund overflow.")?;
+            let (raw,unsafe_nonce,prepaid,loaded)=match source {
+                ParsedSource::Generated(source)=>(Rc::clone(&self.state.inert_documents.generated[source].node),self.state.inert_documents.generated[source].unsafe_nonce,0,false),
+                ParsedSource::Loaded(source)=>{
+                    let original=&self.doc.nodes[source];let mut copied=copied_node_bytes(original);
+                    if let NodeKind::Element{tag,href,..}=&original.kind {copied=copied.checked_add(tag.len()).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::len))).ok_or("Promotion loaded payload overflow.")?;}
+                    self.state.copies(copied)?;
+                    let original=&self.doc.nodes[source];
+                    (Rc::new(Node{kind:script_clone_node::copy_node_kind(&original.kind)?,namespace:original.namespace,children:Vec::new()}),self.doc.nonce_unsafe_nodes.contains(&source),copied,true)
+                },
+            };
             let mut bytes = copied_node_bytes(&raw);
             if let NodeKind::Element { tag, href, attrs, id } = &raw.kind {
                 if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
@@ -455,7 +474,7 @@ impl Bridge<'_> {
             let children = inert.children.len();
             bytes = bytes.saturating_add(children.saturating_mul(size_of::<usize>()));
             self.state.work(children)?;
-            self.state.copies(bytes)?;
+            self.state.copies(bytes.checked_sub(prepaid).ok_or("Promotion prepaid copy ownership mismatch.")?)?;
             retained = retained.saturating_add(bytes);
             let (inert, _, _) = self.parked_template_source(handle).unwrap();
             let mut node_children = Vec::new();
@@ -468,11 +487,9 @@ impl Bridge<'_> {
                 node_children.push(slot);
                 pending.push((child, index, depth + 1));
             }
-            let node = Node {
-                namespace: raw.namespace,
-                kind: script_clone_node::copy_node_kind(&raw.kind)?,
-                children: node_children,
-            };
+            let namespace=raw.namespace;
+            let kind=if loaded {Rc::try_unwrap(raw).map_err(|_|"Private loaded promotion source unexpectedly shared.")?.kind}else{script_clone_node::copy_node_kind(&raw.kind)?};
+            let node=Node{namespace,kind,children:node_children};
             let extra=copied_payload_extra(&node.kind);self.state.copies(extra)?;retained=retained.saturating_add(extra);
             plan.try_reserve(1).map_err(|_| "Cannot reserve inert promotion plan.")?;
             indices.try_reserve(1).map_err(|_| "Cannot reserve inert promotion identities.")?;
@@ -1696,3 +1713,6 @@ fn template_node_can_park(node: &Node) -> bool {
         _ => false,
     }
 }
+
+#[path="script_inert_replace.rs"]
+mod replacement;
