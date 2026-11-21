@@ -174,6 +174,7 @@ enum ComputedProperty {
     Color,
     Visibility,
     PointerEvents,
+    ZIndex,
     FontSize,
     TouchAction,
     Opacity,
@@ -190,6 +191,7 @@ impl ComputedProperty {
             "color"=>Some(Self::Color),
             "visibility"=>Some(Self::Visibility),
             "pointerEvents"=>Some(Self::PointerEvents),
+            "zIndex"=>Some(Self::ZIndex),
             "fontSize" => Some(Self::FontSize),
             "touchAction" => Some(Self::TouchAction),
             "opacity" => Some(Self::Opacity),
@@ -202,7 +204,7 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("visibility"){Some(Self::Visibility)}else if name.eq_ignore_ascii_case("pointer-events"){Some(Self::PointerEvents)}else if name.eq_ignore_ascii_case("display"){Some(Self::Display)}else if name.eq_ignore_ascii_case("color"){Some(Self::Color)}else if name.eq_ignore_ascii_case("font-size") {
+        if name.eq_ignore_ascii_case("z-index"){Some(Self::ZIndex)}else if name.eq_ignore_ascii_case("visibility"){Some(Self::Visibility)}else if name.eq_ignore_ascii_case("pointer-events"){Some(Self::PointerEvents)}else if name.eq_ignore_ascii_case("display"){Some(Self::Display)}else if name.eq_ignore_ascii_case("color"){Some(Self::Color)}else if name.eq_ignore_ascii_case("font-size") {
             Some(Self::FontSize)
         } else if name.eq_ignore_ascii_case("touch-action") {
             Some(Self::TouchAction)
@@ -440,10 +442,10 @@ impl Bridge<'_> {
             return self.computed_transform_value(node);
         }
         let geometry=self.state.geometry.as_mut().ok_or("Computed style requires the actual document renderer.")?;
-        let snapshot=if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents){geometry.presentation_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?}else{geometry.computed_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?};
-        if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents){
+        let snapshot=if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex){geometry.presentation_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?}else{geometry.computed_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?};
+        if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex){
             let Some(presentation)=snapshot.read_presentation(node).map_err(|_|"Computed presentation unavailable within CSS cascade limits.")?else{return Ok(Value::String(String::new()));};
-            let keyword=match property{ComputedProperty::Display=>Some(presentation.display),ComputedProperty::Visibility=>Some(if presentation.visible{"visible"}else{"hidden"}),ComputedProperty::PointerEvents=>Some(if presentation.pointer_events{"auto"}else{"none"}),_=>None};
+            let keyword=match property{ComputedProperty::Display=>Some(presentation.display),ComputedProperty::Visibility=>Some(if presentation.visible{"visible"}else{"hidden"}),ComputedProperty::PointerEvents=>Some(if presentation.pointer_events{"auto"}else{"none"}),ComputedProperty::ZIndex=>Some(presentation.z_index.as_ref().map_or("auto",|value|value.text())),_=>None};
             if let Some(text)=keyword{self.state.copies(text.len())?;let mut value=String::new();value.try_reserve_exact(text.len()).map_err(|_|"Computed display serialization reservation failed.")?;value.push_str(text);return Ok(Value::String(value));}
             self.state.work(64)?;let mut text=transform::NumberText::new();let color=presentation.color;
             std::fmt::write(&mut text,format_args!("rgb({}, {}, {})",(color>>16)&255,(color>>8)&255,color&255)).map_err(|_|"Computed color serialization overflow.")?;
@@ -472,7 +474,7 @@ impl Bridge<'_> {
             return Ok(Value::String(result));
         }
         let (first, second) = match property {
-            ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents=>unreachable!("presentation has dedicated native serialization"),
+            ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex=>unreachable!("presentation has dedicated native serialization"),
             ComputedProperty::FontSize => unreachable!("font-size uses actual native pixel serialization"),
             ComputedProperty::TouchAction => {
                 let value=snapshot.read_touch_action(node).map_err(|_|"Computed touch-action unavailable within CSS cascade limits.")?;

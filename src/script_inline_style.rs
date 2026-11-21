@@ -68,6 +68,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "visibility",
     "white-space",
     "width",
+    "z-index",
 ];
 
 pub(super) fn handle(object: u32) -> bool {
@@ -143,6 +144,7 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             state.work(crate::css::easing_source_cost(specified.len()).0)?;
             if !crate::css::inline_easing_value(specified) { continue; }
         }
+        if name=="z-index"{state.work(specified.len())?;if !crate::css::z_index::valid(specified){continue;}}
         if matches!(name,"visibility"|"pointer-events"){
             state.work(specified.len())?;state.copies(specified.len())?;
             if !crate::css::inline_interaction_value(name,specified){continue;}

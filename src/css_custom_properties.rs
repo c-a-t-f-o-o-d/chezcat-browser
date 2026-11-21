@@ -34,13 +34,13 @@ impl Budget {
         if operation.failed_work || operation.failed_copies { self.work = 0; self.copies = 0; }
         else { self.work -= operation.used_work; self.copies -= operation.used_copies; }
     }
-    fn work(&mut self, amount: usize) -> Result<(), ()> {
+    pub(super) fn work(&mut self, amount: usize) -> Result<(), ()> {
         match self.work.checked_sub(amount) {
             Some(remaining)=>{self.used_work += amount; self.work=remaining;Ok(())},
             None=>{self.used_work += self.work; self.failed_work = true; self.work=0;self.copies=0;Err(())},
         }
     }
-    fn copy(&mut self, amount: usize) -> Result<(), ()> {
+    pub(super) fn copy(&mut self, amount: usize) -> Result<(), ()> {
         self.work(amount)?;
         match self.copies.checked_sub(amount) {
             Some(remaining)=>{self.used_copies += amount; self.copies=remaining;Ok(())},

@@ -6175,3 +6175,7 @@ mod native_hover;
 #[cfg(test)]
 #[path="app_visibility_hit_tests.rs"]
 mod visibility_hit_tests;
+
+#[cfg(test)]
+#[path="app_stacking_tests.rs"]
+mod stacking_tests;

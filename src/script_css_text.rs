@@ -30,6 +30,7 @@ impl Bridge<'_> {
                         return Err("Whole CSS text contains an unsupported transform.".into())
                     }
                 }
+            } else if name=="z-index"{let Some(value)=crate::css::z_index::specified(&raw)else{continue;};value
             } else if matches!(name.as_str(),"visibility"|"pointer-events"){
                 let Some(value)=crate::css::specified_interaction_value(&name,&raw)else{continue;};value
             } else if name == "opacity" {
