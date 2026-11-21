@@ -231,3 +231,21 @@ fn anchor_app_local_opaque_initiator_overrides_destination_prior_web_origin(){
     assert_eq!(request.method, "GET");
     assert!(!request.cookie.contains("destination_strict="), "Opaque source origin fell back to destination's prior web origin");
 }
+
+#[test]
+fn anchor_interface_actual_app_uses_genuine_identity_in_trusted_live_link_mutation() {
+    let files=Files::new();let mut app=files.page(r#"
+var saved=HTMLAnchorElement;
+if(!(a instanceof saved)||Object.getPrototypeOf(a)!==saved.prototype)throw 'actual parsed anchor';
+a.onclick=function(e){if(!e.isTrusted||!(this instanceof saved)||this!==a)throw 'trusted native anchor';this.href='other.html#changed';document.title='Genuine anchor activated';};
+delete window.HTMLAnchorElement;
+"#);
+    let source=app.location.clone();let (x,y)=point(&app,"a");
+    let target=take_link(activate(&mut app,"a",input(0)));
+    assert_eq!(app.document.title,"Genuine anchor activated");
+    assert_eq!(target.location,navigation::resolve("other.html#changed",&app.base_location).unwrap());
+    assert_eq!(target.location.root,source.root);
+    assert_eq!(app.page.link_at(x,y-app.content_top()+app.scroll),Some("other.html#changed"));
+    eval(&mut app,"if(!(a instanceof saved)||a.href.indexOf('other.html#changed')<0)throw 'saved identity and real URL';");
+    assert_eq!(app.location,source,"Activation returns the actual guarded target for normal App navigation");
+}

@@ -137,3 +137,31 @@ fn anchor_url_namespace_and_unsupported_capabilities_leave_raw_data_intact() {
     run(&mut doc, &mut forms, &mut page, "var other=document.getElementById('other');other.href='ordinary expando';if(other.getAttribute('href')!==null||other.href!=='ordinary expando')throw 'expando became link data';");
     run(&mut doc, &mut forms, &mut page, "if(a.getAttribute('href')!=='mailto:original@example.test'||a.getAttributeNS('urn:metadata','href')!=='metadata')throw 'unsupported projection changed raw data';");
 }
+
+#[test]
+fn anchor_interface_genuine_nodes_owners_prototypes_and_url_backend() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var A=HTMLAnchorElement,a=document.getElementById('parsed');
+if(Object.getPrototypeOf(A)!==HTMLElement||Object.getPrototypeOf(A.prototype)!==HTMLElement.prototype||A.prototype.constructor!==A||A.name!=='HTMLAnchorElement'||A.length!==0)throw 'canonical owner chain';
+if(Object.getPrototypeOf(a)!==A.prototype||!(a instanceof A)||!(a instanceof HTMLElement)||Object.prototype.toString.call(a)!=='[object HTMLAnchorElement]')throw 'actual parsed identity';
+if(document.getElementById('foreign') instanceof A||document.getElementById('other') instanceof A)throw 'false native brand';
+var descriptor=Object.getOwnPropertyDescriptor(window,'HTMLAnchorElement'),pd=Object.getOwnPropertyDescriptor(A,'prototype');
+if(!descriptor.configurable||!descriptor.writable||descriptor.enumerable||pd.writable||pd.configurable||pd.enumerable)throw 'interface descriptors';
+var rejected=0;for(var call of [function(){new A();},function(){A();}]){try{call();}catch(e){if(!(e instanceof TypeError))throw e;rejected++;}}
+if(rejected!==2)throw 'constructor fabricated a node';
+A.prototype.originalProbe=19;if(a.originalProbe!==19)throw 'ordinary inherited property';
+a.originalProbe=23;if(a.originalProbe!==23||!delete a.originalProbe||a.originalProbe!==19)throw 'native own descriptor';
+var made=document.createElement('a');made.href='../real?q=one two#part';
+if(!(made instanceof A)||Object.getPrototypeOf(made)!==A.prototype||made.isConnected||made.ownerDocument!==document||made.href!=='https://example.test/real?q=one%20two#part'||made.getAttribute('href')!=='../real?q=one two#part')throw 'real factory URL backend';
+var cloned=a.cloneNode(true);if(!(cloned instanceof A)||cloned===a||cloned.ownerDocument!==document||cloned.getAttribute('href')!=='initial')throw 'real clone';
+var owner=document.implementation.createHTMLDocument('inert'),inert=owner.createElement('a');
+if(!(inert instanceof A)||inert.ownerDocument!==owner||Object.getPrototypeOf(inert)!==A.prototype||inert.isConnected)throw 'inert native owner';
+var copy=inert.cloneNode(true);if(!(copy instanceof A)||copy.ownerDocument!==owner||copy===inert)throw 'inert clone identity';
+var imported=document.importNode(inert,true);if(!(imported instanceof A)||imported.ownerDocument!==document||imported.isConnected)throw 'real imported owner';
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow;
+if(w.HTMLAnchorElement===A||a instanceof w.HTMLAnchorElement||Object.getPrototypeOf(w.HTMLAnchorElement)!==w.HTMLElement||Object.getPrototypeOf(w.HTMLAnchorElement.prototype)!==w.HTMLElement.prototype)throw 'child owner realm';
+delete window.HTMLAnchorElement;if(typeof HTMLAnchorElement!=='undefined'||!(a instanceof A)||!(made instanceof A)||Object.getPrototypeOf(a)!==A.prototype)throw 'saved canonical identity after global deletion';
+window.HTMLAnchorElement=17;if(!(cloned instanceof A)||a.constructor!==A)throw 'global replacement changed native ancestry';
+"#);
+}
