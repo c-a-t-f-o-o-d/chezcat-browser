@@ -3,7 +3,7 @@
 
 use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface, aria_reflection_interface};
 
@@ -442,6 +442,7 @@ impl Runtime {
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
                     self.define_readonly_node_getter(prototype, window, "currentScript", DOCUMENT_CURRENT_SCRIPT_GET)?;
+                    self.define_readonly_node_getter(prototype, window, "activeElement", DOCUMENT_ACTIVE_ELEMENT_GET)?;
                     for (name, operation, length) in [
                         ("createCDATASection", CREATE_CDATA_SECTION, 1),
                         ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),

@@ -57,6 +57,7 @@ impl App {
                     self.reflow();
                 }
                 self.apply_script_scroll();
+                self.apply_script_focus();
                 self.validate_control_focus();
                 self.sync_editors();
                 if outcome.errors > 0 {

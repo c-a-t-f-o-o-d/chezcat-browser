@@ -2800,6 +2800,7 @@ impl App {
             self.reflow();
         }
         self.apply_script_scroll();
+        self.apply_script_focus();
         self.validate_control_focus();
         self.sync_editors();
         if outcome.errors > 0 {
@@ -6221,6 +6222,10 @@ mod console_diagnostics_tests;
 #[cfg(test)]
 #[path="app_svg_shared_paint_tests.rs"]
 mod svg_shared_paint_tests;
+
+#[cfg(test)]
+#[path="app_selected_component_tests.rs"]
+mod selected_component_tests;
 
 #[cfg(test)]
 #[path="app_flat_behavior_tests.rs"]
