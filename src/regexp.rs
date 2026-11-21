@@ -338,15 +338,17 @@ impl Parser {
         let start = self.at;
         let mut number = 0usize;
         while let Some(unit @ 48..=57) = self.peek() {
+            // Counts are carried exactly through Scan and compiler expansion.
+            // Their numeric value does not reserve storage: those paths retain
+            // their own input, bytecode and work bounds. Reject only a count
+            // that the counter cannot represent, without rounding or wrapping.
             number = number
-                .saturating_mul(10)
-                .saturating_add((unit - 48) as usize);
+                .checked_mul(10)
+                .and_then(|number| number.checked_add((unit - 48) as usize))
+                .ok_or(Error::Limit(
+                    "Regular-expression repetition count exceeds the supported integer range.",
+                ))?;
             self.at += 1;
-            if number > 1000 {
-                return Err(Error::Limit(
-                    "Regular-expression repetition limit reached (1000).",
-                ));
-            }
         }
         if self.at == start {
             Err(Error::Syntax("A counted repetition needs a number."))
@@ -1775,7 +1777,6 @@ mod tests {
         for pattern in ["{1}", "{1,}", "{1,2}", "a{2,1}", "a{1}*", "a{1}{2}", "*{", "("] {
             assert!(matches!(Regex::compile(pattern, "", &mut 100_000), Err(Error::Syntax(_))), "{pattern}");
         }
-        assert!(matches!(Regex::compile("a{1001}", "", &mut 100_000), Err(Error::Limit(_))));
         assert!(matches!(Regex::compile("{", "", &mut 0), Err(Error::Limit(_))));
         assert!(matches!(Regex::compile("{", "u", &mut 100_000), Err(Error::Syntax(_))));
         assert!(matches!(Regex::compile("{", "v", &mut 100_000), Err(Error::Unsupported(_))));
@@ -1784,6 +1785,199 @@ mod tests {
             let regex = Regex::compile(pattern, "", &mut budget).unwrap();
             assert_eq!(regex.find(&[97,97,97,97], 0, false, &mut budget).unwrap().unwrap().end(), end);
         }
+    }
+
+    #[test]
+    fn counted_repetition_above_thousand_keeps_exact_range_and_open_ended_matches() {
+        for raw in [false, true] {
+            for (pattern, maximum) in [
+                ("^a{1001}$", Some(1001)),
+                ("^a{1001,1002}$", Some(1002)),
+                ("^a{1001,}$", None),
+                ("^[ab]{1001}$", Some(1001)),
+                ("^.{1001}$", Some(1001)),
+            ] {
+                let regex = if raw {
+                    Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "", &mut 100_000)
+                } else {
+                    Regex::compile(pattern, "", &mut 100_000)
+                }.unwrap();
+                for length in [1000, 1001, 1002, 1003] {
+                    let input = vec![b'a' as u16; length];
+                    let found = regex.find(&input, 0, false, &mut 100_000).unwrap();
+                    let expected = length >= 1001 && maximum.is_none_or(|maximum| length <= maximum);
+                    assert_eq!(found.is_some(), expected, "raw={raw}: {pattern}, length={length}");
+                    if let Some(found) = found {
+                        assert_eq!((found.start(), found.end()), (0, length));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn counted_repetition_large_bounds_preserve_greedy_lazy_and_backtracking_order() {
+        for (pattern, text, expected) in [
+            ("a{1,1000000}", "aaaa", (0, 4)),
+            ("a{1,1000000}?", "aaaa", (0, 1)),
+            ("a{0,1000000}?", "aaaa", (0, 0)),
+            ("a{1,1000000}a$", "aaaa", (0, 4)),
+            ("a{1,1000000}?a$", "aaaa", (0, 4)),
+            ("(?<=a{1,1000000})b", "aaaab", (4, 5)),
+        ] {
+            let regex = Regex::compile(pattern, "", &mut 100_000).unwrap();
+            let found = regex.find(&text.encode_utf16().collect::<Vec<_>>(), 0, false, &mut 100_000)
+                .unwrap().unwrap();
+            assert_eq!((found.start(), found.end()), expected, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn counted_repetition_expands_compound_groups_and_keeps_the_last_capture() {
+        let pattern = "^(ab){1001}$";
+        for raw in [false, true] {
+            let regex = if raw {
+                Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "", &mut 100_000)
+            } else {
+                Regex::compile(pattern, "", &mut 100_000)
+            }.unwrap();
+            let input: Vec<_> = "ab".repeat(1001).encode_utf16().collect();
+            let found = regex.find(&input, 0, false, &mut 100_000).unwrap().unwrap();
+            assert_eq!(found.captures, vec![Some((0, 2002)), Some((2000, 2002))]);
+            assert!(regex.find(&input[..2000], 0, false, &mut 100_000).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn counted_repetition_above_thousand_keeps_utf16_units_and_unicode_code_points() {
+        let mut raw_pattern = vec![b'^' as u16, 0xd800];
+        raw_pattern.extend("{1001}$".encode_utf16());
+        let regex = Regex::compile_units(&raw_pattern, "", &mut 100_000).unwrap();
+        let input = vec![0xd800; 1001];
+        let found = regex.find(&input, 0, false, &mut 100_000).unwrap().unwrap();
+        assert_eq!((found.start(), found.end()), (0, 1001));
+        assert!(regex.find(&input[..1000], 0, false, &mut 100_000).unwrap().is_none());
+
+        let pattern = "^😺{1001}$";
+        let input: Vec<_> = "😺".repeat(1001).encode_utf16().collect();
+        for raw in [false, true] {
+            let regex = if raw {
+                Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "u", &mut 100_000)
+            } else {
+                Regex::compile(pattern, "u", &mut 100_000)
+            }.unwrap();
+            let found = regex.find(&input, 0, false, &mut 100_000).unwrap().unwrap();
+            assert_eq!((found.start(), found.end()), (0, 2002));
+            assert!(regex.find(&input[..2000], 0, false, &mut 100_000).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn counted_repetition_uses_full_representable_counts_on_short_inputs() {
+        let maximum = usize::MAX;
+        for raw in [false, true] {
+            for (pattern, expected) in [
+                (format!("a{{{maximum}}}"), None),
+                (format!("a{{{maximum},}}"), None),
+                (format!("a{{0,{maximum}}}"), Some((0, 4))),
+                (format!("a{{0,{maximum}}}?"), Some((0, 0))),
+            ] {
+                let regex = if raw {
+                    Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "", &mut 1024)
+                } else {
+                    Regex::compile(&pattern, "", &mut 1024)
+                }.unwrap();
+                // A numeric bound alone must not allocate or perform work in
+                // proportion to that bound. Four available units suffice.
+                let found = regex.find(&[97; 4], 0, true, &mut 128).unwrap();
+                assert_eq!(found.map(|found| (found.start(), found.end())), expected, "{pattern}");
+            }
+        }
+    }
+
+    #[test]
+    fn counted_repetition_rejects_unrepresentable_and_inverted_counts_exactly() {
+        let just_over = (usize::MAX as u128 + 1).to_string();
+        let too_large = format!("{}0", usize::MAX);
+        for raw in [false, true] {
+            for pattern in [
+                format!("a{{{just_over}}}"),
+                format!("a{{0,{just_over}}}"),
+                format!("a{{{too_large}}}"),
+                format!("a{{{too_large},}}"),
+                format!("a{{0,{too_large}}}"),
+            ] {
+                let result = if raw {
+                    Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "", &mut 100_000)
+                } else {
+                    Regex::compile(&pattern, "", &mut 100_000)
+                };
+                assert!(matches!(result, Err(Error::Limit(
+                    "Regular-expression repetition count exceeds the supported integer range."
+                ))), "raw={raw}: {pattern}");
+            }
+            let mut inverted = vec![format!("a{{{},{}}}", usize::MAX, usize::MAX - 1)];
+            if usize::BITS > 53 {
+                // These adjacent values must not collapse through f64 when
+                // the implementation's integer counter can represent both.
+                inverted.push("a{9007199254740993,9007199254740992}".into());
+            }
+            for pattern in inverted {
+                let result = if raw {
+                    Regex::compile_units(&pattern.encode_utf16().collect::<Vec<_>>(), "", &mut 100_000)
+                } else {
+                    Regex::compile(&pattern, "", &mut 100_000)
+                };
+                assert!(matches!(result, Err(Error::Syntax(_))), "raw={raw}: {pattern}");
+            }
+        }
+    }
+
+    #[test]
+    fn counted_repetition_overflow_digits_keep_incomplete_legacy_braces_literal() {
+        let too_large = format!("{}0", usize::MAX);
+        for pattern in [
+            format!("a{{{too_large}"),
+            format!("a{{0,{too_large}"),
+            format!("a{{{too_large},x}}"),
+        ] {
+            let units: Vec<_> = pattern.encode_utf16().collect();
+            for raw in [false, true] {
+                let regex = if raw {
+                    Regex::compile_units(&units, "", &mut 100_000)
+                } else {
+                    Regex::compile(&pattern, "", &mut 100_000)
+                }.unwrap();
+                let found = regex.find(&units, 0, false, &mut 100_000).unwrap().unwrap();
+                assert_eq!((found.start(), found.end()), (0, units.len()));
+                let unicode = if raw {
+                    Regex::compile_units(&units, "u", &mut 100_000)
+                } else {
+                    Regex::compile(&pattern, "u", &mut 100_000)
+                };
+                assert!(matches!(unicode, Err(Error::Syntax(_))), "raw={raw}: {pattern}");
+            }
+        }
+    }
+
+    #[test]
+    fn counted_repetition_keeps_compilation_and_matching_work_refusals() {
+        for pattern in [format!("(?:){{{}}}", usize::MAX), format!("(?:ab){{{}}}", usize::MAX)] {
+            let mut budget = 512;
+            assert!(matches!(Regex::compile(&pattern, "", &mut budget), Err(Error::Limit(
+                "Regular-expression work limit reached."
+            ))), "{pattern}");
+            assert_eq!(budget, 0);
+        }
+        let regex = Regex::compile("^a{1001}$", "", &mut 100_000).unwrap();
+        let input = vec![97; 1001];
+        let mut budget = 64;
+        assert!(matches!(regex.find(&input, 0, false, &mut budget), Err(Error::Limit(
+            "Regular-expression work limit reached."
+        ))));
+        assert_eq!(budget, 0);
+        let found = regex.find(&input, 0, false, &mut 100_000).unwrap().unwrap();
+        assert_eq!((found.start(), found.end()), (0, 1001));
     }
 
     #[test]
