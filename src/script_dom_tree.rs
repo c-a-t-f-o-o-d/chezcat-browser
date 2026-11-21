@@ -514,6 +514,8 @@ impl Bridge<'_> {
                 && matches!(&entry.kind, NodeKind::Element { tag, .. } if tag == "link"))
     }
 
+    pub(super) fn movable_template_host(&self,node:usize)->bool{self.state.dom.created.contains(&node)&&self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html&&entry.children.is_empty()&&matches!(&entry.kind,NodeKind::Element{tag,..} if tag=="template"))}
+
     pub(super) fn created_html_style(&self, node: usize) -> bool {
         self.state.dom.created.contains(&node) && self.doc.nodes.get(node).is_some_and(|entry|
             entry.namespace == crate::html::Namespace::Html
@@ -1152,9 +1154,9 @@ impl Bridge<'_> {
                         | "embed"
                         | "base"
                         | "meta"
-                        | "template"
                         | "video" | "audio" | "source"
                 )
+                || name=="template"&&!self.movable_template_host(node)
                 || name == "style" && !(direct_style && self.created_html_style(node))
                 || matches!(name, "option" | "optgroup") && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled

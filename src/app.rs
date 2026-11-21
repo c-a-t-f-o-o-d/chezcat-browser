@@ -6058,3 +6058,7 @@ mod native_control_import_tests;
 #[cfg(test)]
 #[path="app_style_import_tests.rs"]
 mod style_import_tests;
+
+#[cfg(test)]
+#[path="app_template_main_import_tests.rs"]
+mod template_main_import_tests;

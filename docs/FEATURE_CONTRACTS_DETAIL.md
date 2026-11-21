@@ -1999,3 +1999,30 @@ checks glyph/background colors, moves a style out and back, preserves editor
 state and activates an actual link. This is package fixture evidence. It does
 not establish the real site's shell, complete CSSOM/constructible sheets,
 arbitrary loaded-resource adoption or completion of the remaining P1 package.
+
+
+## Main-document template hosts and appropriate content owners
+
+Importing a template, or cloning a main-document template, creates a real detached
+main-document host rather than an inert surrogate with a main owner label. Its
+content is a separate, independently cloned inert fragment in the destination's
+appropriate template document. Nested templates and descendants use that same
+appropriate owner. A shallow copy has empty content without materializing the
+source subtree. Source templates and saved content/owner identities remain real
+and independent through later destination/source edits.
+
+Content/index preparation uses the existing inert clone and paid identity maps.
+A checkpoint rolls back new entries, generated data and content/document links
+on refusal, refunds payload and preserves actual reusable backing. New main-host
+links publish before returning the native operation, without author callbacks
+between preparation and main DOM publication. Bulk index insertion avoids
+repeated per-key shifts. Created/imported hosts with empty ordinary child lists
+can move through checked tree operations or retire during text replacement;
+saved content stays inert and available after the host detaches.
+
+The original App fixture connects an imported host without activating content,
+then explicitly imports/stamps that content, checks nested appropriate ownership,
+real glyphs and stable neighboring editor/link targets. Arbitrary cross-document
+same-identity adoption and ordinary-child mutation of opaque/loaded template
+hosts remain outside this increment. This is a connected P1 fixture result,
+not a real-site shell result or completion of namespace/lifecycle work.

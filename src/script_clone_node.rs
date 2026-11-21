@@ -74,6 +74,10 @@ impl Bridge<'_> {
         Err(("TypeError", "importNode requires a genuine Node.".into()))
     }
 
+    fn template_import_source(&self,object:u32)->Option<ImportSource<'_>>{
+        self.inert_import_source(object).or_else(||{if self.template_receiver(object){let index=node_index(object)?;Some(ImportSource::Parsed{node:self.doc.nodes.get(index)?,unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)})}else{None}})
+    }
+    fn template_import_children(&self,object:u32)->Option<&[u32]>{if self.template_receiver(object){Some(&[])}else{self.inert_children(object)}}
     pub(super) fn import_node(&mut self, args: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
         let Some(Value::Host(source)) = args.first() else { return Err("importNode requires a Node.".into()); };
         let deep = if let Some(fields) = fields {
@@ -81,7 +85,7 @@ impl Bridge<'_> {
         } else {
             args.get(1).is_some_and(|value| matches!(value, Value::Null) || value.truthy())
         };
-        if !self.inert_clone_receiver(*source) {
+        if !self.inert_clone_receiver(*source)&&!self.template_receiver(*source) {
             return self.clone_node(*source, deep);
         }
         if !deep&&self.inert_interface(*source)==Some("HTMLTextAreaElement"){return Err("Shallow inert TEXTAREA import requires raw-value cloning; no node was created.".into());}
@@ -93,8 +97,9 @@ impl Bridge<'_> {
         let mut pending = vec![(*source, None, 1usize)];
         let mut staged = Vec::new();
         let mut bytes = 0usize;
+        let mut templates=Vec::new();
         while let Some(&(handle, parent, depth)) = pending.get(staged.len()) {
-            let children = self.inert_children(handle).ok_or("Inert import source is unavailable.")?;
+            let children = self.template_import_children(handle).ok_or("Inert import source is unavailable.")?;
             let count = if deep { children.len() } else { 0 };
             if count > remaining - pending.len() {
                 return Err("DOM appended-node limit reached during import.".into());
@@ -102,21 +107,22 @@ impl Bridge<'_> {
             if count != 0 && depth >= dom_tree::MAX_DOM_DEPTH {
                 return Err("DOM depth limit reached during import.".into());
             }
-            let attributes = match self.inert_import_source(handle) {
+            let attributes = match self.template_import_source(handle) {
                 Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.len(),
                 _ => 0,
             };
             self.state.work(count.saturating_add(attributes).saturating_add(1))?;
-            let source = self.inert_import_source(handle).ok_or("Inert import source is unavailable.")?;
+            if self.template_receiver(handle){templates.try_reserve(1).map_err(|_|"Cannot reserve main template import hosts.")?;templates.push((handle,node_handle(base+staged.len())));}
+            let source = self.template_import_source(handle).ok_or("Inert import source is unavailable.")?;
             let cost = match &source {
                 ImportSource::Parsed { node, .. } => {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style")) {
+                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
-                        if tag=="style"&&self.inert_children(handle).unwrap().iter().take(count).any(|&child|self.inert_node_type(child)!=Some(3)){return Err("Imported STYLE requires plain direct text children.".into());}
+                        if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|self.inert_node_type(child)!=Some(3)){return Err("Imported STYLE requires plain direct text children.".into());}
                         if attrs.iter().any(|attr| attr.name.namespace.is_some()
                             || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
@@ -126,7 +132,7 @@ impl Bridge<'_> {
                     copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
-                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style")) {
+                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
                         return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                     }
                     tag.len()
@@ -140,7 +146,7 @@ impl Bridge<'_> {
                 return Err("DOM retained text/attribute growth limit reached during import.".into());
             }
             self.state.copies(cost)?;
-            let source = self.inert_import_source(handle).ok_or("Inert import source is unavailable.")?;
+            let source = self.template_import_source(handle).ok_or("Inert import source is unavailable.")?;
             let (kind, namespace, unsafe_nonce) = match source {
                 ImportSource::Parsed { node, unsafe_nonce } => (copy_node_kind(&node.kind)?, node.namespace, unsafe_nonce),
                 ImportSource::Element(tag) => (NodeKind::Element {
@@ -159,7 +165,7 @@ impl Bridge<'_> {
             let index = base + staged.len();
             pending.try_reserve(count).map_err(|_| "Cannot reserve DOM import traversal.")?;
             staged.try_reserve(1).map_err(|_| "Cannot reserve DOM import nodes.")?;
-            let children = self.inert_children(handle).ok_or("Inert import source is unavailable.")?;
+            let children = self.template_import_children(handle).ok_or("Inert import source is unavailable.")?;
             pending.extend(children.iter().take(count).map(|&child| (child, Some(index), depth + 1)));
             let mut children = Vec::new();
             self.state.copies(count.checked_mul(size_of::<usize>()).ok_or("Imported child-link copy work overflow.")?)?;
@@ -172,14 +178,16 @@ impl Bridge<'_> {
         }
         let form_plan=self.prepare_imported_controls(&mut staged,bytes)?;
         let bytes=bytes.checked_add(form_plan.as_ref().map_or(0,|plan|plan.retained_bytes)).ok_or("Imported native control payload overflow.")?;
-        self.publish_detached_copy(staged, bytes, form_plan)
+        if templates.is_empty(){return self.publish_detached_copy(staged,bytes,form_plan);}
+        let checkpoint=self.template_import_checkpoint();
+        let result=(||{self.prepare_main_template_contents(&templates,deep)?;self.publish_detached_copy(staged,bytes,form_plan)})();
+        if result.is_err(){self.rollback_template_import(checkpoint);}result
     }
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
-        if self.template_receiver(object) || self.inert_clone_receiver(object) {
-            return self.clone_inert_tree(object, deep);
-        }
+        if self.template_receiver(object)&&!self.inert_clone_receiver(object){return self.import_node(&[Value::Host(object),Value::Bool(deep)],None);}
+        if self.inert_clone_receiver(object) {return self.clone_inert_tree(object,deep);}
         let root = self.dom_node(object)?;
         let base = self.doc.nodes.len();
         let remaining = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))

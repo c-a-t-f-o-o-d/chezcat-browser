@@ -32,6 +32,7 @@ impl<K:Ord+Copy,V> IdentityMap<K,V> {
     }
     // The caller admits record writes, sorting and any required backing, and
     // validates that every incoming key is distinct from the existing keys.
+    pub(super) fn retain_entries(&mut self,mut keep:impl FnMut(&K,&V)->bool){self.entries.retain(|(key,value)|keep(key,value));}
     pub(super) fn append_and_sort(&mut self, additional:usize, entries:impl IntoIterator<Item=(K,V)>){
         assert!(self.len().checked_add(additional).is_some_and(|length|length<=self.entries.capacity()),
             "Batched identity insertion requires admitted backing");
