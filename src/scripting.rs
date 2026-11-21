@@ -8413,3 +8413,7 @@ mod aria_reflections;
 #[cfg(test)]
 #[path="script_aria_reflection_tests.rs"]
 mod aria_reflection_tests;
+
+#[cfg(test)]
+#[path="script_replace_self_tests.rs"]
+mod replacement_self_tests;

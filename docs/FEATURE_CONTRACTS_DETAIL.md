@@ -2410,5 +2410,25 @@ An original App component-style fixture replaces within template content, observ
 the genuine queued mutation, deep-imports the result, paints text/link pixels and
 accepts native input and link activation. This finite owner increment does not
 establish exact captured-call causality, complete adoption/document replacement,
-full platform lifecycle or actual-site readiness. Existing main-tree same-node
-replacement observation/Range behavior remains a separate known follow-up.
+full platform lifecycle or actual-site readiness. Main-tree same-node replacement effects are described in the following section.
+
+## Main-tree self-replacement removal effects
+
+Replacing a supported main-tree node with itself retains final links and identity,
+but performs its observable adoption/removal/insertion effects. The native observer
+plan queues removal followed by insertion with the original sibling boundaries.
+Live Range points inside the removed subtree collapse to the parent/index, and
+parent-offset adjustments use the real remove/insert rules. Native focus within
+the removed subtree is cleared and the App receives the removal acknowledgment;
+control editor values, caret/selection data and node/list identities remain real.
+
+Existing hierarchy, resource, namespace and subtree checks precede these effects.
+Range work is admitted before any boundary/focus/generation change. Refusal leaves
+those states unchanged; a later job can recover. The final unchanged vectors need
+no redundant removal/reinsertion allocation, while mutation generation and relevant
+layout/focus invalidation still occur. Wider custom-element, resource and focusing
+lifecycle remains bounded by the existing supported mutation paths.
+
+An original RED case reproduced the missing records on the old early return.
+Focused observer/Range/refusal cases and an actual App trusted-keyboard/editor/
+focus-style/link case qualify the correction. This is not actual-site acceptance.

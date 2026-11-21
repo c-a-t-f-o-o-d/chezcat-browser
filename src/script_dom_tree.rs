@@ -1256,7 +1256,6 @@ impl Bridge<'_> {
         let child = self.dom_node(incoming)?;
         if self.fragment_receiver(incoming) {return self.splice_document_fragment(parent,"replaceChild",args);}
         let old = self.dom_node(outgoing)?;
-        if child == old { return Ok(Value::Host(outgoing)); }
         self.mutation_ancestors(parent)?;
         let source_parent = self.state.tree.parents[child];
         if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
@@ -1288,6 +1287,21 @@ impl Bridge<'_> {
             .and_then(|count| count.checked_add(outgoing_nodes.len()))
             .ok_or("DOM replacement work size overflow.")?;
         self.state.work(work)?;
+        if child==old {
+            // Final links are identical, but DOM adoption removes and inserts
+            // this Node. Preserve those live Range and native focus effects.
+            let position=self.doc.nodes[parent].children.iter().position(|&node|node==child).ok_or("Self replacement child link is unavailable.")?;
+            self.state.prepare_range_changes(2,incoming_nodes.len())?;
+            self.state.ranges_remove(parent,position,1,&incoming_nodes);
+            self.state.ranges_insert(parent,position,1);
+            let focus_removed=self.doc.native_focus.get().is_some_and(|node|incoming_nodes.contains(&node));
+            if focus_removed {
+                self.doc.native_focus.set(None);self.state.dom.native_focus_removed=true;
+            }
+            self.state.dom_committed();self.state.dirty=true;
+            if focus_removed||self.state.dom.connected[parent]{self.state.layout_changed();}
+            return Ok(Value::Host(outgoing));
+        }
 
         // Stage the final vectors. Removing an existing sibling before locating
         // old handles either sibling order; incoming may also descend from old.

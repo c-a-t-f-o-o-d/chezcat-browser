@@ -6195,3 +6195,7 @@ mod aria_reflection_tests;
 #[cfg(test)]
 #[path="app_inert_replace_tests.rs"]
 mod inert_replace_tests;
+
+#[cfg(test)]
+#[path="app_replace_self_tests.rs"]
+mod replacement_self_tests;
