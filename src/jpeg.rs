@@ -12,8 +12,6 @@ type Result<T> = std::result::Result<T, String>;
 type Check<'a> = &'a dyn Fn() -> Result<()>;
 const MAX_DIMENSION: usize = 16_384;
 const MAX_COEFFICIENTS: usize = 16 * 1024 * 1024;
-const MAX_SCANS: usize = 256;
-const MAX_MARKERS: usize = 65_536;
 const MAX_SCAN_WORK: usize = 128_000_000;
 
 // Natural row-major positions visited by JPEG's diagonal coefficient order.
@@ -898,11 +896,15 @@ fn decode_inner(data: &[u8], tiff: Option<TiffColor>, check: Check<'_>) -> Resul
     let mut frame: Option<Frame> = None;
     let mut quant: [Option<Quant>; 4] = std::array::from_fn(|_| None);
     let mut tables: [Option<Huffman>; 8] = std::array::from_fn(|_| None);
-    let (mut scans, mut restart, mut work) = (0usize, 0usize, MAX_SCAN_WORK);
+    let (mut restart, mut work) = (0usize, MAX_SCAN_WORK);
+    let mut seen_scan = false;
     let mut adobe = None;
     let mut jfif = false;
     let mut orientation = None;
-    for _ in 0..MAX_MARKERS {
+    // Every marker consumes input, segments have checked extents, and table
+    // replacements retain only their fixed slots. The admitted input bounds
+    // record traversal without imposing a separate marker-count restriction.
+    loop {
         check()?;
         let code = marker(data, &mut position)?;
         match code {
@@ -911,7 +913,7 @@ fn decode_inner(data: &[u8], tiff: Option<TiffColor>, check: Check<'_>) -> Resul
                     return Err("Trailing bytes after JPEG end-of-image marker.".into());
                 }
                 let frame = frame.ok_or("JPEG frame is missing.")?;
-                if scans == 0 || frame.components.iter().any(|c| c.progression[0] < 0) {
+                if !seen_scan || frame.components.iter().any(|c| c.progression[0] < 0) {
                     return Err("JPEG image is missing component scan data.".into());
                 }
                 let count = frame.components.len();
@@ -1048,13 +1050,12 @@ fn decode_inner(data: &[u8], tiff: Option<TiffColor>, check: Check<'_>) -> Resul
                 restart = word(values, 0)?;
             }
             0xda => {
-                scans += 1;
-                if scans > MAX_SCANS {
-                    return Err("JPEG exceeds the 256-scan limit.".into());
-                }
                 let frame = frame
                     .as_mut()
                     .ok_or("JPEG scan appears before its frame.")?;
+                // Each coefficient is initialized once and then only refined
+                // through descending bit positions. Scan::new checks that
+                // history; decode_scan charges the shared work allowance.
                 let scan = Scan::new(segment(data, &mut position)?, frame)?;
                 for selection in &scan.selected {
                     let component = &mut frame.components[selection.component];
@@ -1084,6 +1085,7 @@ fn decode_inner(data: &[u8], tiff: Option<TiffColor>, check: Check<'_>) -> Resul
                     &mut work,
                     check,
                 )?;
+                seen_scan = true;
             }
             0xe0 => {
                 let values = segment(data, &mut position)?;
@@ -1129,7 +1131,6 @@ fn decode_inner(data: &[u8], tiff: Option<TiffColor>, check: Check<'_>) -> Resul
             }
         }
     }
-    Err("JPEG exceeds the marker count limit.".into())
 }
 
 #[cfg(test)]
@@ -1327,45 +1328,260 @@ mod tests {
         assert_eq!(error, "Stopped");
     }
 
-    #[test]
-    fn marker_and_scan_limits_bound_small_but_repetitive_files() {
-        let mut markers = vec![255, 0xd8];
-        for _ in 0..MAX_MARKERS {
-            marker_bytes(&mut markers, 0xfe, &[]);
+    fn gray_with_comments(progressive: bool, count: usize) -> Vec<u8> {
+        let original = gray(progressive);
+        let mut bytes = original[..2].to_vec();
+        for _ in 0..count {
+            marker_bytes(&mut bytes, 0xfe, &[]);
         }
-        markers.extend([255, 0xd9]);
-        assert!(decode(&markers, &|| Ok(()))
-            .unwrap_err()
-            .contains("marker count limit"));
+        bytes.extend(&original[2..]);
+        bytes
+    }
 
+    // Every one of the 64 coefficients is initialized at Al=13, then refined
+    // through all 13 lower bit positions in separate scans: 896 scans total.
+    // The final DC refinement is last and can change the pixel from 128 to 129.
+    // The quantizer and all codewords are authored here, without an encoder.
+    fn progressively_refined_gray(count: usize, last_dc_bit: bool) -> Vec<u8> {
+        assert!(count <= 64 * 14);
         let original = gray(true);
         let header_end = original
             .windows(2)
             .position(|bytes| bytes == [255, 0xda])
             .unwrap();
-        let make_scans = |count: usize| {
-            let mut bytes = original[..header_end].to_vec();
-            for index in 0..count {
-                let band = (index % 64) as u8;
-                let generation = (index / 64) as u8;
-                let approximation = if generation == 0 {
-                    13
-                } else {
-                    ((14 - generation) << 4) | (13 - generation)
-                };
-                marker_bytes(&mut bytes, 0xda, &[1, 1, 0, band, band, approximation]);
-                bytes.push(0x7f); // A zero DC/refinement bit or zero EOB code, then one padding bits.
+        let mut bytes = original[..header_end].to_vec();
+        let quant = bytes.windows(2).position(|b| b == [255, 0xdb]).unwrap();
+        bytes[quant + 5] = 8; // DC quantization: coefficient 1 produces sample 129.
+        for index in 0..count {
+            let generation = (index / 64) as u8;
+            let band = if generation == 13 {
+                ((index + 1) % 64) as u8
+            } else {
+                (index % 64) as u8
+            };
+            let approximation = if generation == 0 {
+                13
+            } else {
+                ((14 - generation) << 4) | (13 - generation)
+            };
+            marker_bytes(&mut bytes, 0xda, &[1, 1, 0, band, band, approximation]);
+            if generation == 13 && band == 0 && last_dc_bit {
+                bytes.extend([255, 0]); // One refinement bit, seven padding bits, byte stuffing.
+            } else {
+                bytes.push(0x7f); // Zero DC/refinement bit or EOB code, then one padding bits.
             }
+        }
+        bytes.extend([255, 0xd9]);
+        bytes
+    }
+
+    #[test]
+    fn comment_records_beyond_former_limit_preserve_decoded_pixels() {
+        for progressive in [false, true] {
+            let bytes = gray_with_comments(progressive, 65_537);
+            let image = crate::image::decode_checked(&bytes, &|| Ok(())).unwrap();
+            assert_eq!((image.width, image.height), (1, 1));
+            assert_eq!(image.pixels, [0xff808080]);
+        }
+    }
+
+    #[test]
+    fn malformed_marker_tails_beyond_former_limit_are_rejected() {
+        let mut prefix = gray_with_comments(false, 65_537);
+        prefix.truncate(prefix.len() - 2); // Replace the original EOI with each late malformed tail.
+        for (tail, expected) in [
+            (&[][..], "marker is missing"),
+            (&[255][..], "Truncated JPEG marker"),
+            (&[255, 0xfe, 0, 1][..], "Invalid JPEG marker length"),
+            (&[255, 0xfe, 0, 4, 0][..], "marker extends beyond"),
+            (&[255, 0xd0][..], "Unexpected standalone"),
+            (&[255, 0xd9, 0][..], "Trailing bytes"),
+        ] {
+            let mut bytes = prefix.clone();
+            bytes.extend(tail);
+            let error = decode(&bytes, &|| Ok(())).unwrap_err();
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
+    }
+
+    #[test]
+    fn cancellation_reaches_comment_records_beyond_former_limit() {
+        let bytes = gray_with_comments(false, 65_540);
+        let calls = std::cell::Cell::new(0);
+        // One admission callback, followed by one for each comment. This stop
+        // is after 65,537 comments, before the following comment is examined.
+        let stop = 65_539;
+        let error = decode(&bytes, &|| {
+            calls.set(calls.get() + 1);
+            if calls.get() == stop {
+                Err("cancelled beyond the former marker limit".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error, "cancelled beyond the former marker limit");
+        assert_eq!(calls.get(), stop);
+    }
+
+    #[test]
+    fn fully_refined_progressive_scans_preserve_the_final_pixel_bit() {
+        for count in [256, 257, 896] {
+            let bytes = progressively_refined_gray(count, false);
+            let image = decode(&bytes, &|| Ok(())).unwrap();
+            assert_eq!((image.width, image.height), (1, 1));
+            assert_eq!(image.pixels, [0xff808080], "{count} scans");
+        }
+        let bytes = progressively_refined_gray(896, true);
+        assert_eq!(decode(&bytes, &|| Ok(())).unwrap().pixels, [0xff818181]);
+    }
+
+    #[test]
+    fn late_scan_headers_and_entropy_still_require_valid_progression() {
+        let mut prefix = progressively_refined_gray(257, false);
+        prefix.truncate(prefix.len() - 2);
+        // The next AC band is still at Al=10, so Ah=10 / Al=9 is valid.
+        let valid = [1, 1, 0, 1, 1, 0xa9];
+        for (header, entropy, expected) in [
+            (&valid[..], &[0x7f][..], None),
+            (
+                &[1, 1, 0, 1, 1, 0][..],
+                &[0x7f][..],
+                Some("refinement history"),
+            ),
+            (
+                &[1, 1, 0, 1, 1, 0x98][..],
+                &[0x7f][..],
+                Some("refinement history"),
+            ),
+            (
+                &[1, 1, 0, 1, 1, 0xed][..],
+                &[0x7f][..],
+                Some("approximation parameters"),
+            ),
+            (&[1, 1, 0, 64, 64, 0xa9][..], &[0x7f][..], Some("spectral")),
+            (&[1, 1, 0][..], &[0x7f][..], Some("scan header length")),
+            (&valid[..], &[][..], Some("unexpected marker")),
+            (&valid[..], &[0][..], Some("entropy padding")),
+        ] {
+            let mut bytes = prefix.clone();
+            marker_bytes(&mut bytes, 0xda, header);
+            bytes.extend(entropy);
             bytes.extend([255, 0xd9]);
+            let result = decode(&bytes, &|| Ok(()));
+            if let Some(expected) = expected {
+                let error = result.unwrap_err();
+                assert!(error.contains(expected), "{expected}: {error}");
+            } else {
+                assert_eq!(result.unwrap().pixels, [0xff808080]);
+            }
+        }
+    }
+
+    #[test]
+    fn cancellation_reaches_scans_beyond_former_limit() {
+        let bytes = progressively_refined_gray(896, true);
+        let calls = std::cell::Cell::new(0);
+        // Admission and three table/frame markers consume four callbacks;
+        // each one-block scan consumes two. Stop inside scan 298.
+        let stop = 600;
+        let error = decode(&bytes, &|| {
+            calls.set(calls.get() + 1);
+            if calls.get() == stop {
+                Err("cancelled beyond the former scan limit".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error, "cancelled beyond the former scan limit");
+        assert_eq!(calls.get(), stop);
+    }
+
+    #[test]
+    fn scan_work_is_shared_and_refused_before_entropy_or_progression() {
+        let mut frame = Frame::new(&[8, 0, 1, 0, 1, 1, 1, 0x11, 0], 0xc2).unwrap();
+        let mut counts = [0; 16];
+        counts[0] = 1;
+        let mut tables = std::array::from_fn(|_| None);
+        tables[0] = Some(Huffman::new(&counts, &[0], true).unwrap());
+        tables[4] = Some(Huffman::new(&counts, &[0], false).unwrap());
+        let data = [0x7f, 0x7f];
+        let mut position = 0;
+        let mut work = 2;
+        for band in [0, 1] {
+            let scan = Scan::new(&[1, 1, 0, band, band, 0], &frame).unwrap();
+            decode_scan(
+                &data,
+                &mut position,
+                &mut frame,
+                &scan,
+                &tables,
+                0,
+                &mut work,
+                &|| Ok(()),
+            )
+            .unwrap();
+        }
+        assert_eq!((position, work), (2, 0));
+        assert_eq!(&frame.components[0].progression[..3], &[0, 0, -1]);
+        let scan = Scan::new(&[1, 1, 0, 2, 2, 0], &frame).unwrap();
+        let error = decode_scan(
+            &data,
+            &mut position,
+            &mut frame,
+            &scan,
+            &tables,
+            0,
+            &mut work,
+            &|| Ok(()),
+        )
+        .unwrap_err();
+        assert!(error.contains("coefficient scan work limit"), "{error}");
+        assert_eq!((position, work), (2, 0));
+        assert_eq!(&frame.components[0].progression[..3], &[0, 0, -1]);
+        assert!(frame.components[0].coefficients.iter().all(|&value| value == 0));
+    }
+
+    #[test]
+    fn tiff_jpeg_records_preserve_container_color_and_mode_rules() {
+        // An original little-endian TIFF directory containing one JPEG strip.
+        let tiff = |payload: &[u8], photo: u32| {
+            let fields = [
+                (256u16, 1u32),
+                (257, 1),
+                (258, 8),
+                (259, 7),
+                (262, photo),
+                (273, 122),
+                (277, 1),
+                (278, 1),
+                (279, payload.len() as u32),
+            ];
+            let mut bytes = b"II\x2a\0\x08\0\0\0".to_vec();
+            bytes.extend((fields.len() as u16).to_le_bytes());
+            for (tag, value) in fields {
+                bytes.extend(tag.to_le_bytes());
+                bytes.extend(4u16.to_le_bytes()); // LONG, one value stored inline.
+                bytes.extend(1u32.to_le_bytes());
+                bytes.extend(value.to_le_bytes());
+            }
+            bytes.extend(0u32.to_le_bytes()); // No following IFD.
+            assert_eq!(bytes.len(), 122);
+            bytes.extend(payload);
             bytes
         };
-        assert_eq!(
-            decode(&make_scans(MAX_SCANS), &|| Ok(())).unwrap().pixels,
-            [0xff808080]
-        );
-        assert!(decode(&make_scans(MAX_SCANS + 1), &|| Ok(()))
+        let payload = gray_with_comments(false, 65_537);
+        for (photo, pixel) in [(0, 0xff7f7f7f), (1, 0xff808080)] {
+            let bytes = tiff(&payload, photo);
+            let image = crate::image::decode_checked(&bytes, &|| Ok(())).unwrap();
+            assert_eq!((image.width, image.height), (1, 1));
+            assert_eq!(image.pixels, [pixel]);
+        }
+        let bytes = tiff(&progressively_refined_gray(896, false), 1);
+        assert!(crate::image::decode_checked(&bytes, &|| Ok(()))
             .unwrap_err()
-            .contains("256-scan limit"));
+            .contains("Progressive JPEG is not supported within TIFF"));
     }
 
     #[test]
