@@ -1898,8 +1898,9 @@ nodes retain current parent/attribute state through moves, clones and imports.
 Refusal publishes no partial list or tree change. The original App fixture removes
 declarative metadata, queries nested content, moves it through an inert fragment,
 clones/deep-imports ordinary content and checks painted glyphs with stable editor
-and link targets. Mixed-resource/nested-template main adoption, dynamic SVG and
-remaining lifecycle/scheduling routes are separate unfinished P1 contracts.
+and link targets. Later scoped mixed-resource/main-template copy and dynamic
+SVG increments extend this path; remaining lifecycle/scheduling routes and
+broader same-identity cross-document adoption remain separate P1 contracts.
 See [DOM queries](https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall)
 and [Web IDL operation functions](https://webidl.spec.whatwg.org/#es-operations).
 
@@ -2026,3 +2027,26 @@ real glyphs and stable neighboring editor/link targets. Arbitrary cross-document
 same-identity adoption and ordinary-child mutation of opaque/loaded template
 hosts remain outside this increment. This is a connected P1 fixture result,
 not a real-site shell result or completion of namespace/lifecycle work.
+
+
+## Passive dynamic SVG and connected graphics
+
+The main document and genuine inert HTML documents implement null-prefix
+createElementNS for the supported passive SVG containers and shapes. Namespace,
+case-sensitive names, expanded-name Attr records and native SVGElement ancestry
+survive independent deep clone/import. Real class tokens, attribute removal,
+insert/reorder/replace and fragment splices reuse the guarded DOM transactions.
+Unsupported foreign provenance, resource elements, handlers and external SVG
+references are refused before publication. No SVG-specific constructor is faked.
+
+Connected SVG roots use current DOM snapshots with the original standard-library
+SVG decoder, existing image input/pixel/decoded-storage allowances and checked
+traversal. Source changes replace the raster; detachment discards it. Templates
+stay inert. The actual App fixture stamps a cloned local-reference vector,
+changes its fill through a trusted event, removes/restores it, and verifies exact
+pixels alongside a stable native editor and real anchor hit/navigation. This
+finite paint path does not implement external stylesheet SVG cascade/inherited
+currentColor, general foreignObject, external SVG resources or a usable site.
+See [SVG namespace](https://svgwg.org/svg2-draft/struct.html#Namespace),
+[DOM element creation](https://dom.spec.whatwg.org/#dom-document-createelementns)
+and [DOM node cloning](https://dom.spec.whatwg.org/#concept-node-clone).

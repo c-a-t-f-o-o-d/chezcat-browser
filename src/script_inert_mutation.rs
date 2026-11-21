@@ -55,6 +55,11 @@ impl Bridge<'_> {
         let source=self.state.inert_documents.node(child).unwrap();
         let old_parent=source.parent;
         let fragment=matches!(source.kind,Kind::Fragment{..});
+        if method!="removeChild"{
+            if fragment{let length=self.inert_children(child).unwrap().len();self.state.work(length)?;for slot in 0..length{let root=self.inert_children(child).unwrap()[slot];self.validate_svg_edge(parent,root)?;}}
+            else{self.validate_svg_edge(parent,child)?;}
+        }
+
         let reference=if method=="insertBefore"{if let Some(Value::Host(handle))=args.get(1){Some(*handle)}else{None}}else{None};
         if reference==Some(child){return Ok(Value::Host(child));}
         if method=="removeChild" {

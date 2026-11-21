@@ -1869,14 +1869,16 @@ fn class_list_copy_work_and_invalid_namespace_failures_preserve_attribute() {
 }
 
 #[test]
-fn class_list_put_forwards_conversion_is_limited_to_real_html_elements() {
-    let (mut doc,mut forms,mut page,outcome) = page("<p id=p></p><svg><g id=f></g></svg>",&[]);
+fn class_list_put_forwards_conversion_is_limited_to_known_html_and_svg_elements() {
+    let (mut doc,mut forms,mut page,outcome) = page("<p id=p></p><svg><g id=f></g></svg><math id=unknown></math>",&[]);
     assert_eq!(outcome.errors,0,"{}",page.report());
     let html = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("p")).unwrap();
     let foreign = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("f")).unwrap();
+    let unknown = (0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("unknown")).unwrap();
     let mut bridge = Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
     assert!(bridge.string_setter(node_handle(html),"classList"));
-    assert!(!bridge.string_setter(node_handle(foreign),"classList"));
+    assert!(bridge.string_setter(node_handle(foreign),"classList"));
+    assert!(!bridge.string_setter(node_handle(unknown),"classList"));
     assert!(!bridge.string_setter(DOCUMENT,"classList"));
     let text = bridge.call(DOCUMENT,"createTextNode",&[Value::String("text".into())]).unwrap();
     let Value::Host(text) = text else {unreachable!()};

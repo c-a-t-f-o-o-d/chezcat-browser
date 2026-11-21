@@ -229,6 +229,10 @@ pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Res
     parse_internal(input, Some(context), scripting, None, None)
 }
 
+pub(crate) fn svg_dom_name(name:&str)->bool{svg_namespace::dom_name(name)}
+pub(crate) fn svg_dom_attribute(tag:&str,name:&AttributeName,value:&str)->bool{svg_namespace::dom_attribute(tag,name,value)}
+pub(crate) fn svg_dom_transfer(node:&Node)->bool{node.namespace==Namespace::Svg&&match &node.kind{NodeKind::Element{tag,attrs,..}=>svg_dom_name(tag)&&attrs.iter().all(|attr|svg_dom_attribute(tag,&attr.name,&attr.value)),_=>false}}
+
 /// HTML's autonomous custom-element names start with an ASCII lowercase
 /// letter and use the DOM local-name grammar.
 /// https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name

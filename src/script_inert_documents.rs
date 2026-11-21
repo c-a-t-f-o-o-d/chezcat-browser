@@ -281,7 +281,7 @@ impl Bridge<'_> {
             let Kind::Element(tag)=&inert.kind else{unreachable!()};
             (crate::html::Namespace::Html,tag.len().saturating_add(size_of::<Node>()+2*size_of::<usize>()),false)
         };
-        if value.is_some()&&namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}
+        if let Some(value)=value.as_deref(){if namespace==crate::html::Namespace::Svg{let tag=match self.inert_import_source(object){Some(ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,..},..},..})=>tag.as_str(),_=>return Err("Inert SVG source is unavailable.".into())};if !crate::html::svg_dom_attribute(tag,&name,value){return Err("Inert SVG attribute is outside the passive/local-reference policy.".into());}}else if namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}}
         if namespace==crate::html::Namespace::Html&&!expanded{name.qualified.make_ascii_lowercase();}
         let attrs=self.inert_element_attributes(object).ok_or("Inert Element attributes are unavailable.")?;
         let work=attrs.iter().fold(attrs.len().saturating_add(1),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;
@@ -1452,6 +1452,11 @@ impl Bridge<'_> {
                     Some(Value::String(value)) if !value.is_empty() => Some(value.as_str()),
                     _ => None,
                 };
+                if namespace==Some("http://www.w3.org/2000/svg")&&!name.contains(':'){
+                    if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("Inert SVG creation options are unavailable.".into());}
+                    if !crate::html::svg_dom_name(&name){return Err("Inert SVG creation requires a supported passive shape/container.".into());}
+                    return self.create_inert_svg(owner,name);
+                }
                 if namespace != Some(HTML_NAMESPACE) || name.contains(':') {
                     return Err("Inert createElementNS requires the HTML namespace and a null prefix.".into());
                 }
@@ -1469,6 +1474,13 @@ impl Bridge<'_> {
 
     pub(super) fn create_inert_processing_instruction(&mut self, owner: u32, target: String, data: String) -> Result<Value, String> {
         self.append_inert_leaf(owner, Kind::ProcessingInstruction { target, data })
+    }
+
+    fn create_inert_svg(&mut self,owner:u32,name:String)->Result<Value,String>{
+        let payload=name.capacity().checked_add(size_of::<Node>()+2*size_of::<usize>()).ok_or("Inert SVG source size overflow.")?;self.state.copies(name.len())?;
+        let first=self.reserve_inert_entries(1,payload,1)?;let arena=&mut self.state.inert_documents;let source=arena.generated.len();
+        arena.generated.push(GeneratedNode{node:Rc::new(Node{kind:NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()}),unsafe_nonce:false});
+        arena.entries.push(Entry::Node(InertNode{kind:Kind::Parsed{source:ParsedSource::Generated(source),initial_template:None},owner,parent:None,children:Vec::new()}));Ok(Value::Host(first))
     }
 
     fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
@@ -1679,7 +1691,7 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Text(_) | NodeKind::Comment(_) => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
-        NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => true,
+        NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => crate::html::svg_dom_transfer(node),
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)

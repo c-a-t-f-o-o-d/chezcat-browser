@@ -46,26 +46,41 @@ pub(super) fn template_refusal(tag: &Tag) -> Option<(&'static str, &str)> {
     if !shape_element(&tag.name){return Some(("element",&tag.name));}
     if tag.duplicate_attributes{return Some(("duplicate attributes on element",&tag.name));}
     if !tag.clean_syntax{return Some(("malformed element",&tag.name));}
-    tag.attrs.iter().find_map(|(key, value)| (!match key.as_str() {
+    tag.attrs.iter().find_map(|(key,value)|(!passive_attribute(&tag.name,key,value)).then_some(("attribute",key.as_str())))
+}
+
+fn passive_attribute(tag:&str,key:&str,value:&str)->bool{match key {
         "id" | "class" | "style" | "role" | "focusable" | "tabindex" | "viewbox" | "preserveaspectratio" | "pathlength" |
         "maskunits" | "maskcontentunits" | "mask-type" |
         "clippathunits" | "gradientunits" | "gradienttransform" | "spreadmethod" | "offset" | "stop-color" | "stop-opacity" |
         "opacity" | "fill-opacity" | "stroke-opacity" | "fill-rule" | "clip-rule" | "transform" | "display" | "visibility" | "fx" | "fy" | "fr" |
         "width" | "height" | "x" | "y" | "cx" | "cy" | "r" | "rx" | "ry" |
         "x1" | "y1" | "x2" | "y2" | "d" | "points" | "stroke-width" => true,
-        "href" | "xlink:href" => matches!(tag.name.as_str(),"use"|"lineargradient"|"radialgradient")&&crate::svg_reference::fragment(value).is_some(),
+        "href" | "xlink:href" => matches!(tag,"use"|"lineargradient"|"radialgradient")&&crate::svg_reference::fragment(value).is_some(),
         "mask" | "clip-path" => crate::svg_reference::effect(value).is_ok(),
         "fill" | "stroke" => crate::svg_reference::effect(value).is_ok()||value.strip_prefix('#').map_or_else(
             || !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphabetic()),
             |digits| matches!(digits.len(), 3 | 4 | 6 | 8) && digits.bytes().all(|b| b.is_ascii_hexdigit())),
-        "xmlns" => Some(value.as_str()) == Namespace::Svg.element_uri(),
+        "xmlns" => Some(value) == Namespace::Svg.element_uri(),
         "xmlns:xlink" => value=="http://www.w3.org/1999/xlink",
         // These ordinary null-namespace data/accessibility names do not bind
         // event handlers, external resources or graphics/focus APIs.
         _ if key.starts_with("aria-") || key.starts_with("data-") => true,
         _ if passive_presentation_attribute(key) => true,
         _ => false,
-    }).then_some(("attribute",key.as_str())))
+    }}
+
+pub(super) fn dom_name(name:&str)->bool{matches!(name,"svg"|"defs"|"g"|"mask"|"clipPath"|"linearGradient"|"radialGradient"|"stop"|"symbol"|"use"|"circle"|"ellipse"|"line"|"path"|"polygon"|"polyline"|"rect")}
+pub(super) fn dom_attribute(tag:&str,name:&super::AttributeName,value:&str)->bool{
+    if !dom_name(tag){return false;}
+    if let Some(namespace)=&name.namespace{return match namespace.uri.as_str(){
+        "http://www.w3.org/1999/xlink"=>namespace.local=="href"&&namespace.prefix.as_deref()==Some("xlink")&&matches!(tag,"use"|"linearGradient"|"radialGradient")&&crate::svg_reference::fragment(value).is_some(),
+        "http://www.w3.org/2000/xmlns/"=>(namespace.local=="xmlns"&&namespace.prefix.is_none()&&value=="http://www.w3.org/2000/svg")||(namespace.local=="xlink"&&namespace.prefix.as_deref()==Some("xmlns")&&value=="http://www.w3.org/1999/xlink"),
+        _=>false,
+    };}
+    let key=match name.qualified.as_str(){"viewBox"=>"viewbox","preserveAspectRatio"=>"preserveaspectratio","pathLength"=>"pathlength","maskUnits"=>"maskunits","maskContentUnits"=>"maskcontentunits","clipPathUnits"=>"clippathunits","gradientUnits"=>"gradientunits","gradientTransform"=>"gradienttransform","spreadMethod"=>"spreadmethod",name=>name};
+    if key.contains(':'){return false;}
+    let tag=match tag{"clipPath"=>"clippath","linearGradient"=>"lineargradient","radialGradient"=>"radialgradient",name=>name};passive_attribute(tag,key,value)
 }
 
 pub(super) fn publish(nodes: &mut [Node]) {

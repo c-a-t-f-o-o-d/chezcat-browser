@@ -766,7 +766,7 @@ impl Bridge<'_> {
         if property == "getBoundingClientRect" { return Ok(Some(self.class_list_element_receiver(object))); }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(false)); }
-            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
+            if !matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) { return Err("Attribute map requires known namespace provenance.".into()); }
             return Ok(Some(true));
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
@@ -861,7 +861,7 @@ impl Bridge<'_> {
         }
         if property == "attributes" {
             if !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) { return Ok(Some(Value::Undefined)); }
-            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Attribute map requires known namespace provenance.".into()); }
+            if !matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) { return Err("Attribute map requires known namespace provenance.".into()); }
             return Ok(Some(Value::Host(script_named_map::handle(object))));
         }
         if matches!(property,"localName"|"prefix"|"namespaceURI") {
@@ -897,7 +897,7 @@ impl Bridge<'_> {
         }
         if property == "classList" {
             if !matches!(self.doc.nodes[node].kind,NodeKind::Element {..}) { return Ok(Some(Value::Undefined)); }
-            if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("Class token list requires known namespace provenance.".into()); }
+            if !matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) { return Err("Class token list requires known namespace provenance.".into()); }
             return Ok(Some(Value::Host(script_class_list::handle(object))));
         }
         if matches!(property, "vspace" | "hspace") {
@@ -1037,7 +1037,8 @@ impl Bridge<'_> {
         Ok(None)
     }
 
-    pub(super) fn create_dom_node(&mut self, kind: NodeKind) -> Result<Value, String> {
+    pub(super) fn create_dom_node(&mut self,kind:NodeKind)->Result<Value,String>{let namespace=if matches!(kind,NodeKind::Element{..}){crate::html::Namespace::Html}else{crate::html::Namespace::None};self.create_dom_node_ns(kind,namespace)}
+    pub(super) fn create_dom_node_ns(&mut self, kind: NodeKind,namespace:crate::html::Namespace) -> Result<Value, String> {
         self.state.rebuild(self.doc)?;
         if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
@@ -1067,9 +1068,7 @@ impl Bridge<'_> {
             self.state.dom.force_async.insert(node);
         }
         self.doc.nodes.push(Node {
-            namespace: if matches!(kind, NodeKind::Element { .. }) {
-                crate::html::Namespace::Html
-            } else { crate::html::Namespace::None },
+            namespace,
             kind,
             children: Vec::new(),
         });
@@ -1127,6 +1126,7 @@ impl Bridge<'_> {
         while let Some((node, level)) = stack.pop() {
             self.state.work(1)?;
             depth = depth.max(level);
+            self.validate_svg_node(node)?;
             let name = tag(self.doc, node);
             if self.native_button(node) || self.fresh_button(node) {
                 self.state.work(self.doc.nodes.len())?;
@@ -1255,13 +1255,14 @@ impl Bridge<'_> {
         self.mutation_ancestors(parent)?;
         let source_parent = self.state.tree.parents[child];
         if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
+        self.validate_svg_edge(node_handle(parent),node_handle(child))?;
         let (incoming_nodes, depth) = self.mutation_subtree_with_styles(child)?;
         self.validate_button_children(parent,&incoming_nodes)?;
         let (outgoing_nodes, _) = self.mutation_subtree_with_styles(old)?;
-        if self.doc.nodes[parent].namespace != crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent))
+        if !matches!(self.doc.nodes[parent].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) && !self.fragment_receiver(node_handle(parent))
             || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
             || incoming_nodes.iter().chain(&outgoing_nodes).any(|&node|
-                self.doc.nodes[node].namespace.is_foreign()
+                self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
                     || matches!(tag(self.doc, node), "script" | "link" | "iframe")) {
             return Err("replaceChild in foreign, script, stylesheet or frame contexts is not implemented; no tree was changed.".into());
         }
@@ -1401,6 +1402,7 @@ impl Bridge<'_> {
         if reference == Some(child) {
             return Ok(Value::Host(node_handle(child)));
         }
+        if method!="removeChild"{self.validate_svg_edge(node_handle(parent),node_handle(child))?;}
         self.mutation_ancestors(parent)?;
         let old_parent = self.state.tree.parents[child];
         if let Some(old_parent) = old_parent {
@@ -1703,6 +1705,11 @@ impl Bridge<'_> {
             let namespace=match args.first(){Some(Value::String(s)) if !s.is_empty()=>Some(s.as_str()),_=>None};
             let name=self.text(args.get(1).ok_or("createElementNS requires two arguments.")?)?;
             super::script_attribute_names::validate_element_namespace(namespace,&name).map_err(|(_,message)|message)?;
+            if namespace==Some("http://www.w3.org/2000/svg")&&!name.contains(':'){
+                if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("SVG creation options are not implemented; no node was created.".into());}
+                if !crate::html::svg_dom_name(&name){return Err("SVG element is outside the supported passive shape/container subset; no node was created.".into());}
+                return self.create_dom_node_ns(NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},crate::html::Namespace::Svg).map(Some);
+            }
             if namespace!=Some("http://www.w3.org/1999/xhtml")||name.contains(':') {return Err("createElementNS currently implements the HTML namespace with a null prefix; no node was created.".into());}
             if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)) {return Err("Element creation options/custom registries are not implemented; no node was created.".into());}
             if !name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'-'|b'_'|b'.')) {return Err("Valid element name is outside the supported factory spelling subset; no node was created.".into());}
@@ -1882,7 +1889,7 @@ mod namespaced_creation_tests {
     fn svg_element_names_reflect_proven_namespace_and_preserve_fragment_replacement_guards() {
         let mut doc = crate::html::parse(concat!(
             "<html><body><circle id=htmlShape></circle><svg id=drawing>",
-            "<g><circle id=shape></circle></g></svg><div id=neighbor></div></body></html>"
+            "<g><circle id=shape></circle></g></svg><div id=neighbor></div><math id=guard><mi>x</mi></math></body></html>"
         ));
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
@@ -1903,11 +1910,14 @@ mod namespaced_creation_tests {
             fragment.appendChild(document.createElement('div'));
         "#);
         assert_eq!(read.errors, 0, "{}", page.report());
+        let replacement = page.console_eval(&mut doc, &mut forms,
+            "var inserted=fragment.firstChild;document.body.replaceChild(fragment,drawing);if(drawing.isConnected||shape.isConnected||inserted.parentNode!==document.body||fragment.childNodes.length!==0||drawing.namespaceURI!==svgNS)throw 'real SVG retirement';var blocked=document.createDocumentFragment();blocked.appendChild(document.createElement('div'));");
+        assert_eq!(replacement.errors, 0, "{}", page.report());
         let nodes = format!("{:?}", doc.nodes);
         let commits = page.state.dom_commits;
-        let replacement = page.console_eval(&mut doc, &mut forms,
-            "document.body.replaceChild(fragment,drawing);");
-        assert_eq!(replacement.errors, 1, "foreign subtree batch replacement must fail atomically");
+        let refused = page.console_eval(&mut doc, &mut forms,
+            "document.body.replaceChild(blocked,document.getElementById('guard'));");
+        assert_eq!(refused.errors, 1, "unknown foreign subtree replacement must fail atomically");
         assert_eq!(format!("{:?}", doc.nodes), nodes);
         assert_eq!(page.state.dom_commits, commits);
     }

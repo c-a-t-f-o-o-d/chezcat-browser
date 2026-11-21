@@ -211,11 +211,11 @@ impl Bridge<'_> {
         Ok(attrs.iter().position(|attr| attr.name.qualified == qualified))
     }
 
-    pub(super) fn method_qualified_attribute_name(&mut self, node: usize, method: &str, name: String)
+    pub(super) fn method_qualified_attribute_name(&mut self, node: usize, _method: &str, name: String)
         -> Result<String, String>
     {
         // Keep the existing qualified-name normalization for each operation.
-        if self.doc.nodes[node].namespace == crate::html::Namespace::Svg && method != "setAttribute" {
+        if self.doc.nodes[node].namespace == crate::html::Namespace::Svg {
             Ok(name)
         } else {
             self.state.copies(name.len())?;
@@ -335,7 +335,7 @@ impl Bridge<'_> {
 
     pub(super) fn attr_element_node(&mut self, object: u32) -> Result<usize, String> {
         let node = self.node(object)?;
-        if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
+        if !matches!(self.doc.nodes[node].namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
             return Err("Attr namespace provenance for foreign parser contexts is unavailable.".into());
         }
         Ok(node)
@@ -375,7 +375,8 @@ impl Bridge<'_> {
         let node = self.attr_element_node(object)?;
         let text = self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
         self.state.copies(text.len())?;
-        let slot = self.raw_attribute_slot(node, &text.to_ascii_lowercase())?;
+        let text = if self.doc.nodes[node].namespace == crate::html::Namespace::Html { text.to_ascii_lowercase() } else { text };
+        let slot = self.raw_attribute_slot(node, &text)?;
         self.lookup_attribute_node_at(node, slot)
     }
 
@@ -466,6 +467,11 @@ impl Bridge<'_> {
         self.public_attribute_prepared(node,name,value,InputPreparation::Pending)
     }
     fn public_attribute_prepared(&mut self,node:usize,name:AttributeName,value:Option<String>,input:InputPreparation)->Result<(),String>{
+        if self.doc.nodes[node].namespace==crate::html::Namespace::Svg{
+            if let Some(value)=value.as_deref(){self.state.work(name.bytes().saturating_add(value.len()))?;if !crate::html::svg_dom_attribute(tag(self.doc,node),&name,value){return Err("SVG attribute is outside the supported passive/local-reference policy; no attribute was changed.".into());}if name.namespace.is_none()&&name.qualified=="style"{validate_style(value,self.state.limits.host.string_bytes)?;}}
+            return self.attribute_named_prepared(node,name,value,input);
+        }
+
         if name.namespace.is_some() || name.qualified.contains(':') || name.qualified.bytes().any(|c| c.is_ascii_uppercase()) {
             return self.attribute_named_prepared(node, name, value,input);
         }
