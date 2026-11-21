@@ -8249,3 +8249,7 @@ mod inert_selector_tests;
 #[cfg(test)]
 #[path="script_passive_html_import_tests.rs"]
 mod passive_html_import_tests;
+
+#[cfg(test)]
+#[path="script_native_control_import_tests.rs"]
+mod native_control_import_tests;

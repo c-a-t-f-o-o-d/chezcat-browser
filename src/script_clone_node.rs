@@ -3,6 +3,9 @@
 use super::*;
 use script_inert_documents::ImportSource;
 
+#[path="script_import_controls.rs"]
+mod import_controls;
+
 pub(super) const CLONE_METHOD: &str = "\0Node.cloneNode";
 
 pub(super) fn ordinary_clone_element(name: &str) -> bool {
@@ -81,6 +84,7 @@ impl Bridge<'_> {
         if !self.inert_clone_receiver(*source) {
             return self.clone_node(*source, deep);
         }
+        if !deep&&self.inert_interface(*source)==Some("HTMLTextAreaElement"){return Err("Shallow inert TEXTAREA import requires raw-value cloning; no node was created.".into());}
 
         let base = self.doc.nodes.len();
         let remaining = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))
@@ -108,7 +112,7 @@ impl Bridge<'_> {
                 ImportSource::Parsed { node, .. } => {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                        if node.namespace != crate::html::Namespace::Html || !ordinary_clone_element(tag) {
+                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button")) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if attrs.iter().any(|attr| attr.name.namespace.is_some()
@@ -120,7 +124,7 @@ impl Bridge<'_> {
                     copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
-                    if !ordinary_clone_element(tag) {
+                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button")) {
                         return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                     }
                     tag.len()
@@ -164,7 +168,9 @@ impl Bridge<'_> {
             children.extend(start..start + count);
             staged.push(DetachedCopy { node: Node { kind, namespace, children }, parent, unsafe_nonce });
         }
-        self.publish_detached_copy(staged, bytes, None)
+        let form_plan=self.prepare_imported_controls(&mut staged,bytes)?;
+        let bytes=bytes.checked_add(form_plan.as_ref().map_or(0,|plan|plan.retained_bytes)).ok_or("Imported native control payload overflow.")?;
+        self.publish_detached_copy(staged, bytes, form_plan)
     }
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {

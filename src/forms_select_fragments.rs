@@ -110,8 +110,10 @@ impl Forms {
         }
         if let Some((doc, base)) = fragment {
             if base == 0 || base.checked_add(doc.nodes.len().saturating_sub(1)).is_none() { return Err("Select native identity range overflow.".into()); }
+            let mut buttons=Vec::new();
             for local in 1..doc.nodes.len() {
                 let name = tag(doc, local);
+                if name=="button"{buttons.try_reserve(1).map_err(|_|"Fragment BUTTON plan reservation failed.")?;buttons.push(local);continue;}
                 if matches!(name, "input" | "textarea") {
                     let textarea = name == "textarea";
                     let checkbox = fragment_checkbox_input(doc, local);
@@ -184,6 +186,7 @@ impl Forms {
                 plan.retained_bytes = plan.retained_bytes.checked_add(extra).ok_or("Select retained payload overflow.")?;
                 plan.additions.insert(base + local - 1, control);
             }
+            if !buttons.is_empty(){self.add_fragment_buttons(doc,base,&buttons,&mut plan)?;}
         }
         plan.metadata.try_reserve(self.controls.len().saturating_add(plan.additions.len())).map_err(|_| "Select metadata reservation failed.")?;
         Ok(plan)

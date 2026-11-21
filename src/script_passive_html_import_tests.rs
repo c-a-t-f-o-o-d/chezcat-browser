@@ -42,7 +42,7 @@ if(typeof customElements!=='undefined'||'attachShadow' in HTMLElement.prototype)
 fn passive_html_import_late_native_handler_and_customized_builtin_refusals_are_atomic() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc,&mut forms,&mut page,"var t=document.createElement('template');t.innerHTML='<original-shell><span>Kept</span></original-shell>';var source=t.content.firstChild,owner=source.ownerDocument;");
-    for source in ["t.innerHTML='<original-shell><span onclick=forbidden()>Bad</span></original-shell>';","t.innerHTML='<original-shell is=unsupported><span>Bad</span></original-shell>';","t.innerHTML='<original-shell><span>Prefix</span><button>Native control</button></original-shell>';" ] {
+    for source in ["t.innerHTML='<original-shell><span onclick=forbidden()>Bad</span></original-shell>';","t.innerHTML='<original-shell is=unsupported><span>Bad</span></original-shell>';","t.innerHTML='<original-shell><span>Prefix</span><input type=radio></original-shell>';" ] {
   run(&mut doc,&mut forms,&mut page,source);let before=page.state.retained;let count=doc.nodes.len();let commits=page.state.dom_commits;
   let result=page.console_eval(&mut doc,&mut forms,"document.importNode(t.content,true);");assert_eq!(result.errors,1,"{}",page.report());assert_eq!(page.state.retained,before);assert_eq!(doc.nodes.len(),count);assert_eq!(page.state.dom_commits,commits);
  }

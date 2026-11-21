@@ -164,14 +164,17 @@ impl Forms {
         Ok(Some(ButtonAttributePlan { node, update }))
     }
 
-    pub(crate) fn add_created_buttons(&self, doc: &Document, nodes: &[usize], plan: &mut SelectFormPlan) -> Result<(), String> {
-        if self.controls.len().saturating_add(plan.additions.len()).saturating_add(nodes.len()) > MAX_CONTROLS {
+    pub(crate) fn add_created_buttons(&self,doc:&Document,nodes:&[usize],plan:&mut SelectFormPlan)->Result<(),String>{self.add_button_sources(doc,nodes.iter().copied().map(|node|(node,node)),plan)}
+    pub(crate) fn add_fragment_buttons(&self,doc:&Document,base:usize,nodes:&[usize],plan:&mut SelectFormPlan)->Result<(),String>{self.add_button_sources(doc,nodes.iter().copied().map(|node|(node,base+node-1)),plan)}
+    fn add_button_sources(&self, doc: &Document, nodes: impl ExactSizeIterator<Item=(usize,usize)>, plan: &mut SelectFormPlan) -> Result<(), String> {
+        let count=nodes.len();
+        if self.controls.len().saturating_add(plan.additions.len()).saturating_add(count) > MAX_CONTROLS {
             return Err("Native form control limit reached before BUTTON insertion.".into());
         }
         let mut bytes = self.text_payload(None)?;
         for control in plan.additions.values() { bytes = bytes.checked_add(text_inputs::control_payload(control)?).ok_or("Native form payload overflow.")?; }
-        for &node in nodes {
-            if self.controls.contains_key(&node) || plan.additions.contains_key(&node) { return Err("BUTTON native identity is already owned.".into()); }
+        for (node,target) in nodes {
+            if self.controls.contains_key(&target) || plan.additions.contains_key(&target) { return Err("BUTTON native identity is already owned.".into()); }
             button_shape(doc,node)?;
             let name = doc.attr(node,"name").unwrap_or("");
             let initial = doc.attr(node,"value").unwrap_or("");
@@ -183,15 +186,15 @@ impl Forms {
             let retained = name.len().checked_add(initial.len()).and_then(|bytes|bytes.checked_add(caption.len()))
                 .and_then(|bytes|bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
                 .ok_or("BUTTON retained payload overflow.")?;
-            let control = Control { owner: None, group_root: node, kind: button_kind(doc.attr(node,"type")), value, dirty_value: false,
+            let control = Control { owner: None, group_root: target, kind: button_kind(doc.attr(node,"type")), value, dirty_value: false,
                 name: copied(name)?, caption, disabled: doc.attr(node,"disabled").is_some(), readonly: false, required: false,
                 checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                 tab_index: doc.attr(node,"tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
                 button_element: true, initial: copied(initial)?, initially_checked: false, image_point: (0,0) };
             plan.retained_bytes = plan.retained_bytes.checked_add(retained).ok_or("Native BUTTON retained payload overflow.")?;
-            plan.additions.insert(node,control);
+            plan.additions.insert(target,control);
         }
-        plan.metadata.try_reserve(nodes.len()).map_err(|_| "BUTTON owner plan reservation failed.")?;
+        plan.metadata.try_reserve(count).map_err(|_| "BUTTON owner plan reservation failed.")?;
         Ok(())
     }
 }
