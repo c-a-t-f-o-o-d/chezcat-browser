@@ -226,6 +226,7 @@ impl Bridge<'_> {
     pub(super) fn attribute_observation_plan(&mut self, object: u32, method: &str, args: &[Value])
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
     {
+        if self.inert_node_type(object)==Some(1){return self.inert_attribute_observation_plan(object,method,args);}
         if !self.attr_element_receiver(object) || self.is_frame_handle(object) { return Ok(None); }
         let node = self.attr_element_node(object)?;
         let (slot, local, uri, removal) = match method {

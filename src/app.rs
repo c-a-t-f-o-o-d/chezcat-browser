@@ -6072,3 +6072,7 @@ mod template_main_import_tests;
 #[cfg(test)]
 #[path="app_dynamic_svg_tests.rs"]
 mod dynamic_svg_tests;
+
+#[cfg(test)]
+#[path="app_inert_observation_tests.rs"]
+mod inert_observation_tests;
