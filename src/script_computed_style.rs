@@ -170,6 +170,8 @@ pub(super) struct Declaration {
 
 #[derive(Clone, Copy)]
 enum ComputedProperty {
+    Display,
+    Color,
     FontSize,
     TouchAction,
     Opacity,
@@ -182,6 +184,8 @@ enum ComputedProperty {
 impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
+            "display"=>Some(Self::Display),
+            "color"=>Some(Self::Color),
             "fontSize" => Some(Self::FontSize),
             "touchAction" => Some(Self::TouchAction),
             "opacity" => Some(Self::Opacity),
@@ -194,7 +198,7 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("font-size") {
+        if name.eq_ignore_ascii_case("display"){Some(Self::Display)}else if name.eq_ignore_ascii_case("color"){Some(Self::Color)}else if name.eq_ignore_ascii_case("font-size") {
             Some(Self::FontSize)
         } else if name.eq_ignore_ascii_case("touch-action") {
             Some(Self::TouchAction)
@@ -442,6 +446,13 @@ impl Bridge<'_> {
                 &mut self.state.host_work,
                 &mut self.state.copy_work,
             )?;
+        if matches!(property,ComputedProperty::Display|ComputedProperty::Color){
+            let Some(presentation)=snapshot.read_presentation(node).map_err(|_|"Computed presentation unavailable within CSS cascade limits.")?else{return Ok(Value::String(String::new()));};
+            if matches!(property,ComputedProperty::Display){let text=presentation.display;self.state.copies(text.len())?;let mut value=String::new();value.try_reserve_exact(text.len()).map_err(|_|"Computed display serialization reservation failed.")?;value.push_str(text);return Ok(Value::String(value));}
+            self.state.work(64)?;let mut text=transform::NumberText::new();let color=presentation.color;
+            std::fmt::write(&mut text,format_args!("rgb({}, {}, {})",(color>>16)&255,(color>>8)&255,color&255)).map_err(|_|"Computed color serialization overflow.")?;
+            self.state.copies(text.text().len())?;let mut result=String::new();result.try_reserve_exact(text.text().len()).map_err(|_|"Computed color serialization reservation failed.")?;result.push_str(text.text());return Ok(Value::String(result));
+        }
         if matches!(property, ComputedProperty::FontSize) {
             let Some(size)=snapshot.read_font_size(node).map_err(|_|"Computed font-size unavailable within CSS cascade limits.")? else {return Ok(Value::String(String::new()));};
             if !size.is_finite() {return Err("Computed font-size is not finite.".into());}
@@ -465,6 +476,7 @@ impl Bridge<'_> {
             return Ok(Value::String(result));
         }
         let (first, second) = match property {
+            ComputedProperty::Display|ComputedProperty::Color=>unreachable!("presentation has dedicated native serialization"),
             ComputedProperty::FontSize => unreachable!("font-size uses actual native pixel serialization"),
             ComputedProperty::TouchAction => {
                 let value=snapshot.read_touch_action(node).map_err(|_|"Computed touch-action unavailable within CSS cascade limits.")?;

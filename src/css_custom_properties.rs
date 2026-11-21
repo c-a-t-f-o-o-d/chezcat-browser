@@ -340,7 +340,7 @@ pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let length=|value|if inherit{inherited_layout_length(value,parent)}else{value};
     match name{
         "width"=>{style.width=length(source.width);return;},"height"=>{style.height=length(source.height);return;},"min-width"=>{style.min_width=length(source.min_width);return;},"min-height"=>{style.min_height=length(source.min_height);return;},"max-width"=>{style.max_width=source.max_width.map(length);return;},"max-height"=>{style.max_height=source.max_height.map(length);return;},
-        "display"=>{style.display=source.display;return;},"box-sizing"=>{style.border_box=source.border_box;return;},
+        "display"=>{style.display=source.display;style.display_alias=source.display_alias;return;},"box-sizing"=>{style.border_box=source.border_box;return;},
         "flex-grow"=>{style.flex_grow=source.flex_grow;return;},"flex-shrink"=>{style.flex_shrink=source.flex_shrink;return;},"flex-basis"=>{style.flex_basis=length(source.flex_basis);return;},"flex"=>{style.flex_grow=source.flex_grow;style.flex_shrink=source.flex_shrink;style.flex_basis=length(source.flex_basis);return;},
         "flex-direction"=>{style.flex_direction=source.flex_direction;return;},"flex-wrap"=>{style.flex_wrap=source.flex_wrap;return;},"flex-flow"=>{style.flex_direction=source.flex_direction;style.flex_wrap=source.flex_wrap;return;},
         "gap"=>{style.gap=source.gap.map(length);return;},"row-gap"=>{style.gap[0]=length(source.gap[0]);return;},"column-gap"=>{style.gap[1]=length(source.gap[1]);return;},_=>{},

@@ -5,6 +5,12 @@ use std::rc::Rc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ComputedStyleUnavailable;
 
+#[derive(Clone,Copy)]
+pub(crate) struct ComputedPresentation {pub display:&'static str,pub color:u32}
+pub(crate) fn display_css(value:Display)->&'static str{match value{Display::None=>"none",Display::Block=>"block",Display::Inline=>"inline",Display::InlineBlock=>"inline-block",Display::Flex=>"flex",Display::Grid=>"grid",Display::Table=>"table",Display::TableRowGroup=>"table-row-group",Display::TableRow=>"table-row",Display::TableCell=>"table-cell"}}
+
+pub(super) fn style_display(style:&Style)->&'static str{match (style.display,style.display_alias){(Display::Block,Some("list-item"))=>"list-item",(Display::TableRowGroup,Some("table-header-group"))=>"table-header-group",(Display::TableRowGroup,Some("table-footer-group"))=>"table-footer-group",_=>display_css(style.display)}}
+
 #[derive(Clone)]
 pub(crate) struct ComputedProperties(Rc<Snapshot>);
 struct Snapshot {
@@ -19,6 +25,7 @@ struct Snapshot {
     opacities: HashMap<usize, Option<f64>>,
     touch_actions: HashMap<usize, Option<TouchAction>>,
     font_sizes: HashMap<usize, Option<f32>>,
+    presentation:Vec<ComputedPresentation>,
 }
 impl ComputedProperties {
     #[allow(clippy::too_many_arguments)]
@@ -34,6 +41,7 @@ impl ComputedProperties {
         opacities: HashMap<usize, Option<f64>>,
         touch_actions: HashMap<usize, Option<TouchAction>>,
         font_sizes: HashMap<usize, Option<f32>>,
+        presentation:Vec<ComputedPresentation>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -47,6 +55,7 @@ impl ComputedProperties {
             opacities,
             touch_actions,
             font_sizes,
+            presentation,
         }))
     }
     pub(crate) fn read(
@@ -125,6 +134,11 @@ impl ComputedProperties {
     pub(crate) fn has_transform_geometry(&self) -> bool {
         self.0.has_transform_geometry
     }
+    pub(crate) fn read_presentation(&self,node:usize)->Result<Option<ComputedPresentation>,ComputedStyleUnavailable>{
+        if !*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?{return Ok(None);}
+        if !self.0.complete{return Err(ComputedStyleUnavailable);}
+        self.0.presentation.get(node).copied().map(Some).ok_or(ComputedStyleUnavailable)
+    }
     pub(crate) fn canvas_foreground(&self, node: usize) -> Result<Option<u32>, ComputedStyleUnavailable> {
         if !self.0.complete { return Err(ComputedStyleUnavailable); }
         Ok(self.0.canvas_foregrounds.get(&node).copied())
@@ -175,6 +189,7 @@ pub(super) fn check_css_deadline(deadline: Option<Instant>) -> Result<(), String
 }
 
 impl<'a> CssBudget<'a> {
+    pub(super) fn presentation(&mut self,count:usize)->Result<(),String>{self.work(count)?;self.copies(count.checked_mul(std::mem::size_of::<ComputedPresentation>()).ok_or("Computed presentation backing overflow.")?)}
     pub(super) fn font_size(&mut self,first:bool)->Result<(),String> {
         self.work(1)?;self.copies((if first {6} else {3})*std::mem::size_of::<(usize,Option<f32>)>())
     }
