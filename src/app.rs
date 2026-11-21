@@ -6042,3 +6042,7 @@ mod nested_template_tests;
 #[cfg(test)]
 #[path="app_error_event_tests.rs"]
 mod error_event_tests;
+
+#[cfg(test)]
+#[path="app_inert_selector_tests.rs"]
+mod inert_selector_tests;

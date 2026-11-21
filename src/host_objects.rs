@@ -426,6 +426,13 @@ impl Runtime {
                 for (property,operation) in PARENT_NODE_GETTERS {
                     self.define_readonly_node_getter(prototype,window,property,operation)?;
                 }
+                let queries=if name=="Document" {[("querySelector","\0Document.querySelector"),("querySelectorAll","\0Document.querySelectorAll")]}else{[("querySelector","\0DocumentFragment.querySelector"),("querySelectorAll","\0DocumentFragment.querySelectorAll")]};
+                for (key,operation) in queries {
+                    let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
+                    if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
+                    self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
+                    self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
+                }
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
                     self.define_readonly_node_getter(prototype, window, "currentScript", DOCUMENT_CURRENT_SCRIPT_GET)?;

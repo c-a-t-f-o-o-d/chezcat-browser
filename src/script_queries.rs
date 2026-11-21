@@ -5,7 +5,7 @@ use super::*;
 
 pub(super) enum NodeList {
     Snapshot(Vec<usize>),
-    MutationSnapshot(Vec<u32>),
+    HandleSnapshot(Vec<u32>),
     Name(String),
     // A live SameObject list over this real node's immediate children.
     Children(usize),
@@ -60,8 +60,18 @@ impl Bridge<'_> {
         self.state.copies(nodes.len()*size_of::<u32>())?;
         let (handle,replacement,added)=self.prepare_node_list("mutation snapshot",payload)?;
         handles.extend_from_slice(nodes);
-        self.commit_node_list(NodeList::MutationSnapshot(handles),replacement,added,payload);
+        self.commit_node_list(NodeList::HandleSnapshot(handles),replacement,added,payload);
         Ok(handle)
+    }
+
+    pub(super) fn snapshot_query_handles(&mut self,nodes:Vec<u32>)->Result<Value,String>{
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&nodes.len()>4096{return Err("DOM selector result limit reached (4096 elements).".into());}
+        let references=self.state.node_list_references.checked_add(nodes.len()).ok_or("DOM NodeList retained-reference accounting overflow.")?;
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&references>self.state.limits.host.node_list_references{return Err("DOM NodeList retained-reference limit reached.".into());}
+        self.state.work(nodes.len())?;let payload=nodes.capacity()*size_of::<u32>();let (handle,replacement,added)=self.prepare_node_list("inert query snapshot",payload)?;
+        self.commit_node_list(NodeList::HandleSnapshot(nodes),replacement,added,payload);self.state.node_list_references=references;Ok(Value::Host(handle))
     }
 
     pub(super) fn create_child_list(&mut self, object: u32) -> Result<Value, String> {
@@ -171,7 +181,7 @@ impl Bridge<'_> {
             return if property == "length" { Ok(Value::Number(nodes.len() as f64)) }
                 else { Ok(collection_index(property).and_then(|index|nodes.get(index)).map_or(Value::Undefined,|&node|Value::Host(node_handle(node)))) };
         }
-        if let NodeList::MutationSnapshot(nodes) = list {
+        if let NodeList::HandleSnapshot(nodes) = list {
             return if property == "length" { Ok(Value::Number(nodes.len() as f64)) }
                 else { Ok(collection_index(property).and_then(|index| nodes.get(index)).copied()
                     .map_or(Value::Undefined, Value::Host)) };

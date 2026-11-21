@@ -177,11 +177,10 @@ for(var fn of [Element.prototype.matches,Element.prototype.closest]){
  try{fn.call(a,conversion);throw 'matching conversion swallowed';}catch(e){if(e!==marker)throw e;}
  fn.call(a,'.item',{toString:function(){throw 'extra converted';}});
 }
+if(touched)throw 'invalid brand converted selector';
 var template=document.createElement('template');template.innerHTML='<span>inert</span>';
-for(var fn of [Element.prototype.matches,Element.prototype.closest]){
- try{fn.call(template.content.firstChild,request);throw 'inert selector fabricated';}catch(e){if(e.name!=='NotSupportedError')throw e;}
-}
-if(touched||rejected!==receivers.length*2||!a.matches('.item')||a.closest('#root')!==document.getElementById('root'))throw 'matching validation order/recovery';
+if(Element.prototype.matches.call(template.content.firstChild,request)!==false||Element.prototype.closest.call(template.content.firstChild,request)!==null)throw 'real inert nonmatching selectors';
+if(touched!==2||rejected!==receivers.length*2||!a.matches('.item')||a.closest('#root')!==document.getElementById('root'))throw 'matching validation order/recovery';
 "#);
 }
 
