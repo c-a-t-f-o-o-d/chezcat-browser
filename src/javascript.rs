@@ -800,6 +800,8 @@ pub trait Host {
     /// Nullable (boolean or unrestricted double or DOMString): scalar values
     /// retain their type, while other values undergo DOMString conversion.
     fn nullable_scalar_setter(&self,_object:u32,_property:&str)->bool{false}
+    /// Nullable DOMString normalizes original null/undefined to native null.
+    fn nullable_string_setter(&self,_object:u32,_property:&str)->bool{false}
     /// LegacyNullToEmptyString preserves normal undefined/object conversion.
     fn null_string_setter(&self, _object: u32, _property: &str) -> bool { false }
     /// Pure interface checks interleaved with scalar conversion in table order.
@@ -9101,7 +9103,9 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
         // Canonical attribute getters ignore arguments; setters use one value.
-        let args = if let Some((_, setter)) = html_reflection_interface::operation(method) {
+        let attribute_setter=html_reflection_interface::operation(method).map(|(_,setter)|setter)
+            .or_else(||aria_reflection_interface::operation(method).map(|(_,_,setter)|setter));
+        let args = if let Some(setter) = attribute_setter {
             if setter { &args[..args.len().min(1)] } else { &[][..] }
         } else {
             match method {
@@ -14129,3 +14133,6 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
 
 #[path="html_reflection_interface.rs"]
 pub(crate) mod html_reflection_interface;
+
+#[path="aria_reflection_interface.rs"]
+pub(crate) mod aria_reflection_interface;

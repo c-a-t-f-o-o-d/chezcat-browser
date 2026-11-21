@@ -27,7 +27,9 @@ fn fixture_with(extra: &str) -> (Document, Forms, Page) {
     let mut doc = crate::html::parse(&[markup, extra].concat());
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
+    // Native interface/owner behavior uses the product admission profile.
+    // The explicit copy-work refusal below still selects its own narrow job.
+    let mut page = Page::with_limits(crate::javascript::limits::BROWSER);
     let source = location("https://dom-string.test/path/page");
     page.set_location(&source);
     page.set_resource_base(&source);
