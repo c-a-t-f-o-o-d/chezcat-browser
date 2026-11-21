@@ -1581,6 +1581,11 @@ impl Runtime {
                 return Ok(DescriptorTarget::Ordinary(Ordinary::Object(properties)));
             }
         }
+        if let Value::Host(handle)=value{
+            let interface=host.instance_ancestry(*handle).and_then(|entry|entry.constructor.map(|(_,name)|name)).unwrap_or("unclassified");
+            let excerpt:String=name.chars().take(80).collect();
+            return Err(Fault::new(format!("Native host object prototypes and descriptors are not implemented. Receiver {handle:#010x}, interface {interface}, property {excerpt:?}.")));
+        }
         self.ordinary_required(value)
             .map(DescriptorTarget::Ordinary)
     }
