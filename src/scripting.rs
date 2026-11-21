@@ -2958,6 +2958,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if script_element_properties::ordinary_interface_member(property) && self.form_named_control(object,property) {return false;}
         self.ordinary_attribute_method(object,property)
             || parent_children::member(property) && self.parent_node_receiver(object)
             || property == "style" && self.html_element_expando_receiver(object)
@@ -3181,11 +3182,13 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
+        if self.form_receiver(object) && self.class_list_element_receiver(object) {return true;}
         self.range_owner(object).is_some() || object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
             || self.abort_instance(object).is_some()
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if property=="submit" && self.form_submit_method(object).is_some() {return false;}
         if self.range_owner(object).is_some() {return false;}
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
         if self.canvas_context_receiver(object) { return script_canvas_context::unsupported_state(property); }
@@ -3223,6 +3226,7 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
+        if self.form_receiver(object) && self.class_list_element_receiver(object) {return true;}
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object)
             || self.text_or_comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
@@ -3525,6 +3529,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if method==crate::javascript::HTML_FORM_SUBMIT && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
         if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
@@ -3727,6 +3732,10 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method==crate::javascript::HTML_FORM_SUBMIT && self.inert_interface(object)==Some("HTMLFormElement") {
+            return Err(("NotSupportedError","Inert form submission has no native form backend.".into()));
+        }
+        let method=if method==crate::javascript::HTML_FORM_SUBMIT {"submit"}else{method};
         if crate::javascript::range_interface::operation(method) { return Ok(()); }
         if method == MEDIA_QUERY_LIST && object == WINDOW {
             return Err(("TypeError", "Illegal MediaQueryList constructor.".into()));
@@ -4087,9 +4096,9 @@ impl Host for Bridge<'_> {
         }
         if object == DOCUMENT && property == "createEvent" && self.event_factory_enabled() { return Some("createEvent"); }
         if let Some(method) = self.created_event_method(object, property) { return Some(method); }
-        if property == "submit" {
-            return self.form_submit_method(object);
-        }
+        // Form submission is a canonical prototype operation; native named
+        // controls still resolve before the prototype through form lookup.
+        if property == "submit" && self.form_receiver(object) { return None; }
         if self.collection_receiver(object){return None;}
         if let Some(method) = self.dom_method(object, property) {
             return Some(method);
@@ -4126,6 +4135,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
             return object==WINDOW && self.media_query_owner(receiver).is_some();
@@ -4700,9 +4710,7 @@ impl Host for Bridge<'_> {
             if matches!(property, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return Ok(true); }
             return self.frame_get(object, property).unwrap().map(|_| true);
         }
-        if property == "submit" && self.form_submit_method(object).is_some() {
-            return Ok(true);
-        }
+
         if collection_handle_index(object).is_some() {
             return Ok(matches!(property, "length" | "item" | "namedItem")
                 || !matches!(self.tag_collection_get(object, property)?, Value::Undefined));
@@ -5601,6 +5609,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        let method=if method==crate::javascript::HTML_FORM_SUBMIT {"submit"}else{method};
         if crate::javascript::range_interface::operation(method) { return self.range_call(object,method,args); }
         if object==WINDOW && method=="matchMedia" {return self.create_media_query(args);}
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {return self.media_query_get(object,method);}

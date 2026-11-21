@@ -126,6 +126,27 @@ mod tests {
     }
 
     #[test]
+    fn form_interface_real_prototype_submit_named_controls_and_saved_roots() {
+        let page=run("<body><form name=f><input name=constructor value=constructor-field><input name=submit value=submit-field><input name=inheritedProbe value=probe-field><input name=getAttribute value=method-field><input name=children value=children-field></form><form name=other></form></body>",r#"
+var f=document.f,other=document.other,C=HTMLFormElement,P=C.prototype;
+if(!(f instanceof C)||!(f instanceof HTMLElement)||Object.getPrototypeOf(f)!==P||Object.getPrototypeOf(P)!==HTMLElement.prototype||Object.getPrototypeOf(C)!==HTMLElement||other.constructor!==C||Object.prototype.toString.call(f)!=='[object HTMLFormElement]')throw 'genuine form interface';
+if(f.getAttribute.value!=='method-field'||typeof f.children.length!=='number'||Element.prototype.getAttribute.call(f,'name')!=='f'||String(other)!=='[object HTMLFormElement]')throw 'named native member precedence';
+if(f.constructor.value!=='constructor-field')throw 'named constructor';if(f.submit.value!=='submit-field')throw 'named submit';if(other.submit!==P.submit)throw 'canonical prototype submit';
+var calls=0;Object.defineProperty(P,'inheritedProbe',{get:function(){calls++;return this;},configurable:true});
+if(f.inheritedProbe.value!=='probe-field'||calls!==0||other.inheritedProbe!==other||calls!==1)throw 'named control precedence over author prototype';
+var method=Object.getOwnPropertyDescriptor(P,'submit');if(method.value.name!=='submit'||method.value.length!==0||!method.enumerable||!method.writable||!method.configurable)throw 'canonical submit descriptor';
+for(var call of [function(){new C();},function(){C();},function(){method.value.call(document.body);}]){var caught=false;try{call();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'native form brand';}
+P.submit=function(){return this;};if(other.submit()!==other||f.submit.value!=='submit-field')throw 'ordinary prototype override';delete P.submit;
+if(typeof other.submit!=='undefined'||'submit' in other||f.submit.value!=='submit-field')throw 'deleted prototype operation resurrected';Object.defineProperty(P,'submit',method);
+var inert=document.implementation.createHTMLDocument('inert').createElement('form');if(!(inert instanceof C))throw 'real inert class';
+try{method.value.call(inert);throw 'inert fake submission';}catch(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw e;}
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);if(frame.contentWindow.HTMLFormElement===C||f instanceof frame.contentWindow.HTMLFormElement)throw 'owner interface identity';
+delete window.HTMLFormElement;if(!(other instanceof C)||P.constructor!==C||f.constructor.value!=='constructor-field')throw 'saved canonical roots';
+"#, "");
+        assert_eq!(page.error_count(),0,"{}",page.report());assert!(page.state.navigation.is_none());
+    }
+
+    #[test]
     fn form_submit_snapshots_values_bypasses_validation_and_omits_submitter() {
         let html = "<form id=f name=f action='/search'><input name=required required><textarea name=q>before</textarea><button name=go value=button>Search</button></form>";
         let mut page = run(html, "document.f.onsubmit=function(){throw Error('submit event must not run');};if(typeof document.f.submit!=='function' || !('submit' in document.f))throw Error('native method');if(document.f.getAttribute('action')!=='/search')throw Error('form attribute method');document.f.addEventListener('submit',function(){throw Error('unexpected listener');});document.f.submit();document.f.q.value='after';", "");

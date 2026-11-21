@@ -466,6 +466,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("button", "HTMLButtonElement"),
     ("canvas", "HTMLCanvasElement"),
     ("div", "HTMLDivElement"),
+    ("form", "HTMLFormElement"),
     ("html", "HTMLHtmlElement"),
     ("iframe", "HTMLIFrameElement"),
     ("img", "HTMLImageElement"),
@@ -521,6 +522,7 @@ pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
 pub(crate) const CREATE_PROCESSING_INSTRUCTION: &str = "\0Document.createProcessingInstruction";
 pub(crate) const PROCESSING_INSTRUCTION_TARGET_GET: &str = "\0ProcessingInstruction.get.target";
 pub(crate) const ELEMENT_INNER_HTML_GET: &str = "\0Element.get.innerHTML";
+pub(crate) const HTML_FORM_SUBMIT: &str = "\0HTMLFormElement.submit";
 pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
 
@@ -9136,7 +9138,7 @@ impl Runtime {
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if kind == "NotSupportedError"
-                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | "\0Media.load" | "\0Media.pause")
+                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | "\0Media.load" | "\0Media.pause")
                 || kind == "InvalidCharacterError"
                     && matches!(method, CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction")
             {

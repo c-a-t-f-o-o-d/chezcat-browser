@@ -1580,3 +1580,23 @@ content deletion/extraction/cloning/insertion and surrounding remain outside the
 implemented subset. Range identity is not a DOM selection, editor-selection or
 site initialization claim. Original App acceptance uses trusted input, actual
 text runs/pixels and stable neighboring editor/link hit targets.
+
+
+## Native form interface and named lookup
+
+Real HTML forms use their realm's canonical HTMLFormElement constructor and
+prototype, with HTMLElement ancestry, class tag and illegal direct construction.
+The canonical prototype.submit operation uses the existing native submission
+snapshot and navigation path. Supported named controls retain their existing lookup
+precedence. Constructor and submit shadowing resolves real controls, while an
+unshadowed submit reads the shared prototype operation. Untouched protected
+native member priorities remain, including form text/tag-name reads. Author prototype overrides/deletion do not resurrect a
+hidden per-instance native method. Own form expandos remain guarded.
+
+Borrowed submit validates the real HTML form brand. Inert forms have genuine
+interface identity but no active native submission backend and explicitly refuse
+submission. Existing local-file, exact-origin, CSP form-action, request and
+queueing protections remain. Submitting still bypasses constraint validation,
+submit events and submitter inclusion through the existing backend. This slice
+does not add requestSubmit, reset/validation methods, full reflected form IDL,
+indexed form collections or RadioNodeList behavior.
