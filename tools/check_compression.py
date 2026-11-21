@@ -63,16 +63,16 @@ def wrapped(raw, level, strategy, wbits):
     return compressor.compress(raw) + compressor.flush()
 
 
-def options(raw, flags):
+def options(raw, flags, *, extra=b"OB\x04\x00test", name=b"page.html",
+            comment=b"Original test comment"):
     body = gzip.compress(raw, mtime=0)[10:]
     header = bytearray([31, 139, 8, flags, 0, 0, 0, 0, 0, 255])
     if flags & 4:
-        extra = b"OB\x04\x00test"
         header += struct.pack("<H", len(extra)) + extra
     if flags & 8:
-        header += b"page.html\0"
+        header += name + b"\0"
     if flags & 16:
-        header += b"Original test comment\0"
+        header += comment + b"\0"
     if flags & 2:
         header += struct.pack("<H", zlib.crc32(header) & 0xffff)
     return bytes(header) + body
@@ -110,12 +110,59 @@ def tests():
             changed[4] ^= 1  # MTIME is otherwise ignorable, but FHCRC authenticates it.
             add(f"bad-header-crc/{flags}", "gzip", changed, None, error="header CRC")
 
-    for count in (1, 2, 8, 128):
+    for count in (1, 2, 8, 128, 129, 257):
         parts = [rng.randbytes(index % 79) for index in range(count)]
         encoded = b"".join(gzip.compress(part, mtime=0) for part in parts)
         assert gzip.decompress(encoded) == b"".join(parts)
         add(f"members/{count}", "gzip", encoded, b"".join(parts))
-    add("too-many-members", "gzip", gzip.compress(b"", mtime=0) * 129, None, error="member")
+    encoded = gzip.compress(b"", mtime=0) * 256 + gzip.compress(raw, mtime=0)
+    assert gzip.decompress(encoded) == raw
+    add("members/empty-prefix-final-payload", "gzip", encoded, raw)
+    add("members/output-budget", "gzip", encoded, None, limit=len(raw) - 1, error="limit")
+    add("members/cancel-after-old-cap", "gzip", encoded, None, stop=300, error="cancelled")
+    changed = bytearray(encoded)
+    changed[-8] ^= 1
+    add("members/late-crc", "gzip", changed, None, error="CRC-32")
+
+    # DEFLATE has no aggregate block-count field. These empty stored blocks
+    # consume input but produce no output, followed by a nonempty final block.
+    prefix = b"\x00\x00\x00\xff\xff" * 32768
+    body = prefix + wrapped(raw, 0, zlib.Z_DEFAULT_STRATEGY, -15)
+    for kind, header, trailer, wbits in [
+            ("zlib", b"\x78\x01", struct.pack(">I", zlib.adler32(raw)), 15),
+            ("gzip", gzip.compress(raw, mtime=0)[:10],
+             struct.pack("<II", zlib.crc32(raw), len(raw)), 31)]:
+        encoded = header + body + trailer
+        assert zlib.decompress(encoded, wbits) == raw
+        add("blocks/past-old-cap-final-payload", kind, encoded, raw)
+        add("blocks/output-budget", kind, encoded, None, limit=len(raw) - 1, error="limit")
+        add("blocks/cancel-after-old-cap", kind, encoded, None, stop=17000, error="cancelled")
+        changed = bytearray(encoded)
+        changed[len(header) + len(prefix)] = 7
+        add("blocks/late-reserved-type", kind, changed, None, error="Reserved DEFLATE block type")
+
+    # XLEN retains its format-defined 16-bit width, but its largest legal value
+    # already exceeds the old 64 KiB aggregate header cap with fixed fields.
+    extra = b"OB" + struct.pack("<H", 65531) + b"x" * 65531
+    for flags in (4, 8, 16, 30):
+        encoded = options(raw, flags, extra=extra, name=b"n" * 131073, comment=b"c" * 131074)
+        assert zlib.decompress(encoded, 31) == raw
+        add(f"long-header/flags{flags}", "gzip", encoded, raw)
+        if flags & (8 | 16):
+            add(f"long-header/cancel/flags{flags}", "gzip", encoded, None, stop=12, error="cancelled")
+        if flags & 2:
+            changed = bytearray(encoded)
+            changed[100000] ^= 1
+            add("long-header/late-crc", "gzip", changed, None, error="header CRC")
+    for flag in (8, 16):
+        header = bytearray(gzip.compress(b"", mtime=0)[:10])
+        header[3] = flag
+        add(f"long-header/unterminated/{flag}", "gzip", header + b"n" * 131073,
+            None, error="unterminated")
+    header = bytearray(gzip.compress(b"", mtime=0)[:10])
+    header[3] = 4
+    add("long-header/truncated-extra", "gzip", header + b"\xff\xff" + extra[:-1],
+        None, error="Truncated gzip header")
 
     for kind, encoded in [("zlib", zlib.compress(raw)), ("gzip", options(raw, 31))]:
         for length in range(len(encoded)):
@@ -130,7 +177,10 @@ def tests():
         add("limit/extra-space", kind, encoded, raw, limit=len(raw) + 1)
         add("limit/one-short", kind, encoded, None, limit=len(raw) - 1, error="limit")
         add("limit/zero", kind, encoded, None, limit=0, error="limit")
-        add("limit/global-cap", kind, encoded, None, limit=32 * 1024 * 1024 + 1, error="limit")
+        # The decoder's byte ceiling was already raised to 512 MiB. Keep a
+        # positive old-boundary check and test the actual admission ceiling.
+        add("limit/above-old-32-mib-cap", kind, encoded, raw, limit=32 * 1024 * 1024 + 1)
+        add("limit/global-cap", kind, encoded, None, limit=512 * 1024 * 1024 + 1, error="limit")
         add("cancel/start", kind, encoded, None, stop=1, error="cancelled")
     for kind, wbits in [("zlib", 15), ("gzip", 31)]:
         large = rng.randbytes(100_000)
@@ -175,8 +225,10 @@ def tests():
     header[3] = 8
     exact = bytes(header) + b"a" * (65536 - 11) + b"\0" + empty[10:]
     assert gzip.decompress(exact) == b""
-    add("header-limit/exact", "gzip", exact, b"")
-    add("header-limit/excess", "gzip", exact[:10] + b"a" + exact[10:], None, error="header")
+    add("header/old-boundary", "gzip", exact, b"")
+    excess = exact[:10] + b"a" + exact[10:]
+    assert gzip.decompress(excess) == b""
+    add("header/past-old-boundary", "gzip", excess, b"")
     return cases
 
 

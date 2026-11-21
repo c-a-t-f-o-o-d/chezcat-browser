@@ -25,6 +25,10 @@ mod network_tests;
 #[path = "http_deadline_tests.rs"]
 mod deadline_tests;
 
+#[cfg(test)]
+#[path = "http_capacity_tests.rs"]
+mod capacity_tests;
+
 #[path = "http_connect.rs"]
 mod connection;
 use connection::connect;
@@ -85,8 +89,6 @@ const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
 const MAX_HEADERS: usize = 200;
-const MAX_CHUNKS: usize = 65_536;
-const MAX_INFORMATIONAL: usize = 8;
 const MAX_REDIRECTS: usize = 5;
 const MAX_CONTENT_CODINGS: usize = 4;
 const MAX_EMPTY_CODINGS: usize = 32;
@@ -1810,7 +1812,10 @@ fn read_response_traced<R: Read>(
     let mut input = Input::new(TracedRead { source, trace }, limits.wire, cancel, deadline);
     let result = (|| {
         let mut connection_persistent = true;
-        for information in 0..=MAX_INFORMATIONAL {
+        // Informational responses consume the same aggregate header-byte
+        // budget as the final response. Every iteration reads a complete status
+        // and field section under the existing cancellation/deadline checks.
+        loop {
             input.stage = "status line";
             let status_bytes=input.line(Budget::Headers)?;
             let (status,version_10)=status_line(&status_bytes)?;
@@ -1824,9 +1829,6 @@ fn read_response_traced<R: Read>(
             if (100..200).contains(&status) {
                 if status == 101 {
                     return Err("HTTP protocol upgrades are not supported.".into());
-                }
-                if information == MAX_INFORMATIONAL {
-                    return Err("Too many informational HTTP responses.".into());
                 }
                 if header(&headers, "content-length").is_some()
                     || header(&headers, "transfer-encoding").is_some()
@@ -1926,7 +1928,6 @@ fn read_response_traced<R: Read>(
                 reusable,
             });
         }
-        Err("The HTTP response has no final status.".into())
     })();
     result.map_err(|error| ResponseFailure {
         text: input.explain_failure(error),
@@ -2206,7 +2207,10 @@ fn chunked<R: Read>(
     output: &mut Vec<u8>,
     limit: usize,
 ) -> Result<(), String> {
-    for _ in 0..MAX_CHUNKS {
+    // Each nonterminal chunk consumes a size line, body bytes and CRLF. The
+    // existing aggregate metadata/body/wire budgets bound that progress; reads
+    // remain cancelable and deadline checked even for buffered tiny chunks.
+    loop {
         input.stage = "chunk size";
         let size = chunk_size(&input.line(Budget::Chunks)?)?;
         if size == 0 {
@@ -2224,7 +2228,6 @@ fn chunked<R: Read>(
             return Err("HTTP chunk data is missing its terminating CRLF.".into());
         }
     }
-    Err("HTTP chunk count exceeds 65536.".into())
 }
 
 fn chunk_size(line: &[u8]) -> Result<usize, String> {
@@ -2663,10 +2666,9 @@ mod tests {
         ] {
             assert!(parse(input, 10).is_err());
         }
-        let repeated = "HTTP/1.1 103 Hints\r\n\r\n".repeat(MAX_INFORMATIONAL + 1);
-        assert!(parse(repeated.as_bytes(), 0)
-            .unwrap_err()
-            .contains("informational"));
+        let repeated = "HTTP/1.1 103 Hints\r\n\r\n".repeat(9)
+            + "HTTP/1.1 204 No Content\r\n\r\n";
+        assert_eq!(parse(repeated.as_bytes(), 0).unwrap().status, 204);
         let redirect = read_response(
             Cursor::new(b"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 99999999\r\nContent-Encoding: gzip\r\n\r\n"),
             1, &AtomicBool::new(false), Instant::now() + Duration::from_secs(2), true,
@@ -2713,11 +2715,9 @@ mod tests {
         assert!(parse(large.as_bytes(), 0).unwrap_err().contains("32 KiB"));
         let tiny_chunks = format!(
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{}0\r\n\r\n",
-            "1\r\nx\r\n".repeat(MAX_CHUNKS)
+            "1\r\nx\r\n".repeat(65_536)
         );
-        assert!(parse(tiny_chunks.as_bytes(), MAX_CHUNKS)
-            .unwrap_err()
-            .contains("chunk count"));
+        assert_eq!(parse(tiny_chunks.as_bytes(), 65_536).unwrap().body, vec![b'x'; 65_536]);
         let extended = format!(
             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{}0\r\n\r\n",
             format!("1;{}\r\nx\r\n", "a".repeat(8000)).repeat(66)

@@ -6225,3 +6225,7 @@ mod svg_shared_paint_tests;
 #[cfg(test)]
 #[path="app_selected_component_tests.rs"]
 mod selected_component_tests;
+
+#[cfg(test)]
+#[path="app_flat_behavior_tests.rs"]
+mod flat_behavior_tests;

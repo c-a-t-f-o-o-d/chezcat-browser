@@ -248,9 +248,8 @@ pub(super) fn tga(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResu
         if directory != 0 {
             metadata_range(directory, 2, footer, &mut raster_end)?;
             let tags = usize::from(le16(&data[directory..]));
-            if tags > 4096 {
-                return Err("TGA developer directory exceeds 4096 fields.".into());
-            }
+            // The u16 count and checked ten-byte records bound this source scan;
+            // no per-tag metadata is retained, and cancellation remains active.
             metadata_range(directory, 2 + tags * 10, footer, &mut raster_end)?;
             for n in 0..tags {
                 if n & 255 == 0 {
@@ -475,6 +474,80 @@ pub(super) fn pcx(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tga_with_developer_tags(tags: u16) -> Vec<u8> {
+        let mut bytes = vec![0u8; 18];
+        bytes[2] = 2;
+        bytes[12] = 1;
+        bytes[14] = 1;
+        bytes[16] = 24;
+        bytes[17] = 32;
+        bytes.extend_from_slice(&[0x56, 0x34, 0x12]);
+        let metadata = bytes.len() as u32;
+        bytes.push(42);
+        let directory = bytes.len() as u32;
+        bytes.extend_from_slice(&tags.to_le_bytes());
+        for tag in 0..tags {
+            bytes.extend_from_slice(&tag.to_le_bytes());
+            bytes.extend_from_slice(&metadata.to_le_bytes());
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&directory.to_le_bytes());
+        bytes.extend_from_slice(TGA_SIGNATURE);
+        bytes
+    }
+
+    #[test]
+    fn tga_developer_directory_accepts_the_format_maximum_count() {
+        let data = tga_with_developer_tags(u16::MAX);
+        let bitmap = crate::image::decode_checked(&data, &|| Ok(())).unwrap();
+        assert_eq!((bitmap.width, bitmap.height), (1, 1));
+        assert_eq!(bitmap.pixels, [0xff123456]);
+    }
+
+    #[test]
+    fn tga_developer_directory_preserves_late_extent_validation() {
+        let data = tga_with_developer_tags(4097);
+        let footer = data.len() - 26;
+        let directory = le32(&data[footer + 4..]) as usize;
+        let last = directory + 2 + 4096 * 10;
+        let mut bad_offset = data.clone();
+        bad_offset[last + 2..last + 6].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(tga(&bad_offset, &|| Ok(()))
+            .unwrap_err()
+            .contains("metadata offset or size"));
+
+        let mut bad_length = data.clone();
+        bad_length[last + 6..last + 10].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(tga(&bad_length, &|| Ok(()))
+            .unwrap_err()
+            .contains("metadata offset or size"));
+
+        let mut truncated = data;
+        truncated.remove(footer - 1);
+        assert!(tga(&truncated, &|| Ok(()))
+            .unwrap_err()
+            .contains("metadata offset or size"));
+    }
+
+    #[test]
+    fn tga_developer_directory_scans_remain_cancelable() {
+        let data = tga_with_developer_tags(u16::MAX);
+        let calls = std::cell::Cell::new(0usize);
+        let check = || {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 20 {
+                Err("cancelled during TGA developer directory scan".into())
+            } else {
+                Ok(())
+            }
+        };
+        assert_eq!(
+            tga(&data, &check).unwrap_err(),
+            "cancelled during TGA developer directory scan"
+        );
+    }
 
     #[test]
     fn tga_original_truecolor_is_not_misidentified_as_a_cursor() {

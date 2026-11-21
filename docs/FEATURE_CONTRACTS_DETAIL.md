@@ -2583,3 +2583,45 @@ nested SVG and wider graphics remain unfinished or guarded. Native CSSOM source
 readback is separate from complete computed paint readback. These checks do not
 establish actual-site initialization or complete SVG conformance. See
 [SVG paint and color](https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint).
+
+## Resource-governed iterative Array flattening
+
+Array.prototype.flat and flatMap share an explicit frame worklist. Its depth no
+longer borrows the parser/evaluator nesting counter. Both initial storage and
+subsequent growth use fallible, unpublished reservations; actual backing and
+movement/write work are admitted before frame publication. Frame capacity joins
+shared retained-value accounting, including during nested author callbacks. Each
+invocation refunds only its owned workspace on normal or abrupt completion.
+
+The source, mapper/receiver/depth values, partial species target and suspended
+array frames have explicit root registrations. A detached parent frame and a
+partial output containing functions remain rooted across a getter's reentry.
+Temporary registrations unwind with the operation. Callback allocations and
+observable writes to an exposed species target remain intact after an exception.
+
+Finite and Infinity depths, one-level flatMap, holes/inherited indices, captured
+lengths and live reads retain their semantics. Empty sources still validate the
+mapper and perform species construction, then return without a frame allocation.
+Repeated array identities are expanded normally; finite cyclic input retains its
+actual boundary identity, and infinite cyclic traversal stops on real work or
+storage admission rather than returning truncated output. Native-stack checks
+remain around actual reentrant Script execution. The existing output/property,
+retained-value, source/species and checked-index boundaries remain.
+
+Original witnesses construct256 nested arrays iteratively and prepare128-level
+component behaviors through real template import, native controls, pixels and
+link activation. A shallow operation from72 supported Script callers reproduces
+the old borrowed64 refusal; its test worker supplies8MiB while keeping native
+stack checks. The96-level heap-expression case already passed before this fix.
+Focused checks also cover species/mapper abrupt effects, live inherited holes,
+exact small-budget growth/copy refusal and recovery, nested workspace lifetime,
+root publication and cyclic work. These are Windows runtime/App checks, not a
+fresh captured-site or complete Array conformance result.
+
+The directly related review found paid iterative JSON parse/revive/stringify
+frames without this borrowed64 restriction. Array string joining has actual
+native recursive conversions protected by measured stack checks; its small depth
+witness is test-only. Parser/lexer and RegExp structural/storage work remains
+separate, as do the wider capacity inventory and architectural work. The global
+parser guard is unchanged. See the
+[FlattenIntoArray algorithm](https://tc39.es/ecma262/multipage/indexed-collections.html#sec-flattenintoarray).

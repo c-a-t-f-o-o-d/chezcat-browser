@@ -828,13 +828,10 @@ fn frame<'a>(
     let mut at = 16;
     let mut alpha = None;
     let mut image = None;
-    let mut count = 0;
     while at < data.len() {
         check()?;
-        count += 1;
-        if count > 16_384 {
-            return Err("WebP frame chunk limit reached.".into());
-        }
+        // Each checked chunk advances at least eight bytes within this frame;
+        // unknown chunks retain no storage, and ANMF nesting is rejected.
         let (kind, payload) = chunk_at(data, &mut at)?;
         match kind {
             b"ALPH" => {
@@ -885,7 +882,6 @@ pub(super) fn decode_asset(
         return Err("WebP RIFF size does not match the file.".into());
     }
     let mut at = 12usize;
-    let mut chunks = 0usize;
     let mut image = None;
     let mut alpha = None;
     let mut canvas = None;
@@ -897,10 +893,8 @@ pub(super) fn decode_asset(
     let mut orientation = None;
     while at < data.len() {
         check()?;
-        chunks += 1;
-        if chunks > 16_384 {
-            return Err("WebP chunk limit or truncated chunk header.".into());
-        }
+        // The admitted input and checked chunk extents bound this scan. Actual
+        // image/frame storage and decode work keep their separate allowances.
         let start = at;
         let (kind, payload) = chunk_at(data, &mut at)?;
         let length = payload.len();
@@ -1431,6 +1425,102 @@ mod tests {
             body.extend_from_slice(frame);
         }
         riff(&body)
+    }
+
+    fn container_with_records(inner: bool, count: usize, tail: &[u8]) -> Vec<u8> {
+        let records = chunk(b"junk", &[]).repeat(count);
+        if inner {
+            let first = animation_frame(1, 1, 0, 0, 70, 2, 0xff223344);
+            let mut payload = first[8..].to_vec();
+            payload.extend_from_slice(&records);
+            payload.extend_from_slice(tail);
+            animation_file(
+                1,
+                1,
+                3,
+                &[
+                    chunk(b"ANMF", &payload),
+                    animation_frame(1, 1, 0, 0, 110, 2, 0xff556677),
+                ],
+            )
+        } else {
+            let mut body = chunk(b"VP8X", &[0; 10]);
+            body.extend_from_slice(&solid(1, 1, 0xff223344)[12..]);
+            body.extend_from_slice(&records);
+            body.extend_from_slice(tail);
+            riff(&body)
+        }
+    }
+
+    #[test]
+    fn source_bounded_webp_chunks_preserve_static_pixels() {
+        let data = container_with_records(false, 16_385, &[]);
+        let bitmap = crate::image::decode(&data).unwrap();
+        assert_eq!((bitmap.width, bitmap.height), (1, 1));
+        assert_eq!(bitmap.pixels, [0xff223344]);
+        let asset = crate::image::decode_asset_checked(&data, &|| Ok(())).unwrap();
+        assert_eq!(asset.bitmap.pixels, [0xff223344]);
+        assert!(asset.animation.is_none());
+    }
+
+    #[test]
+    fn source_bounded_webp_frame_chunks_preserve_animation_pixels_timing_and_loops() {
+        let data = container_with_records(true, 16_385, &[]);
+        assert_eq!(crate::image::decode(&data).unwrap().pixels, [0xff223344]);
+        let asset = crate::image::decode_asset_checked(&data, &|| Ok(())).unwrap();
+        assert_eq!((asset.bitmap.width, asset.bitmap.height), (1, 1));
+        assert_eq!(asset.bitmap.pixels, [0xff223344]);
+        let animation = asset.animation.unwrap();
+        assert_eq!(animation.plays, Some(3));
+        assert_eq!(animation.frames.len(), 2);
+        assert_eq!(animation.frames[0].bitmap.pixels, [0xff223344]);
+        assert_eq!(animation.frames[1].bitmap.pixels, [0xff556677]);
+        assert_eq!(animation.frames[0].delay_ms, 70);
+        assert_eq!(animation.frames[1].delay_ms, 110);
+    }
+
+    #[test]
+    fn source_bounded_webp_chunks_preserve_late_extent_padding_and_order_checks() {
+        let mut bad_extent = b"junk".to_vec();
+        bad_extent.extend_from_slice(&u32::MAX.to_le_bytes());
+        let mut bad_padding = chunk(b"junk", &[0]);
+        *bad_padding.last_mut().unwrap() = 1;
+        let cases = [
+            (vec![0; 7], "Truncated WebP chunk header"),
+            (bad_extent, "Truncated WebP chunk."),
+            (bad_padding, "padding byte is missing or nonzero"),
+            (solid(1, 1, 0xffabcdef)[12..].to_vec(), "image payload"),
+            (chunk(b"ALPH", &[0]), "chunk order"),
+        ];
+        for inner in [false, true] {
+            for (tail, expected) in &cases {
+                let data = container_with_records(inner, 16_385, tail);
+                let error = decode_asset(&data, &|| Ok(())).unwrap_err();
+                assert!(error.contains(expected), "inner={inner}: {error}");
+            }
+        }
+        let nested = container_with_records(true, 16_385, &chunk(b"ANMF", &[]));
+        assert!(decode_asset(&nested, &|| Ok(()))
+            .unwrap_err()
+            .contains("Invalid chunk inside WebP animation frame"));
+    }
+
+    #[test]
+    fn source_bounded_webp_chunk_scans_remain_cancelable_past_the_old_cutoff() {
+        for inner in [false, true] {
+            let data = container_with_records(inner, 20_000, &[]);
+            let calls = Cell::new(0usize);
+            let error = decode_asset(&data, &|| {
+                calls.set(calls.get() + 1);
+                if calls.get() >= 18_000 {
+                    Err("cancelled during long WebP chunk scan".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error, "cancelled during long WebP chunk scan", "inner={inner}");
+        }
     }
 
     #[test]
