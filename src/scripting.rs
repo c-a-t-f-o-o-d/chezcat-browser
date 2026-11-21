@@ -8463,3 +8463,7 @@ mod document_active_element_tests;
 #[cfg(test)]
 #[path="script_character_data_properties_tests.rs"]
 mod character_data_properties_tests;
+
+#[cfg(test)]
+#[path="script_svg_author_properties_tests.rs"]
+mod svg_author_properties_tests;
