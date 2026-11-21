@@ -427,6 +427,213 @@ fn cmap_four_supports_delta_and_glyph_array_mappings() {
     assert_eq!(font.glyph_index('😀'), 0);
 }
 
+fn cmap_record(data: &mut [u8], index: usize, platform: u16, encoding: u16, offset: usize) {
+    let at = 4 + index * 8;
+    put16(data, at, platform);
+    put16(data, at + 2, encoding);
+    put32(data, at + 4, u32::try_from(offset).unwrap());
+}
+
+// Synthetic parser-capacity fixtures: unsupported encoding IDs fill the
+// directory. These are not claims that every ID is a registered cmap encoding.
+fn cmap_records(count: usize, subtable: &[u8]) -> Vec<u8> {
+    assert!((1..=usize::from(u16::MAX)).contains(&count));
+    let directory_end = 4 + count * 8;
+    let mut data = vec![0; directory_end];
+    put16(&mut data, 2, count as u16);
+    for index in 0..count {
+        cmap_record(&mut data, index, 1, index as u16, directory_end);
+    }
+    cmap_record(&mut data, count - 1, 3, 10, directory_end);
+    data.extend_from_slice(subtable);
+    data
+}
+
+fn cmap_a_mapping(format: u16, glyph: u16) -> Vec<u8> {
+    if format == 12 {
+        let mut data = vec![0; 28];
+        put16(&mut data, 0, 12);
+        put32(&mut data, 4, 28);
+        put32(&mut data, 12, 1);
+        put32(&mut data, 16, 65);
+        put32(&mut data, 20, 65);
+        put32(&mut data, 24, u32::from(glyph));
+        data
+    } else {
+        assert_eq!(format, 4);
+        let mut data = vec![0; 32];
+        put16(&mut data, 0, 4);
+        put16(&mut data, 2, 32);
+        put16(&mut data, 6, 4);
+        put16(&mut data, 8, 4);
+        put16(&mut data, 10, 1);
+        for (at, value) in [(14, 65), (16, u16::MAX), (20, 65), (22, u16::MAX),
+                            (24, glyph.wrapping_sub(65)), (26, 1)] {
+            put16(&mut data, at, value);
+        }
+        data
+    }
+}
+
+#[test]
+fn cmap_metadata_record_capacity_reaches_the_tail_and_full_u16_count() {
+    for count in [257, usize::from(u16::MAX)] {
+        let mut font_tables = tables();
+        let subtable = font_tables[b"cmap"][12..].to_vec();
+        font_tables.insert(*b"cmap", cmap_records(count, &subtable));
+        let font = Font::parse(&sfnt(font_tables)).unwrap();
+        assert_eq!(font.glyph_index('A'), 2);
+        assert_eq!(font.glyph_index('😀'), 7);
+        assert!((font.advance(font.glyph_index('A'), 20.0) - 13.6).abs() < 0.001);
+    }
+}
+
+#[test]
+fn cmap_metadata_record_capacity_preserves_format_platform_and_offset_preference() {
+    // Deliberately vary record order to cover the existing parser's selection
+    // behavior; this does not add directory-order conformance requirements.
+    for (later_format, first_platform, last_platform, higher_offset_first, expected) in [
+        (4, 0, 3, false, 2),  // Format 12 precedes platform preference.
+        (12, 3, 0, false, 2), // Platform 3 precedes the later table offset.
+        (12, 0, 0, true, 3),  // Equal format/platform prefer the higher offset.
+    ] {
+        let first_offset = 4 + 257 * 8;
+        let mut data = cmap_records(257, &cmap_a_mapping(12, 2));
+        let later_offset = data.len();
+        data.extend_from_slice(&cmap_a_mapping(later_format, 3));
+        let (first, last) = if higher_offset_first {
+            (later_offset, first_offset)
+        } else {
+            (first_offset, later_offset)
+        };
+        cmap_record(&mut data, 0, first_platform, if first_platform == 0 { 6 } else { 10 }, first);
+        cmap_record(&mut data, 256, last_platform, if last_platform == 0 { 4 } else { 10 }, last);
+        let mut font_tables = tables();
+        font_tables.insert(*b"cmap", data);
+        let font = Font::parse(&sfnt(font_tables)).unwrap();
+        assert_eq!(font.glyph_index('A'), expected);
+    }
+}
+
+#[test]
+fn cmap_metadata_record_capacity_keeps_directory_and_selected_tail_validation() {
+    let directory_end = 4 + 257 * 8;
+    let mut data = cmap_records(257, &cmap_a_mapping(12, 2));
+    cmap_record(&mut data, 0, 0, 4, directory_end);
+    assert!(read_cmap(&data[..directory_end - 1]).unwrap_err().contains("Truncated font data"));
+
+    let mut invalid_offset = data.clone();
+    cmap_record(&mut invalid_offset, 256, 3, 10, data.len());
+    assert!(read_cmap(&invalid_offset).unwrap_err().contains("Truncated font data"));
+
+    let invalid_tail = data.len();
+    let mut selected = cmap_a_mapping(12, 3);
+    put16(&mut selected, 2, 1); // Reserved field in the selected format-12 table.
+    data.extend_from_slice(&selected);
+    cmap_record(&mut data, 256, 3, 10, invalid_tail);
+    assert!(read_cmap(&data).unwrap_err().contains("Invalid cmap format 12 groups"));
+
+    put16(&mut data, 2, 0);
+    assert!(read_cmap(&data).is_err());
+}
+
+fn kern_subtable(pairs: &[(u32, i16)], override_existing: bool) -> Vec<u8> {
+    assert!(pairs.len() <= usize::from(u16::MAX));
+    let mut data = vec![0; 14 + pairs.len() * 6];
+    let len = data.len();
+    put16(&mut data, 2, len as u16);
+    put16(&mut data, 4, if override_existing { 9 } else { 1 });
+    put16(&mut data, 6, pairs.len() as u16);
+    if !pairs.is_empty() {
+        let power = 1usize << pairs.len().ilog2();
+        put16(&mut data, 8, (power * 6) as u16);
+        put16(&mut data, 10, power.ilog2() as u16);
+        put16(&mut data, 12, ((pairs.len() - power) * 6) as u16);
+    }
+    for (index, &(key, value)) in pairs.iter().enumerate() {
+        put32(&mut data, 14 + index * 6, key);
+        put16(&mut data, 18 + index * 6, value as u16);
+    }
+    data
+}
+
+fn repeated_kern_subtables(subtable: &[u8], count: usize) -> Vec<u8> {
+    assert!(count <= usize::from(u16::MAX));
+    let mut data = vec![0; 4];
+    put16(&mut data, 2, count as u16);
+    for _ in 0..count {
+        data.extend_from_slice(subtable);
+    }
+    data
+}
+
+#[test]
+fn kern_metadata_record_capacity_keeps_late_additive_and_override_metrics() {
+    let key = 0x0002_0003;
+    let subtable = kern_subtable(&[(key, -1)], false);
+    let mut data = repeated_kern_subtables(&subtable, 65);
+    for expected in [-65.0, -7.0, -4.0] {
+        let mut font_tables = tables();
+        font_tables.insert(*b"kern", data.clone());
+        let font = Font::parse(&sfnt(font_tables)).unwrap();
+        assert_eq!(font.kerning(2, 3, 250.0), expected / 4.0);
+        if expected == -65.0 {
+            // The 65th subtable replaces all earlier contributions.
+            let last = 4 + 64 * subtable.len();
+            data[last..].copy_from_slice(&kern_subtable(&[(key, -7)], true));
+        } else if expected == -7.0 {
+            put16(&mut data, 2, 66);
+            data.extend_from_slice(&kern_subtable(&[(key, 3)], false));
+        }
+    }
+}
+
+#[test]
+fn kern_metadata_record_capacity_full_u16_count_keeps_i32_extremes() {
+    let key = 0x0002_0003;
+    for (value, expected) in [(i16::MIN, -2_147_450_880), (i16::MAX, 2_147_385_345)] {
+        let data = repeated_kern_subtables(&kern_subtable(&[(key, value)], false), usize::from(u16::MAX));
+        assert_eq!(read_kern(&data).unwrap(), vec![(key, expected)]);
+    }
+}
+
+#[test]
+fn kern_metadata_record_capacity_full_count_skips_unknown_formats_with_input_progress() {
+    let mut subtable = vec![0; 6];
+    put16(&mut subtable, 2, 6);
+    put16(&mut subtable, 4, 0x0100);
+    let data = repeated_kern_subtables(&subtable, usize::from(u16::MAX));
+    assert!(read_kern(&data).unwrap().is_empty());
+    assert!(read_kern(&data[..data.len() - 1]).unwrap_err().contains("Truncated font data"));
+}
+
+#[test]
+fn kern_metadata_record_capacity_keeps_late_length_truncation_and_pair_order_checks() {
+    let subtable = kern_subtable(&[(0x0002_0003, -1)], false);
+    let data = repeated_kern_subtables(&subtable, 65);
+    assert!(read_kern(&data[..data.len() - 1]).unwrap_err().contains("Truncated font data"));
+    let mut invalid_length = data.clone();
+    put16(&mut invalid_length, 4 + 64 * subtable.len() + 2, 0);
+    assert!(read_kern(&invalid_length).unwrap_err().contains("Invalid kerning subtable length"));
+
+    let mut unsorted = data[..4 + 64 * subtable.len()].to_vec();
+    unsorted.extend_from_slice(&kern_subtable(&[(0x0002_0003, -1), (0x0002_0002, -1)], false));
+    assert!(read_kern(&unsorted).unwrap_err().contains("Unsorted kerning pairs"));
+}
+
+#[test]
+fn kern_metadata_record_capacity_retains_the_aggregate_pair_budget() {
+    let pairs: Vec<_> = (0..1024).map(|key| (key, -1)).collect();
+    let mut data = repeated_kern_subtables(&kern_subtable(&pairs, false), 256);
+    let found = read_kern(&data).unwrap();
+    assert_eq!(found.len(), 1024);
+    assert_eq!(found.first(), Some(&(0, -256)));
+    assert_eq!(found.last(), Some(&(1023, -256)));
+    put16(&mut data, 2, 257);
+    data.extend_from_slice(&kern_subtable(&[(0, -1)], false));
+    assert!(read_kern(&data).unwrap_err().contains("Kerning pairs exceed their limit"));
+}
+
 #[test]
 fn legacy_large_kern_wrap_is_checked_against_the_actual_table() {
     let count = 10_921usize;

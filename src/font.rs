@@ -581,11 +581,14 @@ fn read_cmap(data: &[u8]) -> Result<Cmap> {
         return Err("Invalid cmap version.".into());
     }
     let count = usize::from(u16_at(data, 2)?);
-    if count == 0 || count > 256 {
-        return Err("cmap encoding count exceeds its limit.".into());
+    if count == 0 {
+        return Err("Invalid cmap encoding count.".into());
     }
     bytes(data, 4, count * 8)?;
-    let mut candidates = Vec::new();
+    // The u16 count and admitted eight-byte records bound this traversal.
+    // Retain the existing (format, platform, offset) preference without
+    // allocating and sorting a candidate for every encoding record.
+    let mut candidate = None;
     for index in 0..count {
         let at = 4 + index * 8;
         let platform = u16_at(data, at)?;
@@ -596,11 +599,13 @@ fn read_cmap(data: &[u8]) -> Result<Cmap> {
         }
         let format = u16_at(data, offset)?;
         if format == 4 || format == 12 {
-            candidates.push((format, platform, offset));
+            let current = (format, platform, offset);
+            if candidate.is_none_or(|previous| current > previous) {
+                candidate = Some(current);
+            }
         }
     }
-    candidates.sort_unstable();
-    let Some((format, _, offset)) = candidates.last().copied() else {
+    let Some((format, _, offset)) = candidate else {
         return Err("No supported Unicode cmap (format 4 or 12).".into());
     };
     if format == 12 {
@@ -691,9 +696,8 @@ fn read_kern(data: &[u8]) -> Result<Vec<(u32, i32)>> {
         return Ok(Vec::new());
     }
     let count = usize::from(u16_at(data, 2)?);
-    if count > 64 {
-        return Err("Kerning subtable count exceeds its limit.".into());
-    }
+    // Each of these u16-counted subtables must advance through at least six
+    // admitted bytes. The separate aggregate-pair budget still bounds storage.
     let mut at = 4;
     let mut pairs = BTreeMap::<u32, i32>::new();
     let mut total = 0;
@@ -733,6 +737,8 @@ fn read_kern(data: &[u8]) -> Result<Vec<(u32, i32)>> {
                 if flags & 8 != 0 {
                     pairs.insert(key, value);
                 } else {
+                    // Sorted keys occur at most once per subtable. Summing
+                    // u16::MAX signed-i16 values still fits the i32 accumulator.
                     *pairs.entry(key).or_default() += value;
                 }
             }
