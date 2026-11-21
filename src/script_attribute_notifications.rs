@@ -66,11 +66,27 @@ impl Bridge<'_> {
         self.attribute_change_for_name(owner, &name)
             .map(|change| Some((owner, change)))
     }
+    pub(super) fn style_attribute_change(
+        &mut self,
+        object: u32,
+    ) -> Result<Option<(u32, NativeAttributeChange)>, String> {
+        if !script_inline_style::handle(object) {
+            return Ok(None);
+        }
+        let owner = node_handle(self.style_node(object)?);
+        self.state.copies(5)?;
+        let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text("style")?);
+        self.attribute_change_for_name(owner, &name)
+            .map(|change| Some((owner, change)))
+    }
     pub(super) fn attribute_setter_change(
         &mut self,
         object: u32,
         property: &str,
     ) -> Result<Option<(u32, NativeAttributeChange)>, String> {
+        if script_inline_style::handle(object) && css_name(property).is_ok() {
+            return self.style_attribute_change(object);
+        }
         if self.attr_receiver(object) && matches!(property, "value" | "nodeValue" | "textContent") {
             let id = script_attr::index(object).unwrap();
             let Some(owner) = self.state.attributes[id].owner else {
@@ -97,6 +113,9 @@ impl Bridge<'_> {
             "className" if html => "class",
             "classList" if self.class_list_element_receiver(object) => "class",
             "title" if html => "title",
+            _ if html && self.html_text_reflection(node, property).is_some() => {
+                self.html_text_reflection(node, property).unwrap()
+            }
             _ => return Ok(None),
         };
         self.state.copies(key.len())?;

@@ -14,7 +14,7 @@ pub(super) fn ordinary_clone_element(name: &str) -> bool {
         || matches!(name, "nav" | "main" | "section" | "article" | "aside" | "header"
             | "footer" | "address" | "figure" | "figcaption" | "ol" | "ul" | "dl"
             | "table" | "caption" | "col" | "colgroup" | "thead" | "tbody" | "tfoot"
-            | "tr" | "td" | "th" | "hr" | "time")
+            | "tr" | "td" | "th" | "hr" | "time" | "slot")
 }
 
 pub(super) fn copy_text(text:&str)->Result<String,String>{

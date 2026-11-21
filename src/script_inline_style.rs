@@ -162,7 +162,15 @@ pub(super) fn replace(
     limit: usize,
     state: &mut State,
 ) -> Result<Option<String>, String> {
-    let winning = winner(existing, name, state)?.map(|(index, _)| index);
+    let selected=winner(existing,name,state)?;
+    if !value.is_empty(){
+        if let Some((_,raw))=selected{
+            let clean=if raw.contains("/*"){state.work(raw.len())?;state.copies(raw.len())?;Some(crate::css::without_comments(raw))}else{None};
+            let (prior,important)=crate::css::declaration_priority(clean.as_deref().unwrap_or(raw));
+            if prior==value&&important==priority.eq_ignore_ascii_case("important"){return Ok(None);}
+        }
+    }
+    let winning=selected.map(|(index,_)|index);
     if winning.is_none() && value.is_empty() {
         return Ok(None);
     }

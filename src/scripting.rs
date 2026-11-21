@@ -2942,7 +2942,7 @@ impl Bridge<'_> {
             specified = match script_inline_style::normalize_easing(value, self.state, script_inline_style::EasingText::Specified)? { Some(value) => value, None => return Ok(()) };
             specified.as_str()
         } else {value};
-        let priority = if (checked || name == "animation-timing-function") && value.is_empty() {""} else {priority};
+        let priority = if value.is_empty() {""} else {priority};
         if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
             return Err("CSS priority must be empty or important.".into());
         }
@@ -3077,7 +3077,7 @@ impl Host for Bridge<'_> {
     fn mutation_content_changes(&mut self,target:u32,property:&str,value:&Value)->Result<Vec<crate::javascript::NativeChildListChange>,String>{self.content_observation_changes(target,property,value)}
 
     fn mutation_attribute_setter_change(&mut self,target:u32,property:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{self.attribute_setter_change(target,property)}
-    fn mutation_attribute_operation_change(&mut self,target:u32,method:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{if matches!(method,"add"|"remove"){self.token_attribute_change(target)}else{Ok(None)}}
+    fn mutation_attribute_operation_change(&mut self,target:u32,method:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{if matches!(method,"add"|"remove"){self.token_attribute_change(target)}else if matches!(method,"setProperty"|"removeProperty"){self.style_attribute_change(target)}else{Ok(None)}}
 
     fn mutation_attribute_change(&mut self, target: u32, method: &str, args: &[Value])
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
@@ -3374,6 +3374,7 @@ impl Host for Bridge<'_> {
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.xhr_index(object).is_some(){return property=="responseType";}
         if property=="textContent"&&self.text_content_receiver(object){return true;}
+        if property=="name"&&self.html_slot_receiver(object){return true;}
         if self.mutation_observation_target(object)==Some(true)&&matches!(property,"data"|"nodeValue"){return true;}
         if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
 
@@ -5491,6 +5492,7 @@ impl Host for Bridge<'_> {
             return self.set_template_html(object, &source);
         }
         if self.inert_interface(object).is_some() {
+            if property=="name"&&self.html_slot_receiver(object){return self.set_inert_attribute(object,&[Value::String("name".into()),value]).map(|_|());}
             if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(&value)?};return self.replace_inert_text_content(object,text);}
             if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=self.text(&value)?;return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
@@ -5805,6 +5807,7 @@ impl Host for Bridge<'_> {
             return self.get(object, "innerHTML");
         }
         if method == HTML_SLOT_NAME_GET {
+            if self.inert_node_type(object).is_some(){return self.inert_get(object,"name");}
             let node = self.dom_node(object)?;
             return self.html_text_reflection_get(node, "name");
         }
@@ -8294,3 +8297,7 @@ mod attribute_notification_tests;
 
 #[path="script_attribute_notifications.rs"]
 mod attribute_notifications;
+
+#[cfg(test)]
+#[path="script_style_slot_notification_tests.rs"]
+mod style_slot_notification_tests;
