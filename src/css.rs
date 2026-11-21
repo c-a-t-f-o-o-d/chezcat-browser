@@ -395,6 +395,7 @@ pub struct Style {
     pub overflow: Overflow,
     pub visible:bool,
     pub pointer_events:bool,
+    pub(crate) z_index:Option<std::rc::Rc<z_index::Value>>,
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
@@ -467,7 +468,7 @@ impl Default for Style {
             position: Position::Static,
             transform: Transform::None,
             overflow: Overflow::default(),
-            visible:true,pointer_events:true,
+            visible:true,pointer_events:true,z_index:None,
             inset: [Length::Auto; 4],
             color: 0x26364a,
             opacity: 1.0,
@@ -1306,6 +1307,7 @@ fn compute_cascade(
         let mut has_radius = false;
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
+        let mut sheet_z_index=None;
         let mut sheet_interaction=[parent.visible,parent.pointer_events];
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
         let parent_font_known=parents[index].and_then(|parent|font_sizes.get(&parent)).is_none_or(Option::is_some);
@@ -1363,7 +1365,8 @@ fn compute_cascade(
                 continue;
             }
             let mut apply_box = |budget: &mut custom_properties::Budget| {
-                if interaction_style::apply(&mut style,&parent,declaration,priority.1,&mut sheet_interaction,&variables[index],budget){true}
+                if z_index::apply(&mut style,&parent,declaration,priority.1,&mut sheet_z_index,&variables[index],budget){true}
+                else if interaction_style::apply(&mut style,&parent,declaration,priority.1,&mut sheet_interaction,&variables[index],budget){true}
                 else if grid_alignment::apply(&mut style,&parent,declaration,priority.1,&mut sheet_grid_alignment,&variables[index],budget) {
                     true
                 } else if line_height::apply(&mut style,&parent,declaration,priority.1,&mut sheet_line_height,&variables[index],budget) {
@@ -1492,7 +1495,7 @@ fn compute_cascade(
         presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
         let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
         if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
-        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events}));
+        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events,z_index:style.z_index.clone()}));
     }
     Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
 }
@@ -3095,6 +3098,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "font" | "overflow" | "text-decoration" => {
                 return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
             }
+            "z-index" if !z_index::valid(&decl.value)=>continue,
             "visibility"|"pointer-events" if !interaction_style::valid(name,&decl.value)=>continue,
             "color" | "background-color" if !inline_color_value(&value) => continue,
             "animation-timing-function" if !inline_easing_value(&value) => continue,
@@ -5411,3 +5415,6 @@ mod structural;
 
 #[path="css_interaction_style.rs"]
 mod interaction_style;
+
+#[path="css_z_index.rs"]
+pub(crate) mod z_index;

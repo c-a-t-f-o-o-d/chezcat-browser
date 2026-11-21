@@ -2891,7 +2891,8 @@ impl Bridge<'_> {
         let clean;
         let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
         let specified = crate::css::declaration_priority(raw).0;
-        let value = if matches!(name,"visibility"|"pointer-events"){
+        let value = if name=="z-index"{self.state.work(specified.len().saturating_mul(2))?;self.state.copies(specified.len().saturating_mul(2))?;crate::css::z_index::specified(specified).ok_or("Invalid selected z-index declaration.")?}
+        else if matches!(name,"visibility"|"pointer-events"){
             self.state.work(specified.len().saturating_mul(2))?;self.state.copies(specified.len().saturating_mul(2))?;
             crate::css::specified_interaction_value(name,specified).ok_or("Invalid selected interaction declaration.")?
         } else if name == "touch-action" {
@@ -2941,6 +2942,9 @@ impl Bridge<'_> {
                 }
             };
             specified.as_str()
+        } else if name=="z-index"&&!value.is_empty(){
+            if !priority.is_empty()&&!priority.eq_ignore_ascii_case("important"){return Ok(());}
+            self.state.work(value.len().saturating_mul(2))?;self.state.copies(value.len().saturating_mul(2))?;specified=match crate::css::z_index::specified(value){Some(value)=>value,None=>return Ok(())};specified.as_str()
         } else if matches!(name,"visibility"|"pointer-events")&&!value.is_empty(){
             if !priority.is_empty()&&!priority.eq_ignore_ascii_case("important"){return Ok(());}
             self.state.work(value.len().saturating_mul(2))?;self.state.copies(value.len().saturating_mul(2))?;
@@ -3396,7 +3400,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if matches!(property, "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -3735,7 +3739,7 @@ impl Host for Bridge<'_> {
         if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
-            || matches!(property, "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -8358,3 +8362,7 @@ mod native_focus_selector_tests;
 #[cfg(test)]
 #[path="script_visibility_hit_tests.rs"]
 mod visibility_hit_tests;
+
+#[cfg(test)]
+#[path="script_stacking_tests.rs"]
+mod stacking_tests;

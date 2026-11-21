@@ -654,6 +654,7 @@ struct Engine<'a> {
     fonts: &'a Book,
     doc: &'a Document,
     styles: Vec<std::rc::Rc<Style>>,
+    canvas_background:Option<usize>,
     image_sizes: &'a HashMap<usize, (usize, usize)>,
     zoom: f32,
     layout: Layout,
@@ -888,13 +889,13 @@ fn build_viewport_with_fonts_inner(
                 styles
                     .get(index)
                     .filter(|style| style.display != Display::None)
-                    .and_then(|style| style.background)
+                    .and_then(|style| style.background.map(|color|(index,color)))
             } else {
                 None
             }
         })
     });
-    if let Some(color) = root_background {
+    if let Some((_,color)) = root_background {
         page.items.push(PaintItem::Rect {
             node:0,
             x: 0,
@@ -940,6 +941,7 @@ fn build_viewport_with_fonts_inner(
         fonts,
         doc,
         styles: shared_styles,
+        canvas_background:root_background.map(|(node,_)|node),
         image_sizes,
         zoom,
         layout: page,
@@ -1080,7 +1082,7 @@ fn build_viewport_with_fonts_inner(
         .saturating_add(16)
         .clamp(16, MAX_HEIGHT);
     engine.finish_decorations();
-    engine.order_positioned_paint();
+    if !engine.order_explicit_stacking(budget.as_deref_mut())?{engine.order_positioned_paint();}
     engine.filter_visibility_paint(budget.as_deref_mut())?;
     engine.finish_opacity();
     engine.build_hits();
@@ -2249,9 +2251,9 @@ impl Engine<'_> {
         let top = y + border[0] + padding[0];
         let left = x + border[3] + padding[3];
         let colors = style.border_color.map(|color| color.unwrap_or(style.color));
-        let background = style
-            .background
-            .and_then(|color| self.rect(x, y, outer_width, 0, color));
+        // A color propagated to the canvas is not repainted on its source box.
+        // https://drafts.csswg.org/css-backgrounds-3/#body-background
+        let background = if self.canvas_background==Some(index){None}else{style.background.and_then(|color|self.rect(x,y,outer_width,0,color))};
         // Keep the outer item bounds for geometry/hits. Color clipping changes
         // only coverage, using the actual used border and padding dimensions.
         let uniform = (border[0] > 0 && border == [border[0]; 4]
@@ -6429,3 +6431,10 @@ mod native_hover_tests;
 
 #[path="layout_visibility.rs"]
 mod visibility;
+
+#[cfg(test)]
+#[path="layout_stacking_tests.rs"]
+mod stacking_tests;
+
+#[path="layout_stacking.rs"]
+mod stacking;
