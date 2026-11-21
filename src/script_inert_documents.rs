@@ -1519,6 +1519,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if property=="name"&&self.html_slot_receiver(object){let value=self.inert_element_attribute(object,&Value::String("name".into()))?;return Ok(if matches!(value,Value::Null){Value::String(String::new())}else{value});}
         self.state.work(1)?;
         if self.inert_implementation(object) || self.inert_parser(object) { return Ok(Value::Undefined); }
         if property == "childNodes" { return self.create_inert_child_list(object); }

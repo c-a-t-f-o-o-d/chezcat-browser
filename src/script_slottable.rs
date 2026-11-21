@@ -22,11 +22,12 @@ impl Slottable {
 
 impl Bridge<'_> {
     pub(super) fn html_slot_receiver(&self, object: u32) -> bool {
-        node_index(object).is_some()
+        self.inert_interface(object)==Some("HTMLSlotElement") || node_index(object).is_some()
             && self.concrete_html_interface(object) == Some("HTMLSlotElement")
     }
 
     pub(super) fn slottable(&self, object: u32) -> Option<Slottable> {
+        if let Some(kind)=self.inert_node_type(object){return match kind{1=>Some(Slottable::Element),3=>Some(Slottable::Text),_=>None};}
         if self.frame_element_sibling_receiver(object) {
             return Some(Slottable::Element);
         }
@@ -40,7 +41,7 @@ impl Bridge<'_> {
 
     pub(super) fn assigned_slot_lookup(&self, object: u32, name: &str) -> bool {
         name == "assignedSlot"
-            && (self.frame_element_sibling_receiver(object) || self.namespace_receiver(object))
+            && (self.frame_element_sibling_receiver(object) || self.namespace_receiver(object) || matches!(self.inert_node_type(object),Some(1|3)))
             && !self.form_named_control(object, name)
     }
 
@@ -57,6 +58,12 @@ impl Bridge<'_> {
         self.state.work(1)?;
         if self.slottable(object) != Some(interface) {
             return Err("assignedSlot getter has an incompatible receiver.".into());
+        }
+        if self.inert_node_type(object).is_some(){
+            if let Some(parent)=self.inert_observation_parent(object){
+                if matches!(self.inert_import_source(parent),Some(script_inert_documents::ImportSource::Parsed{node,..}) if node.namespace.is_foreign()){return Err("Slottable parent namespace is unavailable.".into());}
+            }
+            return Ok(Value::Null);
         }
         if self.is_frame_handle(object) {
             self.frame_light_dom_element(object)?;
