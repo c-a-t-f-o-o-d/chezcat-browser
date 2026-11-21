@@ -6,9 +6,6 @@
 //! Bilevel CCITT RLE, Group 3 and Group 4 are decoded from their published codes.
 
 use super::{dimensions, pixel, reserved, Bitmap, ImageResult, MAX_INPUT_BYTES};
-use std::collections::BTreeMap;
-
-const MAX_FIELDS: usize = 4096;
 const MAX_FIELD_VALUES: usize = 262_144;
 const MAX_RASTER_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SEGMENT_BYTES: usize = 32 * 1024 * 1024;
@@ -67,13 +64,14 @@ impl<'a> Reader<'a> {
 
 #[derive(Clone, Copy)]
 struct Field {
+    tag: u16,
     kind: u16,
     count: usize,
     at: usize,
 }
 struct Directory<'a> {
     reader: Reader<'a>,
-    fields: BTreeMap<u16, Field>,
+    fields: Vec<Field>,
 }
 impl<'a> Directory<'a> {
     fn parse(data: &'a [u8], check: Check<'_>) -> ImageResult<Self> {
@@ -96,11 +94,14 @@ impl<'a> Directory<'a> {
             return Err("Invalid TIFF first-directory offset.".into());
         }
         let count = usize::from(reader.short(first)?);
-        if count == 0 || count > MAX_FIELDS {
-            return Err("TIFF directory field count exceeds its limit or is empty.".into());
+        if count == 0 {
+            return Err("TIFF directory is empty.".into());
         }
         reader.bytes(first + 2, count * 12 + 4)?;
-        let mut fields = BTreeMap::new();
+        // The classic IFD count is a u16 and its complete record range was
+        // admitted above. Reserve its actual descriptors fallibly instead of
+        // allocating map nodes behind an unrelated field-count ceiling.
+        let mut fields = reserved(count)?;
         for index in 0..count {
             if index.is_multiple_of(128) {
                 check()?;
@@ -129,14 +130,30 @@ impl<'a> Directory<'a> {
             if width != 0 {
                 reader.bytes(at, length)?;
             }
-            if fields.insert(tag, Field { kind, count, at }).is_some() {
+            fields.push(Field { tag, kind, count, at });
+        }
+        // Keep accepting unsorted directories. Sorting uses the admitted
+        // vector in place; the format's u16 count bounds the sort itself.
+        check()?;
+        fields.sort_unstable_by_key(|field| field.tag);
+        for (index, pair) in fields.windows(2).enumerate() {
+            if index.is_multiple_of(128) {
+                check()?;
+            }
+            if pair[0].tag == pair[1].tag {
                 return Err("TIFF directory repeats a field tag.".into());
             }
         }
         Ok(Self { reader, fields })
     }
+    fn field(&self, tag: u16) -> Option<&Field> {
+        self.fields
+            .binary_search_by_key(&tag, |field| field.tag)
+            .ok()
+            .map(|index| &self.fields[index])
+    }
     fn values(&self, tag: u16) -> ImageResult<Option<Vec<u32>>> {
-        let Some(field) = self.fields.get(&tag) else {
+        let Some(field) = self.field(tag) else {
             return Ok(None);
         };
         if field.count > MAX_FIELD_VALUES {
@@ -165,7 +182,7 @@ impl<'a> Directory<'a> {
             .ok_or_else(|| format!("Required TIFF field {tag} is missing."))
     }
     fn data(&self, tag: u16) -> ImageResult<Option<&'a [u8]>> {
-        let Some(f) = self.fields.get(&tag) else {
+        let Some(f) = self.field(tag) else {
             return Ok(None);
         };
         if !matches!(f.kind, 1 | 7) {
@@ -174,7 +191,7 @@ impl<'a> Directory<'a> {
         Ok(Some(self.reader.bytes(f.at, f.count)?))
     }
     fn rational_is(&self, tag: u16, expected: &[(u32, u32)]) -> ImageResult<bool> {
-        let Some(field) = self.fields.get(&tag) else {
+        let Some(field) = self.field(tag) else {
             return Ok(true);
         };
         if field.kind != 5 || field.count != expected.len() {
@@ -900,7 +917,7 @@ pub(super) fn decode(data: &[u8], check: Check<'_>) -> ImageResult<Bitmap> {
     if photo == 5 && directory.scalar(334, Some(4))? != 4 {
         return Err("TIFF CMYK requires four inks.".into());
     }
-    if directory.fields.contains_key(&336) {
+    if directory.field(336).is_some() {
         return Err("TIFF custom ink DotRange is not implemented.".into());
     }
     let planar = directory.scalar(284, Some(1))?;
@@ -953,12 +970,12 @@ pub(super) fn decode(data: &[u8], check: Check<'_>) -> ImageResult<Bitmap> {
         orientation,
         palette,
     };
-    let tiled = directory.fields.contains_key(&322)
-        || directory.fields.contains_key(&323)
-        || directory.fields.contains_key(&324)
-        || directory.fields.contains_key(&325);
+    let tiled = directory.field(322).is_some()
+        || directory.field(323).is_some()
+        || directory.field(324).is_some()
+        || directory.field(325).is_some();
     let (block_width, block_height, offsets, lengths) = if tiled {
-        if directory.fields.contains_key(&273) || directory.fields.contains_key(&279) {
+        if directory.field(273).is_some() || directory.field(279).is_some() {
             return Err("TIFF cannot mix strip and tile storage.".into());
         }
         let w = directory.scalar(322, None)? as usize;
