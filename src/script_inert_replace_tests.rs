@@ -256,3 +256,32 @@ fn inert_replace_loaded_promotion_failure_restores_main_slot_and_inert_owner_the
     assert_eq!(bridge.doc.attr(index, "data-preserved"), Some("loaded"));
     assert!(!bridge.inert_adopted_node(child));
 }
+
+#[test]
+fn inert_replace_saved_child_realm_method_revalidates_origin_and_keeps_child_write_guard() {
+    let (mut d, mut f, mut p) = page();
+    execute(
+        &mut d,
+        &mut f,
+        &mut p,
+        r#"
+var owner=document.implementation.createHTMLDocument('owner'),parent=owner.createElement('div'),old=owner.createElement('b'),next=owner.createElement('em');parent.appendChild(old);var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,saved=w.Node.prototype.replaceChild;if(saved===Node.prototype.replaceChild||Object.getPrototypeOf(saved)!==w.Function.prototype||saved.call(parent,next,old)!==old||parent.firstChild!==next)throw 'genuine borrowed owner method';
+var caught=false;try{Node.prototype.replaceChild.call(w.document.body,next,w.document.documentElement);}catch(e){caught=e instanceof TypeError;}if(!caught||parent.firstChild!==next||next.parentNode!==parent)throw 'child mutation guard';var pending=owner.createElement('span');
+"#,
+    );
+    p.set_location(&crate::navigation::Location {
+        url: Some(crate::url::parse("https://other.test/").unwrap().0),
+        path: None,
+        fragment: String::new(),
+        root: None,
+    });
+    assert_eq!(
+        p.console_eval(&mut d, &mut f, "saved.call(parent,pending,next);")
+            .errors,
+        1,
+        "{}",
+        p.report()
+    );
+    assert!(p.report().contains("same-origin"), "{}", p.report());
+    execute(&mut d,&mut f,&mut p,"if(parent.firstChild!==next||next.parentNode!==parent||pending.parentNode!==null)throw 'denied owner call mutated tree';");
+}

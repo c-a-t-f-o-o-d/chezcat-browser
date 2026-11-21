@@ -2374,3 +2374,41 @@ admission/copy-work cases keep their own profiles. The unchanged 1,024-function
 adversarial profile still refuses incomplete intrinsic bootstrap and preserves main
 native state. A previously documented raw-text iframe fallback fixture still fails;
 these checks do not claim full DOM/HTML/SVG conformance or actual-site readiness.
+
+## Same-inert-owner Node replacement and loaded parked promotion
+
+Node.replaceChild is inherited and callable normally or through a saved native
+method on represented inert Elements/fragments, including main-slot identities
+currently parked in an inert owner. Both Node arguments are validated before the
+tree algorithm; wrong types do not coerce ordinary objects. Hierarchy/cycle and
+membership checks precede owner-policy refusal. Named replacement hierarchy,
+not-found and supported-policy errors use genuine DOMException values. Inert
+Document structure and cross-document adoption remain explicitly unsupported.
+
+Replacement returns the old child, preserves real node/attribute/list identity,
+handles both existing-sibling orders and removes an incoming descendant from its
+old subtree. Fragment children are spliced in order, leaving the donor empty;
+an empty fragment removes the old child. Source/destination backing, moves and
+parent writes are paid before publication. Allocation or copy refusal leaves
+both trees, generation and retained storage unchanged.
+
+Observer preflight uses real owner paths and snapshots. Moving an existing node
+or draining a fragment queues its removal record, followed by the combined
+replacement record. Transient subtree observation survives removal until its
+checkpoint. Self replacement follows adopt/remove/insert observation, retaining
+the final tree identity. Saved same-origin child-realm methods revalidate their
+original owner on later calls; protected child DOM writes remain refused.
+
+Promotion now accepts both generated snapshots and unchanged loaded sources in
+reserved parked main slots. It copies loaded data once, refunds the main-slot
+payload actually replaced and preserves nonce/resource checks. Post-swap preflight
+failure restores the original slot and inert ownership; a later valid promotion
+can recover. No unrelated attribute write is needed to make a parked leaf usable.
+Unreserved inert handles still require real import/copy, not fabricated main IDs.
+
+An original App component-style fixture replaces within template content, observes
+the genuine queued mutation, deep-imports the result, paints text/link pixels and
+accepts native input and link activation. This finite owner increment does not
+establish exact captured-call causality, complete adoption/document replacement,
+full platform lifecycle or actual-site readiness. Existing main-tree same-node
+replacement observation/Range behavior remains a separate known follow-up.
