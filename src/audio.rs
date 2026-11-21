@@ -8,7 +8,6 @@ pub struct Limits {
     pub input_bytes: usize,
     pub channels: u16,
     pub sample_rate: u32,
-    pub chunks: usize,
     pub duration: Duration,
     pub block_frames: usize,
 }
@@ -18,7 +17,6 @@ impl Default for Limits {
             input_bytes: 512 * 1024 * 1024,
             channels: 32,
             sample_rate: 768_000,
-            chunks: 1_000_000,
             duration: Duration::from_secs(7 * 24 * 3600),
             block_frames: 16_384,
         }
@@ -97,13 +95,11 @@ impl Clip {
             .and_then(|size| size.checked_add(8))
             .filter(|&end| end == data.len())
             .ok_or("RIFF declared/actual size mismatch.")?;
-        let (mut position, mut chunks, mut format, mut samples) = (12usize, 0usize, None, None);
+        let (mut position, mut format, mut samples) = (12usize, None, None);
         while position < end {
             check()?;
-            chunks += 1;
-            if chunks > limits.chunks {
-                return Err("Audio chunk-index allowance exceeded.".into());
-            }
+            // Every chunk consumes at least its eight-byte header from the
+            // admitted input. Ignored chunks retain no index or copied data.
             let begin = position
                 .checked_add(8)
                 .filter(|&at| at <= end)
@@ -277,6 +273,10 @@ impl Clip {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+#[path = "audio_capacity_tests.rs"]
+mod capacity_tests;
 
 #[cfg(test)]
 mod tests {
@@ -456,7 +456,7 @@ mod tests {
                 ..Limits::default()
             },
             Limits {
-                chunks: 1,
+                block_frames: 0,
                 ..Limits::default()
             },
             Limits {
