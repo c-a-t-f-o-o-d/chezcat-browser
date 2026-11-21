@@ -663,6 +663,7 @@ struct Compound {
     checked: bool,
     disabled: bool,
     negations: Vec<Vec<Selector>>,
+    structural:Vec<structural::Predicate>,
 }
 
 #[derive(Debug)]
@@ -755,6 +756,12 @@ pub fn query_with_topology(
     budget:&mut usize,parents:&[Option<usize>],sibling_slots:&[usize],first_only:bool,copy_budget:&mut usize,
 )->Result<Vec<usize>,String> {
     if source.len()>MAX_SELECTOR_BYTES*16{return Err("Selector query exceeds 8 KiB.".into());}
+    let storage=structural::query_cost(source);
+    let syntax_work=if storage==0{0}else{source.len().saturating_mul(4)};
+    if syntax_work>*budget{*budget=0;return Err("DOM structural selector syntax work allowance exhausted.".into());}
+    *budget-=syntax_work;
+    if storage>*copy_budget{*copy_budget=0;return Err("DOM structural selector syntax copy allowance exhausted.".into());}
+    *copy_budget-=storage;
     let selectors=parse_selector_list(source,false).ok_or("Invalid selector or selector syntax outside the supported subset.")?;
     // Detached leaves and parked inert slots can extend the document arena
     // without participating in the checked connected topology. Per-node
@@ -2396,6 +2403,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             checked: false,
             disabled: false,
             negations: Vec::new(),
+            structural:Vec::new(),
         };
         if bytes[position] == b'*' {
             position += 1;
@@ -2462,6 +2470,8 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                         specificity.1=specificity.1.checked_add(maximum.1)?;
                         specificity.2=specificity.2.checked_add(maximum.2)?;
                         part.negations.push(arguments);
+                    } else if structural::name(name) {
+                        part.structural.push(structural::parse(name,source,&mut position)?);specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("root") {
                         part.root=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("checked") {
@@ -2923,6 +2933,7 @@ fn matches_selector(
                 }
             }
         }
+        for predicate in &compound.structural{if !predicate.matches(context,node,budget){return false;}}
         if compound.checked {
             let initial = match tag.as_str() {
                 "input"
@@ -5348,3 +5359,10 @@ mod sizing_math_tests;
 #[cfg(test)]
 #[path="css_viewport_sizing_tests.rs"]
 mod viewport_sizing_tests;
+
+#[cfg(test)]
+#[path="css_structural_tests.rs"]
+mod structural_tests;
+
+#[path="css_structural.rs"]
+mod structural;
