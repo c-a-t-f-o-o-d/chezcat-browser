@@ -3794,6 +3794,7 @@ enum Builtin {
     Number,
     BigInt,
     BigIntMethod(bool),
+    BigIntWidth(bool),
     Boolean,
     ParseInt,
     ParseFloat,
@@ -10489,6 +10490,7 @@ impl Runtime {
                 let value = self.copy_value(value)?;
                 self.big_int(value, host)
             }
+            Builtin::BigIntWidth(signed) => self.big_int_width(signed, args, host),
             Builtin::IsFinite => Ok(Value::Bool(self.binary_number(value, host)?.is_finite())),
             Builtin::IsNaN => Ok(Value::Bool(self.binary_number(value, host)?.is_nan())),
             Builtin::ParseFloat => {
