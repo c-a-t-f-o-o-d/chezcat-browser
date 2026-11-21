@@ -2,6 +2,10 @@
 //! References: qoiformat.org/qoi-specification.pdf and the Netpbm format manuals.
 use super::{be32, dimensions, pixel, reserved, Bitmap, ImageResult};
 
+#[cfg(test)]
+#[path = "image_simple_capacity_tests.rs"]
+mod capacity_tests;
+
 fn whitespace(byte: &u8) -> bool {
     // Netpbm uses all six ASCII/C whitespace bytes, including vertical tab.
     matches!(*byte, b' ' | b'\t'..=b'\r')
@@ -297,26 +301,44 @@ pub(super) fn netpbm(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
     })
 }
 
+// Header lines borrow the admitted image input. Scan even a single long comment
+// in small chunks so cancellation does not depend on encountering a newline.
+fn pam_line<'a>(
+    data: &'a [u8],
+    position: &mut usize,
+    check: &dyn Fn() -> ImageResult<()>,
+) -> ImageResult<&'a str> {
+    let start = *position;
+    let mut at = start;
+    loop {
+        check()?;
+        let end = data.len().min(at.saturating_add(4096));
+        let chunk = &data[at..end];
+        let newline = chunk.iter().position(|&byte| byte == b'\n');
+        let text = &chunk[..newline.unwrap_or(chunk.len())];
+        if !text.is_ascii() {
+            return Err("PAM header must be ASCII text.".into());
+        }
+        if let Some(offset) = newline {
+            let stop = at + offset;
+            *position = stop + 1;
+            return std::str::from_utf8(&data[start..stop])
+                .map_err(|_| "PAM header must be ASCII text.".into());
+        }
+        if end == data.len() {
+            return Err("Truncated PAM header.".into());
+        }
+        at = end;
+    }
+}
+
 fn pam(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> {
     let mut position = 0;
     let mut fields = [None; 4];
-    let mut tuple = String::new();
+    let mut tuple = None;
+    let mut multiple_tuple_lines = false;
     loop {
-        check()?;
-        let stop = data[position..data.len().min(65536)]
-            .iter()
-            .position(|b| *b == b'\n')
-            .and_then(|n| position.checked_add(n))
-            .ok_or("Truncated PAM header.")?;
-        if stop >= 65536 {
-            return Err("PAM header exceeds 64 KiB.".into());
-        }
-        let line = std::str::from_utf8(&data[position..stop])
-            .map_err(|_| "PAM header must be ASCII text.")?;
-        if !line.is_ascii() {
-            return Err("PAM header must be ASCII text.".into());
-        }
-        position = stop + 1;
+        let line = pam_line(data, &mut position, check)?;
         let line = line.trim();
         if line.starts_with('#') || line.is_empty() {
             continue;
@@ -325,7 +347,12 @@ fn pam(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> 
             .split(|c: char| c.is_ascii() && whitespace(&(c as u8)))
             .filter(|s| !s.is_empty());
         let key = words.next().unwrap();
-        if key == "P7" && fields.iter().all(Option::is_none) && tuple.is_empty() && stop <= 3 {
+        // PAM field names have at most eight characters. This also keeps an
+        // unsupported-field diagnostic independent of the source line length.
+        if key.len() > 8 {
+            return Err("PAM header field name exceeds eight characters.".into());
+        }
+        if key == "P7" && fields.iter().all(Option::is_none) && tuple.is_none() && position <= 4 {
             if words.next().is_some() {
                 return Err("Invalid PAM signature line.".into());
             }
@@ -338,17 +365,16 @@ fn pam(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> 
             break;
         }
         if key == "TUPLTYPE" {
-            let value = words.collect::<Vec<_>>().join(" ");
+            // The specification preserves interior whitespace and joins
+            // multiple TUPLTYPE lines with a blank. All supported visual tuple
+            // names are single words, so a multi-line tuple cannot match one.
+            // Borrow one value and retain that fact instead of copying a
+            // potentially input-sized tuple or temporary list of its words.
+            let value = line[key.len()..].trim();
             if value.is_empty() {
                 return Err("PAM tuple type is empty.".into());
             }
-            if !tuple.is_empty() {
-                tuple.push(' ');
-            }
-            tuple.push_str(&value);
-            if tuple.len() > 128 {
-                return Err("PAM tuple type exceeds its limit.".into());
-            }
+            multiple_tuple_lines |= tuple.replace(value).is_some();
             continue;
         }
         let slot = match key {
@@ -376,16 +402,17 @@ fn pam(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> 
     if maximum == 0 || maximum > 65535 || !(1..=4).contains(&depth) {
         return Err("PAM supports one through four unsigned channels up to 16 bits.".into());
     }
-    let valid = match tuple.as_str() {
-        "" => true,
-        "BLACKANDWHITE" => depth == 1 && maximum == 1,
-        "BLACKANDWHITE_ALPHA" => depth == 2 && maximum == 1,
-        "GRAYSCALE" => depth == 1,
-        "GRAYSCALE_ALPHA" => depth == 2,
-        "RGB" => depth == 3,
-        "RGB_ALPHA" => depth == 4,
-        _ => false,
-    };
+    let valid = !multiple_tuple_lines
+        && match tuple.unwrap_or("") {
+            "" => true,
+            "BLACKANDWHITE" => depth == 1 && maximum == 1,
+            "BLACKANDWHITE_ALPHA" => depth == 2 && maximum == 1,
+            "GRAYSCALE" => depth == 1,
+            "GRAYSCALE_ALPHA" => depth == 2,
+            "RGB" => depth == 3,
+            "RGB_ALPHA" => depth == 4,
+            _ => false,
+        };
     if !valid {
         return Err("Unsupported or inconsistent PAM tuple type.".into());
     }
