@@ -545,6 +545,25 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn html_reflector_child_realm_saved_accessors_revalidate_origin_and_refuse_child_writes() {
+        let source=format!("{CREATE}{}",r#"
+var root=document.documentElement,childRoot=w.document.documentElement,calls=0;
+var get=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'hidden').get,set=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'hidden').set;
+var childGet=w.Object.getOwnPropertyDescriptor(w.HTMLElement.prototype,'hidden').get;
+if(get===childGet||Object.getPrototypeOf(childGet)!==w.Function.prototype||childGet.call(root)!==false||get.call(childRoot)!==false)throw 'real realm accessors';
+var caught=false;try{set.call(childRoot,{toString:function(){calls++;return '';}});}catch(e){caught=e.name==='NotSupportedError';}if(!caught||calls!==0)throw 'child write refusal before conversion';
+var read=w.Function('n','return n.hidden;');root.hidden=true;if(read(root)!==true||childGet.call(root)!==true)throw 'same origin HTML read';
+"#);
+        let (mut doc,mut forms,mut page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::Location{url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,fragment:String::new(),root:None});
+        for denied in ["read(root);","childGet.call(root);","get.call(childRoot);","set.call(childRoot,{toString:function(){calls++;return '';}});"] {
+            assert_eq!(page.console_eval(&mut doc,&mut forms,denied).errors,1,"{denied}: {}",page.report());
+        }
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(calls!==0||root.hidden!==true)throw 'denied access changed state';root.hidden=false;").errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn global_is_finite_is_an_ordinary_per_realm_window_function() {
         let source = format!("{CREATE}{}", r#"
 var main=isFinite, child=w.isFinite;
