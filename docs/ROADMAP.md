@@ -61,8 +61,9 @@ The next milestone is a usable signed-out YouTube header, guide and search field
 The active P1 package completes known template preparation, import and activation
 contracts before another site milestone check. Nested content, ordinary metadata,
 live ParentNode views and finite child moves/import are integrated. Inert selector
-queries are integrated; passive HTML clone/import is the next connected increment.
-Mixed native-control/resource and nested import,
+queries and passive HTML clone/import are integrated. Supported native control
+default import and connection is the current increment. Remaining native families,
+mixed resources and nested import,
 namespace-aware SVG and remaining mutation/lifecycle scheduling stay open.
 The last actual clean `fff35f8` run at November 21, 04:13 UTC completed all 43
 script executions and 61 callbacks without escaped errors but still rendered the

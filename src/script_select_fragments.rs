@@ -80,7 +80,7 @@ impl Bridge<'_> {
             }
         }
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
-            matches!(tag(doc, node), "select" | "textarea") || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
+            matches!(tag(doc, node), "select" | "textarea" | "button") || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
         if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
             return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), radio_checked: Vec::new(), retained_bytes: 0 });
         }
@@ -101,6 +101,13 @@ impl Bridge<'_> {
         if affected.iter().any(|node| self.forms.controls[node].kind == Kind::TextArea)
             || fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node| tag(doc, node) == "textarea")) {
             self.state.work(self.forms.default_scan_work())?;
+        }
+        if let Some((doc,_))=fragment{
+            for local in 1..doc.nodes.len(){if tag(doc,local)=="button"{
+                self.state.work(self.forms.default_scan_work().saturating_add(doc.nodes.len()))?;
+                let (work,copies)=forms::button_caption_work(doc,local)?;self.state.work(work)?;
+                let text=doc.attr(local,"name").map_or(0,str::len).saturating_add(doc.attr(local,"value").map_or(0,str::len).saturating_mul(6));self.state.copies(copies.saturating_add(text))?;
+            }}
         }
         let mut plan = self.forms.prepare_selects(fragment)?;
         if !created_inputs.is_empty() { self.forms.add_created_text_inputs(self.doc,&created_inputs,&mut plan)?; }

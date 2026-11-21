@@ -1922,3 +1922,30 @@ source and destination unchanged. Original App checks clone/import and connect
 nested passive containers, then verify real glyphs, editor state and link targets.
 Mixed native-control/resource and nested-template adoption remain unfinished P1
 work; this is not completion of the full stamping package.
+
+
+## Default native control import and activation
+
+Deep import from inert template/fragment data admits the existing supported text
+INPUT, checkbox, plain TEXTAREA, conventional SELECT/OPTION/OPTGROUP and BUTTON
+families. Native defaults, editor state, checked state and option identities are
+constructed by the shared form planner. Imported controls are detached genuine
+main-document nodes; value/checked/selection edits survive connection, and form
+owners use the projected actual tree. Native reset uses the preserved defaults.
+
+The import moves owned staged nodes into a checked local view without a markup
+roundtrip or duplicate text copies. Temporary backing is admitted and refunded;
+all buffers are restored on success/refusal. The returned native state and DOM
+records publish together after retained/backing checks. Button defaults share a
+source-to-destination mapping with existing created-button admission, preserving
+control/value/caption limits and avoiding local/global identity aliasing.
+
+Native handler/customized-built-in/namespace guards remain intact. Explicit form
+reassociation, radio/hidden/other INPUT import, standalone option/group import and
+shallow inert TEXTAREA import requiring raw-value clone steps explicitly refuse.
+Existing main-control clone rules and the JavaScript form.reset/options-collection
+surface are unchanged. Unsupported members and quota/copy refusal leave no staged
+DOM prefix or native control published. Original App checks operate actual imported
+controls through pointer/text input, commit/reset, real pixels and link activation.
+Mixed resources, nested-template adoption, namespace SVG and remaining lifecycle
+routes stay separate unfinished P1 work.
