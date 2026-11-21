@@ -444,6 +444,8 @@ var prefix=0;document.title='created-interfaces-ok';
 // base/custom Event for simultaneous mouse and keyboard payloads.
 struct AnimationData {name:Value,elapsed:f64,pseudo:Value}
 impl AnimationData {fn payload_bytes(&self)->usize{retained_storage::value_bytes(&self.name)+retained_storage::value_bytes(&self.pseudo)}}
+struct ErrorEventData {message:Value,filename:Value,error:Value,line:u32,column:u32}
+impl ErrorEventData {fn payload_bytes(&self)->usize{retained_storage::value_bytes(&self.message)+retained_storage::value_bytes(&self.filename)+retained_storage::value_bytes(&self.error)}}
 struct WheelData {mouse:MouseData,x:f64,y:f64,z:f64,mode:u32,momentum:bool}
 
 enum UiRecord {
@@ -455,6 +457,7 @@ enum UiRecord {
     Focus(UiData,Option<u32>),
     Progress(crate::javascript::xhr_interface::Progress),
     Animation(AnimationData),
+    Error(Vec<ErrorEventData>),
 }
 impl UiRecord {
     fn prepare(ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>)->Result<Self,String>{
@@ -465,12 +468,14 @@ impl UiRecord {
             _=>return Err("Event UI family data is inconsistent.".into()),
         })
     }
-    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
-    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
     fn mouse(&self)->Option<&MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&data[0].mouse),_=>None}}
     fn mouse_mut(&mut self)->Option<&mut MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&mut data[0].mouse),_=>None}}
     fn wheel(&self)->Option<&WheelData>{if let Self::Wheel(_,data)=self{data.first()}else{None}}
     fn wheel_bytes(&self)->usize{if let Self::Wheel(_,data)=self{data.capacity()*std::mem::size_of::<WheelData>()}else{0}}
+    fn error_event(&self)->Option<&ErrorEventData>{if let Self::Error(data)=self{data.first()}else{None}}
+    fn error_bytes(&self)->usize{if let Self::Error(data)=self{data.capacity()*std::mem::size_of::<ErrorEventData>()+data[0].payload_bytes()}else{0}}
     fn animation(&self)->Option<&AnimationData>{if let Self::Animation(data)=self{Some(data)}else{None}}
     fn keyboard(&self)->Option<&KeyboardData>{if let Self::Keyboard(_,key)=self{Some(key)}else{None}}
 }
@@ -503,7 +508,7 @@ pub(super) struct CreatedEvent {
 mod storage_tests;
 
 impl CreatedEvent {
-    fn payload_bytes(&self)->usize {self.data.wheel_bytes()+self.name.capacity()+owned_custom_bytes(self.custom.as_ref())+self.data.keyboard().map_or(0,KeyboardData::payload_bytes)+self.data.animation().map_or(0,AnimationData::payload_bytes)}
+    fn payload_bytes(&self)->usize {self.data.error_bytes()+self.data.wheel_bytes()+self.name.capacity()+owned_custom_bytes(self.custom.as_ref())+self.data.keyboard().map_or(0,KeyboardData::payload_bytes)+self.data.animation().map_or(0,AnimationData::payload_bytes)}
 }
 fn owned_custom_bytes(value:Option<&Value>)->usize {value.map_or(0,retained_storage::value_bytes)}
 
@@ -659,6 +664,30 @@ impl Bridge<'_> {
         self.state.created_events[id].data=UiRecord::Focus(UiData {view,detail},related);
         Ok(value)
     }
+    pub(super) fn construct_error_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String>{
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value)).filter(|value|!matches!(value,Value::Undefined));
+        let empty=Value::String(String::new());let undefined=Value::Undefined;
+        let message=field("message").unwrap_or(&empty);let filename=field("filename").unwrap_or(&empty);let error=field("error").unwrap_or(&undefined);
+        if !matches!(message,Value::String(_)|Value::StringUnits(_))||!matches!(filename,Value::String(_)|Value::StringUnits(_)){return Err("ErrorEvent text fields require converted strings.".into());}
+        let line=field("lineno").map(timer_integer).transpose()?.unwrap_or(0) as u32;let column=field("colno").map(timer_integer).transpose()?.unwrap_or(0) as u32;
+        let filename_bytes=match filename{Value::String(text)=>text.len(),Value::StringUnits(units)=>{self.state.work(units.len().saturating_mul(2))?;std::char::decode_utf16(units.iter().copied()).try_fold(0usize,|bytes,ch|bytes.checked_add(ch.unwrap_or(char::REPLACEMENT_CHARACTER).len_utf8())).ok_or("ErrorEvent filename size overflow.")?},_=>unreachable!()};
+        if message.bytes()>self.state.limits.host.string_bytes||filename_bytes>self.state.limits.host.string_bytes||error.bytes()>self.state.limits.host.string_bytes{return Err("ErrorEvent text allowance exceeded.".into());}
+        let copies=message.bytes().checked_add(filename_bytes).and_then(|bytes|bytes.checked_add(error.bytes())).ok_or("ErrorEvent payload size overflow.")?;
+        if copies>self.state.retained_limit.saturating_sub(self.state.retained){return Err("ErrorEvent retained payload refused.".into());}self.state.copies(copies)?;
+        let mut filename_text=String::new();filename_text.try_reserve_exact(filename_bytes).map_err(|_|"Could not reserve ErrorEvent filename.")?;
+        match filename{Value::String(text)=>filename_text.push_str(text),Value::StringUnits(units)=>{for ch in std::char::decode_utf16(units.iter().copied()){filename_text.push(ch.unwrap_or(char::REPLACEMENT_CHARACTER));}},_=>unreachable!()}
+        let mut data=Vec::new();data.try_reserve_exact(1).map_err(|_|"Could not reserve ErrorEvent record.")?;
+        data.push(ErrorEventData{message:copy_custom_value(message)?,filename:Value::String(filename_text),error:copy_custom_value(error)?,line,column});
+        let payload=data.capacity().checked_mul(std::mem::size_of::<ErrorEventData>()).and_then(|bytes|bytes.checked_add(data[0].payload_bytes())).ok_or("ErrorEvent backing size overflow.")?;
+        if payload>self.state.retained_limit.saturating_sub(self.state.retained){return Err("ErrorEvent retained backing refused.".into());}
+        // Prepay only this error instance. No callback or fallible operation
+        // occurs between base publication and attaching its reserved payload.
+        self.state.retained+=payload;
+        let value=match self.construct_base_event(owner,args,fields){Ok(value)=>value,Err(error)=>{self.state.retained-=payload;return Err(error);}};
+        let Value::Host(handle)=value else{unreachable!()};let id=self.created_event_index(handle).unwrap();self.state.created_events[id].data=UiRecord::Error(data);Ok(value)
+    }
+    pub(super) fn error_event_receiver(&self,handle:u32)->bool{self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.error_event().is_some())}
+    pub(super) fn error_event_property(&self,object:u32,name:&str)->bool{self.error_event_receiver(object)&&matches!(name,"message"|"filename"|"lineno"|"colno"|"error")}
     pub(super) fn construct_animation_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let empty=Value::String(String::new());
@@ -780,7 +809,7 @@ impl Bridge<'_> {
         Ok(())
     }
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
-        base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
+        base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
             || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.focus_receiver(object) && name=="relatedTarget"
@@ -858,7 +887,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
@@ -868,7 +897,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
+            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
@@ -893,6 +922,10 @@ impl Bridge<'_> {
                 self.state.copies(value.bytes())?;
                 return copy_custom_value(if name=="key"{&self.state.created_events[id].data.keyboard().unwrap().key}else{&self.state.created_events[id].data.keyboard().unwrap().code});
             }
+            if matches!(name,"message"|"filename"|"error")&&self.error_event_receiver(object){
+                let data=self.state.created_events[id].data.error_event().unwrap();let value=match name{"message"=>&data.message,"filename"=>&data.filename,_=>&data.error};self.state.copies(value.bytes())?;
+                let data=self.state.created_events[id].data.error_event().unwrap();return copy_custom_value(match name{"message"=>&data.message,"filename"=>&data.filename,_=>&data.error});
+            }
             if matches!(name,"animationName"|"pseudoElement")&&self.animation_receiver(object) {
                 let data=self.state.created_events[id].data.animation().unwrap();let value=if name=="animationName"{&data.name}else{&data.pseudo};
                 self.state.copies(value.bytes())?;
@@ -909,6 +942,7 @@ impl Bridge<'_> {
             Ok(match name {
                 "deltaX"|"deltaY"|"deltaZ"|"deltaMode" if event.data.wheel().is_some()=>{let d=event.data.wheel().unwrap();Value::Number(match name{"deltaX"=>d.x,"deltaY"=>d.y,"deltaZ"=>d.z,_=>f64::from(d.mode)})},
                 "momentum" if event.data.wheel().is_some()=>Value::Bool(event.data.wheel().unwrap().momentum),
+                "lineno"|"colno" if event.data.error_event().is_some()=>{let data=event.data.error_event().unwrap();Value::Number(f64::from(if name=="lineno"{data.line}else{data.column}))},
                 "elapsedTime" if event.data.animation().is_some()=>Value::Number(event.data.animation().unwrap().elapsed),
                 "lengthComputable" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Bool(data.length_computable)},
                 "loaded"|"total" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Number(if name=="loaded" {data.loaded}else{data.total} as f64)},

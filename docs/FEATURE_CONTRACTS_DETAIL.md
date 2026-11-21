@@ -1849,3 +1849,27 @@ from a trusted button callback, checking painted glyphs, editor state and links.
 This does not add arbitrary template insertion modes, full table/foreign recovery,
 resource activation or complete main-document template adoption. See the
 [HTML template element](https://html.spec.whatwg.org/multipage/scripting.html#the-template-element).
+
+
+## Genuine ErrorEvent construction and synthetic delivery
+
+Each implemented Window realm supplies a canonical ErrorEvent derived from Event.
+Ordered Web IDL conversion retains a DOMString message, USVString filename
+(replacing unpaired surrogates), modulo-32-bit line/column numbers and the exact
+uncoerced error value. Branded readonly getters, saved constructor roots and
+owner/origin access use the existing event model. Base initEvent preserves these
+fields. Dictionary-export roots retain object/function error values.
+
+Only error instances allocate the additional payload. Actual backing and owned
+strings are prepaid before base publication, refunded on construction failure,
+and included in unpublished-wrapper rollback. Getter copies remain metered.
+Synthetic addEventListener delivery uses real target/phase/bubbling/cancellation
+and protected untrusted state. The original App fixture dispatches from a native
+button callback and checks actual exception identity, painted message glyphs,
+neighboring editor state and link targets.
+
+This increment does not install automatic global exception reporting, worker
+error propagation or legacy Window.onerror handling. Legacy initErrorEvent and
+createEvent(ErrorEvent) are not exposed. Constructor success does not establish
+site bootstrap or resolve an underlying exception reported by page code. See the
+[HTML ErrorEvent interface](https://html.spec.whatwg.org/multipage/webappapis.html#the-errorevent-interface).

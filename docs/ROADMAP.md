@@ -58,13 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `0f24be5` at November 21, 03:42 UTC
+The latest isolated Windows check on clean `c3081a5` at November 21, 04:04 UTC
 completes all 43 script executions but still renders a skeleton. DOMContentLoaded
-then fails in checked HTML fragment parsing. A separate tag/context diagnostic
-identifies nested template markup; the connected increment adds genuine inert
-nested content, scope boundaries, cloning/serialization and transactional indexes.
-The owner's earlier later Hq timer call remains untraced; it is not assigned a
-guessed API or claimed resolved by its absence in this short checkpoint.
+then references missing ErrorEvent in a polyfill error-reporting fallback. The
+connected increment supplies real ErrorEvent fields and synthetic delivery;
+an underlying application exception may remain and must be checked on actual
+site execution. The older Hq timer binding remains untraced, without a resolution
+claim from its absence in a short checkpoint.
 These implementation checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
