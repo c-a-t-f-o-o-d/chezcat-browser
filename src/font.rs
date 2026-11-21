@@ -24,7 +24,8 @@ struct Table {
 #[derive(Debug)]
 enum Cmap {
     Segments(Vec<Segment>),
-    Groups(Vec<Group>),
+    // Validated format-12 records in the retained immutable sfnt bytes.
+    Groups(Table),
 }
 
 #[derive(Debug)]
@@ -40,6 +41,16 @@ struct Group {
     start: u32,
     end: u32,
     glyph: u32,
+}
+
+impl Group {
+    fn read(record: &[u8; 12]) -> Self {
+        Self {
+            start: u32::from_be_bytes([record[0], record[1], record[2], record[3]]),
+            end: u32::from_be_bytes([record[4], record[5], record[6], record[7]]),
+            glyph: u32::from_be_bytes([record[8], record[9], record[10], record[11]]),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -370,7 +381,7 @@ impl Font {
             }
             offsets.push(offset);
         }
-        let cmap = read_cmap(get(b"cmap")?)?;
+        let cmap = read_cmap(get(b"cmap")?, tables[b"cmap"].start)?;
         let kern = tables
             .get(b"kern")
             .map(|table| read_kern(&source[table.start..table.start + table.len]))
@@ -407,10 +418,15 @@ impl Font {
     pub fn glyph_index(&self, character: char) -> u16 {
         let code = character as u32;
         let glyph = match &self.cmap {
-            Cmap::Groups(groups) => {
-                let index = groups.partition_point(|group| group.end < code);
-                groups
+            Cmap::Groups(table) => {
+                // Parsing admitted this exact record range, checked every
+                // group, and retained the same immutable bytes in Font.
+                let (records, _) = self.bytes[table.start..table.start + table.len]
+                    .as_chunks::<12>();
+                let index = records.partition_point(|record| Group::read(record).end < code);
+                records
                     .get(index)
+                    .map(Group::read)
                     .filter(|group| group.start <= code)
                     .map_or(0, |group| group.glyph + code - group.start)
             }
@@ -605,7 +621,7 @@ impl Font {
     }
 }
 
-fn read_cmap(data: &[u8]) -> Result<Cmap> {
+fn read_cmap(data: &[u8], source_start: usize) -> Result<Cmap> {
     if u16_at(data, 0)? != 0 {
         return Err("Invalid cmap version.".into());
     }
@@ -641,31 +657,30 @@ fn read_cmap(data: &[u8]) -> Result<Cmap> {
         let len = u32_at(data, offset + 4)? as usize;
         let table = bytes(data, offset, len)?;
         let count = u32_at(table, 12)? as usize;
-        if count > 65_536 || u16_at(table, 2)? != 0 {
+        if u16_at(table, 2)? != 0 {
             return Err("Invalid cmap format 12 groups.".into());
         }
-        bytes(table, 16, count * 12)?;
-        let mut groups: Vec<Group> = Vec::with_capacity(count);
-        for index in 0..count {
-            let at = 16 + index * 12;
-            let group = Group {
-                start: u32_at(table, at)?,
-                end: u32_at(table, at + 4)?,
-                glyph: u32_at(table, at + 8)?,
-            };
+        let record_bytes = count.checked_mul(12).ok_or("Font offset overflow.")?;
+        let (records, _) = bytes(table, 16, record_bytes)?.as_chunks::<12>();
+        let mut previous_end = None;
+        for record in records {
+            let group = Group::read(record);
             if group.start > group.end
                 || group.end > 0x10ffff
                 || group
                     .glyph
                     .checked_add(group.end - group.start)
                     .is_none_or(|last| last > 0xffff)
-                || groups.last().is_some_and(|last| last.end >= group.start)
+                || previous_end.is_some_and(|end| end >= group.start)
             {
                 return Err("Invalid cmap format 12 range.".into());
             }
-            groups.push(group);
+            previous_end = Some(group.end);
         }
-        Ok(Cmap::Groups(groups))
+        let start = source_start.checked_add(offset)
+            .and_then(|start| start.checked_add(16))
+            .ok_or("Font offset overflow.")?;
+        Ok(Cmap::Groups(Table { start, len: record_bytes }))
     } else {
         let len = usize::from(u16_at(data, offset + 2)?);
         let table = bytes(data, offset, len)?;

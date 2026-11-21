@@ -655,21 +655,168 @@ fn cmap_metadata_record_capacity_keeps_directory_and_selected_tail_validation() 
     let directory_end = 4 + 257 * 8;
     let mut data = cmap_records(257, &cmap_a_mapping(12, 2));
     cmap_record(&mut data, 0, 0, 4, directory_end);
-    assert!(read_cmap(&data[..directory_end - 1]).unwrap_err().contains("Truncated font data"));
+    assert!(read_cmap(&data[..directory_end - 1], 0).unwrap_err().contains("Truncated font data"));
 
     let mut invalid_offset = data.clone();
     cmap_record(&mut invalid_offset, 256, 3, 10, data.len());
-    assert!(read_cmap(&invalid_offset).unwrap_err().contains("Truncated font data"));
+    assert!(read_cmap(&invalid_offset, 0).unwrap_err().contains("Truncated font data"));
 
     let invalid_tail = data.len();
     let mut selected = cmap_a_mapping(12, 3);
     put16(&mut selected, 2, 1); // Reserved field in the selected format-12 table.
     data.extend_from_slice(&selected);
     cmap_record(&mut data, 256, 3, 10, invalid_tail);
-    assert!(read_cmap(&data).unwrap_err().contains("Invalid cmap format 12 groups"));
+    assert!(read_cmap(&data, 0).unwrap_err().contains("Invalid cmap format 12 groups"));
 
     put16(&mut data, 2, 0);
-    assert!(read_cmap(&data).is_err());
+    assert!(read_cmap(&data, 0).is_err());
+}
+
+fn cmap_with_many_groups(count: usize) -> Vec<u8> {
+    assert!((65_537..=100_000).contains(&count));
+    let mut data = vec![0; 28 + count * 12];
+    put16(&mut data, 2, 1);
+    cmap_record(&mut data, 0, 3, 10, 12);
+    put16(&mut data, 12, 12);
+    put32(&mut data, 16, (16 + count * 12) as u32);
+    put32(&mut data, 24, count as u32);
+    for index in 0..count - 2 {
+        // Skip surrogate code points, while keeping distinct scalar aliases
+        // for the fixture's small original glyph set.
+        let code = index as u32 + if index >= 0xd800 { 0x800 } else { 0 };
+        let glyph = match code {
+            86 => 3,
+            111 => 4,
+            233 => 6,
+            _ => 2,
+        };
+        let at = 28 + index * 12;
+        put32(&mut data, at, code);
+        put32(&mut data, at + 4, code);
+        put32(&mut data, at + 8, glyph);
+    }
+    // A sequential mapping and a final Unicode scalar beyond the old count.
+    let at = 28 + (count - 2) * 12;
+    put32(&mut data, at, 0x1f600);
+    put32(&mut data, at + 4, 0x1f601);
+    put32(&mut data, at + 8, 6);
+    put32(&mut data, at + 12, 0x10ffff);
+    put32(&mut data, at + 16, 0x10ffff);
+    put32(&mut data, at + 20, 3);
+    data
+}
+
+fn font_with_cmap(cmap: Vec<u8>) -> Vec<u8> {
+    let mut font_tables = tables();
+    font_tables.insert(*b"cmap", cmap);
+    sfnt(font_tables)
+}
+
+#[test]
+fn cmap_group_capacity_positive_tail_mapping_and_real_pixels_in_ttf_and_woff() {
+    let baseline = Font::parse(&fixture_font()).unwrap();
+    let ttf = font_with_cmap(cmap_with_many_groups(65_537));
+    let woff = woff_from_sfnt(&ttf);
+    for encoded in [&ttf, &woff] {
+        let font = Font::parse(encoded).unwrap();
+        for (character, glyph) in [('A', 2), ('V', 3), ('é', 6), ('😀', 6), ('😁', 7), ('\u{10ffff}', 3)] {
+            assert_eq!(font.glyph_index(character), glyph);
+            assert_eq!(font.advance(glyph, 37.0), baseline.advance(glyph, 37.0));
+            let actual = font.rasterize(font.glyph_index(character), 37.0).unwrap();
+            let expected = baseline.rasterize(glyph, 37.0).unwrap();
+            assert!(actual.coverage.iter().any(|&pixel| pixel != 0));
+            assert_eq!((actual.left, actual.top, actual.width, actual.height),
+                (expected.left, expected.top, expected.width, expected.height));
+            assert_eq!(actual.coverage, expected.coverage);
+        }
+        assert_eq!(font.glyph_index('\u{1f602}'), 0);
+        assert_eq!(font.glyph_index('\u{10fffe}'), 0);
+        assert_eq!(font.kerning(2, 3, 37.0), baseline.kerning(2, 3, 37.0));
+    }
+}
+
+#[test]
+fn cmap_group_capacity_positive_selected_offset_and_owned_source_lifetime() {
+    let bulk = cmap_with_many_groups(100_000);
+    let mut cmap = cmap_records(2, &cmap_a_mapping(12, 3));
+    let selected = cmap.len();
+    cmap_record(&mut cmap, 0, 0, 4, 20);
+    cmap_record(&mut cmap, 1, 3, 10, selected);
+    cmap.extend_from_slice(&bulk[12..]);
+    let ttf = font_with_cmap(cmap);
+    let woff = woff_from_sfnt(&ttf);
+    for mut encoded in [ttf, woff] {
+        let font = Font::parse(&encoded).unwrap();
+        // The validated range must refer to the retained sfnt, not the caller's
+        // temporary buffer or a WOFF transport offset.
+        encoded.fill(0);
+        drop(encoded);
+        assert_eq!(font.glyph_index('A'), 2);
+        assert_eq!(font.glyph_index('\u{10800}'), 2);
+        assert_eq!(font.glyph_index('😁'), 7);
+        assert_eq!(font.glyph_index('\u{10ffff}'), 3);
+        assert!(font.rasterize(font.glyph_index('😁'), 37.0).unwrap()
+            .coverage.iter().any(|&pixel| pixel != 0));
+    }
+}
+
+#[test]
+fn cmap_group_capacity_keeps_late_range_and_glyph_validation() {
+    let original = cmap_with_many_groups(65_537);
+    let tail = original.len() - 12;
+    for (start, end, glyph) in [
+        (0x10ffff, 0x10fffe, 3), // Reversed range.
+        (0x10ffff, 0x110000, 3), // Outside the Unicode address space.
+        (0x1f601, 0x1f601, 3),   // Overlap with the preceding range.
+        (65, 65, 3),            // Out of order.
+        (0x10fffe, 0x10ffff, 0xffff), // Glyph range exceeds u16.
+        (0x10ffff, 0x10ffff, u32::MAX),
+    ] {
+        let mut invalid = original.clone();
+        put32(&mut invalid, tail, start);
+        put32(&mut invalid, tail + 4, end);
+        put32(&mut invalid, tail + 8, glyph);
+        assert!(Font::parse(&font_with_cmap(invalid)).unwrap_err()
+            .contains("Invalid cmap format 12 range"));
+    }
+}
+
+#[test]
+fn cmap_group_capacity_keeps_record_extent_and_reserved_checks() {
+    let original = cmap_with_many_groups(65_537);
+    let mut truncated = original.clone();
+    truncated.pop();
+    assert!(Font::parse(&font_with_cmap(truncated)).unwrap_err().contains("Truncated font data"));
+
+    let mut short_subtable = original.clone();
+    let declared = u32_at(&short_subtable, 16).unwrap();
+    put32(&mut short_subtable, 16, declared - 12);
+    assert!(Font::parse(&font_with_cmap(short_subtable)).unwrap_err().contains("Truncated font data"));
+
+    let mut huge_count = original.clone();
+    put32(&mut huge_count, 24, u32::MAX);
+    assert!(Font::parse(&font_with_cmap(huge_count)).unwrap_err().contains("Truncated font data"));
+
+    let mut reserved = original;
+    put16(&mut reserved, 14, 1);
+    assert!(Font::parse(&font_with_cmap(reserved)).unwrap_err()
+        .contains("Invalid cmap format 12 groups"));
+}
+
+#[test]
+fn cmap_group_capacity_keeps_empty_gaps_and_missing_glyph_fallback() {
+    let mut empty = cmap_records(1, &cmap_a_mapping(12, 2));
+    put32(&mut empty, 24, 0);
+    let font = Font::parse(&font_with_cmap(empty)).unwrap();
+    assert_eq!(font.glyph_index('A'), 0);
+    assert_eq!(font.glyph_index('\u{10ffff}'), 0);
+
+    let mut short = cmap_records(1, &cmap_a_mapping(12, 6));
+    put32(&mut short, 32, 68); // A..D maps to 6..9; this font has glyphs 0..7.
+    let font = Font::parse(&font_with_cmap(short)).unwrap();
+    for (character, glyph) in [('@', 0), ('A', 6), ('B', 7), ('C', 0), ('D', 0), ('E', 0)] {
+        assert_eq!(font.glyph_index(character), glyph);
+    }
 }
 
 fn kern_subtable(pairs: &[(u32, i16)], override_existing: bool) -> Vec<u8> {
