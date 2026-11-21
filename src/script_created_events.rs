@@ -444,10 +444,13 @@ var prefix=0;document.title='created-interfaces-ok';
 // base/custom Event for simultaneous mouse and keyboard payloads.
 struct AnimationData {name:Value,elapsed:f64,pseudo:Value}
 impl AnimationData {fn payload_bytes(&self)->usize{retained_storage::value_bytes(&self.name)+retained_storage::value_bytes(&self.pseudo)}}
+struct WheelData {mouse:MouseData,x:f64,y:f64,z:f64,mode:u32,momentum:bool}
+
 enum UiRecord {
     Base,
     Ui(UiData),
     Mouse(UiData,MouseData),
+    Wheel(UiData,Vec<WheelData>),
     Keyboard(UiData,KeyboardData),
     Focus(UiData,Option<u32>),
     Progress(crate::javascript::xhr_interface::Progress),
@@ -462,10 +465,12 @@ impl UiRecord {
             _=>return Err("Event UI family data is inconsistent.".into()),
         })
     }
-    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
-    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
-    fn mouse(&self)->Option<&MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
-    fn mouse_mut(&mut self)->Option<&mut MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)=>None}}
+    fn mouse(&self)->Option<&MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&data[0].mouse),_=>None}}
+    fn mouse_mut(&mut self)->Option<&mut MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&mut data[0].mouse),_=>None}}
+    fn wheel(&self)->Option<&WheelData>{if let Self::Wheel(_,data)=self{data.first()}else{None}}
+    fn wheel_bytes(&self)->usize{if let Self::Wheel(_,data)=self{data.capacity()*std::mem::size_of::<WheelData>()}else{0}}
     fn animation(&self)->Option<&AnimationData>{if let Self::Animation(data)=self{Some(data)}else{None}}
     fn keyboard(&self)->Option<&KeyboardData>{if let Self::Keyboard(_,key)=self{Some(key)}else{None}}
 }
@@ -498,7 +503,7 @@ pub(super) struct CreatedEvent {
 mod storage_tests;
 
 impl CreatedEvent {
-    fn payload_bytes(&self)->usize {self.name.capacity()+owned_custom_bytes(self.custom.as_ref())+self.data.keyboard().map_or(0,KeyboardData::payload_bytes)+self.data.animation().map_or(0,AnimationData::payload_bytes)}
+    fn payload_bytes(&self)->usize {self.data.wheel_bytes()+self.name.capacity()+owned_custom_bytes(self.custom.as_ref())+self.data.keyboard().map_or(0,KeyboardData::payload_bytes)+self.data.animation().map_or(0,AnimationData::payload_bytes)}
 }
 fn owned_custom_bytes(value:Option<&Value>)->usize {value.map_or(0,retained_storage::value_bytes)}
 
@@ -603,6 +608,25 @@ impl Bridge<'_> {
             related:self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?};
         self.construct_event_record(owner,args,fields,Some(ui),Some(mouse),None,None)
     }
+    // Only wheel instances pay for this backing. Keep the shared base-event
+    // arena unchanged; admit the actual allocation before publishing a record.
+    pub(super) fn construct_wheel_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String>{
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let number=|key|match field(key){None|Some(Value::Undefined)=>Ok(0.0),Some(Value::Number(n)) if n.is_finite()=>Ok(*n),_=>Err("WheelEvent deltas require converted finite doubles.".to_string())};
+        let (x,y,z)=(number("deltaX")?,number("deltaY")?,number("deltaZ")?);
+        let mode=field("deltaMode").map(timer_integer).transpose()?.unwrap_or(0) as u32;
+        let momentum=field("momentum").is_some_and(Value::truthy);
+        let mut data=Vec::new();data.try_reserve_exact(1).map_err(|_|"Could not reserve WheelEvent payload.")?;
+        let bytes=data.capacity()*std::mem::size_of::<WheelData>();
+        if bytes>self.state.retained_limit.saturating_sub(self.state.retained){return Err("WheelEvent retained payload refused.".into());}
+        self.state.retained+=bytes;
+        let value=match self.construct_mouse_event(owner,args,fields){Ok(value)=>value,Err(error)=>{self.state.retained-=bytes;return Err(error);}};
+        let Value::Host(handle)=value else {unreachable!()};let id=self.created_event_index(handle).unwrap();
+        let UiRecord::Mouse(ui,mouse)=std::mem::replace(&mut self.state.created_events[id].data,UiRecord::Base) else {unreachable!()};
+        data.push(WheelData {mouse,x,y,z,mode,momentum});self.state.created_events[id].data=UiRecord::Wheel(ui,data);Ok(value)
+    }
+    pub(super) fn wheel_receiver(&self,handle:u32)->bool{self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.wheel().is_some())}
+    pub(super) fn wheel_property(&self,object:u32,name:&str)->bool{self.wheel_receiver(object)&&matches!(name,"deltaX"|"deltaY"|"deltaZ"|"deltaMode"|"momentum")}
     pub(super) fn construct_keyboard_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let integer=|key|field(key).map(timer_integer).transpose().map(|value|value.unwrap_or(0));
@@ -756,7 +780,7 @@ impl Bridge<'_> {
         Ok(())
     }
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
-        base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
+        base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
             || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.focus_receiver(object) && name=="relatedTarget"
@@ -834,7 +858,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
@@ -844,7 +868,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
+            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
@@ -883,6 +907,8 @@ impl Bridge<'_> {
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
             Ok(match name {
+                "deltaX"|"deltaY"|"deltaZ"|"deltaMode" if event.data.wheel().is_some()=>{let d=event.data.wheel().unwrap();Value::Number(match name{"deltaX"=>d.x,"deltaY"=>d.y,"deltaZ"=>d.z,_=>f64::from(d.mode)})},
+                "momentum" if event.data.wheel().is_some()=>Value::Bool(event.data.wheel().unwrap().momentum),
                 "elapsedTime" if event.data.animation().is_some()=>Value::Number(event.data.animation().unwrap().elapsed),
                 "lengthComputable" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Bool(data.length_computable)},
                 "loaded"|"total" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Number(if name=="loaded" {data.loaded}else{data.total} as f64)},

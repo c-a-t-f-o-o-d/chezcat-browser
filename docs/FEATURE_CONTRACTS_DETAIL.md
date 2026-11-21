@@ -1803,3 +1803,25 @@ this truthful unsupported set alongside live stored metadata; owner, connected
 mutation, quota and context-publication guards remain active. See the
 [HTML supported-token definition](https://html.spec.whatwg.org/multipage/iframe-embed-object.html#dom-iframe-sandbox)
 and [DOM token validation](https://dom.spec.whatwg.org/#concept-domtokenlist-validation).
+
+
+## Genuine WheelEvent construction
+
+Canonical owner-realm WheelEvent derives from MouseEvent and retains finite
+signed deltaX/deltaY/deltaZ doubles, modulo-32-bit deltaMode and momentum.
+DOM_DELTA_PIXEL/LINE/PAGE constants live on the constructor and prototype.
+Ordered Web IDL conversion includes inherited UI/mouse members; branded readonly
+getters, saved roots and owner/origin guards use the existing native event model.
+Inherited initMouseEvent changes parent fields without overwriting wheel data.
+
+Only wheel records allocate their additional backing; actual vector capacity is
+prepaid before base publication and refunded on construction failure. Ordinary
+Event arena size remains unchanged. Original checks cover conversion ordering,
+negative zero, refusal/recovery, child ownership and actual App button callback
+construction with real glyph/editor/link checks.
+
+This increment does not deliver native wheel events or implement synthetic mouse
+activation and target-relative dispatch geometry. The existing mouse-family
+dispatch refusal remains active; construction does not scroll or grant trust.
+Legacy createEvent(WheelEvent) and initWheelEvent are not exposed. See the
+[WheelEvent interface](https://www.w3.org/TR/pointerevents4/#interface-wheelevent).

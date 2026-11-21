@@ -231,6 +231,7 @@ impl Runtime {
                 if host.event_target_interface(handle) {runtime.define_custom_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_ui_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_mouse_event_interface(handle).map_err(Fault::new)?;}
+                if host.event_target_interface(handle) {runtime.define_wheel_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_keyboard_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_focus_event_interface(handle).map_err(Fault::new)?;}
                 if host.event_target_interface(handle) {runtime.define_progress_event_interface(handle).map_err(Fault::new)?;}
