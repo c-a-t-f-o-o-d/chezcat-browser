@@ -82,6 +82,7 @@ impl Runtime {
             Builtin::Promise(operation) => operation.arity(),
             Builtin::Date(operation) => operation.arity(),
             Builtin::Url(operation) => operation.arity(),
+            Builtin::Headers(operation) => operation.arity(),
             Builtin::Rect(operation) => operation.arity(),
             Builtin::ImageData(super::image_data_api::Op::Constructor) => 2,
             Builtin::ImageData(_) => 0,

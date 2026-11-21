@@ -248,6 +248,8 @@ mod template_literals;
 mod text_encoding;
 #[path = "url_api.rs"]
 mod url_api;
+#[path = "headers_api.rs"]
+mod headers_api;
 pub(crate) use url_api::{project as anchor_url_project, mutate as anchor_url_mutate};
 #[path = "work_attribution.rs"]
 mod work_attribution;
@@ -3758,6 +3760,7 @@ enum Builtin {
     Promise(promises::Op),
     Date(date::Op),
     Url(url_api::Op),
+    Headers(headers_api::Op),
     Rect(rect_api::Op),
     ImageData(image_data_api::Op),
     DomException(dom_exception::Op),
@@ -3873,6 +3876,7 @@ struct Object {
     proxy: Option<proxy_objects::ProxyData>,
     date: Option<f64>,
     url: Option<url_api::Data>,
+    headers: Option<headers_api::Data>,
     rect: Option<rect_api::Data>,
     dom_exception: Option<dom_exception::Data>,
     primitive: Option<primitive_wrappers::Data>,
@@ -4039,6 +4043,7 @@ pub struct Runtime {
     regexp_constructor: Option<usize>,
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
+    headers_roots: headers_api::Roots,
     rect_roots: rect_api::Roots,
     image_data_prototype: Option<usize>,
     dom_exception_roots: dom_exception::Roots,
@@ -4194,6 +4199,7 @@ impl Runtime {
             regexp_constructor: None,
             date_prototype: None,
             url_roots: url_api::Roots::default(),
+            headers_roots: headers_api::Roots::default(),
             rect_roots: rect_api::Roots::default(),
             image_data_prototype: None,
             dom_exception_roots: dom_exception::Roots::default(),
@@ -4328,6 +4334,7 @@ impl Runtime {
         else { self.reserve_deferred_global_orders(intrinsic_realms::DOM_EXCEPTION_GLOBALS)?; }
         if self.deferred_intrinsics & 32 == 0 { self.initialize_image_data()?; }
         else { self.reserve_deferred_global_orders(intrinsic_realms::IMAGE_DATA_GLOBALS)?; }
+        self.reserve_deferred_global_orders(intrinsic_realms::HEADERS_GLOBALS)?;
         for (name, value) in [
             ("undefined", Value::Undefined),
             ("NaN", Value::Number(f64::NAN)),
@@ -6148,6 +6155,7 @@ impl Runtime {
             proxy: None,
             date: None,
             url: None,
+            headers: None,
             rect: None,
             dom_exception: None,
             primitive: None,
@@ -8476,6 +8484,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Date(date::Op::Constructor))) => {
                 self.date_construct(args, host)
             }
+            Some(Function::Native(Builtin::Headers(headers_api::Op::Constructor))) => {
+                self.headers_construct(args, host)
+            }
             Some(Function::Native(Builtin::Url(url_api::Op::Constructor(kind)))) => {
                 self.url_construct(*kind, args, host)
             }
@@ -9606,6 +9617,9 @@ impl Runtime {
             Some(Function::Native(Builtin::Date(operation))) => {
                 return self.date_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::Headers(operation))) => {
+                return self.headers_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::Url(operation))) => {
                 return self.url_builtin(*operation, args, this, host);
             }
@@ -10332,6 +10346,7 @@ impl Runtime {
             | Builtin::Promise(_)
             | Builtin::Date(_)
             | Builtin::Url(_)
+            | Builtin::Headers(_)
             | Builtin::Rect(_)
             | Builtin::ImageData(_)
             | Builtin::DomException(_)

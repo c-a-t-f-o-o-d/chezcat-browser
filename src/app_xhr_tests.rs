@@ -434,3 +434,22 @@ r.open('GET','/first');r.send();
         .iter()
         .any(|(head, body)| head.starts_with("POST /second ") && body == b"NEW"));
 }
+
+#[test]
+fn fetch_headers_actual_app_shared_xhr_boundary_preserves_transport_and_cookie_guards() {
+    let site=Site::new();
+    site.page("/headers-home",r#"
+var h=new Headers([['X-Original','one'],['x-original','two'],['Content-Type','application/json'],['Cookie','author=forbidden'],['Host','forbidden.test']]);
+var r=new XMLHttpRequest();r.onload=function(){if(r.status!==201||r.responseText!=='header-response'||r.getResponseHeader('Set-Cookie')!==null)throw 'real filtered response';document.getElementById('out').textContent=r.responseText;document.title='Headers transport complete';};
+r.open('POST','/headers-post');h.forEach(function(value,name){r.setRequestHeader(name,value);});r.send('{"real":true}');
+"#,"");
+    site.put("/headers-post",201,"Content-Type: text/plain\r\nSet-Cookie: private_http=server; Path=/; HttpOnly\r\n",b"header-response");
+    let mut app=App::new();app.set_javascript_enabled(true);
+    let url=crate::url::parse(&format!("{}/headers-home",site.base)).unwrap().0;
+    app.cookies.set_http(&url,"browser_cookie=kept; Path=/; SameSite=Strict").unwrap();
+    site.open(&mut app,"/headers-home");until(&mut app,|app|app.document.title=="Headers transport complete");clean(&app);
+    let seen=site.seen.lock().unwrap();let (head,body)=seen.iter().find(|(head,_)|head.starts_with("POST /headers-post")).unwrap();let lower=head.to_ascii_lowercase();
+    assert_eq!(body,b"{\"real\":true}");assert!(lower.contains("x-original: one, two"));assert!(lower.contains("content-type: application/json"));assert!(lower.contains("cookie: browser_cookie=kept"));assert!(!lower.contains("author=forbidden")&&!lower.contains("forbidden.test"));drop(seen);
+    assert!(app.page.runs.iter().any(|run|run.text=="header-response"));
+    assert!(!app.cookies.document(&url).contains("private_http"));
+}

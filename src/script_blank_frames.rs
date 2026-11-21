@@ -545,6 +545,18 @@ mod tests {
     const CREATE: &str = "var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow;";
 
     #[test]
+    fn fetch_headers_native_values_have_independent_child_realm_roots_and_saved_methods() {
+        let source=format!("{CREATE}{}",r#"
+var main=new Headers({x:'main'}),child=new w.Headers({x:'child'}),get=w.Headers.prototype.get;
+if(Headers===w.Headers||Headers.prototype===w.Headers.prototype||Object.getPrototypeOf(child)!==w.Headers.prototype||get.call(main,'x')!=='main'||Headers.prototype.get.call(child,'x')!=='child')throw 'real realm values';
+var iter=child.entries();if(Object.getPrototypeOf(iter.next())!==w.Object.prototype||Object.getPrototypeOf(child.getSetCookie())!==w.Array.prototype||Object.getPrototypeOf(iter.next)!==w.Function.prototype)throw 'native iterator result realm';
+var copy=new w.Headers(main);main.set('x','changed');if(copy.get('x')!=='main')throw 'independent cross realm copy';
+"#);
+        let (_,_,page,outcome)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(outcome.errors,0,"{}",page.report());
+    }
+
+    #[test]
     fn html_reflector_child_realm_saved_accessors_revalidate_origin_and_refuse_child_writes() {
         let source=format!("{CREATE}{}",r#"
 var root=document.documentElement,childRoot=w.document.documentElement,calls=0;
