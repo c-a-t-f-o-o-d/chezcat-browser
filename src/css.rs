@@ -1454,11 +1454,16 @@ fn compute_cascade(
     }
     check_css_deadline(meter.as_deref().and_then(CssBudget::deadline)
         .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline)))?;
-    if let Some(meter)=meter.as_deref_mut(){meter.presentation(computed.len())?;}else if let Some(meter)=transform_meter.as_deref_mut(){meter.presentation(computed.len())?;}
-    let mut presentation=Vec::new();presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
-    let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
-    if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}else if let Some(meter)=transform_meter.as_deref_mut(){meter.copies(extra)?;}}
-    presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color}));
+    let mut presentation=Vec::new();
+    // The transform-only layout path keeps its existing no-property cost.
+    // Presentation reads can request a funded complete snapshot separately.
+    if transform_meter.is_none()||meter.is_some(){
+        if let Some(meter)=meter.as_deref_mut(){meter.presentation(computed.len())?;}
+        presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
+        let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
+        if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
+        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color}));
+    }
     Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
 }
 

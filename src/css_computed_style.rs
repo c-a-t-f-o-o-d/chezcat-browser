@@ -134,6 +134,7 @@ impl ComputedProperties {
     pub(crate) fn has_transform_geometry(&self) -> bool {
         self.0.has_transform_geometry
     }
+    pub(crate) fn has_presentation(&self)->bool{self.0.presentation.len()==self.0.eligible.len()}
     pub(crate) fn read_presentation(&self,node:usize)->Result<Option<ComputedPresentation>,ComputedStyleUnavailable>{
         if !*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?{return Ok(None);}
         if !self.0.complete{return Err(ComputedStyleUnavailable);}

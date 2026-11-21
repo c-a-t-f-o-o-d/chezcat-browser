@@ -173,8 +173,9 @@ fn computed_style_protocol_atomic_handle_admission_and_explicit_unavailable_read
     assert_eq!(page.state.dom_commits, commits);
     page.state.retained_limit = retained + 1024;
     run(&mut doc,&mut forms,&mut page,"var target=document.getElementById('target'),saved=getComputedStyle(target),read=saved.getPropertyValue;if(read.call(saved,'--missing')!=='')throw 'actual absent';");
+    run(&mut doc,&mut forms,&mut page,"if(read.call(saved,'color')!==saved.color||read.call(saved,'display')!==saved.display)throw 'actual computed presentation';");
     for source in [
-        "read.call(saved,'color');",
+        "read.call(saved,'background-image');",
         "read.call(saved,'--bad name');",
         "saved.cssText;",
         "saved.color='red';",

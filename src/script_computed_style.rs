@@ -435,17 +435,8 @@ impl Bridge<'_> {
         if matches!(property, ComputedProperty::Transform) {
             return self.computed_transform_value(node);
         }
-        let snapshot = self
-            .state
-            .geometry
-            .as_mut()
-            .ok_or("Computed style requires the actual document renderer.")?
-            .computed_snapshot(
-                self.doc,
-                self.forms,
-                &mut self.state.host_work,
-                &mut self.state.copy_work,
-            )?;
+        let geometry=self.state.geometry.as_mut().ok_or("Computed style requires the actual document renderer.")?;
+        let snapshot=if matches!(property,ComputedProperty::Display|ComputedProperty::Color){geometry.presentation_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?}else{geometry.computed_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?};
         if matches!(property,ComputedProperty::Display|ComputedProperty::Color){
             let Some(presentation)=snapshot.read_presentation(node).map_err(|_|"Computed presentation unavailable within CSS cascade limits.")?else{return Ok(Value::String(String::new()));};
             if matches!(property,ComputedProperty::Display){let text=presentation.display;self.state.copies(text.len())?;let mut value=String::new();value.try_reserve_exact(text.len()).map_err(|_|"Computed display serialization reservation failed.")?;value.push_str(text);return Ok(Value::String(value));}
