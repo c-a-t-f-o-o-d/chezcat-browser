@@ -210,7 +210,7 @@ fn shared_download_admission_is_one_global_cap_and_cancel_cleans_every_held_tran
 
 fn received(body:&[u8])->http::Response {
     http::Response {document_timing:None,redirected:false,url:crate::url::parse("https://download.invalid/received.bin").unwrap().0,
-        fragment:None,status:200,protocol:Some("TLS 1.3"),request_is_post:true,cookie_same_site:false,
+        fragment:None,status:200,status_text:"OK".into(),encoded_body_bytes:body.len(),protocol:Some("TLS 1.3"),request_is_post:true,cookie_same_site:false,
         headers:vec![("content-disposition".into(),"attachment; filename=received.bin".into())],body:body.to_vec(),events:Vec::new()}
 }
 

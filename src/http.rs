@@ -37,6 +37,10 @@ pub(crate) use media_cors::Credentials as MediaCredentials;
 mod stylesheet;
 pub(crate) use stylesheet::{check_request as check_stylesheet_request, StylesheetFailure, StylesheetResponse};
 
+#[path = "http_script_request.rs"]
+pub(crate) mod script_request;
+pub(crate) use script_request::{ScriptCredentials, ScriptMethod, ScriptRequest};
+
 // Only these two resource modes need additional redirect/credential state.
 // Other callers retain the existing transport and exact-origin arguments.
 enum ResourceFetch<'origin, 'state> {
@@ -106,6 +110,7 @@ pub enum FetchMode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Get,
+    Script { request: ScriptRequest, origin: HttpUrl },
     FormPost {
         body: Vec<u8>,
         /// A local document has an opaque origin, serialized as `null`.
@@ -115,10 +120,11 @@ pub enum Request {
 
 impl Request {
     pub fn is_post(&self) -> bool {
-        matches!(self, Self::FormPost { .. })
+        matches!(self, Self::FormPost { .. } | Self::Script {request:ScriptRequest {method:ScriptMethod::Post,..},..})
     }
 
     fn method(&self) -> &'static str {
+        if let Self::Script {request,..}=self {return request.method.name();}
         if self.is_post() {
             "POST"
         } else {
@@ -130,12 +136,18 @@ impl Request {
         match self {
             Self::Get => &[],
             Self::FormPost { body, .. } => body,
+            Self::Script {request,..}=>&request.body,
         }
     }
 
     fn redirect(&mut self, status: u16, from: &HttpUrl, to: &HttpUrl) -> Result<(), String> {
         if from.secure && !to.secure {
             return Err("HTTPS redirect to unencrypted HTTP was blocked.".into());
+        }
+        if let Self::Script {request,..}=self {
+            if from.secure && !to.secure {return Err("HTTPS script request redirect to HTTP was blocked.".into());}
+            request.redirect(status,from,to);
+            return Ok(());
         }
         if self.is_post() {
             if matches!(status, 301..=303) {
@@ -158,6 +170,9 @@ pub struct Response {
     /// None preserves the caller's fragment; Some("") explicitly clears it.
     pub fragment: Option<String>,
     pub status: u16,
+    /// Received HTTP reason phrase with bytes represented as Latin-1 code points.
+    pub status_text: String,
+    pub encoded_body_bytes: usize,
     /// Authenticated protocol of the final exchange, not an assumed version.
     pub protocol: Option<&'static str>,
     /// The final exchange can be GET after a POST redirect. Callers use this
@@ -234,14 +249,18 @@ fn fetch_in_pool(
 ) -> Result<Response, String> {
     let cancel = pool.cancel;
     limits.validate()?;
-    if initial.body().len() > MAX_FORM_BYTES {
-        return Err("HTTP form request body exceeds 128 KiB.".into());
+    let body_limit=if matches!(initial,Request::Script {..}) {MAX_BODY_BYTES}else{MAX_FORM_BYTES};
+    if initial.body().len() > body_limit {
+        return Err(if matches!(initial,Request::Script {..}) {"Script request body exceeds the HTTP body policy."}else{"HTTP form request body exceeds 128 KiB."}.into());
     }
     let overall_deadline = Instant::now()
         .checked_add(pool.overall_timeout)
         .ok_or("HTTP overall deadline is out of range.")?;
     let mut current = url.clone();
-    let mut outgoing = initial.clone();
+    let mut outgoing = match initial {
+        Request::Script {request,origin}=>Request::Script {request:request.try_copy()?,origin:script_request::copy_url(origin)?},
+        _=>initial.clone(),
+    };
     let mut fragment = None;
     let mut visited = HashSet::new();
     let mut events = Vec::new();
@@ -335,6 +354,11 @@ fn fetch_in_pool(
             if let Some(origin) = media.as_ref().and_then(media_cors::State::request_origin) {
                 append_request_field(&mut request, "Origin", origin)?;
             }
+            else if let Request::Script {origin,request:script}= &outgoing {
+                if !matches!(script.method,ScriptMethod::Get|ScriptMethod::Head) {
+                    append_request_field(&mut request,"Origin",&format!("{}://{}",if origin.secure {"https"}else{"http"},checked_host(origin)?))?;
+                }
+            }
             let address = current.display();
             if !visited.insert((outgoing.method(), address.clone())) {
                 return Err("HTTP redirect loop detected.".into());
@@ -368,7 +392,7 @@ fn fetch_in_pool(
                     );
                 }
             }
-            if outgoing.is_post() {
+            if matches!(outgoing,Request::FormPost {..}) {
                 events.push(format!(
                     "FORM BODY: {} bytes; values omitted from this report.",
                     outgoing.body().len()
@@ -498,6 +522,8 @@ fn fetch_in_pool(
                 url: current,
                 fragment,
                 status: message.status,
+                status_text: message.status_text,
+                encoded_body_bytes: message.encoded_bytes,
                 protocol,
                 request_is_post: outgoing.is_post(),
                 cookie_same_site,
@@ -665,6 +691,7 @@ fn request(url: &HttpUrl, outgoing: &Request, mode: FetchMode) -> Result<String,
     };
     let form_headers = match outgoing {
         Request::Get => String::new(),
+        Request::Script {request,..}=>request.wire_headers()?,
         Request::FormPost { body, origin } => {
             if body.len() > MAX_FORM_BYTES {
                 return Err("HTTP form request body exceeds 128 KiB.".into());
@@ -681,8 +708,9 @@ fn request(url: &HttpUrl, outgoing: &Request, mode: FetchMode) -> Result<String,
         }
     };
     let method = outgoing.method();
+    let accept=if matches!(outgoing,Request::Script {request,..} if request.headers.iter().any(|(name,_)|name.eq_ignore_ascii_case("accept"))) {""}else{"Accept: */*\r\n"};
     Ok(format!(
-        "{method} {target} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\nAccept: */*\r\nAccept-Encoding: gzip, deflate\r\n{cache_headers}{form_headers}\r\n"
+        "{method} {target} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\n{accept}Accept-Encoding: gzip, deflate\r\n{cache_headers}{form_headers}\r\n"
     ))
 }
 
@@ -747,6 +775,13 @@ impl<'a> Pool<'a> {
             hop_timeout: REQUEST_TIMEOUT,
             overall_timeout: OVERALL_TIMEOUT,
         }
+    }
+
+    /// A script timeout can shorten, never relax, the transport's deadlines.
+    pub(crate) fn with_script_timeout(mut self,timeout:Duration)->Self {
+        self.overall_timeout=self.overall_timeout.min(timeout);
+        self.hop_timeout=self.hop_timeout.min(timeout);
+        self
     }
 
     pub fn with_resource_filter(mut self, filter: &'a ResourceFilter<'a>) -> Self {
@@ -918,7 +953,7 @@ impl<'a> Pool<'a> {
         credentials: MediaCredentials, mode: FetchMode, guard: &ResourceFilter<'_>,
     ) -> Result<Response, String> {
         fetch_in_pool(self, url, &Request::Get, BodyLimits::uniform(limit), None, mode, true, "media", false,
-            None, Some(guard), Some(ResourceFetch::Media(media_cors::Config { origin, credentials })))
+            None, Some(guard), Some(ResourceFetch::Media(media_cors::Config { origin, credentials, omit:false })))
     }
 
     /// Classic script inclusion only: same-origin HTTP(S), or HTTPS from an
@@ -1130,7 +1165,7 @@ impl<'a> Pool<'a> {
                     deadline,
                 )
                 .map_err(ResponseFailure::before_response)?;
-                if outgoing.is_post() {
+                if !outgoing.body().is_empty() {
                     send(
                         &mut connection.stream,
                         outgoing.body(),
@@ -1151,6 +1186,7 @@ impl<'a> Pool<'a> {
                     true,
                     Some(&trace),
                     document,
+                    outgoing.method()=="HEAD",
                 )
             })();
             match result {
@@ -1189,7 +1225,7 @@ impl<'a> Pool<'a> {
                     let stale = error.http_bytes == 0
                         && (connection.io.closed_without_bytes()
                             || connection.stream.peer_closed());
-                    if attempt == 0 && reused && !outgoing.is_post() && stale {
+                    if attempt == 0 && reused && outgoing.method()=="GET" && outgoing.body().is_empty() && stale {
                         trace.fail(&format!(
                             "{}\nStale connection: retrying GET once on a fresh connection.",
                             error.text
@@ -1671,6 +1707,7 @@ fn reserve_body(output: &mut Vec<u8>, count: usize, limit: usize) -> Result<(), 
 struct Message {
     document_timing:Option<network_trace::DocumentTiming>,
     status: u16,
+    status_text:String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
     encoded_bytes: usize,
@@ -1741,6 +1778,7 @@ fn read_response_detailed<R: Read>(
         skip_redirect_body,
         None,
         false,
+        false,
     )
 }
 
@@ -1766,6 +1804,7 @@ fn read_response_traced<R: Read>(
     skip_redirect_body: bool,
     trace: Option<&network_trace::Ticket>,
     document: bool,
+    head_response: bool,
 ) -> Result<Message, ResponseFailure> {
     limits.validate().map_err(ResponseFailure::before_response)?;
     let mut input = Input::new(TracedRead { source, trace }, limits.wire, cancel, deadline);
@@ -1773,7 +1812,11 @@ fn read_response_traced<R: Read>(
         let mut connection_persistent = true;
         for information in 0..=MAX_INFORMATIONAL {
             input.stage = "status line";
-            let (status, version_10) = status_line(&input.line(Budget::Headers)?)?;
+            let status_bytes=input.line(Budget::Headers)?;
+            let (status,version_10)=status_line(&status_bytes)?;
+            let mut status_text=String::new();
+            status_text.try_reserve_exact((status_bytes.len()-13).checked_mul(2).ok_or("HTTP reason phrase size overflow.")?).map_err(|_|"Could not reserve HTTP reason phrase.")?;
+            status_text.extend(status_bytes[13..].iter().copied().map(char::from));
             input.response_status = Some(status);
             input.stage = "headers";
             let headers = fields(&mut input, false)?;
@@ -1797,6 +1840,7 @@ fn read_response_traced<R: Read>(
                 trace.response(status);
             }
             let framing = framing(status, version_10, &headers)?;
+            let framing=if head_response {Framing::Empty}else{framing};
             input.framing = Some(framing);
             let redirect = is_redirect(status) && unique_header(&headers, "location")?.is_some();
             let mut body = Vec::new();
@@ -1873,6 +1917,7 @@ fn read_response_traced<R: Read>(
             return Ok(Message {
                 document_timing:if document {trace.and_then(network_trace::Ticket::document_timing)}else{None},
                 status,
+                status_text,
                 headers,
                 body,
                 encoded_bytes,
@@ -2353,6 +2398,7 @@ mod tests {
             Instant::now() + Duration::from_secs(2),
             false,
             None,
+            false,
             false,
         )
         .map_err(|error| error.text)

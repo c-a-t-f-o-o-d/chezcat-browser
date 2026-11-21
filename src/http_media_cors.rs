@@ -6,11 +6,12 @@ use super::*;
 pub(crate) enum Credentials { SameOrigin, Include }
 
 #[derive(Clone, Copy)]
-pub(super) struct Config<'a> { pub origin: &'a HttpUrl, pub credentials: Credentials }
+pub(super) struct Config<'a> { pub origin: &'a HttpUrl, pub credentials: Credentials, pub omit:bool }
 
 pub(super) struct State<'a> {
     origin: &'a HttpUrl,
     credentials: Credentials,
+    omit:bool,
     serialized: String,
     cors: bool,
     redirect_tainted: bool,
@@ -24,7 +25,7 @@ impl<'a> State<'a> {
         if size>MAX_LINE_BYTES {return Err("Media Origin exceeds the HTTP field limit.".into());}
         let mut serialized=String::new();serialized.try_reserve(size).map_err(|_|"Could not retain the media Origin.")?;
         serialized.push_str(prefix);serialized.push_str(&host);
-        Ok(Self {origin:config.origin,credentials:config.credentials,serialized,cors:false,redirect_tainted:false,
+        Ok(Self {origin:config.origin,credentials:config.credentials,omit:config.omit,serialized,cors:false,redirect_tainted:false,
             cookies:crate::cookies::NavigationContext::new(Some(config.origin),None)})
     }
     pub(super) fn prepare(&mut self,target:&HttpUrl)->Result<(),String> {
@@ -35,7 +36,7 @@ impl<'a> State<'a> {
     pub(super) fn request_origin(&self)->Option<&str> {
         self.cors.then_some(if self.redirect_tainted {"null"}else{self.serialized.as_str()})
     }
-    pub(super) fn credentials_allowed(&self)->bool {self.credentials==Credentials::Include||!self.cors}
+    pub(super) fn credentials_allowed(&self)->bool {!self.omit&&(self.credentials==Credentials::Include||!self.cors)}
     pub(super) fn same_site(&self,target:&HttpUrl)->bool {self.credentials_allowed()&&self.cookies.is_same_site(target)}
     pub(super) fn redirect(&mut self,from:&HttpUrl,to:&HttpUrl) {
         // A -> B retains A. An origin change from already-foreign B makes the

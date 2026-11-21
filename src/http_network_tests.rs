@@ -246,6 +246,7 @@ fn document_download_limit_is_selected_from_real_headers_without_replay() {
             true,
             None,
             true,
+            false,
         );
         assert_eq!(response.is_ok(), accepted, "{disposition}");
         if accepted {

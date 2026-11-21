@@ -67,6 +67,7 @@ impl Entry {
     pub(crate) fn payload_bytes(&self) -> Result<usize, String> {
         let request = match &self.request {
             Request::Get => 0,
+            Request::Script {..}=>return Err("Script subresource requests cannot be stored as session navigation.".into()),
             Request::FormPost { body, origin } => {
                 let url = origin.as_ref().map_or(0, |url| {
                     url.host
@@ -97,6 +98,7 @@ fn copy_text(text: &str) -> Result<String, String> {
 pub(crate) fn request_copy_work(request: &Request) -> Result<usize, String> {
     match request {
         Request::Get => Ok(0),
+        Request::Script {..}=>Err("Script subresource requests cannot be copied into session navigation.".into()),
         Request::FormPost { body, origin } => {
             let text = origin.as_ref().map_or(0, |url| {
                 url.host
@@ -113,6 +115,7 @@ pub(crate) fn request_copy_work(request: &Request) -> Result<usize, String> {
 pub(crate) fn copy_request(request: &Request) -> Result<Request, String> {
     Ok(match request {
         Request::Get => Request::Get,
+        Request::Script {..}=>return Err("Script subresource requests cannot be replayed as session navigation.".into()),
         Request::FormPost { body, origin } => {
             let mut next = Vec::new();
             next.try_reserve_exact(body.len())
@@ -526,4 +529,13 @@ mod tests {
         assert!(stack.commit(stale).is_err());
         assert_eq!(stack.current().unwrap().document, 8);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn script_subresource_requests_are_never_copied_or_replayed_as_navigation() {
+    let origin=crate::url::parse("https://owned-script.test/source").unwrap().0;
+    let request=Request::Script {origin,request:crate::http::ScriptRequest {method:crate::http::ScriptMethod::Post,headers:Vec::new(),body:b"original body".to_vec()}};
+    assert!(request_copy_work(&request).is_err());
+    assert!(copy_request(&request).is_err());
 }

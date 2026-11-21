@@ -39,7 +39,7 @@ impl PolicySet {
             +self.policies.capacity()*std::mem::size_of::<Policy>()+self.diagnostics.capacity()*std::mem::size_of::<String>()
             +self.diagnostics.iter().map(String::capacity).sum::<usize>();
         for policy in &self.policies {
-            for sources in [&policy.default,&policy.scripts,&policy.elements,&policy.attributes,&policy.styles,&policy.style_elements,&policy.fonts,&policy.images,&policy.media,&policy.base,&policy.forms].into_iter().flatten() {
+            for sources in [&policy.default,&policy.scripts,&policy.elements,&policy.attributes,&policy.styles,&policy.style_elements,&policy.fonts,&policy.images,&policy.media,&policy.connect,&policy.base,&policy.forms].into_iter().flatten() {
                 bytes=bytes.saturating_add(sources.capacity()*std::mem::size_of::<Source>());
                 for source in sources {
                     bytes=bytes.saturating_add(match source {Source::Origin{host,..}|Source::Nonce(host)|Source::Hash(_,host)=>host.capacity(),_=>0});
@@ -62,6 +62,7 @@ struct Policy {
     fonts: Option<Vec<Source>>,
     images: Option<Vec<Source>>,
     media: Option<Vec<Source>>,
+    connect: Option<Vec<Source>>,
     base: Option<Vec<Source>>,
     forms: Option<Vec<Source>>,
     sandbox: bool,
@@ -127,7 +128,7 @@ impl PolicySet {
         for policy in &self.policies {
             bytes += std::mem::size_of::<Policy>();
             for sources in [&policy.default, &policy.scripts, &policy.elements, &policy.attributes,
-                &policy.styles, &policy.style_elements, &policy.fonts, &policy.images, &policy.media, &policy.base, &policy.forms].into_iter().flatten() {
+                &policy.styles, &policy.style_elements, &policy.fonts, &policy.images, &policy.media, &policy.connect, &policy.base, &policy.forms].into_iter().flatten() {
                 bytes += sources.iter().map(|source| std::mem::size_of::<Source>() + match source {
                     Source::Origin { host, .. } => host.len(),
                     Source::Nonce(text) | Source::Hash(_, text) => text.len(),
@@ -431,6 +432,19 @@ impl PolicySet {
         Ok(())
     }
 
+    /// Script networking applies all active document policies, including meta
+    /// policies added after parsing; nonces do not confer network permission.
+    pub(crate) fn allows_connect(&self,target:&Location)->Result<(),String> {
+        for policy in self.active(usize::MAX)? {
+            if let Some(list)=policy.connect.as_ref().or(policy.default.as_ref()) {
+                if !list.iter().any(|source|url_matches(source,self.origin.as_ref(),target)) {
+                    return Err("Content Security Policy connect-src/default-src blocked this script request.".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn allows_media(&self, node: usize, target: &Location) -> Result<(), String> {
         for policy in self.active(node)? {
             if let Some(list) = policy.media.as_ref().or(policy.default.as_ref()) {
@@ -485,6 +499,7 @@ fn parse_policy(
         fonts: None,
         images: None,
         media: None,
+        connect: None,
         base: None,
         forms: None,
         sandbox: false,
@@ -522,6 +537,7 @@ fn parse_policy(
             "font-src" => &mut policy.fonts,
             "img-src" => &mut policy.images,
             "media-src" => &mut policy.media,
+            "connect-src" => &mut policy.connect,
             "base-uri" => &mut policy.base,
             "form-action" => &mut policy.forms,
             "sandbox" => {

@@ -60,6 +60,8 @@ fn response(body: &[u8], disposition: &str) -> http::Response {
             .0,
         fragment: None,
         status: 200,
+        status_text:"OK".into(),
+        encoded_body_bytes:body.len(),
         protocol: Some("TLS 1.3"),
         request_is_post: false,
         cookie_same_site: false,
