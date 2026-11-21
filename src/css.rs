@@ -31,6 +31,9 @@ mod overflow;
 pub use overflow::{Overflow, OverflowValue};
 #[path="css_position.rs"]
 mod position;
+#[path="css_touch_action.rs"]
+mod touch_action;
+pub(crate) use touch_action::{TouchAction, specified as specified_touch_action};
 #[path="css_opacity.rs"]
 mod opacity;
 pub(crate) use opacity::{serialize as serialize_opacity, specified as specified_opacity, Specified as SpecifiedOpacity};
@@ -1018,6 +1021,7 @@ fn compute_cascade(
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
     let mut canvas_foregrounds = HashMap::new();
+    let mut touch_actions: HashMap<usize, Option<TouchAction>> = HashMap::new();
     // Default opacity 1 requires no retained per-node allocation. A None entry
     // records an indeterminate winner rather than fabricating that default.
     let mut opacities: HashMap<usize, Option<f64>> = HashMap::new();
@@ -1274,6 +1278,9 @@ fn compute_cascade(
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
+        let mut sheet_touch_action = Some(TouchAction::AUTO);
+        let mut touch_action = Some(TouchAction::AUTO);
+        let parent_touch_action = parents[index].and_then(|parent| touch_actions.get(&parent)).copied().unwrap_or(Some(TouchAction::AUTO));
         let mut sheet_opacity = (1.0, true);
         let mut opacity_known = true;
         for (priority, declaration) in &applicable {
@@ -1283,6 +1290,15 @@ fn compute_cascade(
             if declaration.name == "position" { continue; }
             if let Some(meter) = meter.as_deref_mut() { meter.source(declaration.name.len().saturating_add(declaration.value.len()))?; }
             if radius::property(&declaration.name) { has_radius = true; continue; }
+            if declaration.name == "touch-action" {
+                let apply = |budget: &mut custom_properties::Budget| touch_action::apply(&mut touch_action, &mut sheet_touch_action, parent_touch_action, declaration, priority.1, &variables[index], budget);
+                if let Some(meter)=meter.as_deref_mut() {meter.variables(&mut variable_budget,apply)?;}
+                else if let Some(meter)=transform_meter.as_deref_mut() {
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget,apply)?;
+                } else {let mut apply=apply;apply(&mut variable_budget);}
+                continue;
+            }
             if declaration.name == "opacity" {
                 let mut apply_opacity = |budget: &mut custom_properties::Budget| {
                     opacity::apply(&mut style,declaration,priority.1,&mut sheet_opacity,
@@ -1388,6 +1404,12 @@ fn compute_cascade(
             canvas_foregrounds.try_reserve(1).map_err(|_| "Canvas foreground snapshot reservation failed.")?;
             canvas_foregrounds.insert(index, style.color);
         }
+        if touch_action != Some(TouchAction::AUTO) {
+            if let Some(meter)=meter.as_deref_mut() {meter.touch_action(touch_actions.is_empty())?;}
+            else if let Some(meter)=transform_meter.as_deref_mut() {meter.touch_action(touch_actions.is_empty())?;}
+            touch_actions.try_reserve(1).map_err(|_|"Touch-action snapshot reservation failed.")?;
+            touch_actions.insert(index,touch_action);
+        }
         if !opacity_known || style.opacity != 1.0 {
             let first = opacities.is_empty();
             if let Some(meter) = meter.as_deref_mut() { meter.opacity(first)?; }
@@ -1410,7 +1432,7 @@ fn compute_cascade(
     }
     check_css_deadline(meter.as_deref().and_then(CssBudget::deadline)
         .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline)))?;
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities), stylesheet_cache:prepared.cache })
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -2981,6 +3003,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             }
             "color" | "background-color" if !inline_color_value(&value) => continue,
             "animation-timing-function" if !inline_easing_value(&value) => continue,
+            "touch-action" if touch_action::specified(&value).is_none() => continue,
             "width" | "height" | "min-width" | "min-height" if !variable && !wide && parse_length(&value, true, false).is_none() => continue,
             "max-width" | "max-height" if !variable && !wide && value != "none" && parse_length(&value, false, false).is_none() => continue,
             "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
@@ -3096,6 +3119,7 @@ fn parse_declarations_inner(source:&str,maximum:usize,validate_values:bool,
             if !name.is_empty() && name.len() <= 64 && value.len() <= 2_048 && (!value.is_empty() || custom)
                 && (!custom || custom_properties::custom_name(&name))
                 && (name != "position" || position::valid_declaration(value))
+                && (name != "touch-action" || touch_action::specified(value).is_some())
                 && (!(custom || value.to_ascii_lowercase().contains("var(")) || custom_properties::valid_syntax(&value)) {
                 if name == "transform" && validate_values {
                     if let Some(meter) = transform_meter.as_deref_mut() {

@@ -170,6 +170,7 @@ pub(super) struct Declaration {
 
 #[derive(Clone, Copy)]
 enum ComputedProperty {
+    TouchAction,
     Opacity,
     Position,
     Transform,
@@ -180,6 +181,7 @@ enum ComputedProperty {
 impl ComputedProperty {
     fn attribute(name: &str) -> Option<Self> {
         match name {
+            "touchAction" => Some(Self::TouchAction),
             "opacity" => Some(Self::Opacity),
             "position" => Some(Self::Position),
             "transform" => Some(Self::Transform),
@@ -190,7 +192,9 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("opacity") {
+        if name.eq_ignore_ascii_case("touch-action") {
+            Some(Self::TouchAction)
+        } else if name.eq_ignore_ascii_case("opacity") {
             Some(Self::Opacity)
         } else if name.eq_ignore_ascii_case("position") {
             Some(Self::Position)
@@ -448,6 +452,10 @@ impl Bridge<'_> {
             return Ok(Value::String(result));
         }
         let (first, second) = match property {
+            ComputedProperty::TouchAction => {
+                let value=snapshot.read_touch_action(node).map_err(|_|"Computed touch-action unavailable within CSS cascade limits.")?;
+                (value.map_or("",|value|value.as_str()),None)
+            }
             ComputedProperty::Opacity => unreachable!("opacity uses number serialization"),
             ComputedProperty::Transform => unreachable!("transform serialization uses actual resolved geometry"),
             ComputedProperty::Position => {

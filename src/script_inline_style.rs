@@ -61,6 +61,7 @@ pub(super) const PROPERTIES: &[&str] = &[
     "text-decoration",
     "text-decoration-line",
     "top",
+    "touch-action",
     "transform",
     "vertical-align",
     "white-space",
@@ -139,6 +140,10 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             // Charge this actual candidate here, not an unrelated whole style.
             state.work(crate::css::easing_source_cost(specified.len()).0)?;
             if !crate::css::inline_easing_value(specified) { continue; }
+        }
+        if name == "touch-action" {
+            state.work(specified.len())?;
+            if crate::css::specified_touch_action(specified).is_none() {continue;}
         }
         if name == "opacity" && metered_opacity(specified, state)?.is_none() {
             continue;
@@ -325,8 +330,8 @@ mod tests {
         let (mut doc, mut forms, mut page) = fixture();
         let outcome = page.console_eval(&mut doc, &mut forms, r#"
 var tile=document.getElementById('tile'), native=tile.style, original=tile.getAttribute('style');
-if(typeof native.touchAction!=='undefined'||'touchAction' in native||
-   native['touch-action']!==undefined||native.originalUnusedName!==undefined||
+if(typeof native.scrollSnapType!=='undefined'||'scrollSnapType' in native||
+   native['scroll-snap-type']!==undefined||native.originalUnusedName!==undefined||
    native['']!==undefined||native[100]!==undefined)
     throw 'unsupported names must be absent';
 if(typeof native.position!=='string'||native.position!==''||
@@ -335,11 +340,11 @@ if(typeof native.position!=='string'||native.position!==''||
     throw 'supported declaration behavior';
 "#);
         assert_eq!(outcome.errors, 0, "{}", page.report());
-        let rejected = page.console_eval(&mut doc, &mut forms, "native.touchAction='none';");
+        let rejected = page.console_eval(&mut doc, &mut forms, "native.scrollSnapType='none';");
         assert_eq!(rejected.errors, 1);
-        assert!(page.report().contains("CSS property \"touchAction\" is not supported"));
+        assert!(page.report().contains("CSS property \"scrollSnapType\" is not supported"));
         let outcome = page.console_eval(&mut doc, &mut forms,
-            "if(tile.getAttribute('style')!==original||typeof native.touchAction!=='undefined')throw 'unsupported write changed declaration';");
+            "if(tile.getAttribute('style')!==original||typeof native.scrollSnapType!=='undefined')throw 'unsupported write changed declaration';");
         assert_eq!(outcome.errors, 0, "{}", page.report());
     }
 

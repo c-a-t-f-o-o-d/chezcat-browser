@@ -259,3 +259,41 @@ fn computed_custom_style_actual_app_live_sheet_button_input_and_resized_media_pr
     assert_eq!((app.history_index, app.history.len()), history);
     clean(&app);
 }
+
+#[test]
+fn touch_action_actual_app_trusted_mutation_keeps_mouse_editor_pixels_and_link_hits() {
+    let fixture=Fixture(std::env::temp_dir().join(format!("chezcat-touch-action-app-{}.html",std::process::id())));
+    std::fs::write(&fixture.0,r#"<!doctype html><html><head><title>Touch policy ready</title><style>
+html,body{margin:0;padding:0;background:#ffffff}#parent{touch-action:none}
+#change{display:block;position:absolute;left:20px;top:20px;width:180px;height:32px}
+#neighbor{position:absolute;left:240px;top:20px;width:180px;height:32px}
+#out{position:absolute;left:20px;top:100px;width:400px;height:40px;color:#123456}
+#link{display:block;position:absolute;left:20px;top:180px;width:180px;height:36px;background:#204060}
+</style></head><body><div id=parent><button id=change type=button>Change touch policy</button><input id=neighbor value=seed><a id=link href=#destination>Real link</a><div id=out>Original text</div></div><div id=destination></div><script>
+var button=document.getElementById('change'),neighbor=document.getElementById('neighbor'),link=document.getElementById('link'),out=document.getElementById('out');
+if(getComputedStyle(button).touchAction!=='auto')throw 'touch-action is noninherited';
+button.style.touchAction='none';neighbor.style.touchAction='none';link.style.touchAction='none';
+button.onclick=function(e){if(!e.isTrusted)throw 'real click required';this.style.touchAction='pan-y pan-x';if(getComputedStyle(this).touchAction!=='pan-x pan-y')throw 'actual updated cascade';out.textContent='Actual touch policy';document.title='Touch policy changed';};
+</script></body></html>"#).unwrap();
+    let mut app=App::new();app.resize(640,360);app.set_javascript_enabled(true);app.open(&fixture.0);
+    assert!(!app.failed&&!app.is_loading(),"{}",app.status);
+    let id=|app:&App,name:&str|(0..app.document.nodes.len()).find(|&node|app.document.attr(node,"id")==Some(name)).unwrap();
+    let neighbor=id(&app,"neighbor");let link=id(&app,"link");let button=id(&app,"change");
+    let link_rect=app.page.border_rects[link].unwrap();let before=app.draw();
+    let pixel=|app:&App,canvas:&Canvas,x:i32,y:i32|canvas.pixels[(app.content_top()+y-app.scroll)as usize*canvas.width+x as usize];
+    assert_eq!(pixel(&app,&before,22,182),0x204060);
+    let control=app.page.controls.iter().find(|c|c.node==neighbor).unwrap();let (x,y)=(control.x+12,app.content_top()+control.y+12-app.scroll);
+    app.pointer_down(x,y,false);app.pointer_up(x,y);app.key(0x24,false,false,false);app.key(0x23,false,true,false);app.paste("edited native");
+    let editor=&app.forms.controls[&neighbor].value;let editor=(editor.cursor,editor.anchor,editor.offset);
+    let control=app.page.controls.iter().find(|c|c.node==button).unwrap();let(x,y)=(control.x+12,app.content_top()+control.y+12-app.scroll);
+    app.pointer_down(x,y,false);app.pointer_up(x,y);
+    assert_eq!(app.document.title,"Touch policy changed");assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",app.scripting.as_ref().unwrap().report());
+    let current=&app.forms.controls[&neighbor].value;assert_eq!(current.text(),"edited native");assert_eq!((current.cursor,current.anchor,current.offset),editor);
+    let after_rect=app.page.border_rects[link].unwrap();assert_eq!((after_rect.x,after_rect.y,after_rect.width,after_rect.height),(link_rect.x,link_rect.y,link_rect.width,link_rect.height));
+    assert_eq!(app.page.link_node_at(40,195),Some(link));assert_eq!(app.page.link_at(40,195),Some("#destination"));
+    let after=app.draw();assert_eq!(pixel(&app,&after,22,182),0x204060);assert!(app.page.runs.iter().any(|text|text.text.contains("Actual")));
+    assert!((100..140).any(|y|(20..420).any(|x|pixel(&app,&after,x,y)==0x123456)),"Actual changed response glyphs must paint");
+    let y=app.content_top()+195-app.scroll;app.pointer_down(40,y,false);app.pointer_up(40,y);
+    assert_eq!(app.location.fragment,"destination");
+
+}

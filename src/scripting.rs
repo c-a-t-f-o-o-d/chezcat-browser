@@ -2884,7 +2884,10 @@ impl Bridge<'_> {
         let clean;
         let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
         let specified = crate::css::declaration_priority(raw).0;
-        let value = if name == "opacity" {
+        let value = if name == "touch-action" {
+            self.state.work(specified.len())?;
+            crate::css::specified_touch_action(specified).ok_or("Invalid selected touch-action.")?.to_owned()
+        } else if name == "opacity" {
             let parsed = metered_opacity(specified, self.state)?
                 .ok_or("The selected inline opacity is invalid.")?;
             parsed.serialize()?
@@ -2906,12 +2909,17 @@ impl Bridge<'_> {
             return Ok(());
         }
         let specified;
-        let checked = matches!(name, "transform" | "opacity");
+        let checked = matches!(name, "transform" | "opacity" | "touch-action");
         let value = if checked && !value.is_empty() {
             if value.trim().is_empty() || !priority.is_empty() && !priority.eq_ignore_ascii_case("important") {
                 return Ok(());
             }
-            specified = if name == "opacity" {
+            specified = if name == "touch-action" {
+                self.state.work(value.len())?;
+                let Some(parsed)=crate::css::specified_touch_action(value) else {return Ok(());};
+                self.state.copies(parsed.len())?;
+                parsed.to_owned()
+            } else if name == "opacity" {
                 let Some(parsed) = metered_opacity(value, self.state)? else { return Ok(()); };
                 parsed.serialize()?
             } else {
@@ -3352,7 +3360,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -3681,7 +3689,7 @@ impl Host for Bridge<'_> {
         if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
-            || matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -6410,7 +6418,7 @@ fn validate_style(style: &str, string_limit: usize) -> Result<(), String> {
         // Priority is separate grammar. Keep the ordinary value guard on
         // everything before a genuine trailing priority marker.
         let value = if name == "animation-timing-function" { crate::css::easing_priority(value).0 }
-            else if matches!(name.as_str(), "transform" | "opacity") { crate::css::declaration_priority(value).0 } else { value.trim() };
+            else if matches!(name.as_str(), "transform" | "opacity" | "touch-action") { crate::css::declaration_priority(value).0 } else { value.trim() };
         validate_css_value(&name, value, string_limit)?;
     }
     if !items.complete() { return Err("Inline style has an unterminated string or function.".into()); }

@@ -1680,3 +1680,25 @@ separate work. The optional nonstandard XMLHttpRequest.prototype.fetch is absent
 Implementation checks do not establish a usable site or successful application
 API requests. See the [XHR standard](https://xhr.spec.whatwg.org/) and
 [Fetch standard](https://fetch.spec.whatwg.org/).
+
+
+## touch-action declarations and computed values
+
+The shared native parser supports auto, none, manipulation, axis/direction
+keywords and pinch-zoom combinations, with one horizontal group, one vertical
+group and canonical order. Invalid specified declarations are ignored. Inline
+camel-case and CSS-name reads/writes, set/removeProperty and indexed enumeration
+use the actual style attribute, including priority and legacy-null removal.
+
+The renderer's computed snapshot resolves the noninherited value from real
+ordered author declarations, custom variables, explicit inheritance and the
+existing unlayered revert/revert-layer policy. Incomplete computation remains
+unavailable rather than inventing auto. Native work, copy admission, invalidation
+and owner guards remain active. Actual App acceptance covers a trusted mouse
+mutation with live readback and preserved editor state, pixels and link targets.
+
+This increment supplies CSS semantics. Touch/pen gesture acquisition, gesture
+intersection through ancestors and pointer-stream suppression remain open;
+mouse selection, control activation and link activation are unaffected. See
+[Pointer Events](https://www.w3.org/TR/pointerevents4/#the-touch-action-css-property)
+and the [compatibility value grammar](https://compat.spec.whatwg.org/#touch-action).

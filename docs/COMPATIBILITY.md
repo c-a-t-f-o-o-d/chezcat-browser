@@ -19,6 +19,20 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T02:20:42Z** used clean
+[`305725e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/305725e5643fa6af76a6e37626b4431a8a5d44bd),
+including the genuine buffered XHR increment. With JavaScript enabled and images
+off, the saved HTML reports `LOGGED_IN=false`. It still renders a skeleton with
+no usable header/guide/search. The first escaped failure is a refused CSS
+`touchAction` write, originally 33256:127. There were 43 script executions
+(42 successful), 44 listeners and one error. The previous XHR reference error is
+absent in this distinct response cohort; external JavaScript body hashes are
+unavailable. This does not demonstrate application API success, a usable shell,
+query/results, watch/Back or playback. Existing trust, TLS, CSP, origin,
+credential and native-resource guards remain enabled.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T00:44:53Z** used clean
 [`94ba833`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/94ba833341601e890ee8b62c6ba6d0f0548d5a23),
 with JavaScript enabled and images off; saved HTML reports `LOGGED_IN=false`.

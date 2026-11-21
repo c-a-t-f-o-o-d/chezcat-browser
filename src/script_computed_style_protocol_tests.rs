@@ -189,3 +189,36 @@ fn computed_style_protocol_atomic_handle_admission_and_explicit_unavailable_read
     assert_eq!(page.state.dom_commits, commits);
     assert_eq!(doc.attr(node, "style"), None);
 }
+
+#[test]
+fn touch_action_cssom_mutates_real_declarations_and_live_computed_values() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var target=document.getElementById('target'),s=target.style,c=getComputedStyle(target);
+if(!('touchAction' in s)||s.touchAction!==''||c.touchAction!=='auto')throw 'genuine property defaults';
+s.touchAction='pan-y PAN-x';
+if(s.touchAction!=='pan-x pan-y'||s['touch-action']!=='pan-x pan-y'||s.getPropertyValue('TOUCH-ACTION')!=='pan-x pan-y'||c.touchAction!=='pan-x pan-y'||c.getPropertyValue('TOUCH-ACTION')!=='pan-x pan-y')throw 'canonical real readback';
+s.touchAction='pan-x pan-left';if(s.touchAction!=='pan-x pan-y')throw 'invalid assignment changed declaration';
+s.setProperty('touch-action','none','IMPORTANT');if(c.touchAction!=='none')throw 'priority';
+var before=target.getAttribute('style');s.setProperty('touch-action','auto','unknown');if(target.getAttribute('style')!==before)throw 'bad priority changed declaration';
+s.touchAction=null;if(s.touchAction!==''||c.touchAction!=='auto')throw 'null removes declaration';
+s.setProperty('--Pan','pan-up pinch-zoom');s.touchAction='var(--Pan)';if(c.touchAction!=='pan-up pinch-zoom')throw 'real variables';
+s.setProperty('--Pan','manipulation');if(c.touchAction!=='manipulation')throw 'live computed invalidation';
+if(s.removeProperty('touch-action')!=='var(--Pan)'||c.touchAction!=='auto')throw 'real removal';
+target.setAttribute('style','touch-action:pan-down!important;touch-action:nonsense;color:red');
+if(s.touchAction!=='pan-down'||c.touchAction!=='pan-down'||s.color!=='red')throw 'raw priority and invalid candidates';
+var count=0;for(var i=0;i<s.length;i++){if(s.item(i)==='touch-action')count++;}if(count!==1)throw 'real indexed declaration';
+"#);
+}
+#[test]
+fn touch_action_copy_refusal_preserves_real_style_and_recovers() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,"var target=document.getElementById('target');target.style.touchAction='pan-y';");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("target")).unwrap();
+    let before=doc.attr(node,"style").unwrap().to_owned();let commits=page.state.dom_commits;
+    let old=page.state.copy_work;page.state.copy_work=0;
+    let result=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.set_style(node,"touch-action","none","");
+    assert!(result.is_err());assert_eq!(doc.attr(node,"style"),Some(before.as_str()));assert_eq!(page.state.dom_commits,commits);
+    page.state.copy_work=old;
+    run(&mut doc,&mut forms,&mut page,"target.style.touchAction='none';if(getComputedStyle(target).touchAction!=='none')throw 'recovered native readback';");
+}

@@ -17,6 +17,7 @@ struct Snapshot {
     has_transform_geometry: bool,
     canvas_foregrounds: HashMap<usize, u32>,
     opacities: HashMap<usize, Option<f64>>,
+    touch_actions: HashMap<usize, Option<TouchAction>>,
 }
 impl ComputedProperties {
     #[allow(clippy::too_many_arguments)]
@@ -30,6 +31,7 @@ impl ComputedProperties {
         has_transform_geometry: bool,
         canvas_foregrounds: HashMap<usize, u32>,
         opacities: HashMap<usize, Option<f64>>,
+        touch_actions: HashMap<usize, Option<TouchAction>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -41,6 +43,7 @@ impl ComputedProperties {
             has_transform_geometry,
             canvas_foregrounds,
             opacities,
+            touch_actions,
         }))
     }
     pub(crate) fn read(
@@ -130,6 +133,12 @@ impl ComputedProperties {
         self.0.opacities.get(&node).copied().unwrap_or(Some(1.0))
             .map(Some).ok_or(ComputedStyleUnavailable)
     }
+    pub(crate) fn read_touch_action(&self,node:usize)->Result<Option<TouchAction>,ComputedStyleUnavailable> {
+        let eligible=*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
+        if !eligible {return Ok(None);}
+        if !self.0.complete {return Err(ComputedStyleUnavailable);}
+        self.0.touch_actions.get(&node).copied().unwrap_or(Some(TouchAction::AUTO)).map(Some).ok_or(ComputedStyleUnavailable)
+    }
     pub(crate) fn has_opacity_paint(&self) -> bool { !self.0.opacities.is_empty() }
     #[cfg(test)]
     pub(super) fn transform_storage_len(&self) -> usize { self.0.transforms.len() }
@@ -158,6 +167,10 @@ pub(super) fn check_css_deadline(deadline: Option<Instant>) -> Result<(), String
 }
 
 impl<'a> CssBudget<'a> {
+    pub(super) fn touch_action(&mut self,first:bool)->Result<(),String> {
+        self.work(1)?;
+        self.copies((if first {6} else {3})*std::mem::size_of::<(usize,Option<TouchAction>)>())
+    }
     pub(super) fn opacity(&mut self, first: bool) -> Result<(), String> {
         // Sparse hash buckets/control bytes, including the first allocation.
         let entries = if first { 6 } else { 3 };
