@@ -950,7 +950,7 @@ fn document_import_node_copies_checked_template_content_into_the_real_tree() {
         "<html><head></head><body>",
         "<template id=ordinary><section id=imported class=payload data-key=kept>",
         "<a id=import-link href=#destination>Imported link</a></section></template>",
-        "<template id=protected><div>prefix</div><img src=https://unrequested.test/forbidden.png></template>",
+        "<template id=protected><div>prefix</div><img src=https://unrequested.test/forbidden.png srcset='forbidden.png 1x'></template>",
         "<template id=handler><div onclick=\"throw 1\">inert handler</div></template>",
         "<main id=live></main><p id=destination>Destination</p></body></html>"
     ), &[r#"

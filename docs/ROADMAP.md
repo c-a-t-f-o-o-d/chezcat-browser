@@ -62,8 +62,9 @@ The active P1 package completes known template preparation, import and activatio
 contracts before another site milestone check. Nested content, ordinary metadata,
 live ParentNode views and finite child moves/import are integrated. Inert selector
 queries and passive HTML clone/import are integrated. Supported native control
-default import and connection is the current increment. Remaining native families,
-mixed resources and nested import,
+default import and connection is integrated. Plain image clone/import and guarded
+loader activation is the current resource increment. Remaining native families,
+styles and other mixed resources, nested import,
 namespace-aware SVG and remaining mutation/lifecycle scheduling stay open.
 The last actual clean `fff35f8` run at November 21, 04:13 UTC completed all 43
 script executions and 61 callbacks without escaped errors but still rendered the

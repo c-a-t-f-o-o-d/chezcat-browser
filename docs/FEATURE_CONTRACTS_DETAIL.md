@@ -1949,3 +1949,26 @@ DOM prefix or native control published. Original App checks operate actual impor
 controls through pointer/text input, commit/reset, real pixels and link activation.
 Mixed resources, nested-template adoption, namespace SVG and remaining lifecycle
 routes stay separate unfinished P1 work.
+
+
+## Plain image clone/import and real activation
+
+Checked inert import and main-document clone admit plain childless HTML img
+nodes with independent real identities, attributes and destination ownership.
+Cloning retains DOM data without copying decoded pixels, currentSrc, pending
+request generations, listeners or ordinary wrapper state from the source.
+Eligible requests begin only through the existing guarded connection planner.
+Native completion metadata/events come from actual loader/decoder results.
+
+Responsive srcset/picture selection, active handler/customized-built-in transfer,
+unsupported namespaces and malformed resource shapes retain explicit guards.
+A late import refusal publishes no prefix. Connection preflight refusal preserves
+fragment/native topology and queues no earlier candidate request. Existing image
+attempt/resource, CSP/origin, cancellation and epoch checks are unchanged.
+Detached implicit requests remain outside the implemented image policy.
+
+The original App fixture imports images with a native input and link, confirms
+no detached requests, fetches/decodes original loopback images, checks load-event
+metadata and exact painted colors, clones a loaded image into a new request and
+verifies editor state plus actual pointer link navigation. This is focused App
+evidence, not a fresh site result or completion of responsive/resource support.
