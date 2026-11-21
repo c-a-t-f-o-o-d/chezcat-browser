@@ -58,14 +58,14 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `ae478b5` at November 21, 02:57 UTC
-still renders a skeleton. It first fails on an unsupported iframe `sandbox`
-property read at 6503:24. The next connected increment supplies a live native
-sandbox attribute token list with canonical SameObject/PutForwards accessors.
-Sandboxed contexts and connected policy changes retain their explicit refusal;
-this increment does not claim iframe sandbox relaxation/permission semantics.
-AnimationEvent, anchor identity, XHR, touch-action and computed font size are
-integrated; these checks do not prove a usable shell. The
+The latest isolated Windows check on clean `e3f721d` at November 21, 03:15 UTC
+still renders a skeleton. Main execution first fails on missing `WheelEvent`
+metadata at 40735:73; two callbacks also hit the unsupported token-list supports
+query at 6503:35. The connected query increment reports actual sandbox token
+support (currently no supported permission-relaxation flags), retaining the
+unsupported-context guard. Genuine WheelEvent support follows. The owner's
+separate later Hq timer call remains untraced and is not assigned a guessed API.
+These implementation checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
 
