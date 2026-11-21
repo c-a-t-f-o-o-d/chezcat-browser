@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 #[path="image_svg_geometry.rs"]
 mod geometry;
+#[path="image_svg_computed_paint.rs"]
+mod computed_paint;
+pub(crate) use computed_paint::PaintValues;
 
 const MAX_SOURCE: usize = 1024 * 1024;
 const MAX_NODES: usize = 4096;
@@ -541,9 +544,10 @@ fn number_attr(node: &Node, key: &str, default: f64, reference: f64) -> ImageRes
     node.attr(key).map_or(Ok(default), |v| length(v, reference))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 enum Paint {
     None,
+    Unavailable,
     Solid(u32),
     Current,
     Server(Arc<str>),
@@ -561,16 +565,19 @@ enum Join {
     Bevel,
 }
 
-/// Typed geometry computed by the document cascade, separate from author DOM.
+/// Typed geometry and paint from the document cascade, separate from author DOM.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ComputedGeometry {
+pub(crate) struct ComputedValues {
     geometry: Option<Arc<geometry::Geometry>>,
     font: f64,
     root_font: f64,
     unknown: u16,
+    paint:Option<PaintContext>,
 }
-impl ComputedGeometry {
-    pub(crate) fn new(font: f64, root_font: f64) -> Self { Self { geometry:None,font,root_font,unknown:0 } }
+#[derive(Clone, Debug, PartialEq)]
+struct PaintContext { values:Option<Arc<PaintValues>>,known:bool,color:u32 }
+impl ComputedValues {
+    pub(crate) fn new(font: f64, root_font: f64) -> Self { Self { geometry:None,font,root_font,unknown:0,paint:None } }
     pub(crate) fn property(name: &str) -> bool { geometry::property(name).is_some() }
     fn computed_tag(key:&str)->&'static str { if matches!(key,"cx"|"cy"|"r") {"circle"} else {"rect"} }
     pub(crate) fn valid(_tag:&str,key:&str,text:&str,_outer:bool)->ImageResult<bool> { geometry::valid(Self::computed_tag(key),key,text,false) }
@@ -584,7 +591,16 @@ impl ComputedGeometry {
         if result.is_err() || text.trim().eq_ignore_ascii_case("inherit") && inherited_unknown&bit!=0 {self.unknown|=bit;} else {self.unknown&=!bit;}
         Ok(())
     }
-    pub(crate) fn backing_bytes(&self)->usize {if self.geometry.is_some(){std::mem::size_of::<geometry::Geometry>()+2*std::mem::size_of::<usize>()}else{0}}
+    pub(crate) fn set_paint(&mut self,values:Option<Arc<PaintValues>>,known:bool,color:u32){self.paint=Some(PaintContext{values,known,color});}
+    pub(crate) fn backing_records(&self)->[Option<(usize,usize)>;4] {
+        let mut records=[None;4];
+        if let Some(g)=&self.geometry {records[0]=Some((Arc::as_ptr(g) as usize,std::mem::size_of::<geometry::Geometry>()+2*std::mem::size_of::<usize>()));}
+        if let Some(p)=self.paint.as_ref().and_then(|p|p.values.as_ref()) {
+            records[1]=Some((Arc::as_ptr(p) as usize,std::mem::size_of::<PaintValues>()+2*std::mem::size_of::<usize>()));
+            for (at,value) in [&p.fill,&p.stroke].into_iter().enumerate() {if let Paint::Server(id)=value {records[at+2]=Some((Arc::as_ptr(id) as *const u8 as usize,(id.len()+3*std::mem::size_of::<usize>()-1)&!(std::mem::size_of::<usize>()-1)));}}
+        }
+        records
+    }
     pub(crate) fn mark_unknown(&mut self,key:&str) {if let Some(n)=geometry::property(key){self.unknown|=1<<n;}}
     pub(crate) fn resolve(&self,key:&str,reference:f64)->ImageResult<Option<f64>> {
         if geometry::property(key).is_some_and(|n|self.unknown&(1<<n)!=0) {return Err("SVG computed geometry is unavailable.".into());}
@@ -595,6 +611,7 @@ impl ComputedGeometry {
 #[derive(Clone)]
 struct Style {
     color: u32,
+    color_known:bool,
     fill: Paint,
     stroke: Paint,
     fill_alpha: f64,
@@ -624,6 +641,7 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             color: 0xff000000,
+            color_known:true,
             fill: Paint::Solid(0xff000000),
             stroke: Paint::None,
             fill_alpha: 1.,
@@ -783,7 +801,7 @@ fn style_property(
         // Resolve explicit inheritance against the parent, not an earlier
         // declaration on this same element. Opacity/display do not otherwise inherit.
         match key {
-            "color" => style.color = parent.color,
+            "color" => {style.color = parent.color;style.color_known=parent.color_known;},
             "fill" => style.fill = parent.fill.clone(),
             "stroke" => style.stroke = parent.stroke.clone(),
             "opacity" => style.opacity = parent.opacity,
@@ -816,6 +834,7 @@ fn style_property(
     }
     match key {
         "color" => {
+            style.color_known=!value.eq_ignore_ascii_case("currentcolor")||parent.color_known;
             style.color = if value.eq_ignore_ascii_case("currentcolor") {
                 parent.color
             } else {
@@ -1027,7 +1046,7 @@ fn rules(nodes: &[Node]) -> ImageResult<Vec<Rule>> {
     Ok(out)
 }
 
-fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool,context:Option<&ComputedGeometry>)->ImageResult<Style> {
+fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool,context:Option<&ComputedValues>)->ImageResult<Style> {
     let mut style=parent.clone();style.opacity=1.;style.display=true;style.clip=None;style.mask=None;style.mask_alpha=false;style.mask_mode=None;style.stop_color=0xff000000;style.stop_current=false;style.stop_alpha=1.;style.geometry=None;style.geometry_unknown=0;
     let inline=node.attr("style").map(declarations).transpose()?.unwrap_or_default();
     fn paint(style:&mut Style,parent:&Style,key:&str,value:&str,viewport:Point,css:bool)->ImageResult<()> {
@@ -1035,15 +1054,23 @@ fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool,con
         if key=="font-size"{return geometry::font_size(style,parent,value,css);}
         style_property(style,parent,key,value,viewport)
     }
-    for (key,value) in &node.attrs {if key.starts_with("on"){return Err("SVG event handlers are not executed in image documents.".into());}if context.is_none()||key!="font-size"{paint(&mut style,parent,key,value,viewport,false)?;}}
+    for (key,value) in &node.attrs {if key.starts_with("on"){return Err("SVG event handlers are not executed in image documents.".into());}if context.is_none()||key!="font-size" && (!context.is_some_and(|c|c.paint.is_some())||!matches!(key.as_str(),"fill"|"stroke"|"color")){paint(&mut style,parent,key,value,viewport,false)?;}}
     for important in [false,true] {
-        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{if context.is_none()||d.key!="font-size"{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}}}
-        for d in &inline {if d.important==important{if context.is_none()||d.key!="font-size"{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}
+        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{if context.is_none()||d.key!="font-size" && (!context.is_some_and(|c|c.paint.is_some())||!matches!(d.key.as_str(),"fill"|"stroke"|"color")){paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}}}
+        for d in &inline {if d.important==important{if context.is_none()||d.key!="font-size" && (!context.is_some_and(|c|c.paint.is_some())||!matches!(d.key.as_str(),"fill"|"stroke"|"color")){paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}
     }
     if outer{style.root_font_size=style.font_size;}
     if let Some(context)=context {
         style.geometry=context.geometry.clone();style.geometry_unknown=context.unknown;
         style.font_size=context.font;style.root_font_size=context.root_font;
+        if let Some(paint)=&context.paint {
+            if !paint.known {return Err("SVG computed paint is unavailable.".into());}
+            let initial=PaintValues::new(paint.color);
+            let values=paint.values.as_deref().unwrap_or(&initial);
+            style.color=values.color.unwrap_or(0);style.color_known=values.color.is_some();
+            style.fill=if values.color.is_none()&&matches!(values.fill,Paint::Current){Paint::Unavailable}else{values.fill.clone()};
+            style.stroke=if values.color.is_none()&&matches!(values.stroke,Paint::Current){Paint::Unavailable}else{values.stroke.clone()};
+        }
         return Ok(style);
     }
     for (key,value) in &node.attrs {geometry::apply(&mut style,parent,&node.name,key,value,false,outer)?;}
@@ -2033,7 +2060,7 @@ fn interpolate(a: u32, b: u32, t: f64) -> u32 {
 
 struct Renderer<'a> {
     nodes: Vec<Node>,
-    geometry:Option<&'a [ComputedGeometry]>,
+    geometry:Option<&'a [ComputedValues]>,
     rules: Vec<Rule>,
     ids: HashMap<String, usize>,
     styles: Vec<Style>,
@@ -2464,6 +2491,7 @@ impl Renderer<'_> {
     ) -> ImageResult<Option<Brush>> {
         let id = match paint {
             Paint::None => return Ok(None),
+            Paint::Unavailable => return Err("SVG computed paint is unavailable.".into()),
             Paint::Solid(color) => return Ok(Some(Brush::Solid(*color))),
             Paint::Current => return Ok(Some(Brush::Solid(current))),
             Paint::Server(id) => id,
@@ -2605,6 +2633,7 @@ impl Renderer<'_> {
             last = offset;
             let parent_style = self.styles[host].clone();
             let style = self.style(stop, &parent_style)?;
+            if style.stop_current&&!style.color_known {return Err("SVG computed color is unavailable.".into());}
             let color = if style.stop_current {
                 style.color
             } else {
@@ -2810,7 +2839,7 @@ fn viewbox(node: &Node, width: f64, height: f64) -> ImageResult<(Matrix, Point)>
 pub(super) fn decode(data:&[u8],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     decode_context(data,None,None,check)
 }
-pub(super) fn decode_context(data:&[u8],used:Option<(usize,usize)>,geometry:Option<&[ComputedGeometry]>,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+pub(super) fn decode_context(data:&[u8],used:Option<(usize,usize)>,geometry:Option<&[ComputedValues]>,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     if data.len() > MAX_SOURCE {
         return Err("SVG image source exceeds 1 MiB.".into());
     }
@@ -2827,7 +2856,7 @@ pub(super) fn decode_context(data:&[u8],used:Option<(usize,usize)>,geometry:Opti
     let nodes = parse_xml(text, &mut work)?;
     if let Some(values)=geometry {
         if values.len()!=nodes.len() {return Err("SVG computed geometry context does not match the source tree.".into());}
-        work.tick(values.len().checked_mul(std::mem::size_of::<ComputedGeometry>()).ok_or("SVG computed geometry work overflow.")?)?;
+        work.tick(values.len().checked_mul(std::mem::size_of::<ComputedValues>()).ok_or("SVG computed geometry work overflow.")?)?;
     }
     for node in &nodes {
         if matches!(

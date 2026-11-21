@@ -2508,8 +2508,7 @@ then verifies native dynamic SVG pixels, inherited-variable changes, media resiz
 refusal/stale-paint removal and recovery with edited input and real link activation.
 An unsupported winner retains the existing unavailable-image indication. Clearing
 an obsolete SVG failure status requires successful source and viewport stages;
-other status messages are preserved. Shared descendant paint properties/variables
-remain outside this geometry context.
+other status messages are preserved. The context also carries the finite shared paint family described below.
 CSS math, rollback, wider units and full SVG/font/viewport semantics are unfinished.
 No author DOM/style attributes are rewritten. Focused computation, renderer-context and connected App/refusal
 checks and the selected affected CSS/SVG cases do not establish actual-site shell
@@ -2545,3 +2544,42 @@ identify an unknown deployed binding, or establish actual-site success without a
 source-bound product checkpoint. The relevant specifications are the
 [Console printer](https://console.spec.whatwg.org/#printer) and
 [Web IDL namespaces](https://webidl.spec.whatwg.org/#namespace-object).
+
+## Shared SVG fill, stroke and color
+
+The original inline SVG painter receives inherited fill/stroke/color from the
+same document selector, priority and variable cascade as geometry. HTML ancestors
+can supply inherited paint; SVG presentation attributes precede matched and inline
+CSS. The finite paint grammar reuses the original renderer's colors (including
+alpha), none/currentColor and supported local paint servers. CurrentColor resolves
+against the final consuming element's color, including gradient stops. Missing
+variables use inherited values for this family. Unsupported winners remain
+unavailable per property; later supported declarations can recover.
+
+CSSStyleDeclaration now supplies fill and stroke source values through its real
+property/index/priority/mutation paths. Existing CSSOM URL refusal remains, and an
+external stylesheet's unrepresented paint URL never causes a request or retains
+old pixels. Native author attributes are not rewritten into computed values.
+
+Only SVG content and its actual HTML ancestors compute paint state; unrelated
+HTML branches and inert template content add no paint allocations. Paint uses the
+supplied CSS job budgets rather than the custom-property map's independent scratch
+allowance. The existing checked allocation, image/cache admission and deadline
+remain. Shared geometry, paint and local-server string backing is charged once by
+identity across root caches, including shared inherited values.
+
+Original reductions cover alpha/currentColor, priority, real local gradient
+definitions, unavailable color through gradient currentColor, copy refusal and
+recovery, and shared cache backing. An actual App fixture first reproduces ignored
+external fill, then verifies external variables, inherited HTML fill, CSSOM/class
+changes, important priority, refusal/recovery, edited input and native link use.
+Parsed connected stylesheet text mutation retains its existing guard; this paint
+fixture uses actual class and CSSOM mutations. It does not qualify all component
+stylesheet lifecycle behavior.
+
+The family remains finite: wider color syntaxes, context paint, server fallback,
+additional shared stroke/fill rules and opacity properties, geometry math/rollback,
+nested SVG and wider graphics remain unfinished or guarded. Native CSSOM source
+readback is separate from complete computed paint readback. These checks do not
+establish actual-site initialization or complete SVG conformance. See
+[SVG paint and color](https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint).

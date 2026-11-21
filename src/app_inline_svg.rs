@@ -7,14 +7,16 @@ use crate::html::{Namespace, NodeKind};
 
 pub(super) struct Source {
     text: String,
-    geometry:Vec<crate::image::SvgGeometry>,
+    geometry:Vec<crate::image::SvgStyle>,
     intrinsic: Option<(usize, usize)>,
     viewport: Option<(usize, usize)>,
 }
 
 impl Source {
-    fn bytes(text:&String,geometry:&Vec<crate::image::SvgGeometry>)->Option<usize>{
-        geometry.iter().try_fold(text.capacity().checked_add(std::mem::size_of::<Self>())?.checked_add(geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgGeometry>())?)?,|n,g|n.checked_add(g.backing_bytes()))
+    fn bytes(text:&String,geometry:&Vec<crate::image::SvgStyle>,seen:&mut std::collections::HashSet<usize>)->Option<usize>{
+        let mut bytes=text.capacity().checked_add(std::mem::size_of::<Self>())?.checked_add(geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgStyle>())?)?;
+        for value in geometry {for (identity,size) in value.backing_records().into_iter().flatten(){if !seen.contains(&identity){seen.try_reserve(1).ok()?;seen.insert(identity);bytes=bytes.checked_add(size)?;}}}
+        Some(bytes)
     }
 }
 
@@ -61,10 +63,11 @@ fn escaped(out: &mut String, text: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Result<(String,Vec<crate::image::SvgGeometry>), String> {
+fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Result<(String,Vec<crate::image::SvgStyle>), String> {
     let mut out = String::new();
     let mut geometry=Vec::new();
     let mut geometry_bytes=0usize;
+    let mut backing_seen=std::collections::HashSet::new();
     let mut stack = Vec::new();
     stack
         .try_reserve(1)
@@ -98,9 +101,9 @@ fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Res
                 }
                 geometry.try_reserve(1).map_err(|_|"Inline SVG computed geometry reservation failed.")?;
                 let value=computed.read_svg_geometry(id).map_err(|_|"Inline SVG computed geometry is unavailable.")?.ok_or("Inline SVG computed geometry is absent.")?;
-                geometry_bytes=geometry_bytes.checked_add(value.backing_bytes()).ok_or("Inline SVG computed geometry backing overflow.")?;
+                for (identity,bytes) in value.backing_records().into_iter().flatten(){if !backing_seen.contains(&identity){backing_seen.try_reserve(1).map_err(|_|"Inline SVG backing identity reservation failed.")?;backing_seen.insert(identity);geometry_bytes=geometry_bytes.checked_add(bytes).ok_or("Inline SVG computed style backing overflow.")?;}}
                 geometry.push(value.clone());
-                if geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgGeometry>()).and_then(|n|n.checked_add(geometry_bytes)).and_then(|n|n.checked_add(out.capacity())).is_none_or(|bytes|bytes>crate::image::MAX_INPUT_BYTES) {return Err("Inline SVG computed geometry exceeds source cache allowance.".into());}
+                if geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgStyle>()).and_then(|n|n.checked_add(geometry_bytes)).and_then(|n|n.checked_add(out.capacity())).is_none_or(|bytes|bytes>crate::image::MAX_INPUT_BYTES) {return Err("Inline SVG computed geometry exceeds source cache allowance.".into());}
                 append(&mut out, "<")?;
                 append(&mut out, tag)?;
                 for attr in attrs {
@@ -247,11 +250,12 @@ impl App {
                 let old = previous.remove(&id);
                 match candidate {
                     Ok((source,geometry)) => {
+                        let mut backing_seen=std::collections::HashSet::new();
                         let source_bytes = self
                             .inline_svg_sources
                             .values()
-                            .try_fold(0usize, |n,s|Source::bytes(&s.text,&s.geometry).and_then(|bytes|n.checked_add(bytes)))
-                            .and_then(|n|Source::bytes(&source,&geometry).and_then(|bytes|n.checked_add(bytes)));
+                            .try_fold(0usize, |n,s|Source::bytes(&s.text,&s.geometry,&mut backing_seen).and_then(|bytes|n.checked_add(bytes)))
+                            .and_then(|n|Source::bytes(&source,&geometry,&mut backing_seen).and_then(|bytes|n.checked_add(bytes)));
                         if source_bytes.is_none_or(|n| n > crate::image::MAX_INPUT_BYTES)
                             || self.inline_svg_sources.try_reserve(1).is_err()
                         {
@@ -343,5 +347,19 @@ impl App {
             self.images.remove(id);
         }
         success
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn svg_shared_paint_cache_charges_shared_backings_once_across_roots() {
+        let paint=std::sync::Arc::new(crate::image::SvgPaint::new(0xff203040));
+        let mut value=crate::image::SvgStyle::new(16.,16.);value.set_paint(Some(paint),true,0xff203040);
+        let context=vec![value.clone(),value];let text=String::from("<svg/>");let mut seen=std::collections::HashSet::new();
+        let first=Source::bytes(&text,&context,&mut seen).unwrap();assert_eq!(seen.len(),1);
+        let second=Source::bytes(&text,&context,&mut seen).unwrap();assert_eq!(seen.len(),1);assert!(first>second,"a shared allocation is admitted only once across root caches");
+        assert_eq!(first-second,std::mem::size_of::<crate::image::SvgPaint>()+2*std::mem::size_of::<usize>());
     }
 }

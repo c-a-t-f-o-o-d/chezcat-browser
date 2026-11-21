@@ -25,6 +25,8 @@ pub use sizing_math::CalculatedLength;
 mod custom_properties;
 #[path="css_svg_geometry.rs"]
 mod svg_geometry;
+#[path="css_svg_paint.rs"]
+mod svg_paint;
 #[path="css_computed_style.rs"]
 mod computed_style;
 pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
@@ -76,6 +78,7 @@ use crate::html::{Document, NodeKind};
 // Current browser-owned initial font basis. Media em units use this initial
 // value, independently of author font declarations and physical display zoom.
 const INITIAL_FONT_SIZE: f32 = 16.0;
+const INITIAL_COLOR:u32=0x26364a;
 
 const MAX_DECLARATIONS: usize = 4096;
 const MAX_GROUPED_BOX_BYTES: usize = 2048;
@@ -401,6 +404,8 @@ pub struct Style {
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
+    pub(crate) svg_paint:Option<std::sync::Arc<crate::image::SvgPaint>>,
+    pub(crate) svg_paint_known:bool,
     /// Computed scalar. Ordinary HTML paint groups composite after descendants.
     pub opacity: f64,
     pub background: Option<u32>,
@@ -472,7 +477,8 @@ impl Default for Style {
             overflow: Overflow::default(),
             visible:true,pointer_events:true,z_index:None,
             inset: [Length::Auto; 4],
-            color: 0x26364a,
+            color: INITIAL_COLOR,
+            svg_paint:None,svg_paint_known:true,
             opacity: 1.0,
             background: None,
             background_current_color: false,
@@ -536,6 +542,7 @@ impl Style {
         Self {
             visible:parent.visible,pointer_events:parent.pointer_events,
             color: parent.color,
+            svg_paint:parent.svg_paint.clone(),svg_paint_known:parent.svg_paint_known,
             image_rendering: parent.image_rendering,
             font_size: parent.font_size,
             root_font_size: parent.root_font_size,
@@ -1066,6 +1073,10 @@ fn compute_cascade(
         }
     }
     let mut variable_budget = custom_properties::Budget::default();
+    // Paint has no independent count/scratch ceiling: supplied CSS job budgets,
+    // checked allocation, and the existing image/cache allowances govern it.
+    let mut paint_budget=custom_properties::Budget::with_remaining(usize::MAX,usize::MAX);
+    let paint_needed=svg_paint::needed(doc,&order,&parents,&inert,meter.as_deref_mut(),transform_meter.as_deref_mut())?;
     let mut budget = MAX_MATCH_STEPS;
     let mut root_font_size = INITIAL_FONT_SIZE;
     let mut root_font_known = true;
@@ -1411,19 +1422,24 @@ fn compute_cascade(
             style.root_font_size = root_font_size;
         }
         style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
+        if paint_needed.get(index)==Some(&true) {
+            let paint=|budget:&mut custom_properties::Budget|svg_paint::compute(doc,index,&parent,applicable.iter().map(|(_,d)|*d),&variables[index],budget);
+            let (paint,known)=if let Some(meter)=meter.as_deref_mut(){meter.variables(&mut paint_budget,paint)?}else if let Some(meter)=transform_meter.as_deref_mut(){meter.variables(&mut paint_budget,paint)?}else{paint(&mut paint_budget)};
+            style.svg_paint=paint;style.svg_paint_known=known;
+        }
         if node.namespace==crate::html::Namespace::Svg {
             let parent_geometry=parents[index].and_then(|id|svg_geometry.get(&id)).and_then(Option::as_ref);
             let outer=tag=="svg" && parents[index].is_none_or(|id|doc.nodes[id].namespace!=crate::html::Namespace::Svg);
             let charge=|meter:&mut CssBudget<'_>|->Result<(),String>{
                 meter.work(1)?;
-                meter.copies(std::mem::size_of::<(usize,Option<crate::image::SvgGeometry>)>().checked_mul(6).and_then(|n|n.checked_add(9*32)).ok_or("SVG computed geometry backing overflow.")?)
+                meter.copies(std::mem::size_of::<(usize,Option<crate::image::SvgStyle>)>().checked_mul(6).and_then(|n|n.checked_add(9*32)).ok_or("SVG computed geometry backing overflow.")?)
             };
             if let Some(meter)=meter.as_deref_mut() {charge(meter)?;}
             else if let Some(meter)=transform_meter.as_deref_mut() {charge(meter)?;}
             let resolve=|budget:&mut custom_properties::Budget|svg_geometry::compute(doc,index,tag,outer,parent_geometry,parent_geometry.is_some(),style.font_size,style.root_font_size,font_known&&root_font_known,applicable.iter().map(|(_,d)|*d),&variables[index],budget);
             let geometry=if let Some(meter)=meter.as_deref_mut() {meter.variables(&mut variable_budget,resolve)?} else if let Some(meter)=transform_meter.as_deref_mut() {meter.variables(&mut variable_budget,resolve)?} else {resolve(&mut variable_budget)};
             svg_geometry.try_reserve(1).map_err(|_|"SVG computed geometry snapshot reservation failed.")?;
-            svg_geometry.insert(index,geometry);
+            svg_geometry.insert(index,geometry.map(|mut geometry|{geometry.set_paint(style.svg_paint.clone(),style.svg_paint_known,0xff000000|style.color);geometry}));
         }
         let viewport_length=|value|sizing_math::resolve_viewport(value,environment);
         style.width=viewport_length(style.width);style.height=viewport_length(style.height);style.min_width=viewport_length(style.min_width);style.min_height=viewport_length(style.min_height);style.max_width=style.max_width.map(viewport_length);style.max_height=style.max_height.map(viewport_length);style.flex_basis=viewport_length(style.flex_basis);style.margin=style.margin.map(viewport_length);style.padding=style.padding.map(viewport_length);style.gap=style.gap.map(viewport_length);
@@ -5447,3 +5463,7 @@ pub(crate) mod z_index;
 #[cfg(test)]
 #[path="css_svg_geometry_tests.rs"]
 mod svg_geometry_tests;
+
+#[cfg(test)]
+#[path="css_svg_paint_tests.rs"]
+mod svg_paint_tests;
