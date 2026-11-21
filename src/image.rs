@@ -750,3 +750,9 @@ mod tests {
         }
     }
 }
+
+/// Passive inline SVG rasterization at an already-resolved layout viewport.
+/// Intrinsic resource sizing remains separate in the caller's source cache.
+pub(crate) fn decode_svg_viewport(data:&[u8],width:usize,height:usize,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+    svg::decode_viewport(data,Some((width,height)),check)
+}

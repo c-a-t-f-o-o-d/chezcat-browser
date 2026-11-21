@@ -34,6 +34,9 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
     no_effects(page);
 }
 fn fixture() -> (Document, Forms, Page) {
+    fixture_with_page(Page::for_test())
+}
+fn fixture_with_page(mut page:Page)->(Document,Forms,Page) {
     let mut doc = crate::html::parse(concat!(
         "<!doctype html><title>Original SVG interface</title><body>",
         "<div id=html>Original HTML</div>",
@@ -60,7 +63,6 @@ fn fixture() -> (Document, Forms, Page) {
     );
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     let source = location("https://svg-interface.test/source");
     page.set_location(&source);
     page.set_resource_base(&source);
@@ -252,7 +254,7 @@ if(svg[missing]!==undefined||svg[key]!==undefined||missing in svg||
 
 #[test]
 fn svg_element_interface_owner_realms_and_saved_constructor_origin_guards() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_with_page(Page::with_limits(crate::javascript::limits::BROWSER));
     run(
         &mut doc,
         &mut forms,

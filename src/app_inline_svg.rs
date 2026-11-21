@@ -4,6 +4,26 @@
 use super::*;
 use crate::html::{Namespace, NodeKind};
 
+pub(super) struct Source {
+    text: String,
+    intrinsic: Option<(usize, usize)>,
+    viewport: Option<(usize, usize)>,
+}
+
+pub(super) fn natural_sizes(
+    images: &HashMap<usize, std::sync::Arc<Bitmap>>,
+    densities: &HashMap<usize, f64>,
+    sources: &HashMap<usize, Source>,
+) -> HashMap<usize, (usize, usize)> {
+    let mut sizes = super::natural_image_sizes(images, densities);
+    for (&id, source) in sources {
+        if let Some(size) = source.intrinsic {
+            sizes.insert(id, size);
+        }
+    }
+    sizes
+}
+
 fn append(out: &mut String, text: &str) -> Result<(), String> {
     if out
         .len()
@@ -97,7 +117,80 @@ fn source(doc: &Document, root: usize) -> Result<String, String> {
 }
 
 impl App {
-    pub(super) fn sync_inline_svg(&mut self) {
+    pub(super) fn sync_inline_svg_viewports(&mut self, started: std::time::Instant) {
+        for at in 0..self.page.items.len() {
+            let layout::PaintItem::Image {
+                node,
+                width,
+                height,
+                ..
+            } = self.page.items[at]
+            else {
+                continue;
+            };
+            if width <= 0 || height <= 0 {
+                continue;
+            }
+            let target = (width as usize, height as usize);
+            let Some(source) = self.inline_svg_sources.get_mut(&node) else {
+                continue;
+            };
+            if source.viewport == Some(target) && self.images.contains_key(&node) {
+                continue;
+            }
+            if self
+                .images
+                .get(&node)
+                .is_some_and(|image| (image.width, image.height) == target)
+            {
+                source.viewport = Some(target);
+                continue;
+            }
+            source.viewport = None;
+            self.images.remove(&node);
+            let bitmap = crate::image::decode_svg_viewport(
+                source.text.as_bytes(),
+                target.0,
+                target.1,
+                &|| {
+                    if started.elapsed() > std::time::Duration::from_secs(45) {
+                        Err("Inline SVG image work budget exhausted.".into())
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            match bitmap {
+                Ok(bitmap) => {
+                    let used = self.images.values().try_fold(0usize, |n, image| {
+                        image
+                            .pixels
+                            .capacity()
+                            .checked_mul(std::mem::size_of::<u32>())
+                            .and_then(|b| n.checked_add(b))
+                    });
+                    let bytes = bitmap
+                        .pixels
+                        .capacity()
+                        .checked_mul(std::mem::size_of::<u32>());
+                    if used
+                        .zip(bytes)
+                        .and_then(|(a, b)| a.checked_add(b))
+                        .is_some_and(|n| n <= loader::MAX_DECODED_IMAGE_BYTES)
+                        && self.images.try_reserve(1).is_ok()
+                    {
+                        self.images.insert(node, std::sync::Arc::new(bitmap));
+                        source.viewport = Some(target);
+                    } else {
+                        self.status =
+                            "Inline SVG used viewport exceeds decoded image allowance.".into();
+                    }
+                }
+                Err(error) => self.status = format!("Inline SVG was not painted: {error}"),
+            }
+        }
+    }
+    pub(super) fn sync_inline_svg(&mut self, started: std::time::Instant) {
         let mut previous = std::mem::take(&mut self.inline_svg_sources);
         let mut stack = Vec::new();
         if stack.try_reserve(1).is_err() {
@@ -109,7 +202,6 @@ impl App {
         }
         stack.push(0);
         let mut visited = 0usize;
-        let started = std::time::Instant::now();
         while let Some(id) = stack.pop() {
             visited += 1;
             if visited > self.document.nodes.len() {
@@ -128,7 +220,7 @@ impl App {
                         let source_bytes = self
                             .inline_svg_sources
                             .values()
-                            .try_fold(source.capacity(), |n, s| n.checked_add(s.capacity()));
+                            .try_fold(source.capacity().saturating_add(std::mem::size_of::<Source>()), |n,s| s.text.capacity().checked_add(std::mem::size_of::<Source>()).and_then(|bytes|n.checked_add(bytes)));
                         if source_bytes.is_none_or(|n| n > crate::image::MAX_INPUT_BYTES)
                             || self.inline_svg_sources.try_reserve(1).is_err()
                         {
@@ -138,9 +230,13 @@ impl App {
                                     .into();
                             continue;
                         }
-                        let unchanged =
-                            old.as_deref() == Some(&source) && self.images.contains_key(&id);
+                        let unchanged = old.as_ref().is_some_and(|s| s.text == source)
+                            && self.images.contains_key(&id);
+                        let mut intrinsic = old.as_ref().and_then(|s| s.intrinsic);
+                        let mut viewport = old.as_ref().and_then(|s| s.viewport);
                         if !unchanged {
+                            intrinsic = None;
+                            viewport = None;
                             self.images.remove(&id);
                             let bitmap = crate::image::decode_checked(source.as_bytes(), &|| {
                                 if started.elapsed() > std::time::Duration::from_secs(45) {
@@ -151,6 +247,7 @@ impl App {
                             });
                             match bitmap {
                                 Ok(bitmap) => {
+                                    intrinsic = Some((bitmap.width, bitmap.height));
                                     let used = self.images.values().try_fold(0usize, |n, image| {
                                         image
                                             .pixels
@@ -180,7 +277,14 @@ impl App {
                                 }
                             }
                         }
-                        self.inline_svg_sources.insert(id, source);
+                        self.inline_svg_sources.insert(
+                            id,
+                            Source {
+                                text: source,
+                                intrinsic,
+                                viewport,
+                            },
+                        );
                     }
                     Err(error) => {
                         self.images.remove(&id);

@@ -8,6 +8,9 @@ use super::{dimensions, pixel, reserved, Bitmap, ImageResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[path="image_svg_geometry.rs"]
+mod geometry;
+
 const MAX_SOURCE: usize = 1024 * 1024;
 const MAX_NODES: usize = 4096;
 const MAX_DEPTH: usize = 64;
@@ -382,7 +385,12 @@ impl<'a> Numbers<'a> {
         self.spaces();
         self.at < self.text.len()
     }
-    fn number(&mut self) -> ImageResult<f64> {
+    fn number(&mut self)->ImageResult<f64> {
+        let value=self.raw_number()?;
+        if !value.is_finite()||value.abs()>1e7{return Err("SVG coordinate exceeds its finite 10-million-unit limit.".into());}
+        Ok(value)
+    }
+    fn raw_number(&mut self)->ImageResult<f64> {
         self.spaces();
         let start = self.at;
         let b = self.text.as_bytes();
@@ -420,9 +428,6 @@ impl<'a> Numbers<'a> {
         let value = self.text[start..self.at]
             .parse::<f64>()
             .map_err(|_| "Invalid SVG number.")?;
-        if !value.is_finite() || value.abs() > 1e7 {
-            return Err("SVG coordinate exceeds its finite 10-million-unit limit.".into());
-        }
         Ok(value)
     }
     fn flag(&mut self) -> ImageResult<bool> {
@@ -565,6 +570,9 @@ struct Style {
     stroke_alpha: f64,
     opacity: f64,
     width: f64,
+    geometry:Option<Arc<geometry::Geometry>>,
+    font_size:f64,
+    root_font_size:f64,
     even_odd: bool,
     clip_even_odd: bool,
     clip: Option<Arc<str>>,
@@ -590,6 +598,9 @@ impl Default for Style {
             stroke_alpha: 1.,
             opacity: 1.,
             width: 1.,
+            geometry:None,
+            font_size:16.,
+            root_font_size:16.,
             even_odd: false,
             clip_even_odd: false,
             clip: None,
@@ -710,44 +721,20 @@ fn local_effect(text: &str) -> ImageResult<Option<Arc<str>>> {
     crate::svg_reference::effect(text).map(|id|id.map(Into::into)).map_err(Into::into)
 }
 
-fn declarations(text: &str) -> ImageResult<Vec<(String, String)>> {
-    let mut out = Vec::new();
+#[derive(Clone)]
+struct SvgDeclaration {key:String,value:String,important:bool}
+fn declarations(text:&str)->ImageResult<Vec<SvgDeclaration>> {
+    let mut out=Vec::new();
     for declaration in text.split(';') {
-        let declaration = declaration.trim();
-        if declaration.is_empty() {
-            continue;
-        }
-        let (key, value) = declaration
-            .split_once(':')
-            .ok_or("Invalid SVG style declaration.")?;
-        if value.contains('!') {
-            return Err("SVG !important declarations are not implemented.".into());
-        }
-        if out.len() >= 64 {
-            return Err("SVG style declaration limit reached.".into());
-        }
-        let key = key.trim().to_ascii_lowercase();
-        if matches!(
-            key.as_str(),
-            "transform"
-                | "transform-origin"
-                | "transform-box"
-                | "x"
-                | "y"
-                | "cx"
-                | "cy"
-                | "r"
-                | "rx"
-                | "ry"
-                | "width"
-                | "height"
-                | "d"
-        ) {
-            return Err(format!(
-                "SVG CSS geometry property {key:?} is not implemented; use attributes."
-            ));
-        }
-        out.push((key, value.trim().into()));
+        let declaration=declaration.trim();if declaration.is_empty(){continue;}
+        let (key,value)=declaration.split_once(':').ok_or("Invalid SVG style declaration.")?;
+        if out.len()>=64{return Err("SVG style declaration limit reached.".into());}
+        let key=key.trim().to_ascii_lowercase();
+        if matches!(key.as_str(),"transform"|"transform-origin"|"transform-box"|"d"){return Err(format!("SVG CSS geometry property {key:?} is not implemented."));}
+        let (value,important)=if let Some((value,priority))=value.rsplit_once('!') {
+            if !priority.trim().eq_ignore_ascii_case("important"){return Err("Invalid SVG declaration priority.".into());}(value.trim(),true)
+        }else{(value.trim(),false)};
+        out.push(SvgDeclaration{key,value:value.into(),important});
     }
     Ok(out)
 }
@@ -914,7 +901,7 @@ fn style_property(
 struct Rule {
     selector: String,
     specificity: (usize, usize, usize),
-    properties: Vec<(String, String)>,
+    properties: Vec<SvgDeclaration>,
 }
 fn selector_match(selector: &str, node: &Node) -> bool {
     let mut at = 0;
@@ -989,7 +976,7 @@ fn rules(nodes: &[Node]) -> ImageResult<Vec<Rule>> {
                 bytes += selector.len()
                     + properties
                         .iter()
-                        .map(|(a, b)| a.len() + b.len())
+                        .map(|d| d.key.len() + d.value.len())
                         .sum::<usize>();
                 if bytes > 4 * MAX_SOURCE {
                     return Err("SVG expanded stylesheet limit reached (4 MiB).".into());
@@ -1007,34 +994,24 @@ fn rules(nodes: &[Node]) -> ImageResult<Vec<Rule>> {
     Ok(out)
 }
 
-fn computed(node: &Node, parent: &Style, rules: &[Rule], viewport: Point) -> ImageResult<Style> {
-    let mut style = parent.clone();
-    style.opacity = 1.;
-    style.display = true;
-    style.clip = None;
-    style.mask = None;
-    style.mask_alpha = false;
-    style.mask_mode = None;
-    style.stop_color = 0xff000000;
-    style.stop_current = false;
-    style.stop_alpha = 1.;
-    for (key, value) in &node.attrs {
-        if key.starts_with("on") {
-            return Err("SVG event handlers are not executed in image documents.".into());
-        }
-        style_property(&mut style, parent, key, value, viewport)?;
+fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool)->ImageResult<Style> {
+    let mut style=parent.clone();style.opacity=1.;style.display=true;style.clip=None;style.mask=None;style.mask_alpha=false;style.mask_mode=None;style.stop_color=0xff000000;style.stop_current=false;style.stop_alpha=1.;style.geometry=None;
+    let inline=node.attr("style").map(declarations).transpose()?.unwrap_or_default();
+    fn paint(style:&mut Style,parent:&Style,key:&str,value:&str,viewport:Point,css:bool)->ImageResult<()> {
+        if geometry::property(key).is_some(){return Ok(());}
+        if key=="font-size"{return geometry::font_size(style,parent,value,css);}
+        style_property(style,parent,key,value,viewport)
     }
-    for rule in rules {
-        if selector_match(&rule.selector, node) {
-            for (key, value) in &rule.properties {
-                style_property(&mut style, parent, key, value, viewport)?;
-            }
-        }
+    for (key,value) in &node.attrs {if key.starts_with("on"){return Err("SVG event handlers are not executed in image documents.".into());}paint(&mut style,parent,key,value,viewport,false)?;}
+    for important in [false,true] {
+        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}}
+        for d in &inline {if d.important==important{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}
     }
-    if let Some(inline) = node.attr("style") {
-        for (key, value) in declarations(inline)? {
-            style_property(&mut style, parent, &key, &value, viewport)?;
-        }
+    if outer{style.root_font_size=style.font_size;}
+    for (key,value) in &node.attrs {geometry::apply(&mut style,parent,&node.name,key,value,false,outer)?;}
+    for important in [false,true] {
+        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{geometry::apply(&mut style,parent,&node.name,&d.key,&d.value,true,outer)?;}}}}
+        for d in &inline {if d.important==important{geometry::apply(&mut style,parent,&node.name,&d.key,&d.value,true,outer)?;}}
     }
     Ok(style)
 }
@@ -1338,9 +1315,10 @@ fn ellipse(
     Ok(contour)
 }
 
-fn shape(node: &Node, matrix: Matrix, viewport: Point, work: &mut Work<'_>) -> ImageResult<Path> {
-    let x = |key, default| number_attr(node, key, default, viewport.0);
-    let y = |key, default| number_attr(node, key, default, viewport.1);
+fn shape(node: &Node, style:&Style, matrix: Matrix, viewport: Point, work: &mut Work<'_>) -> ImageResult<Path> {
+    let value=|key,default,reference|if geometry::property(key).is_some(){geometry::resolve(style,key,reference).map(|v|v.unwrap_or(default))}else{number_attr(node,key,default,reference)};
+    let x=|key,default|value(key,default,viewport.0);
+    let y=|key,default|value(key,default,viewport.1);
     let mut contour = Contour {
         points: Vec::new(),
         closed: false,
@@ -1355,8 +1333,8 @@ fn shape(node: &Node, matrix: Matrix, viewport: Point, work: &mut Work<'_>) -> I
             if w == 0. || h == 0. {
                 return Ok(Vec::new());
             }
-            let rx = node.attr("rx").map(|v| length(v, viewport.0)).transpose()?;
-            let ry = node.attr("ry").map(|v| length(v, viewport.1)).transpose()?;
+            let rx=geometry::resolve(style,"rx",viewport.0)?;
+            let ry=geometry::resolve(style,"ry",viewport.1)?;
             let (rx, ry) = (
                 rx.or(ry).unwrap_or(0.).min(w / 2.),
                 ry.or(rx).unwrap_or(0.).min(h / 2.),
@@ -1385,10 +1363,11 @@ fn shape(node: &Node, matrix: Matrix, viewport: Point, work: &mut Work<'_>) -> I
         "circle" | "ellipse" => {
             let center = (x("cx", 0.)?, y("cy", 0.)?);
             let radii = if node.name == "circle" {
-                let r = number_attr(node, "r", 0., viewport.0.hypot(viewport.1) / 2f64.sqrt())?;
+                let r=geometry::resolve(style,"r",viewport.0.hypot(viewport.1)/2f64.sqrt())?.unwrap_or(0.);
                 (r, r)
             } else {
-                (x("rx", 0.)?, y("ry", 0.)?)
+                let rx=geometry::resolve(style,"rx",viewport.0)?;let ry=geometry::resolve(style,"ry",viewport.1)?;
+                (rx.or(ry).unwrap_or(0.),ry.or(rx).unwrap_or(0.))
             };
             if radii.0 < 0. || radii.1 < 0. {
                 return Err("SVG radii cannot be negative.".into());
@@ -2157,6 +2136,7 @@ impl Renderer<'_> {
                 // otherwise a tiny cubic enlarged by scale() gets a coarse box.
                 let mut path = shape(
                     &self.nodes[index],
+                    &style,
                     device.multiply(matrix)?,
                     self.viewport,
                     &mut self.work,
@@ -2266,7 +2246,7 @@ impl Renderer<'_> {
             }
             "rect" | "circle" | "ellipse" | "line" | "polygon" | "polyline" | "path" => {
                 if style.visible {
-                    let path = shape(&self.nodes[index], matrix, self.viewport, &mut self.work)?;
+                    let path = shape(&self.nodes[index], &style, matrix, self.viewport, &mut self.work)?;
                     Clip::geometry(&path, matrix, style.clip_even_odd, &mut self.work)?
                 } else { Clip::Empty }
             }
@@ -2428,12 +2408,12 @@ impl Renderer<'_> {
         let cost = self.nodes[index]
             .attrs
             .iter()
-            .map(|(a, b)| a.len() + b.len())
+            .map(|(a,b)|a.len()+b.len())
             .sum::<usize>()
             + self.rule_cost
             + 1;
-        self.work.tick(cost)?;
-        computed(&self.nodes[index], parent, &self.rules, self.viewport)
+        self.work.tick(cost.checked_mul(4).ok_or("SVG style work overflow.")?)?;
+        computed(&self.nodes[index], parent, &self.rules, self.viewport,index==0)
     }
 
     fn brush(
@@ -2631,7 +2611,7 @@ impl Renderer<'_> {
                 if !style.visible {
                     return Ok(());
                 }
-                let path = shape(&self.nodes[index], matrix, self.viewport, &mut self.work)?;
+                let path = shape(&self.nodes[index], &style, matrix, self.viewport, &mut self.work)?;
                 let Some(bounds) = bounds(&path) else {
                     return Ok(());
                 };
@@ -2788,7 +2768,10 @@ fn viewbox(node: &Node, width: f64, height: f64) -> ImageResult<(Matrix, Point)>
     ))
 }
 
-pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageResult<Bitmap> {
+pub(super) fn decode(data:&[u8],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+    decode_viewport(data,None,check)
+}
+pub(super) fn decode_viewport(data:&[u8],used:Option<(usize,usize)>,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     if data.len() > MAX_SOURCE {
         return Err("SVG image source exceeds 1 MiB.".into());
     }
@@ -2830,15 +2813,16 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
     } else {
         (300., 150.)
     };
-    let mut width = number_attr(root, "width", fallback.0, fallback.0)?;
-    let mut height = number_attr(root, "height", fallback.1, fallback.1)?;
-    if root.attr("viewBox").is_some() {
-        if root.attr("width").is_some() && root.attr("height").is_none() {
-            height = width * fallback.1 / fallback.0;
-        } else if root.attr("height").is_some() && root.attr("width").is_none() {
-            width = height * fallback.0 / fallback.1;
-        }
+    let rules=rules(&nodes)?;
+    let root_style=computed(root,&Style::default(),&rules,fallback,true)?;
+    let explicit_width=geometry::resolve(&root_style,"width",fallback.0)?;
+    let explicit_height=geometry::resolve(&root_style,"height",fallback.1)?;
+    let mut width=explicit_width.unwrap_or(fallback.0);let mut height=explicit_height.unwrap_or(fallback.1);
+    if root.attr("viewBox").is_some(){
+        if explicit_width.is_some()&&explicit_height.is_none(){height=width*fallback.1/fallback.0;}
+        else if explicit_height.is_some()&&explicit_width.is_none(){width=height*fallback.0/fallback.1;}
     }
+    if let Some((used_width,used_height))=used {width=used_width as f64;height=used_height as f64;}
     if width <= 0. || height <= 0. {
         return Err("SVG image dimensions must be positive.".into());
     }
@@ -2846,7 +2830,6 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
     let count = dimensions(width, height)?;
     let (view, viewport) = viewbox(root, width as f64, height as f64)?;
     let matrix = transform(root.attr("transform"))?.multiply(view)?;
-    let rules = rules(&nodes)?;
     let rule_cost = rules
         .iter()
         .map(|rule| {
@@ -2854,7 +2837,7 @@ pub(super) fn decode(data: &[u8], check: &dyn Fn() -> ImageResult<()>) -> ImageR
                 + rule
                     .properties
                     .iter()
-                    .map(|(a, b)| a.len() + b.len())
+                    .map(|d| d.key.len() + d.value.len())
                     .sum::<usize>()
         })
         .sum();
@@ -3309,7 +3292,10 @@ mod tests {
             &format!("<path d='M0 0{}'/>", "l1 0".repeat(MAX_SEGMENTS)),
             "segment",
         );
-        reject("<circle r='-1'/>", "negative");
+        // Invalid negative radius takes the SVG2 initial value0; it is not
+        // a resource refusal. Keep the actual coordinate guard separately.
+        assert!(svg("<circle r='-1'/>").pixels.iter().all(|pixel|*pixel==0));
+        reject("<circle r='100000000'/>","coordinate");
         reject(
             "<rect transform='scale(10000000) scale(10000000)'/>",
             "transform",
@@ -3343,3 +3329,7 @@ mod tests {
             .contains("work limit"));
     }
 }
+
+#[cfg(test)]
+#[path="image_svg_geometry_tests.rs"]
+mod geometry_tests;

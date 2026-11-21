@@ -221,7 +221,7 @@ pub struct App {
     base_fonts: crate::fonts::Book,
     fonts: crate::fonts::Book,
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
-    inline_svg_sources: HashMap<usize, String>,
+    inline_svg_sources: HashMap<usize, inline_svg::Source>,
     image_densities: HashMap<usize, f64>,
     responsive_images: responsive_images::State,
     animations: HashMap<usize, animation::Playback>,
@@ -1705,7 +1705,7 @@ impl App {
                 self.viewport_height(),
                 self.zoom,
                 &self.styles,
-                natural_image_sizes(&self.images, &self.image_densities),
+                inline_svg::natural_sizes(&self.images,&self.image_densities,&self.inline_svg_sources),
                 &self.fonts,
             ).with_limits(self.geometry_limits));
             // Startup scripts and DOMContentLoaded can select CSS images too.
@@ -1761,7 +1761,8 @@ impl App {
     }
     fn reflow(&mut self) {
         self.sync_native_focus_css();
-        self.sync_inline_svg();
+        let svg_started=std::time::Instant::now();
+        self.sync_inline_svg(svg_started);
         self.anchor_geometry_scope = std::rc::Rc::new(());
         let environment=Some(self.css_media_environment());
         self.document.media_environment=environment;
@@ -1780,7 +1781,7 @@ impl App {
                 &self.base_fonts,
             )
         } else {
-            let sizes = natural_image_sizes(&self.images, &self.image_densities);
+            let sizes = inline_svg::natural_sizes(&self.images,&self.image_densities,&self.inline_svg_sources);
             let checked = |node| {
                 self.forms
                     .controls
@@ -1800,7 +1801,7 @@ impl App {
                 self.stylesheet_cache.as_ref(),
             )
         };
-        if self.alternate.is_none() { self.stylesheet_cache = self.page.stylesheet_cache.clone(); }
+        if self.alternate.is_none() { self.stylesheet_cache = self.page.stylesheet_cache.clone();self.sync_inline_svg_viewports(svg_started); }
         self.sync_background_images();
         self.sync_media_controls();
         self.observe_layout();
@@ -1812,7 +1813,7 @@ impl App {
                     self.width - 12,
                     viewport_height,
                     self.zoom,
-                    natural_image_sizes(&self.images, &self.image_densities),
+                    inline_svg::natural_sizes(&self.images,&self.image_densities,&self.inline_svg_sources),
                     &self.page,
                 );
             }
@@ -2768,7 +2769,7 @@ impl App {
                 self.width - 12,
                 height,
                 self.zoom,
-                natural_image_sizes(&self.images, &self.image_densities),
+                inline_svg::natural_sizes(&self.images,&self.image_densities,&self.inline_svg_sources),
             );
         }
     }
@@ -6199,3 +6200,7 @@ mod inert_replace_tests;
 #[cfg(test)]
 #[path="app_replace_self_tests.rs"]
 mod replacement_self_tests;
+
+#[cfg(test)]
+#[path="app_svg_geometry_tests.rs"]
+mod svg_geometry_tests;
