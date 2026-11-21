@@ -6121,3 +6121,7 @@ mod css_text_tests;
 #[cfg(test)]
 #[path="app_inline_flex_tests.rs"]
 mod inline_flex_tests;
+
+#[cfg(test)]
+#[path="app_structural_selector_tests.rs"]
+mod structural_selector_tests;

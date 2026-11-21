@@ -8336,3 +8336,7 @@ mod css_text_tests;
 
 #[path="script_css_text.rs"]
 mod css_text;
+
+#[cfg(test)]
+#[path="script_structural_selector_tests.rs"]
+mod structural_selector_tests;
