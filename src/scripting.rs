@@ -3032,6 +3032,15 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn console_message_limit(&self,object:u32,method:&str)->Option<usize>{
+        (object==CONSOLE&&matches!(method,"log"|"info"|"warn"|"error")).then_some(MAX_LOG_LINE)
+    }
+    fn print_console(&mut self,object:u32,method:&str,message:&str)->Result<Value,String>{
+        if self.console_message_limit(object,method).is_none(){return Err("Native console receiver or operation is invalid.".into());}
+        self.state.copies(message.len())?;
+        self.state.log(&format!("console.{method}: {message}"));
+        Ok(Value::Undefined)
+    }
     fn prepare_request_call(&mut self,object:u32,method:&str,args:&[Value],binary:Option<Vec<u8>>)->Result<crate::javascript::xhr_interface::Call,crate::javascript::xhr_interface::Error>{self.xhr_call(object,method,args,binary)}
     fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
     fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
@@ -8421,3 +8430,7 @@ mod replacement_self_tests;
 #[cfg(test)]
 #[path="script_svg_style_geometry_tests.rs"]
 mod svg_style_geometry_tests;
+
+#[cfg(test)]
+#[path="script_console_diagnostics_tests.rs"]
+mod console_diagnostics_tests;

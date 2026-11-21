@@ -564,6 +564,11 @@ pub struct NativeAttributeChange {
 }
 
 pub trait Host {
+    /// Opt-in, native console printer. The runtime may describe genuine Error
+    /// identities without invoking author getters or coercions. No object arena
+    /// access is granted to the host; unrelated native calls keep original args.
+    fn console_message_limit(&self,_object:u32,_method:&str)->Option<usize>{None}
+    fn print_console(&mut self,_object:u32,_method:&str,_message:&str)->Result<Value,String>{Err("Native console printing is unavailable.".into())}
     fn prepare_request_call(&mut self,_object:u32,_method:&str,_args:&[Value],_binary:Option<Vec<u8>>)->Result<xhr_interface::Call,xhr_interface::Error>{Err(xhr_interface::Error::Exception("NotSupportedError","Script requests are unavailable.".into()))}
     fn begin_request_notification(&mut self,_notification:xhr_interface::Notification)->Result<Option<usize>,String>{Ok(None)}
     fn finish_request_abort(&mut self,_target:u32,_generation:u64){}
@@ -9301,7 +9306,9 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let observation = self.prepare_operation_observation(object,method,args,host)?;
-        let result=if xhr_interface::operation(method).is_some(){self.call_request_operation(object,method,args,host)}else{host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new)};
+        let result=if let Some(limit)=host.console_message_limit(object,method) {
+            self.console_message(args,limit,host).and_then(|message|host.print_console(object,method,&message).map_err(Fault::new))
+        } else if xhr_interface::operation(method).is_some(){self.call_request_operation(object,method,args,host)}else{host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new)};
         self.finish_tree_observation(observation, host)?;
         if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
         if self.drain_native_promise_effects(host)?!=0 {

@@ -48,6 +48,37 @@ mod tests {
     }
 
     #[test]
+    fn console_native_error_bounded_utf8_output_copy_refusal_and_recovery_do_not_allocate_script_state() {
+        let mut runtime=Runtime::for_test();
+        let error=runtime.execute("var e;try{null.missing;}catch(x){e=x;}e;",&mut NoHost).unwrap();
+        let objects=runtime.objects.len();let functions=runtime.functions.len();let retained=runtime.value_bytes;
+        runtime.begin_job();runtime.copy_bytes=0;
+        assert!(runtime.console_message(&[error.clone()],2048,&NoHost).is_err());
+        assert_eq!((runtime.objects.len(),runtime.functions.len(),runtime.value_bytes),(objects,functions,retained));
+        runtime.begin_job();let text=runtime.console_message(&[error],2048,&NoHost).unwrap();assert!(text.contains("Original native error at line 1"),"{text}");
+        let text=runtime.console_message(&[Value::String("ab\u{1f431}tail".into()),Value::String("later".into())],5,&NoHost).unwrap();assert!(text.len()<=5);assert!(text.starts_with("ab"));assert!(!text.contains("tail"));
+        assert_eq!((runtime.objects.len(),runtime.functions.len(),runtime.value_bytes),(objects,functions,retained));
+    }
+
+    #[test]
+    fn console_native_error_host_dispatch_refusal_publishes_nothing_and_unrelated_args_keep_identity() {
+        struct Printer {printed:Vec<String>,ordinary:Option<Value>}
+        impl super::super::Host for Printer {
+            fn get(&mut self,_:u32,_:&str)->Result<Value,String>{Err("No read".into())}
+            fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{Err("No write".into())}
+            fn call(&mut self,_:u32,_:&str,args:&[Value])->Result<Value,String>{self.ordinary=args.first().cloned();Ok(Value::Undefined)}
+            fn console_message_limit(&self,object:u32,method:&str)->Option<usize>{(object==7&&method=="error").then_some(2048)}
+            fn print_console(&mut self,_:u32,_:&str,message:&str)->Result<Value,String>{self.printed.push(message.to_owned());Ok(Value::Undefined)}
+        }
+        let mut host=Printer {printed:Vec::new(),ordinary:None};let mut runtime=Runtime::for_test();
+        let error=runtime.execute("TypeError('dispatch');",&mut NoHost).unwrap();let objects=runtime.objects.len();
+        runtime.begin_job();runtime.copy_bytes=0;
+        assert!(runtime.call_host(7,"error",&[error.clone()],&mut host).is_err());assert!(host.printed.is_empty());assert!(host.ordinary.is_none());assert_eq!(runtime.objects.len(),objects);
+        runtime.begin_job();runtime.call_host(7,"error",&[error.clone()],&mut host).unwrap();assert_eq!(host.printed,["TypeError: dispatch"]);
+        runtime.call_host(7,"ordinary",&[error.clone()],&mut host).unwrap();assert!(matches!((host.ordinary,error),(Some(Value::Object(a)),Value::Object(b)) if a==b));
+    }
+
+    #[test]
     fn stage_observations_classify_typed_faults_without_user_property_reads() {
         let mut runtime = Runtime::for_test();
         assert!(runtime.caught_error_report().contains("stage=unknown kind=unknown"));
@@ -204,5 +235,70 @@ impl Runtime {
                 location.line, location.column, origin.kind, origin.message, location.context);
         }
         text
+    }
+}
+
+/// A two-pass bounded writer: count first, reserve under the job's copy budget,
+/// then render identically. Formatting never calls page code or clones an
+/// unbounded script string. The display limit is owned by the native printer.
+struct ConsoleWriter<'a> { text:Option<&'a mut String>,remaining:usize,written:usize }
+impl std::fmt::Write for ConsoleWriter<'_> {
+    fn write_str(&mut self,text:&str)->std::fmt::Result {
+        let mut end=text.len().min(self.remaining);
+        while !text.is_char_boundary(end){end-=1;}
+        if let Some(out)=&mut self.text {out.push_str(&text[..end]);}
+        self.remaining-=end;self.written+=end;Ok(())
+    }
+}
+impl Runtime {
+    fn console_error_visible(&self,id:usize,host:&dyn super::Host)->bool {
+        let Some(object)=self.objects.get(id) else{return false;};
+        if object.error_name.is_none() || object.proxy.is_some(){return false;}
+        let owner=self.window_realms.iter().find_map(|(&window,&realm)|(realm==object.realm).then_some(window));
+        let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+        match owner {
+            Some(owner) if caller!=Some(owner)=>host.validate_window_access(caller,owner).is_ok(),
+            Some(_)=>true,
+            None=>object.realm==self.active_realm,
+        }
+    }
+    fn console_arguments(&self,args:&[Value],out:&mut ConsoleWriter<'_>,host:&dyn super::Host) {
+        for value in args {
+            if out.remaining==0 {break;}
+            if out.written!=0 {let _=out.write_char(' ');}
+            match value {
+                Value::String(text)=>{let _=out.write_str(text);},
+                Value::BigInt(text)=>{let _=out.write_str(text);},
+                Value::Object(id) if self.console_error_visible(*id,host)=>{
+                    let object=&self.objects[*id];
+                    let kind=object.error_name.unwrap();
+                    if let Some(origin)=self.diagnostics.origins.iter().rev().find(|origin|origin.identity==*id) {
+                        let _=write!(out,"{}: {} | Original native error at line {}, column {} | Original source: {}",origin.kind,origin.message,origin.location.line,origin.location.column,origin.location.context);
+                    } else {
+                        let _=out.write_str(kind);
+                        if let Some(property)=object.properties.get("message") {
+                            if property.getter.is_none()&&property.accessor.is_none() {
+                                if let StoredValue::Value(Value::String(message))=&property.value {
+                                    let _=out.write_str(": ");
+                                    for ch in message.chars().take(512).flat_map(char::escape_default) {let _=out.write_char(ch);if out.remaining==0{break;}}
+                                }
+                            }
+                        }
+                    }
+                },
+                _=>{let _=out.write_str(&value.to_text());},
+            }
+        }
+    }
+    pub(super) fn console_message(&mut self,args:&[Value],limit:usize,host:&dyn super::Host)->Result<String,Fault> {
+        self.work(args.len())?;
+        let mut count=ConsoleWriter {text:None,remaining:limit,written:0};
+        self.console_arguments(args,&mut count,host);
+        // Count both bounded formatting passes and the destination copy.
+        self.work(count.written.checked_mul(3).ok_or_else(||Fault::new("Console diagnostic copy work overflow."))?)?;
+        let mut text=String::new();text.try_reserve_exact(count.written).map_err(|_|Fault::new("Console diagnostic reservation failed."))?;
+        let mut out=ConsoleWriter {text:Some(&mut text),remaining:limit,written:0};
+        self.console_arguments(args,&mut out,host);
+        Ok(text)
     }
 }
