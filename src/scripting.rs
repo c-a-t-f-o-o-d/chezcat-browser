@@ -3050,6 +3050,10 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn native_leaf_getter(&self,object:u32,method:&str)->bool {
+        self.event_target_interface(object) && (matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName")
+            || node_traversal_property(method).is_some() && method!="\0Node.get.baseURI")
+    }
     fn console_message_limit(&self,object:u32,method:&str)->Option<usize>{
         (object==CONSOLE&&matches!(method,"log"|"info"|"warn"|"error")).then_some(MAX_LOG_LINE)
     }
