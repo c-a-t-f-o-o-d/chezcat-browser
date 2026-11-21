@@ -3041,6 +3041,7 @@ impl Host for Bridge<'_> {
         })
     }
     fn mutation_observation_target(&self, target: u32) -> Option<bool> {
+        if let Some(kind)=self.inert_node_type(target){return Some(matches!(kind,3|7|8));}
         self.text_content_receiver(target).then(|| node_index(target).is_some_and(|node|
             self.dom_accessible(node) && self.doc.nodes[node].kind.character_data().is_some()))
     }
@@ -3054,10 +3055,11 @@ impl Host for Bridge<'_> {
     }
 
     fn mutation_child_list_target(&self, target: u32) -> bool {
-        target == DOCUMENT || node_index(target).is_some_and(|node| self.dom_accessible(node))
+        self.inert_node_type(target).is_some() || target == DOCUMENT || node_index(target).is_some_and(|node| self.dom_accessible(node))
     }
 
     fn mutation_observation_parent(&self, target: u32) -> Option<u32> {
+        if self.inert_node_type(target).is_some(){return self.inert_observation_parent(target);}
         let node = node_index(target).filter(|&node| self.dom_accessible(node))?;
         let parent = self.state.tree.parents.get(node).copied().flatten()?;
         Some(if parent == 0 { DOCUMENT } else { node_handle(parent) })
@@ -3365,6 +3367,7 @@ impl Host for Bridge<'_> {
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.xhr_index(object).is_some(){return property=="responseType";}
+        if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
 
         if self.iframe_sandbox_member(object,property) {return true;}
         if self.textarea_value_member(object,property) {return true;}
@@ -3700,7 +3703,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
-        (self.attr_receiver(object) || self.comment_receiver(object) || self.fragment_receiver(object)) && matches!(property, "nodeValue" | "textContent")
+        (self.attr_receiver(object) || self.comment_receiver(object) || self.fragment_receiver(object) || matches!(self.inert_node_type(object),Some(3|7|8))) && matches!(property, "nodeValue" | "textContent")
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
@@ -5480,6 +5483,7 @@ impl Host for Bridge<'_> {
             return self.set_template_html(object, &source);
         }
         if self.inert_interface(object).is_some() {
+            if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=self.text(&value)?;return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));
         }
@@ -8262,3 +8266,7 @@ mod svg_dom;
 #[cfg(test)]
 #[path="script_dynamic_svg_tests.rs"]
 mod dynamic_svg_tests;
+
+#[cfg(test)]
+#[path="script_inert_observation_tests.rs"]
+mod inert_observation_tests;

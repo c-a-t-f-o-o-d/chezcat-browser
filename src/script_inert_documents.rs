@@ -3,6 +3,8 @@
 use super::*;
 use std::rc::Rc;
 
+#[path="script_inert_observation.rs"]
+mod observation;
 #[path = "script_inert_mutation.rs"]
 mod mutation;
 #[path="script_inert_selectors.rs"]

@@ -2050,3 +2050,23 @@ currentColor, general foreignObject, external SVG resources or a usable site.
 See [SVG namespace](https://svgwg.org/svg2-draft/struct.html#Namespace),
 [DOM element creation](https://dom.spec.whatwg.org/#dom-document-createelementns)
 and [DOM node cloning](https://dom.spec.whatwg.org/#concept-node-clone).
+
+
+## Inert tree mutation records and CharacterData
+
+MutationObserver can register genuine inert documents, template content and their
+nodes. Checked append/insert/remove and ordinary attribute-method writes prepare
+ordered records against actual inert parent/child/name metadata, with source and
+destination sibling snapshots and optional old values. Template contents remain
+separate trees; they do not become host descendants for subtree observation.
+Saved registrations keep native identities through supported promotion.
+
+Inert Text, Comment and ProcessingInstruction data writes replace owned text or
+publish a paid immutable parsed source. Clone data remains independent. Native
+retained/copy refusal leaves data and generation unchanged and rolls back pending
+records. Notifications use existing observer and Promise/microtask scheduling.
+The connected original App fixture uses a trusted event to change inert data;
+its observer callback imports mixed nested-template/style/native-control/SVG/link
+content and checks exact vector/text pixels, stable editing and link activation.
+Whole-content replacement, reflected property notifications and transient subtree
+registrations after removal remain separate unfinished observation routes.
