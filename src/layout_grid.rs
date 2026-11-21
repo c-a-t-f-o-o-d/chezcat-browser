@@ -598,7 +598,7 @@ impl Engine<'_> {
             let original_width = self.styles[child].width;
             if element {
                 match self.grid_item_width(child, style, width, depth) {
-                    Ok(Some(value)) => self.styles[child].width = value,
+                    Ok(Some(value)) => std::rc::Rc::make_mut(&mut self.styles[child]).width = value,
                     Ok(None) => {}
                     Err(()) => group.complete = false,
                 }
@@ -606,7 +606,7 @@ impl Engine<'_> {
             for &child in &children[start_child..cursor] {
                 self.walk(child, link, depth + 1);
             }
-            self.styles[child].width = original_width;
+            std::rc::Rc::make_mut(&mut self.styles[child]).width = original_width;
             self.finish_line(false, 0);
             let natural_height = self.flow.y.saturating_sub(item_top).max(0);
             let span = Span {

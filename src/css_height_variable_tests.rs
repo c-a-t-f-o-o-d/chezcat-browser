@@ -77,7 +77,7 @@ fn height_variable_invalid_computed_values_do_not_revive_an_earlier_height() {
         "NaN",
         "Infinity",
         "calc(1px + 2)",
-        "1vh",
+        "1ch",
     ] {
         let (document, computed) = styles(
             &format!(

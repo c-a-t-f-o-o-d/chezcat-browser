@@ -654,7 +654,7 @@ struct TextInlineBox {
 struct Engine<'a> {
     fonts: &'a Book,
     doc: &'a Document,
-    styles: Vec<Style>,
+    styles: Vec<std::rc::Rc<Style>>,
     image_sizes: &'a HashMap<usize, (usize, usize)>,
     zoom: f32,
     layout: Layout,
@@ -831,6 +831,10 @@ fn build_viewport_with_fonts_inner(
     let css::CascadeOutput { styles, computed_properties, stylesheet_cache } = cascade;
     if let Some(meter) = budget.as_deref_mut() {
         if computed_properties.has_transform_geometry() {
+            // This caller budget accounts for transform-bearing layout, not
+            // ordinary rendering. Include its shared style backing here.
+            meter.work(styles.len())?;
+            meter.copies(styles.len().saturating_mul(std::mem::size_of::<Style>() + 3 * std::mem::size_of::<usize>()))?;
             // Additional containing-block/fixed-family walks and the fixed
             // ancestor context retained only for transform-bearing cascades.
             meter.work(doc.nodes.len().saturating_mul(4 * MAX_DEPTH))?;
@@ -924,10 +928,15 @@ fn build_viewport_with_fonts_inner(
             }
         }
     }
+    // Recursive walks retain small shared handles rather than copying an entire
+    // Style into every native stack frame. Used-style overrides remain distinct.
+    let mut shared_styles = Vec::new();
+    shared_styles.try_reserve_exact(styles.len()).map_err(|_| "Layout style storage allocation failed".to_owned())?;
+    shared_styles.extend(styles.into_iter().map(std::rc::Rc::new));
     let mut engine = Engine {
         fonts,
         doc,
-        styles,
+        styles: shared_styles,
         image_sizes,
         zoom,
         layout: page,
@@ -1488,7 +1497,7 @@ impl Engine<'_> {
                         edges[1],
                     )
                 });
-            let mut used = original.clone();
+            let mut used = (*original).clone();
             if matches!(used.display, Display::Inline | Display::InlineBlock) {
                 used.display = Display::Block;
             }
@@ -1524,7 +1533,7 @@ impl Engine<'_> {
             let previous_label = self.active_label;
             let separator = self.pending_separator;
             self.active_label = label;
-            self.styles[node] = used;
+            self.styles[node] = std::rc::Rc::new(used);
             self.separate("\n");
             self.walk(node, link, depth);
             self.finish_line(false, 0);
@@ -2588,7 +2597,7 @@ impl Engine<'_> {
                 let padding = self.edges(original.padding, width, &original, false);
                 let border = self.border(&original, width);
                 let horizontal = padding[1] + padding[3] + border[1] + border[3];
-                let mut used = original.clone();
+                let mut used = (*original).clone();
                 used.display = Display::Block;
                 used.margin = [Length::Px(0.0); 4];
                 used.width = Length::Px((widths[column] - horizontal).max(0) as f32 / self.zoom);
@@ -2621,7 +2630,7 @@ impl Engine<'_> {
                         used.white_space,
                     ),
                 );
-                self.styles[node] = used;
+                self.styles[node] = std::rc::Rc::new(used);
                 self.walk(node, link, depth + 2);
                 self.finish_line(false, 0);
                 let cell_height = (self.flow.y - top).max(0);
@@ -2896,13 +2905,13 @@ impl Engine<'_> {
             }
             NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.canvas(node) || self.inline_svg(node) || self.loaded_image_control(node) => {
                 let width = if self.canvas(node) {
-                    let mut intrinsic_style = style.clone();
+                    let mut intrinsic_style = (*style).clone();
                     if intrinsic_style.width.has_percentage() {
                         intrinsic_style.width = Length::Auto;
                     }
                     self.image_dimensions(node, &intrinsic_style, 0).0
                 } else if tag != "img" && !self.video(node) && !self.inline_svg(node) {
-                    let mut intrinsic_style = style.clone();
+                    let mut intrinsic_style = (*style).clone();
                     if intrinsic_style.width.has_percentage() {
                         intrinsic_style.width = Length::Auto;
                     }
@@ -3127,7 +3136,7 @@ impl Engine<'_> {
     fn flex_dimension(&self, length: Length, reference: Option<i32>, style: &Style, edges: i32) -> Option<f64> {
         let physical=if let Length::Calc(value)=length{
             let reference=if length.has_percentage(){reference? as f32/self.zoom}else{0.0};
-            Some(value.resolve(reference,style.font_size,style.root_font_size)*f64::from(self.zoom))
+            Some(value.resolve(reference,style.font_size,style.root_font_size)?*f64::from(self.zoom))
         }else if let Length::Percent(percent)=length {
             // Avoid a lossy CSS/physical round trip: two exact halves must not
             // exceed their reference because of division by fractional zoom.
@@ -3352,7 +3361,7 @@ impl Engine<'_> {
                     ..Style::default()
                 }
             } else {
-                self.styles[child].clone()
+                (*self.styles[child]).clone()
             };
             let image = self.replaced_image(child);
             if image {
@@ -3503,7 +3512,7 @@ impl Engine<'_> {
             for &child in &item.nodes {
                 let old = self.styles[child].clone();
                 if !item.anonymous {
-                    let mut used = old.clone();
+                    let mut used = (*old).clone();
                     used.margin = [Length::Px(0.0); 4];
                     used.width = Length::Px(item.width as f32 / self.zoom);
                     used.min_width = Length::Px(0.0);
@@ -3532,7 +3541,7 @@ impl Engine<'_> {
                     if matches!(used.display, Display::Inline | Display::InlineBlock) {
                         used.display = Display::Block;
                     }
-                    self.styles[child] = used;
+                    self.styles[child] = std::rc::Rc::new(used);
                 }
                 self.walk(child, link, depth + 1);
                 self.styles[child] = old;

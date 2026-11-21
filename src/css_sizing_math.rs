@@ -4,26 +4,50 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CalculatedLength {
-    pub(crate) coefficients: [f32; 4], // px, percentage, em, rem
+    pub(crate) coefficients: [f32; 6], // px, percentage, em, rem, vw, vh
     pub(crate) nonnegative: bool,
     pub(crate) percentage: bool,
 }
 impl CalculatedLength {
-    pub(crate) fn resolve(self, reference: f32, font: f32, root: f32) -> f64 {
+    pub(crate) fn resolve(self, reference: f32, font: f32, root: f32) -> Option<f64> {
         let c = self.coefficients;
+        if c[4] != 0.0 || c[5] != 0.0 {
+            return None;
+        }
         let value = c[0] as f64
             + c[1] as f64 * reference as f64 / 100.0
             + c[2] as f64 * font as f64
             + c[3] as f64 * root as f64;
-        if self.nonnegative {
+        Some(if self.nonnegative {
             value.max(0.0)
         } else {
             value
-        }
+        })
     }
     pub(crate) fn text(self) -> String {
         let c = self.coefficients;
-        format!("calc({}px + {}% + {}em + {}rem)", c[0], c[1], c[2], c[3])
+        format!(
+            "calc({}px + {}% + {}em + {}rem + {}vw + {}vh)",
+            c[0], c[1], c[2], c[3], c[4], c[5]
+        )
+    }
+    pub(super) fn viewport(mut self, environment: Option<MediaEnvironment>) -> Self {
+        if self.coefficients[4] == 0.0 && self.coefficients[5] == 0.0 {
+            return self;
+        }
+        if let Some(env) = environment.filter(|env| {
+            env.width.is_finite() && env.height.is_finite() && env.width >= 0.0 && env.height >= 0.0
+        }) {
+            let c = &mut self.coefficients;
+            let pixels =
+                c[0] as f64 + c[4] as f64 * env.width / 100.0 + c[5] as f64 * env.height / 100.0;
+            if pixels.is_finite() && pixels.abs() <= f32::MAX as f64 {
+                c[0] = pixels as f32;
+                c[4] = 0.0;
+                c[5] = 0.0;
+            }
+        }
+        self
     }
     pub(super) fn inherited(mut self, parent: &Style) -> Self {
         let c = &mut self.coefficients;
@@ -39,7 +63,7 @@ impl CalculatedLength {
 #[derive(Clone, Copy)]
 enum Value {
     Number(f64),
-    Length([f64; 4], bool),
+    Length([f64; 6], bool),
 }
 impl Value {
     fn scale(self, factor: f64) -> Option<Self> {
@@ -89,7 +113,7 @@ fn expression(source: &str) -> Option<Value> {
     let mut values = Vec::new();
     let mut operators = Vec::new();
     // Existing declaration bytes bound the maximum token/stack storage.
-    values.try_reserve_exact(source.len() / 2 + 1).ok()?;
+    values.try_reserve_exact(source.len() / 3 + 2).ok()?;
     operators.try_reserve_exact(source.len()).ok()?;
     while index < bytes.len() {
         if bytes[index].is_ascii_whitespace() {
@@ -130,9 +154,11 @@ fn expression(source: &str) -> Option<Value> {
                     "%" => (1, 1.0),
                     "em" => (2, 1.0),
                     "rem" => (3, 1.0),
+                    "vw" => (4, 1.0),
+                    "vh" => (5, 1.0),
                     _ => return None,
                 };
-                let mut c = [0.0; 4];
+                let mut c = [0.0; 6];
                 c[slot] = number * factor;
                 Value::Length(c, slot == 1)
             };
@@ -183,13 +209,48 @@ fn expression(source: &str) -> Option<Value> {
     (values.len() == 1).then(|| values[0])
 }
 pub(super) fn cost(source: &str) -> (usize, usize) {
-    // Two validation/application passes, including typed operand and operator
-    // backing. Existing declaration bytes bound both iterative stacks.
+    let values = (source.len() / 3 + 2).saturating_mul(std::mem::size_of::<Value>());
     (
         source.len().saturating_mul(16),
-        source.len().saturating_mul(64),
+        values.saturating_add(source.len()).saturating_mul(2),
     )
 }
+pub(super) fn viewport_literal(source: &str, negative: bool) -> Option<Length> {
+    let source = source.trim_ascii();
+    if !source.is_ascii() || source.bytes().any(|b| b.is_ascii_whitespace()) {
+        return None;
+    }
+    let source = source.to_ascii_lowercase();
+    let (number, slot) = if let Some(number) = source.strip_suffix("vw") {
+        (number, 4)
+    } else if let Some(number) = source.strip_suffix("vh") {
+        (number, 5)
+    } else {
+        return None;
+    };
+    if translate::number_end(number)? != number.len() {
+        return None;
+    }
+    let number = number
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && (negative || *value >= 0.0))?;
+    let mut c = [0.0; 6];
+    c[slot] = number.clamp(-10_000.0, 10_000.0);
+    Some(Length::Calc(CalculatedLength {
+        coefficients: c,
+        nonnegative: !negative,
+        percentage: false,
+    }))
+}
+pub(super) fn resolve_viewport(value: Length, environment: Option<MediaEnvironment>) -> Length {
+    if let Length::Calc(value) = value {
+        Length::Calc(value.viewport(environment))
+    } else {
+        value
+    }
+}
+
 pub(super) fn length(source: &str, negative: bool) -> Option<Length> {
     let source = source.trim_ascii();
     if source.len() > MAX_GROUPED_BOX_BYTES || !source.is_ascii() {
@@ -212,7 +273,7 @@ pub(super) fn length(source: &str, negative: bool) -> Option<Length> {
             .iter()
             .position(|&v| v != 0.0)
             .unwrap_or(if percentage { 1 } else { 0 });
-        if !percentage || slot == 1 {
+        if slot < 4 && (!percentage || slot == 1) {
             let value = if negative { c[slot] } else { c[slot].max(0.0) };
             return length_with_unit(
                 value.clamp(-10_000.0, 10_000.0) as f32,
