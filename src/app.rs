@@ -6117,3 +6117,7 @@ mod viewport_sizing_tests;
 #[cfg(test)]
 #[path="app_css_text_tests.rs"]
 mod css_text_tests;
+
+#[cfg(test)]
+#[path="app_inline_flex_tests.rs"]
+mod inline_flex_tests;

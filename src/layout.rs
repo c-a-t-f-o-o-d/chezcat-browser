@@ -1498,8 +1498,8 @@ impl Engine<'_> {
                     )
                 });
             let mut used = (*original).clone();
-            if matches!(used.display, Display::Inline | Display::InlineBlock) {
-                used.display = Display::Block;
+            if matches!(used.display, Display::Inline | Display::InlineBlock | Display::InlineFlex) {
+                used.display = if used.display==Display::InlineFlex {Display::Flex}else{Display::Block};
             }
             used.margin = [Length::Px(0.0); 4];
             used.width = Length::Px(width as f32 / self.zoom);
@@ -2111,7 +2111,7 @@ impl Engine<'_> {
                     self.active_label = self.labels.get(&index).copied();
                     if style.display.block_level() {
                         self.block(index, &style, link, depth);
-                    } else if style.display == Display::InlineBlock {
+                    } else if style.display.atomic_inline() {
                         self.inline_block(index, &style, link, depth);
                     } else {
                         self.inline(index, &style, link, depth);
@@ -2167,7 +2167,7 @@ impl Engine<'_> {
                 }
                 if style.display.block_level() {
                     self.block(index, &style, link, depth);
-                } else if style.display == Display::InlineBlock {
+                } else if style.display.atomic_inline() {
                     self.inline_block(index, &style, link, depth);
                 } else {
                     if let Some(id) = id {
@@ -2254,7 +2254,7 @@ impl Engine<'_> {
             });
         let mut rounded_border = false;
         if style.background_image.is_none()
-            && matches!(style.display, Display::Block | Display::Flex | Display::Grid | Display::InlineBlock)
+            && matches!(style.display, Display::Block | Display::Flex | Display::InlineFlex | Display::Grid | Display::InlineBlock)
         {
             let circular = if border == [0; 4] || uniform.is_some() { style.circular_radius() } else { None };
             let radius = circular.unwrap_or(0.0) * self.zoom;
@@ -2373,7 +2373,7 @@ impl Engine<'_> {
         let atom_start = self.atoms.len();
         let vertical = border[0] + padding[0] + padding[2] + border[2];
         let specified_height = self.dimension(style.height, None, style, vertical);
-        let formatting = if style.display == Display::Flex {
+        let formatting = if style.display.flex_container() {
             Some(FormattingContext::Flex(self.flex(index, style, link, depth, width, specified_height)))
         } else if style.display == Display::Grid {
             let group = self.grid(index, style, link, depth, width, specified_height);
@@ -2447,7 +2447,7 @@ impl Engine<'_> {
         self.used_margins.insert(index,margin);
         self.placed_boxes.push(index);
         // A min/max-height constraint can establish a different final flex size.
-        if matches!(style.display, Display::Flex | Display::Grid) && content_height != natural_height {
+        if matches!(style.display, Display::Flex | Display::InlineFlex | Display::Grid) && content_height != natural_height {
             self.resize_box(index, content_height, depth);
         }
         self.flow = previous;
@@ -2598,7 +2598,7 @@ impl Engine<'_> {
                 let border = self.border(&original, width);
                 let horizontal = padding[1] + padding[3] + border[1] + border[3];
                 let mut used = (*original).clone();
-                used.display = Display::Block;
+                used.display = if used.display==Display::InlineFlex {Display::Flex}else{Display::Block};
                 used.margin = [Length::Px(0.0); 4];
                 used.width = Length::Px((widths[column] - horizontal).max(0) as f32 / self.zoom);
                 used.min_width = Length::Auto;
@@ -2986,7 +2986,7 @@ impl Engine<'_> {
                         minimum: width,
                     }
                 } else {
-                    let row = style.display == Display::Flex
+                    let row = style.display.flex_container()
                         && matches!(
                             style.flex_direction,
                             FlexDirection::Row | FlexDirection::RowReverse
@@ -3004,7 +3004,7 @@ impl Engine<'_> {
                         {
                             continue;
                         }
-                        if matches!(style.display, Display::Flex | Display::Grid)
+                        if matches!(style.display, Display::Flex | Display::InlineFlex | Display::Grid)
                             && matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) if text.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}')))
                         {
                             continue;
@@ -3023,6 +3023,15 @@ impl Engine<'_> {
                             } else {
                                 [0; 4]
                             };
+                        let dimensions=if row {
+                            let padding=self.edges(child_style.padding,0,child_style,false);
+                            let border=self.border(child_style,0);
+                            let kind=forms::kind(self.doc,child);
+                            let edges=if kind.is_some()&&!self.replaced_image(child){if native_button_padding(kind){padding[1]+padding[3]}else{0}}else{padding[1]+padding[3]+border[1]+border[3]};
+                            let (base,min,max)=self.flex_main_limits(child_style,edges,(dimensions.preferred-edges).max(0),(dimensions.minimum-edges).max(0),true,None);
+                            let contribution=|value:i32|{let mut value=f64::from((value-edges).max(0));if child_style.flex_grow==0.0{value=value.min(base);}if child_style.flex_shrink==0.0{value=value.max(base);} (value.clamp(min,max).ceil()as i32).saturating_add(edges)};
+                            Intrinsic{preferred:contribution(dimensions.preferred),minimum:contribution(dimensions.minimum)}
+                        }else{dimensions};
                         let outer = dimensions.preferred.saturating_add(margin[1] + margin[3]);
                         let child_min = dimensions.minimum.saturating_add(margin[1] + margin[3]);
                         if row {
@@ -3033,7 +3042,7 @@ impl Engine<'_> {
                                 minimum.saturating_add(child_min)
                             };
                             count += 1;
-                        } else if style.display == Display::Flex
+                        } else if style.display.flex_container()
                             || ((style.display == Display::Grid || child_style.display.block_level())
                                 && matches!(self.doc.nodes[child].kind, NodeKind::Element { .. }))
                         {
@@ -3151,29 +3160,17 @@ impl Engine<'_> {
         })
     }
 
-    fn flex_parameters(&self, item: &mut FlexItem, row: bool, reference: Option<i32>) {
-        let edges = item.edges[usize::from(!row)];
-        let style = &item.style;
+    fn flex_main_limits(&self,style:&Style,edges:i32,natural:i32,automatic_min:i32,row:bool,reference:Option<i32>)->(f64,f64,f64){
         let specified = self.flex_dimension(
             if row { style.width } else { style.height },
             reference,
             style,
             edges,
         );
-        let natural = if row {
-            (item.intrinsic.preferred - edges).max(0)
-        } else {
-            (item.natural_height - edges).max(0)
-        };
-        item.base =
+        let base =
             self.flex_dimension(style.flex_basis, reference, style, edges)
                 .or(specified)
                 .unwrap_or(f64::from(natural));
-        let automatic_min = if row {
-            (item.intrinsic.minimum - edges).max(0)
-        } else {
-            (item.minimum_height - edges).max(0)
-        };
         let automatic_min = specified.map_or(f64::from(automatic_min), |n| f64::from(automatic_min).min(n));
         let maximum = (if row {
             style.max_width
@@ -3182,7 +3179,7 @@ impl Engine<'_> {
         })
         .and_then(|v| self.flex_dimension(v, reference, style, edges));
         let automatic_min = maximum.map_or(automatic_min, |n| automatic_min.min(n));
-        item.minimum =
+        let minimum =
             self.flex_dimension(
                 if row {
                     style.min_width
@@ -3194,9 +3191,17 @@ impl Engine<'_> {
                 edges,
             )
             .unwrap_or(automatic_min);
-        item.maximum = maximum.unwrap_or(f64::from(if row { MAX_WIDTH } else { MAX_HEIGHT }))
-            .max(item.minimum);
-        item.main = item.base.clamp(item.minimum, item.maximum);
+        let maximum = maximum.unwrap_or(f64::from(if row { MAX_WIDTH } else { MAX_HEIGHT }))
+            .max(minimum);
+        (base,minimum,maximum)
+    }
+
+    fn flex_parameters(&self,item:&mut FlexItem,row:bool,reference:Option<i32>){
+        let edges=item.edges[usize::from(!row)];
+        let natural=(if row {item.intrinsic.preferred}else{item.natural_height}-edges).max(0);
+        let automatic_min=(if row {item.intrinsic.minimum}else{item.minimum_height}-edges).max(0);
+        let(base,minimum,maximum)=self.flex_main_limits(&item.style,edges,natural,automatic_min,row,reference);
+        item.base=base;item.minimum=minimum;item.maximum=maximum;item.main=base.clamp(minimum,maximum);
     }
 
     /// Resolve flex lengths with the specification's freezing/violation loop.
@@ -3538,8 +3543,8 @@ impl Engine<'_> {
                         .max_height
                         .and_then(|n| self.dimension(n, height, &old, item.edges[1]))
                         .map(|n| Length::Px(n as f32 / self.zoom));
-                    if matches!(used.display, Display::Inline | Display::InlineBlock) {
-                        used.display = Display::Block;
+                    if matches!(used.display, Display::Inline | Display::InlineBlock | Display::InlineFlex) {
+                        used.display = if used.display==Display::InlineFlex {Display::Flex}else{Display::Block};
                     }
                     self.styles[child] = std::rc::Rc::new(used);
                 }
@@ -3944,6 +3949,19 @@ impl Engine<'_> {
         height
     }
 
+    fn inline_flex_baseline(&self,index:usize,fallback:i32)->i32{
+        let Some(FormattingContext::Flex(group))=self.boxes[index].as_ref().and_then(|b|b.formatting.as_ref())else{return fallback;};
+        let Some(line)=group.lines.first()else{return fallback;};
+        let items=&group.items[line.clone()];
+        let row=matches!(group.style.flex_direction,FlexDirection::Row|FlexDirection::RowReverse);
+        for item in if row {items}else{&items[..items.len().min(1)]}{
+            if let Some(span)=item.span{
+                if let Some(atom)=self.atoms[span.start.atoms..span.end.atoms].iter().filter(|a|a.context==Some(index)&&matches!(a.kind,AtomKind::Text(_)|AtomKind::Control(_)|AtomKind::InlineBlock(_))).min_by_key(|a|a.line){return atom.y+atom.ascent;}
+            }
+        }
+        items.first().map_or(fallback,|item|item.y+item.height)
+    }
+
     fn inline_block(&mut self, index: usize, style: &Style, link: Option<usize>, depth: usize) {
         let available = (self.flow.right - self.flow.left).max(1);
         let margin = self.edges(style.margin, available, style, true);
@@ -3992,7 +4010,7 @@ impl Engine<'_> {
         let separator = self.pending_separator;
         let start = self.mark();
         let mut used = style.clone();
-        used.display = Display::Block;
+        used.display = if used.display==Display::InlineFlex {Display::Flex}else{Display::Block};
         used.width = Length::Px(width as f32 / self.zoom);
         used.min_width = Length::Auto;
         used.max_width = None;
@@ -4020,11 +4038,11 @@ impl Engine<'_> {
             start,
             end: self.mark(),
         };
-        let baseline = self.atoms[start.atoms..span.end.atoms]
+        let baseline = if style.display==Display::InlineFlex {self.inline_flex_baseline(index,height)} else {self.atoms[start.atoms..span.end.atoms]
             .iter()
             .filter(|atom| atom.context == Some(index))
             .max_by_key(|atom| atom.line)
-            .map_or(height, |atom| atom.y + atom.ascent);
+            .map_or(height, |atom| atom.y + atom.ascent)};
         if let Some(first) = self.layout.runs.get_mut(start.runs) {
             first.separator_before = if start.runs == 0 { "" } else { separator };
             self.pending_separator = "";
@@ -6383,3 +6401,7 @@ mod tests {
             .any(|runs| runs[0].y != runs[1].y && runs[1].separator_before.is_empty()));
     }
 }
+
+#[cfg(test)]
+#[path="layout_inline_flex_tests.rs"]
+mod inline_flex_tests;
