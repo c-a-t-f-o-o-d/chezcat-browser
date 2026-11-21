@@ -168,6 +168,7 @@ impl ComputedProperties {
 }
 
 pub(crate) struct CascadeOutput {
+    pub has_hover:bool,
     pub styles: Vec<Style>,
     pub computed_properties: ComputedProperties,
     pub stylesheet_cache: Option<StylesheetCache>,

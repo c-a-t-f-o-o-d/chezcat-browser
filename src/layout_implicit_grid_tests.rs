@@ -64,8 +64,7 @@ fn implicit_grid_action_rows_match_literal_and_flex_geometry_and_solid_paint() {
                     width,
                     height,
                     color,
-                    alpha,
-                } = item
+                    alpha, .. } = item
                 {
                     canvas.set_clip(layout.paint_clip(index));
                     canvas.fill_rect_alpha(*x, *y, *width, *height, *color, *alpha);

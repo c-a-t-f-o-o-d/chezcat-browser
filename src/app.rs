@@ -289,6 +289,8 @@ pub struct App {
     drag: Drag,
     select_popup: Option<SelectPopup>,
     hover: Option<String>,
+    hover_point:Option<(i32,i32)>,
+    hover_reflow_active:bool,
     menu: bool,
     chrome: chrome::Chrome,
     inspector: inspector::Inspector,
@@ -430,6 +432,7 @@ impl App {
             drag: Drag::None,
             select_popup: None,
             hover: None,
+            hover_point:None,hover_reflow_active:false,
             menu: false,
             chrome: chrome::Chrome::default(),
             inspector: inspector::Inspector::default(),
@@ -1824,6 +1827,7 @@ impl App {
         self.update_find(false);
         self.validate_control_focus();
         if self.sync_native_focus_css(){self.reflow();}
+        self.refresh_native_hover();
     }
     pub fn resize(&mut self, width: i32, height: i32) {
         let width = width.clamp(1, 8192);
@@ -1877,7 +1881,8 @@ impl App {
     }
     fn set_scroll(&mut self, scroll: i32) {
         let scroll = scroll.clamp(0, self.max_scroll());
-        if scroll != self.scroll {
+        let moved=scroll!=self.scroll;
+        if moved {
             self.anchor_geometry_scope = std::rc::Rc::new(());
             self.select_popup = None;
         }
@@ -1886,6 +1891,7 @@ impl App {
         if let Some(page) = &mut self.scripting {
             page.set_geometry_scroll(if self.view == View::Page { self.scroll } else { self.page_scroll });
         }
+        if moved{self.refresh_native_hover();}
     }
     pub fn scroll_by(&mut self, delta: i32) {
         self.user_changed_loading_position();
@@ -2056,10 +2062,16 @@ impl App {
     }
     fn apply_native_focus_css(&mut self){
         if !self.sync_native_focus_css(){return;}
-        // CSS focus changes must not discard the caret/drag committed by the
+        self.reflow_preserving_drag();
+    }
+    pub(super) fn reflow_preserving_drag(&mut self){
+        let selection=self.selection;
+        let old_runs=selection.map(|_|std::mem::take(&mut self.page.runs));
+        // CSS state changes must not discard the caret/drag committed by the
         // native press. A vanished control still cancels its old drag owner.
         let drag=std::mem::replace(&mut self.drag,Drag::None);
         self.reflow();
+        if let Some(old)=old_runs{if old.len()==self.page.runs.len()&&old.iter().zip(&self.page.runs).all(|(a,b)|a.node==b.node&&a.text==b.text){self.selection=selection;}}
         let keep=match &drag{Drag::Control{node}|Drag::SelectOption{node,..}=>self.page.controls.iter().any(|c|c.node==*node),Drag::Field=>self.focus!=Focus::Page,_=>true};
         if keep{self.drag=drag;}
     }
@@ -3414,7 +3426,7 @@ impl App {
                 / i64::from(self.max_scroll().max(1))) as i32;
         (y, thumb, track)
     }
-    pub fn pointer_down(&mut self, x: i32, y: i32, shift: bool) -> PlatformAction {
+    fn pointer_down_impl(&mut self, x: i32, y: i32, shift: bool) -> PlatformAction {
         self.invalidate_platform_requests();
         if self.downloads_pointer_down(x, y) {
             return PlatformAction::None;
@@ -3545,7 +3557,7 @@ impl App {
         };
         PlatformAction::None
     }
-    pub fn pointer_move(&mut self, x: i32, y: i32, dragging: bool) -> bool {
+    fn pointer_move_impl(&mut self, x: i32, y: i32, dragging: bool) -> bool {
         if dragging { self.invalidate_platform_requests(); }
         if self.downloads_open() {
             return self.downloads_pointer_move(x, y);
@@ -3668,7 +3680,7 @@ impl App {
         }
         changed || !matches!(self.drag, Drag::None)
     }
-    pub fn pointer_up(&mut self, x: i32, y: i32) -> PlatformAction {
+    fn pointer_up_impl(&mut self, x: i32, y: i32) -> PlatformAction {
         self.pointer_up_mode(x, y, true)
     }
     /// Native link activation owns its guarded author/default path separately.
@@ -3769,6 +3781,7 @@ impl App {
         PlatformAction::None
     }
     pub fn pointer_cancel(&mut self) {
+        self.clear_native_hover();
         self.media_pointer_cancel();
         self.downloads_pointer_cancel();
         self.cancel_bookmark_pointer();
@@ -3895,14 +3908,13 @@ impl App {
                     width,
                     height,
                     color,
-                    alpha,
-                } => {
+                    alpha, .. } => {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
                         canvas.fill_rect_alpha(x, y, width, height, self.page_background_color(color), alpha);
                     }
                 }
-                PaintItem::RoundedRect { x, y, width, height, color, alpha, radius, border, background_insets } => {
+                PaintItem::RoundedRect { x, y, width, height, color, alpha, radius, border, background_insets,.. } => {
                     let y = y + top - self.scroll;
                     if y < bottom && y.saturating_add(height) > top {
                         canvas.fill_color_box(x, y, width, height, radius,
@@ -6152,3 +6164,10 @@ mod structural_selector_tests;
 #[cfg(test)]
 #[path="app_native_focus_selector_tests.rs"]
 mod native_focus_selector_tests;
+
+#[cfg(test)]
+#[path="app_native_hover_tests.rs"]
+mod native_hover_tests;
+
+#[path="app_native_hover.rs"]
+mod native_hover;

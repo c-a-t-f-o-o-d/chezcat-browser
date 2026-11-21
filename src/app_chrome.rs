@@ -823,10 +823,11 @@ impl App {
 
     /// Pointer leave must not terminate a captured text selection or scrollbar drag.
     pub fn pointer_leave(&mut self) -> bool {
+        let css_changed=self.clear_native_hover();
         let changed = self.chrome.hover.take().is_some() || self.hover.is_some();
         self.hover = None;
         let panel_changed =
             self.browser_panel.is_some() && self.browser_pointer_move(-1, -1, false);
-        changed || panel_changed
+        changed || panel_changed || css_changed
     }
 }

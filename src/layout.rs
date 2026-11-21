@@ -195,6 +195,7 @@ struct ContainingBlock {
 
 #[derive(Debug)]
 pub struct TextRun {
+    pub(crate) node:usize,
     pub x: i32,
     pub y: i32,
     pub text: String,
@@ -246,6 +247,7 @@ impl TextRun {
 #[derive(Clone, Debug)]
 pub enum PaintItem {
     Rect {
+        node:usize,
         x: i32,
         y: i32,
         width: i32,
@@ -257,6 +259,7 @@ pub enum PaintItem {
     /// including one uniform solid border in the same boundary composite.
     /// The unnormalized radius is retained across final sizing/flex stretch.
     RoundedRect {
+        node:usize,
         x: i32,
         y: i32,
         width: i32,
@@ -291,6 +294,7 @@ pub enum PaintItem {
     },
     /// Interactive box geometry participates in hit order but paints no pixels.
     HitBox {
+        node:usize,
         x: i32,
         y: i32,
         width: i32,
@@ -302,6 +306,7 @@ pub enum PaintItem {
 
 #[derive(Clone)]
 struct HitRegion {
+    node:usize,
     x: i32,
     y: i32,
     width: i32,
@@ -376,6 +381,8 @@ pub struct BorderRect {
 }
 
 pub struct Layout {
+    pub(crate) has_hover_styles:bool,
+    pub(crate) root_hit_node:Option<usize>,
     pub(crate) computed_properties: css::ComputedProperties,
     pub(crate) stylesheet_cache: Option<css::StylesheetCache>,
     pub runs: Vec<TextRun>,
@@ -428,6 +435,9 @@ impl Layout {
         self.hits.iter().filter(|hit| hit.link.is_some_and(|index| index < self.targets.len())
             && hit.width > 0 && hit.height > 0 && hit.x < width && hit.x.saturating_add(hit.width) > 0
             && hit.y < scroll.saturating_add(height) && hit.y.saturating_add(hit.height) > scroll).count()
+    }
+    pub(crate) fn element_node_at(&self,x:i32,y:i32)->Option<usize>{
+        self.hits.iter().rev().find(|h|ClipRect::new(h.x,h.y,h.width,h.height).contains(x,y)).and_then(|h|(h.node!=0).then_some(h.node))
     }
     pub fn link_node_at(&self, x: i32, y: i32) -> Option<usize> {
         for hit in self.hits.iter().rev() {
@@ -521,7 +531,7 @@ impl Layout {
             let rect=match item {
                 PaintItem::Image {node:owner,x:left,y:top,width,height,..}=>{if ClipRect::new(*left,*top,*width,*height).contains(x,y){return *owner==node;}continue;},
                 PaintItem::Rect {x,y,width,height,..} | PaintItem::RoundedRect {x,y,width,height,..} | PaintItem::Background {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
-                PaintItem::HitBox {x,y,width,height,link,control}=>{if link.is_none()&&control.is_none(){continue;}ClipRect::new(*x,*y,*width,*height)},
+                PaintItem::HitBox {x,y,width,height,..}=>ClipRect::new(*x,*y,*width,*height),
                 PaintItem::Text(i)=>{let r=&self.runs[*i];ClipRect::new(r.x,r.y,r.width(),r.height())},
                 PaintItem::Control(i)=>{let r=&self.controls[*i];ClipRect::new(r.x,r.y,r.width,r.height)},
             };
@@ -828,7 +838,7 @@ fn build_viewport_with_fonts_inner(
             doc, external_styles, checked, Some(environment), stylesheet_cache,
         ),
     };
-    let css::CascadeOutput { styles, computed_properties, stylesheet_cache } = cascade;
+    let css::CascadeOutput { styles, computed_properties, stylesheet_cache,has_hover } = cascade;
     if let Some(meter) = budget.as_deref_mut() {
         if computed_properties.has_transform_geometry() {
             // This caller budget accounts for transform-bearing layout, not
@@ -841,7 +851,9 @@ fn build_viewport_with_fonts_inner(
             meter.copies(doc.nodes.len().saturating_mul(std::mem::size_of::<OffsetParent>()))?;
         }
     }
+    let root_hit_node=doc.nodes.first().and_then(|root|root.children.iter().copied().find(|&node|doc.nodes.get(node).is_some_and(|n|n.namespace==crate::html::Namespace::Html&&matches!(&n.kind,NodeKind::Element{tag,..}if tag=="html"))&&styles.get(node).is_some_and(|s|s.display!=Display::None)));
     let mut page = Layout {
+        has_hover_styles:has_hover,root_hit_node,
         computed_properties,
         stylesheet_cache,
         runs: Vec::new(),
@@ -894,6 +906,7 @@ fn build_viewport_with_fonts_inner(
     });
     if let Some(color) = root_background {
         page.items.push(PaintItem::Rect {
+            node:0,
             x: 0,
             y: 0,
             width,
@@ -1798,16 +1811,11 @@ impl Engine<'_> {
         self.layout.hits.clear();
         for (index, item) in self.layout.items.iter().enumerate() {
             let (mut hit, fixed) = match item {
-                PaintItem::Rect {
-                    x,
-                    y,
-                    width,
-                    height,
-                    ..
-                }
-                | PaintItem::RoundedRect { x, y, width, height, .. }
-                | PaintItem::Background { x, y, width, height, .. } => (
+                PaintItem::Rect {node,x,y,width,height,..}
+                | PaintItem::RoundedRect {node,x,y,width,height,..}
+                | PaintItem::Background {node,x,y,width,height,..} => (
                     HitRegion {
+                        node:*node,
                         x: *x,
                         y: *y,
                         width: *width,
@@ -1827,8 +1835,11 @@ impl Engine<'_> {
                         continue;
                     };
                     let a = &self.atoms[atom];
+                    let mut node=if matches!(item,PaintItem::Text(_)){self.layout.runs[*run].node}else{self.layout.controls[*run].node};
+                    for _ in 0..self.doc.nodes.len(){if matches!(self.doc.nodes[node].kind,NodeKind::Element{..}){break;}let Some(parent)=self.parents[node]else{node=0;break;};node=parent;}
                     (
                         HitRegion {
+                            node,
                             x: a.x,
                             y: a.y,
                             width: a.width,
@@ -1846,6 +1857,7 @@ impl Engine<'_> {
                     let a = &self.atoms[*atom];
                     (
                         HitRegion {
+                            node:*node,
                             x: a.x,
                             y: a.y,
                             width: a.width,
@@ -1857,6 +1869,7 @@ impl Engine<'_> {
                     )
                 }
                 PaintItem::HitBox {
+                    node,
                     x,
                     y,
                     width,
@@ -1865,6 +1878,7 @@ impl Engine<'_> {
                     control,
                 } => (
                     HitRegion {
+                        node:*node,
                         x: *x,
                         y: *y,
                         width: *width,
@@ -2269,6 +2283,7 @@ impl Engine<'_> {
             if let Some(item) = background.filter(|_| circular.is_some() || insets != [0; 4]) {
                 if let PaintItem::Rect { color, alpha, .. } = self.layout.items[item] {
                     self.layout.items[item] = PaintItem::RoundedRect {
+                        node:index,
                         x, y, width: outer_width, height: 0, color, alpha, radius,
                         border: if circular.is_some() { uniform } else { None },
                         background_insets: insets,
@@ -2287,11 +2302,11 @@ impl Engine<'_> {
                 None
             }
         });
-        let hit_box = if (link.is_some() || self.active_label.is_some())
-            && self.layout.items.len() < MAX_ITEMS
+        let hit_box = if self.layout.items.len() < MAX_ITEMS
         {
             let item = self.layout.items.len();
             self.layout.items.push(PaintItem::HitBox {
+                node:index,
                 x,
                 y,
                 width: outer_width,
@@ -2581,7 +2596,7 @@ impl Engine<'_> {
             let start = self.mark();
             let row_style = self.styles[row.node].clone();
             let row_background = row_style.background.and_then(|color| {
-                self.rect(left + gaps[0], top, (width - 2 * gaps[0]).max(0), 0, color)
+                self.rect_for(row.node,left + gaps[0], top, (width - 2 * gaps[0]).max(0), 0, color)
             });
             if let NodeKind::Element { id: Some(id), .. } = &self.doc.nodes[row.node].kind {
                 self.anchor(row.node, id, top);
@@ -4292,6 +4307,7 @@ impl Engine<'_> {
             Shape::width,
         );
         self.layout.runs.push(TextRun {
+            node:self.current_node,
             x,
             y,
             text,
@@ -4916,12 +4932,16 @@ impl Engine<'_> {
         self.flow.space_pending = false;
     }
 
+    fn rect_for(&mut self,node:usize,x:i32,y:i32,width:i32,height:i32,color:u32)->Option<usize>{
+        let item=self.rect(x,y,width,height,color)?;if let PaintItem::Rect{node:owner,..}=&mut self.layout.items[item]{*owner=node;}Some(item)
+    }
     fn rect(&mut self, x: i32, y: i32, width: i32, height: i32, color: u32) -> Option<usize> {
         if self.layout.items.len() >= MAX_ITEMS {
             return None;
         }
         let index = self.layout.items.len();
         self.layout.items.push(PaintItem::Rect {
+            node:self.current_node,
             x,
             y,
             width,
@@ -5043,6 +5063,7 @@ impl Engine<'_> {
                 let height = bottom - y + decoration.padding[2] + border[2];
                 if let Some(color) = decoration.background {
                     items.push(PaintItem::Rect {
+                        node:decoration.node,
                         x,
                         y,
                         width,
@@ -5055,6 +5076,7 @@ impl Engine<'_> {
                 for (side, (x, y, width, height)) in boxes.into_iter().enumerate() {
                     if border[side] > 0 {
                         items.push(PaintItem::Rect {
+                        node:decoration.node,
                             x,
                             y,
                             width,
@@ -5064,8 +5086,9 @@ impl Engine<'_> {
                         });
                     }
                 }
-                if decoration.link.is_some() || decoration.control.is_some() {
+                if items.len()<remaining {
                     items.push(PaintItem::HitBox {
+                        node:decoration.node,
                         x,
                         y,
                         width,
@@ -6405,3 +6428,7 @@ mod tests {
 #[cfg(test)]
 #[path="layout_inline_flex_tests.rs"]
 mod inline_flex_tests;
+
+#[cfg(test)]
+#[path="layout_native_hover_tests.rs"]
+mod native_hover_tests;

@@ -38,8 +38,7 @@ fn grid_inline_alignment_action_stack_positions_paint_and_real_hit_bounds() {
             width,
             height,
             color,
-            alpha,
-        } = item
+            alpha, .. } = item
         {
             canvas.set_clip(layout.paint_clip(index));
             canvas.fill_rect_alpha(*x, *y, *width, *height, *color, *alpha);

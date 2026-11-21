@@ -663,6 +663,7 @@ struct Compound {
     checked: bool,
     focus:bool,
     focus_within:bool,
+    hover:bool,
     disabled: bool,
     negations: Vec<Vec<Selector>>,
     structural:Vec<structural::Predicate>,
@@ -700,6 +701,8 @@ struct Selector {
     relations: Vec<Relation>,
     specificity: (u16, u16, u16),
 }
+
+impl Selector{fn depends_on_hover(&self)->bool{self.target==SelectorTarget::Element&&self.parts.iter().any(|p|p.hover||p.negations.iter().flatten().any(Selector::depends_on_hover))}}
 
 struct Rule {
     selectors: Vec<Selector>,
@@ -1485,7 +1488,7 @@ fn compute_cascade(
         if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
         presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color}));
     }
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
+    Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -2405,6 +2408,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             checked: false,
             focus:false,
             focus_within:false,
+            hover:false,
             disabled: false,
             negations: Vec::new(),
             structural:Vec::new(),
@@ -2478,6 +2482,8 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                         part.structural.push(structural::parse(name,source,&mut position)?);specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("root") {
                         part.root=true;specificity.1+=1;
+                    } else if name.eq_ignore_ascii_case("hover") {
+                        part.hover=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("focus") {
                         part.focus=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("focus-within") {
@@ -2778,8 +2784,9 @@ struct MatchContext<'a> {
 }
 
 impl<'a> MatchContext<'a> {
-    fn focus_matches(&self,node:usize,within:bool,budget:&mut usize)->bool{
-        let Some(focus)=self.doc.native_focus.get()else{return false;};
+    fn focus_matches(&self,node:usize,within:bool,budget:&mut usize)->bool{self.interaction_matches(self.doc.native_focus.get(),node,within,budget)}
+    fn interaction_matches(&self,target:Option<usize>,node:usize,within:bool,budget:&mut usize)->bool{
+        let Some(focus)=target else{return false;};
         if !within && focus!=node{return false;}
         if !self.doc.nodes.get(focus).is_some_and(|n|matches!(n.kind,NodeKind::Element{..})){return false;}
         let(mut current,mut contains)=(Some(focus),false);
@@ -2955,6 +2962,7 @@ fn matches_selector(
                 }
             }
         }
+        if compound.hover && !context.interaction_matches(context.doc.native_hover.get(),node,true,budget){return false;}
         if compound.focus {if !context.focus_matches(node,false,budget){return false;}}
         else if compound.focus_within && !context.focus_matches(node,true,budget){return false;}
         for predicate in &compound.structural{if !predicate.matches(context,node,budget){return false;}}

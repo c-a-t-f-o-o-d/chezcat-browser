@@ -293,6 +293,7 @@ impl State {
         self.tree = tree;
         self.dom.connected = connected;
         self.dirty = false;
+        if doc.native_hover.get().is_some_and(|node|!self.dom.connected.get(node).copied().unwrap_or(false)){doc.native_hover.set(None);self.layout_changed();}
         if doc.native_focus.get().is_some_and(|node|!self.dom.connected.get(node).copied().unwrap_or(false)){
             doc.native_focus.set(None);self.dom.native_focus_removed=true;self.layout_changed();
         }
