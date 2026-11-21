@@ -58,12 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `44ef2a1` at November 21, 02:37 UTC
-still renders a skeleton. It first fails on an unsupported computed `fontSize`
-read at 38099:264. The next connected increment reads the actual renderer's
-font-size cascade through live CSSOM, retaining computation availability and
-native budgets. Anchor identity, XHR and touch-action are integrated; these
-checks do not prove a usable shell. The
+The latest isolated Windows check on clean `88e5509` at November 21, 02:46 UTC
+still renders a skeleton. It first fails on missing `AnimationEvent` in handler
+type metadata at 39130:80. The next connected increment supplies a genuine
+Event-derived constructor, retained fields and synthetic dispatch. This does
+not establish CSS animation playback or native animation lifecycle events.
+Anchor identity, XHR, touch-action and computed font size are integrated;
+these checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
 

@@ -1740,3 +1740,24 @@ This readback preserves the existing finite font grammar and 1–256 px native
 renderer policy; it does not complete CSS typography, every computed property,
 font-resource support or the deferred capacity work. See
 [CSSOM resolved values](https://drafts.csswg.org/cssom/#resolved-values).
+
+
+## Genuine AnimationEvent construction
+
+Each owner realm supplies a canonical AnimationEvent derived from Event.
+Constructor dictionaries use ordered Web IDL DOMString and finite-double
+conversion. Native records retain readonly animationName, elapsedTime and
+pseudoElement, including unpaired UTF-16 units and signed zero. Saved roots,
+borrowed getter brands and owner/origin guards follow the existing event model.
+
+The additional string payload is admitted before base record/backing publication
+and refunded if base construction fails. Getter copies remain metered. Synthetic
+dispatch uses the actual event target, propagation/cancellation and protected
+untrusted state. Base initEvent preserves subclass fields. The original App
+fixture dispatches from a trusted button callback and checks real DOM/glyph
+changes with unchanged neighboring editor state and link targets.
+
+This constructor/record increment does not implement CSS animation timelines,
+keyframes or native animation lifecycle delivery. Legacy createEvent and
+initAnimationEvent are not exposed. See the
+[CSS AnimationEvent interface](https://drafts.csswg.org/css-animations/#interface-animationevent).
