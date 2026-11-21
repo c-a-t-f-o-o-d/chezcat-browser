@@ -8,22 +8,24 @@ use super::*;
 const MAX_INTRINSIC_REALMS: usize = 8;
 pub(super) const BINARY_GLOBALS: &[&str] = &["ArrayBuffer", "DataView", "Int8Array", "Uint8Array", "Uint8ClampedArray",
     "Int16Array", "Uint16Array", "Int32Array", "Uint32Array", "Float16Array", "Float32Array", "Float64Array"];
+pub(super) const HEADERS_GLOBALS: &[&str] = &["Headers"];
 pub(super) const URL_GLOBALS: &[&str] = &["URL", "URLSearchParams"];
 pub(super) const TEXT_GLOBALS: &[&str] = &["TextEncoder", "TextDecoder"];
 pub(super) const RECT_GLOBALS: &[&str] = &["DOMRectReadOnly", "DOMRect"];
 pub(super) const DOM_EXCEPTION_GLOBALS: &[&str] = &["DOMException"];
 pub(super) const IMAGE_DATA_GLOBALS: &[&str] = &["ImageData"];
 
+const HEADERS: u8 = 64;
 const BINARY: u8 = 1;
 const URL: u8 = 2;
 const TEXT: u8 = 4;
 const RECT: u8 = 8;
 const DOM_EXCEPTION: u8 = 16;
 const IMAGE_DATA: u8 = 32;
-pub(super) const ALL_DEFERRED: u8 = BINARY | URL | TEXT | RECT | DOM_EXCEPTION | IMAGE_DATA;
+pub(super) const ALL_DEFERRED: u8 = BINARY | URL | TEXT | RECT | DOM_EXCEPTION | IMAGE_DATA | HEADERS;
 
 pub(super) const fn startup_deferred_families(defer_core: bool) -> u8 {
-    if defer_core { ALL_DEFERRED } else { RECT | DOM_EXCEPTION | IMAGE_DATA }
+    if defer_core { ALL_DEFERRED } else { RECT | DOM_EXCEPTION | IMAGE_DATA | HEADERS }
 }
 
 macro_rules! roots {
@@ -55,6 +57,7 @@ roots! {
     regexp_constructor: Option<usize>,
     date_prototype: Option<usize>,
     url_roots: url_api::Roots,
+    headers_roots: headers_api::Roots,
     rect_roots: rect_api::Roots,
     image_data_prototype: Option<usize>,
     dom_exception_roots: dom_exception::Roots,
@@ -124,6 +127,7 @@ impl Runtime {
                 roots.generator_roots.reachability_edges(add);
                 roots.text_roots.reachability_edges(add);
                 roots.url_roots.reachability_edges(add);
+                roots.headers_roots.reachability_edges(add);
                 roots.rect_roots.reachability_edges(add);
                 if let Some(id) = roots.image_data_prototype { add(Edge::Object(id)); }
                 roots.dom_exception_roots.reachability_edges(add);
@@ -145,6 +149,7 @@ impl Runtime {
     pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
         if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
         let (bit, names) = if BINARY_GLOBALS.contains(&name) { (BINARY, BINARY_GLOBALS) }
+            else if HEADERS_GLOBALS.contains(&name) { (HEADERS, HEADERS_GLOBALS) }
             else if URL_GLOBALS.contains(&name) { (URL, URL_GLOBALS) }
             else if TEXT_GLOBALS.contains(&name) { (TEXT, TEXT_GLOBALS) }
             else if RECT_GLOBALS.contains(&name) { (RECT, RECT_GLOBALS) }
@@ -161,6 +166,7 @@ impl Runtime {
             match bit {
                 BINARY => self.initialize_binary()?,
                 URL => self.initialize_url_api()?,
+                HEADERS => self.initialize_headers_api()?,
                 TEXT => { self.ensure_global_intrinsics("Uint8Array")?; self.initialize_text_encoding()?; }
                 RECT => self.initialize_rect_api()?,
                 DOM_EXCEPTION => self.initialize_dom_exception()?,

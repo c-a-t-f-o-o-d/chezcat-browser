@@ -2271,3 +2271,34 @@ The adjacent contentEditable brand check now enforces that same HTML namespace
 boundary instead of accepting SVG through the broader class-list predicate.
 An original App fixture demonstrates reactive show/hide, native link pixels and
 activation with preserved text-editor state; it is not a site initialization claim.
+
+## Native Headers values for shared request and response adapters
+
+Headers uses genuine private runtime data with canonical owner-realm prototypes,
+required method arguments and receiver checks before observable conversion.
+Record and iterable initializers complete Web IDL ByteString conversion before
+header validation. Nested iterator conversion unwinds through the existing
+iterator-close protocol. Invalid names, embedded NUL/newline values, Symbol
+conversion and code points above 255 reject before publishing list changes.
+Normalization removes HTTP whitespace at value boundaries and lowercases names.
+
+Append/get combine ordinary duplicate values with comma-space separators;
+set/delete replace/remove all matching entries. Set-Cookie values remain separate
+for getSetCookie and sorted iteration. Entries/keys/values and forEach consult the
+live sorted list. The iterator prototype inherits the shared Iterator prototype;
+its private source edge participates in native reachability. Supported records,
+iterables, ordinary properties and callee realms use existing runtime semantics;
+native-host initialization and unsupported Proxy operations retain explicit guards.
+
+Native list backing and text capacities spend the existing retained-value ledger,
+with fallible growth and copy/work accounting. Conversion scratch stays charged
+across reentrant callbacks and unwinds on errors. Mutation candidates are private
+until admission succeeds; refusal preserves the real list. There is no extra
+header-count limit copied from URLSearchParams. Immutable native lists reject
+mutation after argument conversion; request/response adapter guards remain separate.
+
+An original App test transfers authored Headers through the real XHR adapter and
+verifies a loopback POST/body, combined header values, native cookie ownership,
+forbidden Host/Cookie filtering, HttpOnly response filtering and rendered response
+text. This is a Headers/transport integration result. Fetch, Response, streaming
+bodies and actual-site request/body success are not supplied by this increment.
