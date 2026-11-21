@@ -108,7 +108,7 @@ impl Bridge<'_> {
                 return Err("DOM depth limit reached during import.".into());
             }
             let attributes = match self.template_import_source(handle) {
-                Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.len(),
+                Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()).saturating_add(a.value.len())),
                 _ => 0,
             };
             self.state.work(count.saturating_add(attributes).saturating_add(1))?;
@@ -119,7 +119,7 @@ impl Bridge<'_> {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
                         let svg=node.namespace==crate::html::Namespace::Svg;
-                        if svg&&!crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}
+                        if svg{if !crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}for attr in attrs{if attr.name.html_is("style"){validate_style(&attr.value,self.state.limits.host.string_bytes)?;}}}
                         if !svg&&(node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }

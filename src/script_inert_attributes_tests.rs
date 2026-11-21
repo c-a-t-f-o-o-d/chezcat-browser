@@ -174,8 +174,8 @@ var svgSeed=document.createElement('template');svgSeed.innerHTML='<svg><rect wid
     page.begin_job();let mount=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("mount")).unwrap();let children=doc.nodes[mount].children.clone();let before=doc.nodes.len();let retained=page.state.retained;let generation=page.state.dom_commits;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     assert!(bridge.splice_checked_inert_fragment(mount,donor,None).unwrap_err().contains("active capabilities"));assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.state.retained,retained);assert_eq!(bridge.state.dom_commits,generation);assert!(!bridge.state.images.has_changes());
-    assert!(bridge.attr_set(width,"value",Value::String("9".into())).unwrap_err().contains("foreign-element"));assert_eq!(bridge.state.retained,retained);
-    page.begin_job();execute(&mut doc,&mut forms,&mut page,"if(donor.children[0]!==parked||parked.isConnected||width.value!=='2')throw 'protected refusal';parked.removeAttribute('onclick');document.getElementById('mount').appendChild(donor);if(!parked.isConnected||parked.attributes!==saved||parked.getAttribute('data-note')!=='kept'||donor.children.length!==0)throw 'safe activation recovery';");
+    bridge.attr_set(width,"value",Value::String("9".into())).unwrap();
+    page.begin_job();execute(&mut doc,&mut forms,&mut page,"if(donor.children[0]!==parked||parked.isConnected||width.value!=='9')throw 'protected refusal';parked.removeAttribute('onclick');document.getElementById('mount').appendChild(donor);if(!parked.isConnected||parked.attributes!==saved||parked.getAttribute('data-note')!=='kept'||donor.children.length!==0)throw 'safe activation recovery';");
 }
 #[test]
 fn inert_attribute_writes_canonical_main_methods_preserve_native_form_named_precedence(){

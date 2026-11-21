@@ -1889,7 +1889,7 @@ mod namespaced_creation_tests {
     fn svg_element_names_reflect_proven_namespace_and_preserve_fragment_replacement_guards() {
         let mut doc = crate::html::parse(concat!(
             "<html><body><circle id=htmlShape></circle><svg id=drawing>",
-            "<g><circle id=shape></circle></g></svg><div id=neighbor></div></body></html>"
+            "<g><circle id=shape></circle></g></svg><div id=neighbor></div><math id=guard><mi>x</mi></math></body></html>"
         ));
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
@@ -1910,11 +1910,14 @@ mod namespaced_creation_tests {
             fragment.appendChild(document.createElement('div'));
         "#);
         assert_eq!(read.errors, 0, "{}", page.report());
+        let replacement = page.console_eval(&mut doc, &mut forms,
+            "var inserted=fragment.firstChild;document.body.replaceChild(fragment,drawing);if(drawing.isConnected||shape.isConnected||inserted.parentNode!==document.body||fragment.childNodes.length!==0||drawing.namespaceURI!==svgNS)throw 'real SVG retirement';var blocked=document.createDocumentFragment();blocked.appendChild(document.createElement('div'));");
+        assert_eq!(replacement.errors, 0, "{}", page.report());
         let nodes = format!("{:?}", doc.nodes);
         let commits = page.state.dom_commits;
-        let replacement = page.console_eval(&mut doc, &mut forms,
-            "document.body.replaceChild(fragment,drawing);");
-        assert_eq!(replacement.errors, 1, "foreign subtree batch replacement must fail atomically");
+        let refused = page.console_eval(&mut doc, &mut forms,
+            "document.body.replaceChild(blocked,document.getElementById('guard'));");
+        assert_eq!(refused.errors, 1, "unknown foreign subtree replacement must fail atomically");
         assert_eq!(format!("{:?}", doc.nodes), nodes);
         assert_eq!(page.state.dom_commits, commits);
     }

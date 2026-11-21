@@ -36,8 +36,8 @@ impl Bridge<'_> {
             }
         }
         self.mutation_ancestors(parent)?;
-        if self.doc.nodes[parent].namespace!=crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent)) {
-            return Err("Fragment insertion requires a known HTML or fragment container; no tree was changed.".into());
+        if !matches!(self.doc.nodes[parent].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) && !self.fragment_receiver(node_handle(parent)) {
+            return Err("Fragment insertion requires a known HTML, SVG or fragment container; no tree was changed.".into());
         }
         if matches!(tag(self.doc,parent),"script"|"style"|"link"|"iframe"|"select"|"option"|"optgroup") {
             return Err("Fragment insertion into resource or native-control interiors is not implemented; no tree was changed.".into());

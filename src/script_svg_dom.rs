@@ -96,6 +96,13 @@ impl Bridge<'_> {
         if !crate::html::svg_dom_transfer(&self.doc.nodes[node]) {
             return Err("SVG transfer requires supported passive namespace/attributes and local references.".into());
         }
+        if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
+            for attr in attrs {
+                if attr.name.html_is("style") {
+                    validate_style(&attr.value, self.state.limits.host.string_bytes)?;
+                }
+            }
+        }
         Ok(())
     }
 }
