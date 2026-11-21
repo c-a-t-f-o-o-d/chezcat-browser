@@ -184,9 +184,11 @@ fn computed_custom_readback_incomplete_snapshot_is_indeterminate_and_names_share
         HashMap::from([(0, 0x123456)]),
         HashMap::new(),
         HashMap::new(),
+        HashMap::new(),
     );
     assert_eq!(snapshot.read(0, "--absent"), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_overflow(0), Err(ComputedStyleUnavailable));
+    assert_eq!(snapshot.read_font_size(0), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_position(0), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.read_transform(0), Err(ComputedStyleUnavailable));
     assert_eq!(snapshot.canvas_foreground(0), Err(ComputedStyleUnavailable));

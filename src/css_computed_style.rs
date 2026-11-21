@@ -18,6 +18,7 @@ struct Snapshot {
     canvas_foregrounds: HashMap<usize, u32>,
     opacities: HashMap<usize, Option<f64>>,
     touch_actions: HashMap<usize, Option<TouchAction>>,
+    font_sizes: HashMap<usize, Option<f32>>,
 }
 impl ComputedProperties {
     #[allow(clippy::too_many_arguments)]
@@ -32,6 +33,7 @@ impl ComputedProperties {
         canvas_foregrounds: HashMap<usize, u32>,
         opacities: HashMap<usize, Option<f64>>,
         touch_actions: HashMap<usize, Option<TouchAction>>,
+        font_sizes: HashMap<usize, Option<f32>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -44,6 +46,7 @@ impl ComputedProperties {
             canvas_foregrounds,
             opacities,
             touch_actions,
+            font_sizes,
         }))
     }
     pub(crate) fn read(
@@ -133,6 +136,11 @@ impl ComputedProperties {
         self.0.opacities.get(&node).copied().unwrap_or(Some(1.0))
             .map(Some).ok_or(ComputedStyleUnavailable)
     }
+    pub(crate) fn read_font_size(&self,node:usize)->Result<Option<f32>,ComputedStyleUnavailable> {
+        if !*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)? {return Ok(None);}
+        if !self.0.complete {return Err(ComputedStyleUnavailable);}
+        self.0.font_sizes.get(&node).copied().unwrap_or(Some(INITIAL_FONT_SIZE)).map(Some).ok_or(ComputedStyleUnavailable)
+    }
     pub(crate) fn read_touch_action(&self,node:usize)->Result<Option<TouchAction>,ComputedStyleUnavailable> {
         let eligible=*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)?;
         if !eligible {return Ok(None);}
@@ -167,6 +175,9 @@ pub(super) fn check_css_deadline(deadline: Option<Instant>) -> Result<(), String
 }
 
 impl<'a> CssBudget<'a> {
+    pub(super) fn font_size(&mut self,first:bool)->Result<(),String> {
+        self.work(1)?;self.copies((if first {6} else {3})*std::mem::size_of::<(usize,Option<f32>)>())
+    }
     pub(super) fn touch_action(&mut self,first:bool)->Result<(),String> {
         self.work(1)?;
         self.copies((if first {6} else {3})*std::mem::size_of::<(usize,Option<TouchAction>)>())

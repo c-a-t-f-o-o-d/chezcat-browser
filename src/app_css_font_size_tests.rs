@@ -121,3 +121,27 @@ document.getElementById('change').onclick=function(event){
     assert_eq!(neighbor(&app),preserved);assert_eq!(app.forms.text_default_value(id(&app,"neighbor")).unwrap(),"neighbor seed");assert_eq!(app.forms.controls.keys().copied().collect::<Vec<_>>(),controls);
     assert_eq!(app.raw,raw);assert_eq!(app.location,location);assert_eq!((app.history_index,app.history.len()),history);assert!(!app.scripting.as_ref().unwrap().has_navigation_request());
 }
+
+#[test]
+fn computed_font_size_actual_app_matches_native_glyph_twins_and_preserves_editor_and_hits() {
+    struct Fixture(PathBuf);impl Drop for Fixture{fn drop(&mut self){let _=std::fs::remove_file(&self.0);}}
+    let fixture=Fixture(std::env::temp_dir().join(format!("chezcat-computed-font-app-{}.html",std::process::id())));
+    std::fs::write(&fixture.0,r#"<!doctype html><html><head><title>Computed font ready</title><style>
+html{font-size:16px}body{margin:0;background:#ffffff;font-family:Geometry;font-size:12px;--Size:12px}
+a{display:block;position:absolute;top:100px;width:180px;height:60px;line-height:40px;color:#ffffff;background:#0d6efd}
+#actual{left:20px;font-size:var(--Size)}#literal{left:280px;font-size:24px}
+#change{position:absolute;left:20px;top:20px;width:180px;height:32px}#neighbor{position:absolute;left:280px;top:20px;width:180px;height:32px}
+</style></head><body><button id=change type=button>Read computed font</button><input id=neighbor value=seed><a id=actual href=#destination>AV</a><a id=literal href=#destination>AV</a><div id=destination></div><script>
+var actual=document.getElementById('actual'),readback=getComputedStyle(actual),literal=document.getElementById('literal');
+if(readback.fontSize!=='12px'||getComputedStyle(literal).fontSize!=='24px')throw 'actual initial native metrics';
+document.getElementById('change').onclick=function(e){if(!e.isTrusted)throw 'native click';actual.style.setProperty('--Size','2em');if(readback.fontSize!=='24px')throw 'actual changed cascade';document.title='Computed font '+readback.fontSize;};
+</script></body></html>"#).unwrap();
+    let mut app=open(&fixture.0);let before=app.draw();assert_ne!(crop(&app,&before,20,100,180,60),crop(&app,&before,280,100,180,60));
+    let neighbor=id(&app,"neighbor");let control=app.page.controls.iter().find(|c|c.node==neighbor).unwrap();let(x,y)=(control.x+12,app.content_top()+control.y+12-app.scroll);app.pointer_down(x,y,false);app.pointer_up(x,y);app.paste("real editor");
+    let value=&app.forms.controls[&neighbor].value;let editor=(value.text(),value.cursor,value.anchor,value.offset);
+    let button=id(&app,"change");let control=app.page.controls.iter().find(|c|c.node==button).unwrap();let(x,y)=(control.x+12,app.content_top()+control.y+12-app.scroll);app.pointer_down(x,y,false);app.pointer_up(x,y);
+    assert_eq!(app.document.title,"Computed font 24px");assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",app.scripting.as_ref().unwrap().report());
+    let after=app.draw();let actual=crop(&app,&after,20,100,180,60);assert!(actual.contains(&0xffffff));assert!(actual.contains(&0x0d6efd));assert_eq!(actual,crop(&app,&after,280,100,180,60));
+    let value=&app.forms.controls[&neighbor].value;assert_eq!((value.text(),value.cursor,value.anchor,value.offset),editor);
+    assert_eq!(app.page.link_node_at(40,120),Some(id(&app,"actual")));assert_eq!(app.page.link_at(40,120),Some("#destination"));
+}

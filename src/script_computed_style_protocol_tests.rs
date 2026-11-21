@@ -222,3 +222,33 @@ fn touch_action_copy_refusal_preserves_real_style_and_recovers() {
     page.state.copy_work=old;
     run(&mut doc,&mut forms,&mut page,"target.style.touchAction='none';if(getComputedStyle(target).touchAction!=='none')throw 'recovered native readback';");
 }
+
+#[test]
+fn computed_font_size_uses_live_native_cascade_and_unzoomed_pixel_serialization() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var target=document.getElementById('target'),parent=document.getElementById('parent'),c=getComputedStyle(target);
+if(!('fontSize' in c)||c.fontSize!=='16px'||c.getPropertyValue('FONT-SIZE')!=='16px')throw 'native initial font size';
+parent.style.fontSize='12px';target.style.fontSize='150%';if(c.fontSize!=='18px')throw 'actual relative cascade';
+parent.style.fontSize='10px';if(c.fontSize!=='15px')throw 'live parent invalidation';
+target.style.setProperty('--Size','17.5px');target.style.fontSize='var(--Size)';if(c.fontSize!=='17.5px')throw 'fractional native computed size';
+target.style.setProperty('--Size','2em');if(c.fontSize!=='20px')throw 'live variable and parent size';
+target.style.fontSize='var(--missing)';if(c.fontSize!=='10px')throw 'invalid variable inherits';
+target.style.fontSize='initial';if(c.fontSize!=='16px')throw 'CSS initial';
+parent.removeChild(target);if(c.fontSize!=='')throw 'disconnected readback';parent.appendChild(target);if(c.fontSize!=='16px')throw 'reconnected native identity';
+"#);
+    page.state.geometry=Some(crate::script_geometry::Geometry::new(800,600,2.0,&HashMap::new(),HashMap::new(),&crate::fonts::Book::empty()));
+    run(&mut doc,&mut forms,&mut page,"target.style.fontSize='18px';if(c.fontSize!=='18px')throw 'page zoom changed computed CSS px';");
+}
+#[test]
+fn computed_font_size_failed_copy_does_not_publish_style_and_recovers() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,"var target=document.getElementById('target'),c=getComputedStyle(target);target.style.fontSize='18px';if(c.fontSize!=='18px')throw 'actual seed';");
+    let node=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("target")).unwrap();let before=doc.attr(node,"style").unwrap().to_owned();let commits=page.state.dom_commits;
+    let handle={let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(handle)=bridge.create_computed_style(&[Value::Host(node_handle(node))]).unwrap() else {panic!("native declaration")};handle};
+    let old=page.state.copy_work;page.state.copy_work=0;
+    assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.computed_style_get(handle,"fontSize").is_err());
+    page.state.copy_work=old;
+    assert_eq!(doc.attr(node,"style"),Some(before.as_str()));assert_eq!(page.state.dom_commits,commits);
+    run(&mut doc,&mut forms,&mut page,"if(c.fontSize!=='18px')throw 'recovered readback';");
+}

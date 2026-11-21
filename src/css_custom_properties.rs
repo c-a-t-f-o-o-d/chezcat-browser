@@ -367,8 +367,28 @@ pub(super) fn apply_overflow(style:&mut Style,parent:&Style,declaration:&Declara
     true
 }
 
+/// Use the renderer's finite font grammar once, keeping substitution refusal
+/// distinct from an invalid/missing variable's inherited computed value.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_font_size(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget,known:&mut bool,parent_known:bool,root_known:bool) {
+    let substituted;
+    let source=if has_var(&declaration.value) {
+        substituted=match variables.substitute(&declaration.value,budget) {
+            Ok(Some(value))=>value,
+            Ok(None)=>{style.font_size=parent.font_size;*known=parent_known;return;},
+            Err(())=>{style.font_size=parent.font_size;*known=false;return;},
+        };
+        substituted.as_str()
+    } else {declaration.value.as_str()};
+    let value=source.trim().to_ascii_lowercase();
+    if let Some(size)=font_size_value(&value,parent.font_size,style.root_font_size) {
+        style.font_size=size;*known=font_size_available(&value,parent_known,root_known);
+    } else if has_var(&declaration.value) {style.font_size=parent.font_size;*known=parent_known;}
+}
+
 pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget)->bool {
     if !box_property(&declaration.name) || !has_var(&declaration.value) {return false;}
+    if declaration.name=="font-size" {apply_font_size(style,parent,declaration,variables,budget,&mut true,true,true);return true;}
     // A var()-bearing declaration participates in the cascade before its
     // substituted grammar is known. Failure uses unset (the parent's computed
     // color/font-size for inherited text properties, initial box components); it cannot
@@ -534,5 +554,22 @@ mod tests {
         style.font_size=99.0;assert!(apply_box(&mut style,&parent,&declaration,&blocked,&mut Budget::default()));assert_eq!(style.font_size,18.0,"Blocked variable maps cannot revive author99px or an unbudgeted24px fallback");
         assert_eq!(style.root_font_size,snapshot.root_font_size);assert_eq!(style.font_families,snapshot.font_families);assert_eq!(style.font_weight,snapshot.font_weight);assert_eq!(style.italic,snapshot.italic);assert!(matches!(style.line_height,LineHeight::Factor(value)if value==2.0));
         assert_eq!(style.color,snapshot.color);assert_eq!(style.background,snapshot.background);assert_eq!(style.background_image,snapshot.background_image);assert_eq!(style.padding,snapshot.padding);assert_eq!(style.border_alpha,snapshot.border_alpha);assert_eq!(parent.font_size,18.0);
+    }
+}
+
+#[cfg(test)]
+mod font_readback_tests {
+    use super::*;
+    #[test]
+    fn computed_font_size_substitution_refusal_and_relative_availability_recover_truthfully() {
+        let mut parent=Style::default();parent.font_size=18.0;let mut style=Style::default();let mut known=true;
+        let mut declaration=Declaration{name:"font-size".into(),value:"var(--missing,24px)".into(),important:false,stylesheet:None};
+        apply_font_size(&mut style,&parent,&declaration,&Variables::default(),&mut Budget::with_remaining(0,0),&mut known,true,true);
+        assert!(!known);assert_eq!(style.font_size,18.0);
+        for (value,parent_known,root_known,expected) in [("2em",false,true,false),("1rem",false,true,true),("1rem",true,false,false),("24px",false,false,true),("inherit",false,true,false)] {
+            declaration.value=value.into();apply_font_size(&mut style,&parent,&declaration,&Variables::default(),&mut Budget::default(),&mut known,parent_known,root_known);assert_eq!(known,expected,"{value}");
+        }
+        declaration.value="var(--missing,24px)".into();apply_font_size(&mut style,&parent,&declaration,&Variables::default(),&mut Budget::default(),&mut known,true,true);
+        assert!(known);assert_eq!(style.font_size,24.0);
     }
 }

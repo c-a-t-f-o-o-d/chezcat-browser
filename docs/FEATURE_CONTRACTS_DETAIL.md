@@ -1719,3 +1719,24 @@ An original actual-App check uses a trusted anchor callback, saved interface
 identity and a real changed target through the native guarded activation path.
 This is an identity increment, not completion of every anchor IDL member or
 unrestricted navigation. See the [HTML anchor interface](https://html.spec.whatwg.org/multipage/text-level-semantics.html#htmlanchorelement).
+
+
+## Renderer-backed computed font size
+
+Live computed declarations expose fontSize and font-size reads from the same
+native cascade used for painting. Supported relative units, variable substitution,
+explicit inheritance and the finite font shorthand feed a paid sparse snapshot.
+Pixel serialization reuses the original stack number formatter and charges the
+final string before allocating it; page zoom does not scale the CSS-pixel value.
+
+Failed variable computation remains distinguishable from a missing/invalid
+variable. Unknown parent/root-dependent sizes remain unavailable until a genuine
+known declaration restores them. Incomplete snapshots and copy refusal do not
+publish fabricated values or mutate native style. An original App check compares
+real changed glyph pixels against a literal font twin, with stable neighboring
+editor state and link targets.
+
+This readback preserves the existing finite font grammar and 1–256 px native
+renderer policy; it does not complete CSS typography, every computed property,
+font-resource support or the deferred capacity work. See
+[CSSOM resolved values](https://drafts.csswg.org/cssom/#resolved-values).

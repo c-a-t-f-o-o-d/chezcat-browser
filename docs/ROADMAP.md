@@ -58,11 +58,11 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `e5b3d7b` at November 21, 02:31 UTC
-still renders a skeleton. It first fails on missing `HTMLAnchorElement` in
-endpointLink metadata at 31124:299. The next connected increment gives real
-native anchors their canonical owner-realm interface over the existing URL and
-activation backend. The XHR and touch-action increments are integrated; these
+The latest isolated Windows check on clean `44ef2a1` at November 21, 02:37 UTC
+still renders a skeleton. It first fails on an unsupported computed `fontSize`
+read at 38099:264. The next connected increment reads the actual renderer's
+font-size cascade through live CSSOM, retaining computation availability and
+native budgets. Anchor identity, XHR and touch-action are integrated; these
 checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.

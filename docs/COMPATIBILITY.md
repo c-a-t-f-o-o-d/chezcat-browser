@@ -19,6 +19,20 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T02:37:21Z** used clean
+[`44ef2a1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/44ef2a1bd8e5df0a5db28323897938dfcf2aabc9),
+including genuine anchor interface identity. JavaScript was enabled and images
+off; saved HTML reports `LOGGED_IN=false`. Actual pixels remain a skeleton,
+without usable site header/guide/search. The first failure is an unsupported
+computed declaration `fontSize` read at 38099:264. There were 43 script executions
+(42 successful), 44 listeners and one error. The previous anchor interface error
+is absent in this distinct `kevlar_base` response cohort; JavaScript body hashes
+remain unavailable. Existing trust, TLS, CSP, origin, credentials and native
+resource guards remain active. Query/results, watch/Back and playback remain
+unproved.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T02:31:00Z** used clean
 [`e5b3d7b`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e5b3d7bb6805ff13a43c9606d1d5f265f0667842),
 including the touch-action CSS increment. JavaScript was enabled and images off;
