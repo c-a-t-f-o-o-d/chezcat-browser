@@ -293,3 +293,35 @@ fn shipped_game_plays_through_with_frames_keys_pause_restart_and_browser_focus_i
     app.activate_control(node(&app, "pause-game"));
     assert!(app.next_script_timer().is_none());
 }
+
+#[test]
+fn focus_event_actual_app_tab_transition_keeps_native_editor_and_new_target_live() {
+    let(_fixture,mut app)=Fixture::new(r#"<body><input id=a value=original><textarea id=b>second</textarea><p id=out>old</p><script>
+var a=document.getElementById('a'),b=document.getElementById('b'),log='';
+for(var type of ['blur','focusout','focus','focusin']){document.addEventListener(type,function(e){if(!(e instanceof FocusEvent)||!e.isTrusted||e.cancelable||e.view!==window)throw 'native focus';log+=e.type+':'+e.target.id+':'+(e.relatedTarget?e.relatedTarget.id:'null')+';';document.getElementById('out').textContent=log;},true);}
+</script></body>"#);
+    let a=node(&app,"a");let b=node(&app,"b");app.script_begin_job();app.focus_control(a);
+    app.forms.controls.get_mut(&a).unwrap().value.move_to(3,false);
+    app.key_event(input(true,"Tab","Tab",9));
+    assert!(app.focus==Focus::Control(b));assert_eq!(app.forms.controls[&a].value.text(),"original");assert_eq!(app.forms.controls[&a].value.cursor,3);
+    let page=app.scripting.as_mut().unwrap();assert_eq!(page.console_eval(&mut app.document,&mut app.forms,"if(log!=='focus:a:null;focusin:a:null;blur:a:b;focusout:a:b;focus:b:a;focusin:b:a;')throw log;").errors,0,"{}",page.report());
+    assert!(app.page.runs.iter().any(|text|text.text.contains("focusout:a:b")));
+}
+
+#[test]
+fn focus_event_actual_pointer_commits_caret_before_callback_and_handles_removed_control(){
+    let(_fixture,mut app)=Fixture::new(r#"<body><input id=a value=original><input id=b value=second><script>
+var a=document.getElementById('a'),b=document.getElementById('b'),log='';
+a.onfocus=function(e){if(e.relatedTarget!==null||!e.isTrusted)throw 'pointer focus';log+='a;';};
+a.onblur=function(e){if(e.relatedTarget!==b)throw 'pointer related';log+='blur;';};
+b.onfocus=function(e){if(e.relatedTarget!==a)throw 'pointer related new';log+='b;';b.parentNode.removeChild(b);};
+</script></body>"#);
+    for id in ["a","b"] {
+        let node=node(&app,id);let rect=app.page.controls.iter().find(|rect|rect.node==node).unwrap();
+        let x=rect.x+rect.width/2;let y=rect.y+rect.height/2+app.content_top()-app.scroll;
+        app.pointer_down(x,y,false);app.pointer_up(x,y);
+        if id=="a" {assert!(app.forms.controls[&node].value.cursor>0);assert_eq!(app.forms.controls[&node].value.text(),"original");}
+    }
+    let page=app.scripting.as_mut().unwrap();assert_eq!(page.console_eval(&mut app.document,&mut app.forms,"if(log!=='a;blur;b;'||b.isConnected)throw log;").errors,0,"{}",page.report());
+    assert!(app.focus==Focus::Page);
+}

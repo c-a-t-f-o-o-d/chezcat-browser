@@ -447,6 +447,7 @@ enum UiRecord {
     Ui(UiData),
     Mouse(UiData,MouseData),
     Keyboard(UiData,KeyboardData),
+    Focus(UiData,Option<u32>),
 }
 impl UiRecord {
     fn prepare(ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>)->Result<Self,String>{
@@ -457,8 +458,8 @@ impl UiRecord {
             _=>return Err("Event UI family data is inconsistent.".into()),
         })
     }
-    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)=>Some(ui),Self::Base=>None}}
-    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)=>Some(ui),Self::Base=>None}}
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base=>None}}
     fn mouse(&self)->Option<&MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
     fn mouse_mut(&mut self)->Option<&mut MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
     fn keyboard(&self)->Option<&KeyboardData>{if let Self::Keyboard(_,key)=self{Some(key)}else{None}}
@@ -497,13 +498,14 @@ impl CreatedEvent {
 fn owned_custom_bytes(value:Option<&Value>)->usize {value.map_or(0,retained_storage::value_bytes)}
 
 #[derive(Clone,Copy)]
-enum Interface { Base, Custom, Ui, Mouse, Keyboard }
+enum Interface { Base, Custom, Ui, Mouse, Keyboard, Focus }
 
 fn interface(value: Option<&Value>) -> Option<Interface> {
     let Some(Value::String(name)) = value else { return None; };
     if name.eq_ignore_ascii_case("CustomEvent") { Some(Interface::Custom) }
     else if ["MouseEvent", "MouseEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Mouse) }
     else if name.eq_ignore_ascii_case("KeyboardEvent") {Some(Interface::Keyboard)}
+    else if name.eq_ignore_ascii_case("FocusEvent") {Some(Interface::Focus)}
     else if ["UIEvent", "UIEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Ui) }
     else if ["Event", "Events", "HTMLEvents", "SVGEvents"].iter().any(|s| name.eq_ignore_ascii_case(s)) { Some(Interface::Base) }
     else { None }
@@ -565,12 +567,12 @@ impl Bridge<'_> {
     pub(super) fn mouse_target_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)> {
         let Some(value)=value else {return Ok(None)};
         if matches!(value,Value::Null|Value::Undefined) {return Ok(None);}
-        let Value::Host(target)=value else {return Err(("TypeError","MouseEvent relatedTarget requires a genuine EventTarget or null.".into()));};
+        let Value::Host(target)=value else {return Err(("TypeError","Event relatedTarget requires a genuine EventTarget or null.".into()));};
         let target_owner=if self.event_target_interface(*target) {Some(*target)}
             else if let Some(window)=self.standalone_target_owner(*target) {Some(window)}
             else if self.frame_node_interface(*target).is_some() {self.frame_instance_window(*target)}
             else {self.dispatch_receiver(*target).then_some(WINDOW)}
-            .ok_or_else(||("TypeError","MouseEvent relatedTarget requires a genuine EventTarget or null.".into()))?;
+            .ok_or_else(||("TypeError","Event relatedTarget requires a genuine EventTarget or null.".into()))?;
         if owner!=target_owner {self.frame_window_access(Some(owner),target_owner).map_err(|message|("SecurityError",message))?;}
         Ok(Some(*target))
     }
@@ -614,6 +616,23 @@ impl Bridge<'_> {
             ctrl:flag("ctrlKey"),alt:flag("altKey"),shift:flag("shiftKey"),meta:flag("metaKey"),repeat:flag("repeat"),
             composing:flag("isComposing"),key_code:integer("keyCode")? as u32,char_code:integer("charCode")? as u32,modifiers};
         self.construct_event_record(owner,args,fields,Some(ui),None,Some(keyboard),None)
+    }
+    pub(super) fn construct_focus_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let related=self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?;
+        let detail=field("detail").map(timer_integer).transpose()?.unwrap_or(0);
+        let view=self.ui_view_argument(owner,field("view")).map_err(|(_,message)|message)?;
+        let value=self.construct_event_record(owner,args,fields,Some(UiData {view,detail}),None,None,None)?;
+        // The Focus payload fits the existing UI family record; publication is
+        // infallible and does not add storage to every base/custom Event.
+        let Value::Host(handle)=value else {unreachable!()};
+        let id=self.created_event_index(handle).unwrap();
+        self.state.created_events[id].data=UiRecord::Focus(UiData {view,detail},related);
+        Ok(value)
+    }
+    pub(super) fn focus_receiver(&self,handle:u32)->bool {
+        self.created_event_index(handle).is_some_and(|id|matches!(self.state.created_events[id].data,UiRecord::Focus(..)))
+            || self.state.event.as_ref().is_some_and(|event|event.handle==handle&&event.focus.is_some())
     }
     pub(super) fn keyboard_receiver(&self,handle:u32)->bool {
         self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.keyboard().is_some())
@@ -703,6 +722,7 @@ impl Bridge<'_> {
         base_property(name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
             || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
+            || self.focus_receiver(object) && name=="relatedTarget"
             || self.ui_receiver(object) && (ui_property(name) || matches!(name,"initUIEvent"|"which"|"sourceCapabilities"))
             || self.mouse_receiver(object) && (mouse_property(name) || matches!(name,"initMouseEvent"|"initUIEvent"|"which"|"x"|"y"|"offsetX"|"offsetY"|"movementX"|"movementY"|"pageX"|"pageY"|"layerX"|"layerY"|"getModifierState"|"sourceCapabilities"))
     }
@@ -731,7 +751,7 @@ impl Bridge<'_> {
 
     pub(super) fn ui_receiver(&self,handle:u32)->bool {
         self.created_event_index(handle).is_some_and(|id|self.state.created_events[id].data.ui().is_some())
-            || self.state.event.as_ref().is_some_and(|event|event.handle==handle && (event.keyboard.is_some() || event.mouse.is_some()))
+            || self.state.event.as_ref().is_some_and(|event|event.handle==handle && (event.keyboard.is_some() || event.mouse.is_some() || event.focus.is_some()))
     }
 
     pub(super) fn custom_receiver(&self, handle:u32) -> bool {
@@ -777,7 +797,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
@@ -787,7 +807,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
+            base_property(name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
@@ -821,6 +841,7 @@ impl Bridge<'_> {
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
             Ok(match name {
+                "relatedTarget" if matches!(event.data,UiRecord::Focus(..)) => {let UiRecord::Focus(_,related)=&event.data else {unreachable!()};native(*related)},
                 "target" | "srcElement" => native(event.target),
                 "currentTarget" => native(event.current),
                 "bubbles" => Value::Bool(event.bubbles),
@@ -932,7 +953,8 @@ impl Bridge<'_> {
             timestamp: self.state.clock_ms(Instant::now()),
             data:match interface {Interface::Base|Interface::Custom=>UiRecord::Base,Interface::Ui=>UiRecord::Ui(UiData::default()),
                 Interface::Mouse=>UiRecord::Mouse(UiData::default(),MouseData::default()),
-                Interface::Keyboard=>UiRecord::Keyboard(UiData::default(),KeyboardData::default())},
+                Interface::Keyboard=>UiRecord::Keyboard(UiData::default(),KeyboardData::default()),
+                Interface::Focus=>UiRecord::Focus(UiData::default(),None)},
             custom: matches!(interface,Interface::Custom).then_some(Value::Null), message: false };
         self.state.created_events.push(event);
         self.state.retained+=added;

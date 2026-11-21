@@ -19,6 +19,35 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The owner's **2026-11-21T00:36:03Z** signed-out navigation reports a dirty
+development build based on `6c92856`; the base hash does not identify its
+uncommitted edits or executable. It still shows a skeleton and hidden search.
+The first escaped failure is missing `FocusEvent` in `onFocusOut` type metadata,
+originally 27041:350; 5966:53 is the rethrow. All 15 recorded requests succeeded
+with gzip; 42 of 43 script executions succeeded. No escaped resource-budget
+refusal was reported. This confirms the same interface family already under
+implementation, not that a focus event had fired or later focus behavior worked.
+External JavaScript body hashes and the tested executable hash are unavailable;
+this is a distinct response cohort from the isolated run below. A usable shell
+and later journey milestones remain unproved.
+
+**Previous isolated development run.**
+
+The next isolated signed-out Windows run at **2026-11-21T00:21:22Z** used clean
+[`6c92856`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/6c928569f34674a9f7b34abcf2d9450de1846682),
+with JavaScript enabled and images off. Saved HTML reports `LOGGED_IN=false`.
+It stops at missing `FocusEvent` in dynamic application type metadata on
+`VK.prototype.onFocusOut`, originally 22346:68; 2222:68 is the rethrow. There
+were 44 script executions (43 successful), 39 listeners and one escaped error.
+The inspected render remains a skeleton without usable site header/sidebar/search.
+The textarea reference error is absent in this distinct live response cohort;
+external JavaScript body hashes remain unavailable, so this is not an
+identical-input comparison. Existing security and native-resource checks remain
+enabled. FocusEvent implementation checks are separate from a new site result.
+Query/results/watch/Back/media journey milestones remain unproved.
+
+**Previous isolated development run.**
+
 The next isolated signed-out Windows run at **2026-11-21T00:02:35Z** used clean
 [`bddb41a`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/bddb41a1ee3e55ba465931296beda91795ea58c8),
 with JavaScript enabled and images off. The saved HTML reports `LOGGED_IN=false`.

@@ -2111,6 +2111,7 @@ impl App {
         self.invalidate_platform_requests();
         self.select_popup = None;
         self.chrome.focus = None;
+        let previous=if let Focus::Control(previous)=self.focus {Some(previous)}else{None};
         self.focus = Focus::Control(node);
         self.selection = None;
         self.pending_surrogate = None;
@@ -2129,6 +2130,19 @@ impl App {
         // screen when the click occurred. Its caret is assigned before syncing.
         if scroll_into_view {
             self.sync_editors();
+        }
+        if scroll_into_view {self.script_focus_transition(previous,Some(node));}
+    }
+    fn script_focus_transition(&mut self,previous:Option<usize>,next:Option<usize>) {
+        if previous==next || self.script_jobs_paused() {return;}
+        if let Some(page)=&mut self.scripting {
+            let outcome=page.focus_transition(&mut self.document,&mut self.forms,previous,next);
+            if outcome.layout_changed {self.reflow();}
+            self.apply_history_replacement();
+            self.apply_script_scroll();
+            self.validate_control_focus();
+            self.sync_editors();
+            if outcome.errors>0 {self.show_script_errors();}
         }
     }
     fn tab_focus(&mut self, previous: bool) {
@@ -3406,8 +3420,8 @@ impl App {
         if y < self.content_top() || y >= self.content_bottom() {
             return PlatformAction::None;
         }
-        self.focus = Focus::Page;
         if x >= self.width - 12 && self.max_scroll() > 0 {
+            self.focus = Focus::Page;
             let (top, thumb, _) = self.scrollbar();
             if y < top {
                 self.scroll_by(-self.viewport_height());
@@ -3438,6 +3452,7 @@ impl App {
                     let kind = control.kind;
                     // Pointer focus must not move the target between press and
                     // release. Keyboard focus still brings controls into view.
+                    let previous=if let Focus::Control(previous)=self.focus {Some(previous)}else{None};
                     self.focus_control_with_scroll(node, false);
                     if matches!(kind, Kind::Text | Kind::TextArea) {
                         if let Some(rect) = self.page.controls.iter().find(|c| c.node == node) {
@@ -3463,10 +3478,14 @@ impl App {
                     } else {
                         self.drag = Drag::Control { node };
                     }
+                    self.script_begin_job();
+                    self.update_script_geometry();
+                    self.script_focus_transition(previous,Some(node));
                 }
                 return PlatformAction::None;
             }
         }
+        self.focus = Focus::Page;
         if let Some(point) = self.point_at(x, y) {
             let start = if shift {
                 self.selection.map(|s| s.start).unwrap_or(point)
