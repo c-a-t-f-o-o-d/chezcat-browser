@@ -93,6 +93,7 @@ impl Runtime {
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::Proxy | Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
             Builtin::JsonStringify | Builtin::ReflectSet => 3,
+            Builtin::BigIntWidth(_) => 2,
             Builtin::Math("random") => 0,
             Builtin::Math("atan2" | "hypot" | "imul" | "max" | "min" | "pow") => 2,
             Builtin::ObjectStatic(

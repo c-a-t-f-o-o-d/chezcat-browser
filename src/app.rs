@@ -6234,3 +6234,7 @@ mod flat_behavior_tests;
 #[cfg(test)]
 #[path="app_character_data_properties_tests.rs"]
 mod character_data_properties_tests;
+
+#[cfg(test)]
+#[path="app_bigint_width_tests.rs"]
+mod bigint_width_tests;

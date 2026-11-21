@@ -6,6 +6,9 @@ use std::{cmp::Ordering, fmt::Write, sync::Arc};
 
 const DECIMAL_BASE: u64 = 1_000_000_000;
 
+#[path = "bigint_width.rs"]
+mod width;
+
 pub(super) fn compare(left: &str, right: &str) -> Ordering {
     match (left.strip_prefix('-'), right.strip_prefix('-')) {
         (Some(left), Some(right)) => unsigned_compare(right, left),
@@ -60,6 +63,10 @@ impl Runtime {
             Value::String("BigInt".into()),
             Some((false, false, true)),
         )?;
+        let Value::Function(constructor) = self.binding_value(self.global_environment, "BigInt")? else { unreachable!() };
+        let constructor = self.function_properties[constructor];
+        self.prototype_method(constructor, "asIntN", Builtin::BigIntWidth(true))?;
+        self.prototype_method(constructor, "asUintN", Builtin::BigIntWidth(false))?;
         self.prototype_method(prototype, "toString", Builtin::BigIntMethod(true))?;
         self.prototype_method(prototype, "valueOf", Builtin::BigIntMethod(false))
     }
@@ -415,3 +422,7 @@ if (JSON.stringify(value) !== '"7"') throw 'JSON hook';
         );
     }
 }
+
+#[cfg(test)]
+#[path = "bigint_width_tests.rs"]
+mod width_tests;
