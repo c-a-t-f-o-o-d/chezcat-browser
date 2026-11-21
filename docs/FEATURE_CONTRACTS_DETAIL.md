@@ -1282,6 +1282,27 @@ payloads in each record; key/code payloads and actual record capacity are
 admitted before publication and included in unpublished rollback. Deprecated
 initKeyboardEvent and native IME/keypress delivery remain unimplemented.
 See [KeyboardEvent](https://w3c.github.io/uievents/#interface-keyboardevent).
+FocusEvent adds a genuine per-owner UIEvent subclass with constructor, branded
+readonly relatedTarget, canonical descriptors and legacy createEvent factory.
+The nullable related target must be a real accessible EventTarget. Dictionary
+conversion, inherited UI fields, untrusted synthetic dispatch, protected trust,
+ordinary prototype replacement/deletion and owner/origin checks use real native
+records. Allocation/copy failure and unpublished wrapper rollback preserve the
+existing record arena and identities; no simultaneous new payload is charged
+to every base Event.
+
+Rendered native controls deliver blur, focusout, focus and focusin after an
+actual focus change, with the previous/new native targets, Window view, zero
+detail and noncancelable composed flags. Only focusin/out bubble. Repeated focus
+on the same control emits no transition. Native pointer caret placement precedes
+callbacks, and disconnected targets are revalidated between deliveries. Original
+App tests cover tab/pointer focus, retained editor state and callback removal.
+Synthetic FocusEvent delivery changes no native focus or text. Existing control
+focus() remains queued; full synchronous HTML focus/blur algorithms, arbitrary
+non-control focus, nested-context/chrome/OS focus notifications and shadow
+retargeting are outside this increment. There is no initFocusEvent method.
+See [FocusEvent](https://w3c.github.io/uievents/#interface-focusevent).
+
 Synthetic Mouse dispatch/default activation from synthetic events and general native
 pointer payloads remain unsupported. The finite trusted anchor host seam is
 described in B2 and used by its guarded native link routing.
