@@ -6026,3 +6026,7 @@ mod xhr_tests;
 #[cfg(test)]
 #[path="app_animation_event_tests.rs"]
 mod animation_event_tests;
+
+#[cfg(test)]
+#[path="app_iframe_sandbox_tests.rs"]
+mod iframe_sandbox_tests;

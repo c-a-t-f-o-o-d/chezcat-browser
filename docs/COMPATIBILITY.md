@@ -19,6 +19,20 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T02:57:49Z** used clean
+[`ae478b5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ae478b5fe86fe93db83104852e5249755e8470b6),
+including genuine AnimationEvent construction. JavaScript was enabled and images
+off; saved HTML reports `LOGGED_IN=false`. The inspected render remains a
+skeleton without usable site header/guide/search. The first failure is an
+unsupported native iframe `sandbox` property read at 6503:24. There were 43
+script executions (42 successful), 39 listeners and one error. The earlier
+AnimationEvent reference error is absent in this distinct live cohort; external
+JavaScript body hashes remain unavailable. Existing trust, TLS, CSP, origin,
+credentials and native-resource guards remain active. Query/results, watch/Back
+and playback remain unproved.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T02:46:27Z** used clean
 [`88e5509`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/88e5509688dbe691d2770e69080df9e3e0a57b91),
 including renderer-backed computed font size. JavaScript was enabled and images
