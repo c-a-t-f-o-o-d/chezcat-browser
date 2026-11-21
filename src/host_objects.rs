@@ -548,6 +548,9 @@ impl Runtime {
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
             )?;
+            if name == "HTMLFormElement" {
+                self.define_canvas_operation(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;
+            }
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
             }

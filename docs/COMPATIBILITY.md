@@ -19,6 +19,21 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+A later isolated Windows run at **2026-11-20T23:37:19Z** used clean
+[`2497be9`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/2497be93f3c7376131b40be29cc29274364c7193),
+with JavaScript enabled, images off and a fresh signed-out profile. The saved
+HTML reports `LOGGED_IN=false`. The first escaped error is now
+`HTMLFormElement is not defined` at original application-script 21740:111 in
+type metadata; 5966:53 is the rethrow. The Range reference error is absent in
+this run. There were 43 script executions (42 successful), 22 listeners and one
+escaped error. The inspected App render still shows a skeleton: usable site
+header/guide/search, query/results, watch/Back and media remain unproved.
+This is a new live response cohort, not an exact-byte replay of the earlier run;
+external JavaScript response-body hashes were not exported. Existing trust,
+TLS, CSP, origin, credential and native resource checks stayed enabled.
+
+**Earlier owner-supplied checkpoint, retained on its tested source.**
+
 The November 20, 2026 owner-supplied YouTube logs and HTML/Elements exports
 identify a clean development build at
 [`cffb9d1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cffb9d1914d28c93378f7a180e9693410aca0513).
