@@ -3008,8 +3008,13 @@ impl Bridge<'_> {
             || self.inert_children(object).is_some()
     }
 
+    fn node_metadata_property(&self, object:u32, property:&str)->bool {
+        matches!(property,"ownerDocument"|"isConnected") && self.text_content_receiver(object)
+    }
+
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if self.node_metadata_property(object,property) {return true;}
         if self.aria_reflection_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
@@ -3135,6 +3140,7 @@ impl Host for Bridge<'_> {
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
+        if self.inert_node_type(object)==Some(11) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(1)
             && (self.html_reflection_receiver(object) || self.inert_interface(object)==Some("SVGElement"))
         {return Some(WINDOW);}
@@ -3163,7 +3169,8 @@ impl Host for Bridge<'_> {
             || self.processing_instruction_receiver(object)
     }
     fn mutable_native_wrapper_prototype(&self, object: u32) -> bool {
-        self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
+        self.fragment_receiver(object) || self.inert_node_type(object)==Some(11)
+            || self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
             || self.ordinary_event_owner(object).is_some() && !self.ui_receiver(object)
                 && !self.custom_receiver(object) && !self.mouse_receiver(object)
     }
@@ -3281,6 +3288,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.node_metadata_property(object,property) {return false;}
         if self.aria_reflection_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
@@ -4426,6 +4434,9 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object) && parent_children::operation(method).is_some() {
             return self.parent_node_receiver(receiver);
+        }
+        if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected") {
+            return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
             return self.node_traversal_receiver(receiver);
@@ -5901,7 +5912,7 @@ impl Host for Bridge<'_> {
         }
         if let Some(property)=parent_children::operation(method) {return self.parent_node_get(object,property);}
         if let Some(property) = node_traversal_property(method) {
-            return self.get(object, property);
+            return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
@@ -8469,3 +8480,7 @@ mod character_data_properties_tests;
 #[cfg(test)]
 #[path="script_svg_author_properties_tests.rs"]
 mod svg_author_properties_tests;
+
+#[cfg(test)]
+#[path="script_fragment_author_prototype_tests.rs"]
+mod fragment_author_prototype_tests;

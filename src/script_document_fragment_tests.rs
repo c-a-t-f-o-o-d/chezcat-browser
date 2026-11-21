@@ -1,8 +1,11 @@
 //! Original genuine fragment identity, live tree, batch and native-model controls.
 use super::*;
 fn fixture(source:&str)->(Document,Forms,Page) {
+    fixture_page(source,Page::for_test())
+}
+fn fixture_page(source:&str,mut page:Page)->(Document,Forms,Page) {
     let mut doc=crate::html::parse("<html><body><form id=f><input id=neighbor name=keep value=seed><div id=host></div><span id=after>After</span></form><div id=dest></div><svg id=foreign></svg></body></html>");
-    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);
     page.set_location(&crate::navigation::address("https://fragment.test/source",&crate::navigation::Location::home()).unwrap());
     let outcome=page.start(&mut doc,&mut forms,&[Script{node:0,label:"Original DocumentFragment".into(),source:source.into()}]);
     assert_eq!(outcome.errors,0,"{}",page.report());(doc,forms,page)
@@ -86,14 +89,14 @@ fn document_fragment_failed_batch_never_publishes_a_prefix_or_loses_donor_childr
 }
 #[test]
 fn document_fragment_native_borrowing_and_child_factory_boundary_keep_real_owners() {
-    let(mut doc,mut forms,mut page)=fixture(r#"
+    let(mut doc,mut forms,mut page)=fixture_page(r#"
 var f=new DocumentFragment(),a=document.createElement('span'),dest=document.getElementById('dest');
 dest.appendChild.call(f,a);if(a.parentNode!==f)throw 'Node method borrowed to fragment';f.appendChild.call(dest,f);if(a.parentNode!==dest||f.childNodes.length!==0)throw 'Node method borrowed from fragment';
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var child=frame.contentWindow;
-"#);
+"#,Page::with_limits(crate::javascript::limits::BROWSER));
     let before=doc.nodes.len();
     let outcome=page.console_eval(&mut doc,&mut forms,"new child.DocumentFragment();");
-    assert_eq!(outcome.errors,1,"{}",page.report());assert_eq!(doc.nodes.len(),before);assert!(page.report().contains("Child DocumentFragment allocation"));
+    assert_eq!(outcome.errors,1,"{}",page.report());assert_eq!(doc.nodes.len(),before);assert!(page.report().contains("Child DocumentFragment allocation"),"{}",page.report());
 }
 #[test]
 fn document_fragment_node_and_staging_allowances_refuse_without_partial_splice() {

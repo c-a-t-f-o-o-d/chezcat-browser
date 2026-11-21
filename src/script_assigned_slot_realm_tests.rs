@@ -11,12 +11,14 @@ fn location(source: &str) -> crate::navigation::Location {
     }
 }
 fn fixture() -> (Document, Forms, Page) {
+    fixture_page(Page::for_test())
+}
+fn fixture_page(mut page:Page) -> (Document, Forms, Page) {
     let mut doc = crate::html::parse(
         "<!doctype html><title>Assigned slot owners</title><body><p id=main>main text</p><form id=f><input id=neighbor name=neighbor value=original></form>",
     );
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     page.set_location(&location("https://assigned-slot.test/source"));
     assert_eq!(
         page.start(&mut doc, &mut forms, &[]).errors,
@@ -63,7 +65,7 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
 
 #[test]
 fn assigned_slot_realm_same_origin_saved_text_and_element_getters_revalidate_late_owner() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_page(Page::with_limits(crate::javascript::limits::BROWSER));
     run(
         &mut doc,
         &mut forms,

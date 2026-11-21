@@ -510,7 +510,9 @@ pub(crate) const NODE_MUTATION_METHODS: [(&str, usize); 4] = [
     ("removeChild", 1),
     ("replaceChild", 2),
 ];
-pub(crate) const NODE_TRAVERSAL_GETTERS: [(&str, &str); 7] = [
+pub(crate) const NODE_TRAVERSAL_GETTERS: [(&str, &str); 9] = [
+    ("ownerDocument", "\0Node.get.ownerDocument"),
+    ("isConnected", "\0Node.get.isConnected"),
     ("childNodes", "\0Node.get.childNodes"),
     ("firstChild", "\0Node.get.firstChild"),
     ("lastChild", "\0Node.get.lastChild"),
