@@ -9075,9 +9075,8 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
-        // Neither the style getter nor the unavailable cssText replacement
-        // consumes script values. Keep ignored arguments out of host exports.
-        let args = if matches!(method, ELEMENT_STYLE_GET | ELEMENT_STYLE_SET) { &[] } else { args };
+        // The style getter ignores arguments; its setter forwards the value.
+        let args = match method { ELEMENT_STYLE_GET=>&[][..],ELEMENT_STYLE_SET=>&args[..args.len().min(1)],_=>args };
         if let Some(property)=host.native_setter_property(object,method) {
             // Web IDL attribute setters receive undefined when no argument is
             // supplied. Brand/origin validation preceded any value conversion.

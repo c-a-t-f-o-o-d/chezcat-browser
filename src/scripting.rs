@@ -3374,6 +3374,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property=="style"&&self.html_element_receiver(object){return true;}
         if self.placeholder_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return property=="responseType";}
         if property=="textContent"&&self.text_content_receiver(object){return true;}
@@ -3387,7 +3388,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if matches!(property, "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.hidden_input_property(object,property) {return true;}
@@ -3411,6 +3412,7 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if method==ELEMENT_STYLE_SET&&self.html_element_receiver(object)&&!self.is_frame_handle(object){return Some("style");}
         if matches!(placeholder::operation(method),Some((interface,true)) if self.placeholder_interface(object)==Some(interface)){return Some("placeholder");}
         if self.xhr_index(object).is_some(){return crate::javascript::xhr_interface::setter(method).map(|name|match name {"timeout"=>"timeout","withCredentials"=>"withCredentials","responseType"=>"responseType","onreadystatechange"=>"onreadystatechange","onloadstart"=>"onloadstart","onprogress"=>"onprogress","onabort"=>"onabort","onerror"=>"onerror","onload"=>"onload","ontimeout"=>"ontimeout","onloadend"=>"onloadend",_=>unreachable!()});}
 
@@ -3721,10 +3723,11 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
+        if property=="style"&&self.html_element_receiver(object){return true;}
         if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
-            || matches!(property, "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))
@@ -4957,7 +4960,7 @@ impl Host for Bridge<'_> {
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
             if let Some(index) = collection_index(property) { return Ok(index < self.inline_names(node)?.len()); }
-            return Ok(property == "length" || script_inline_style::method(property).is_some() || supported_css_name(property).is_some());
+            return Ok(matches!(property,"length"|"cssText") || script_inline_style::method(property).is_some() || supported_css_name(property).is_some());
         }
         if object == CONSOLE {
             return Ok(matches!(property, "log" | "info" | "warn" | "error"));
@@ -5271,6 +5274,7 @@ impl Host for Bridge<'_> {
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
+            if property=="cssText"{return self.get_css_text(node);}
             if property == "length" { return Ok(Value::Number(self.inline_names(node)?.len() as f64)); }
             if let Some(index) = collection_index(property) { return Ok(self.inline_index(node, index)?.unwrap_or(Value::Undefined)); }
             // Feature detection reads the actual names exposed by this declaration.
@@ -5492,6 +5496,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property=="style"&&self.html_element_receiver(object){let node=self.node(object)?;let source=self.text(&value)?;return self.set_css_text(node,&source);}
         if self.xhr_index(object).is_some(){return self.xhr_set(object,property,value).unwrap();}
         if self.placeholder_member(object,property){return self.placeholder_set(object,&value);}
 
@@ -5590,6 +5595,7 @@ impl Host for Bridge<'_> {
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
             let value = self.text(&value)?;
+            if property=="cssText"{return self.set_css_text(node,&value);}
             return self.set_style(node, &css_name(property)?, &value, "");
         }
         if self.set_handler(object, property, value.clone())? {
@@ -5834,9 +5840,7 @@ impl Host for Bridge<'_> {
             if method == ELEMENT_STYLE_GET {
                 return Ok(Value::Host(STYLE_BASE + node as u32));
             }
-            // Web IDL forwards this write to the native declaration's cssText.
-            // Whole declaration replacement is outside the checked property setter.
-            return Err("Setting HTMLElement.style requires CSSStyleDeclaration.cssText replacement, which is unavailable.".into());
+            return Err("Inline style setters must use the native conversion transaction.".into());
         }
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, None);
@@ -8325,3 +8329,10 @@ mod placeholder;
 #[cfg(test)]
 #[path="script_computed_presentation_tests.rs"]
 mod computed_presentation_tests;
+
+#[cfg(test)]
+#[path="script_css_text_tests.rs"]
+mod css_text_tests;
+
+#[path="script_css_text.rs"]
+mod css_text;

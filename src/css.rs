@@ -3066,6 +3066,50 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
     Ok(names.into_iter().map(|(name, _)| name).collect())
 }
 
+/// Parsed CSSOM block values use the same declaration/value grammar as layout.
+pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut CssBudget<'_>) -> Result<Vec<(String,String,bool)>,String> {
+    let declarations=parse_declarations_inner(source,MAX_DECLARATIONS+1,true,Some(meter))?;
+    if declarations.len()>MAX_DECLARATIONS{return Err("Inline CSS declaration limit reached.".into());}
+    let mut result=Vec::new();
+    result.try_reserve_exact(declarations.len()).map_err(|_|"Cannot reserve inline declaration block.")?;
+    for decl in declarations {
+        if !decl.name.starts_with("--") && supported.binary_search(&decl.name.as_str()).is_err(){continue;}
+        let single=format!("{}:{}{};",decl.name,decl.value,if decl.important{" !important"}else{""});
+        let names=inline_declaration_names(&single,supported,Some(meter))?;
+        if names.is_empty(){continue;}
+        let lower=decl.value.to_ascii_lowercase();
+        let wide=matches!(lower.as_str(),"inherit"|"initial"|"unset"|"revert"|"revert-layer");
+        let variable=lower.contains("var(");
+        if !wide&&!variable {
+            let valid=match decl.name.as_str(){
+                "display"=>display_value(&lower).is_some(),
+                "box-sizing"=>matches!(lower.as_str(),"content-box"|"border-box"),
+                "flex-direction"=>matches!(lower.as_str(),"row"|"row-reverse"|"column"|"column-reverse"),
+                "flex-wrap"=>matches!(lower.as_str(),"nowrap"|"wrap"),
+                "flex-grow"|"flex-shrink"=>flex_factor(&lower).is_some(),
+                "flex-basis"=>sizing_value(&lower,Length::Auto).is_some(),
+                "justify-content"=>flex_pack(&lower).is_some(),
+                "align-items"=>flex_align(&lower).is_some(),
+                "align-self"=>lower=="auto"||flex_align(&lower).is_some(),
+                "font-family"=>font_families(&decl.value).is_some(),
+                "font-size"=>font_size_value(&lower,16.0,16.0).is_some(),
+                "font-weight"=>font_weight(&lower,400).is_some(),
+                "font-style"=>matches!(lower.as_str(),"normal"|"italic"|"oblique"),
+                "line-height"=>line_height::literal(&lower,LineHeight::Factor(1.5)).is_some(),
+                "white-space"=>matches!(lower.as_str(),"normal"|"nowrap"|"pre"|"pre-wrap"|"break-spaces"),
+                "text-align"=>matches!(lower.as_str(),"left"|"start"|"center"|"right"|"end"),
+                "background-position"=>object_position(&lower).is_some(),
+                "background-repeat"=>matches!(lower.as_str(),"repeat"|"no-repeat"|"repeat-x"|"repeat-y"),
+                "background-size"=>matches!(lower.as_str(),"auto"|"contain"|"cover"),
+                _=>true,
+            };
+            if !valid{continue;}
+        }
+        result.push((decl.name,decl.value,decl.important));
+    }
+    Ok(result)
+}
+
 pub(crate) fn inline_color_value(value: &str) -> bool {
     let value = value.trim().to_ascii_lowercase();
     matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer")

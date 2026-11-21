@@ -285,6 +285,7 @@ impl Bridge<'_> {
         if inherited {
             let methods = [
                 "length",
+                "cssText",
                 "item",
                 "getPropertyValue",
                 "setProperty",
@@ -415,7 +416,7 @@ for(var receiver of [document,document.createTextNode('x'),native,Object.create(
 "#);
         assert_eq!(setup.errors, 0, "{}", page.report());
         for refused in [
-            "p.style='color:blue';",
+            "p.style='background-image:url(a),url(b)';",
             "Object.defineProperty(p,'ownerDocument',{get:function(){return null;}});",
             "Object.defineProperty(p,'onclick',{value:17});",
         ] {

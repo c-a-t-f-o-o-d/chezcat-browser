@@ -1417,8 +1417,11 @@ mod expando_tests {
         let mut runtime = Runtime::for_test();
         let mut host = Native { enabled: true, reads: 0 };
         let id = runtime.new_object(None).unwrap();
-        for operation in [ELEMENT_STYLE_GET, ELEMENT_STYLE_SET] {
-            let error = runtime.call_host(42, operation, &[Value::Object(id)], &mut host).unwrap_err();
+        for (operation, arguments) in [
+            (ELEMENT_STYLE_GET, vec![Value::Object(id)]),
+            (ELEMENT_STYLE_SET, vec![Value::String(String::new()),Value::Object(id)]),
+        ] {
+            let error = runtime.call_host(42, operation, &arguments, &mut host).unwrap_err();
             assert!(error.message.contains("No native call"), "{}", error.message);
             assert!(!runtime.exported_object_roots.contains(&id));
         }
