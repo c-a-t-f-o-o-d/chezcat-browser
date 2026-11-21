@@ -6109,3 +6109,7 @@ mod computed_presentation_tests;
 #[cfg(test)]
 #[path="app_sizing_math_tests.rs"]
 mod sizing_math_tests;
+
+#[cfg(test)]
+#[path="app_viewport_sizing_tests.rs"]
+mod viewport_sizing_tests;

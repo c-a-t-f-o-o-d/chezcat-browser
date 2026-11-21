@@ -229,7 +229,7 @@ impl Length {
             Self::Percent(value) => reference * value / 100.0,
             Self::Em(value) => font * value,
             Self::Rem(value) => root_font * value,
-            Self::Calc(value)=>value.resolve(reference,font,root_font).clamp(-100_000.0,100_000.0)as f32,
+            Self::Calc(value)=>value.resolve(reference,font,root_font)?.clamp(-100_000.0,100_000.0)as f32,
         };
         Some(value.clamp(-100_000.0, 100_000.0))
     }
@@ -1376,6 +1376,8 @@ fn compute_cascade(
             style.root_font_size = root_font_size;
         }
         style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
+        let viewport_length=|value|sizing_math::resolve_viewport(value,environment);
+        style.width=viewport_length(style.width);style.height=viewport_length(style.height);style.min_width=viewport_length(style.min_width);style.min_height=viewport_length(style.min_height);style.max_width=style.max_width.map(viewport_length);style.max_height=style.max_height.map(viewport_length);style.flex_basis=viewport_length(style.flex_basis);style.margin=style.margin.map(viewport_length);style.padding=style.padding.map(viewport_length);style.gap=style.gap.map(viewport_length);
         // Height inherits its computed length, not a parent's em/rem token.
         // Percentages and auto retain their containing-block/used-value role.
         if matches!(style.height, Length::Em(_) | Length::Rem(_)) {
@@ -3073,7 +3075,7 @@ pub(crate) fn inline_color_value(value: &str) -> bool {
 
 fn gap_values(value: &str) -> Option<[Length; 2]> {
     let grouped=border_parts(value)?;let mut parts=grouped.iter().copied();
-    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else if part.starts_with("calc("){sizing_math::length(part,false)}else{parse_length(part, false, false)};
+    let length = |part: &str| if part == "normal" {Some(Length::Px(0.0))} else if part.starts_with("calc("){sizing_math::length(part,false)}else{sizing_math::viewport_literal(part,false).or_else(||parse_length(part, false, false))};
     let row = length(parts.next()?)?;
     let column = match parts.next() { Some(part) => length(part)?, None => row };
     parts.next().is_none().then_some([row, column])
@@ -3372,6 +3374,7 @@ fn flex_flow_value(value:&str)->Option<(FlexDirection,bool)>{
 fn max_sizing_value(value:&str)->Option<Option<Length>>{
     let value=value.trim();if value.eq_ignore_ascii_case("none"){return Some(None);}
     if value.starts_with("calc("){return sizing_math::length(value,false).map(Some);}
+    if let Some(value)=sizing_math::viewport_literal(value,false){return Some(Some(value));}
     if !value.is_ascii()||value.bytes().any(|b|b.is_ascii_whitespace()){return None;}
     parse_length(value,false,false).map(Some)
 }
@@ -3385,6 +3388,7 @@ fn sizing_value(value: &str, parent: Length) -> Option<Length> {
         return Some(Length::Auto);
     }
     if value.to_ascii_lowercase().starts_with("calc("){return sizing_math::length(value,false);}
+    if let Some(value)=sizing_math::viewport_literal(value,false){return Some(value);}
     if !value.is_ascii() || value.bytes().any(|byte|byte.is_ascii_whitespace()) { return None; }
     parse_length(value,true,false)
 }
@@ -3796,7 +3800,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             if let Some(value) = if value == "normal" {
                 Some(Length::Px(0.0))
             } else {
-                if value.starts_with("calc("){sizing_math::length(&value,false)}else{parse_length(&value,false,false)}
+                if value.starts_with("calc("){sizing_math::length(&value,false)}else{sizing_math::viewport_literal(&value,false).or_else(||parse_length(&value,false,false))}
             } {
                 style.gap[usize::from(declaration.name == "column-gap")] = value;
             }
@@ -5292,3 +5296,7 @@ mod layout_variable_tests;
 #[cfg(test)]
 #[path="css_sizing_math_tests.rs"]
 mod sizing_math_tests;
+
+#[cfg(test)]
+#[path="css_viewport_sizing_tests.rs"]
+mod viewport_sizing_tests;
