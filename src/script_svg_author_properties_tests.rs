@@ -13,7 +13,7 @@ fn fixture() -> (Document, Forms, Page) {
         .unwrap(),
     );
     assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
-    run(&mut doc,&mut forms,&mut page,"var template=document.createElement('template');template.innerHTML='<svg width=24 height=24><rect id=shape width=12 height=12 fill=red></rect></svg>';var root=template.content.firstChild,shape=root.firstChild,owner=shape.ownerDocument;");
+    run(&mut doc,&mut forms,&mut page,"var template=document.createElement('template');template.innerHTML='<svg width=24 height=24><rect id=shape width=12 height=12 fill=red></rect></svg>';var root=template.content.firstChild,shape=root.firstChild,owner=shape.ownerDocument;if(root.namespaceURI!=='http://www.w3.org/2000/svg'||shape.namespaceURI!==root.namespaceURI||owner===document||root.ownerDocument!==owner)throw 'actual inert SVG ownership';");
     (doc, forms, page)
 }
 fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
@@ -33,6 +33,15 @@ for(var node of [root,shape,created]){var state={node:node};node.bindingState=st
 if(observer.takeRecords().length||shape.getAttribute('fill')!=='red'||shape.id!=='shape'||shape.localName!=='rect')throw 'metadata changed native attrs';shape.bindingValue='blue';var records=observer.takeRecords();if(hits!==1||records.length!==1||records[0].target!==shape||records[0].attributeName!=='fill'||records[0].oldValue!=='red'||shape.getAttribute('fill')!=='blue')throw 'author setter keeps real mutation';
 "#,
     );
+    let commits = page.state.dom_commits;
+    let out = page.console_eval(
+        &mut doc,
+        &mut forms,
+        "shape.bindingValue='url(https://external-svg-properties.test/paint.svg#p)';",
+    );
+    assert_eq!(out.errors, 1, "{}", page.report());
+    assert_eq!(page.state.dom_commits, commits);
+    run(&mut doc,&mut forms,&mut page,"if(hits!==2||shape.getAttribute('fill')!=='blue'||observer.takeRecords().length)throw 'author setter preserves SVG resource refusal';");
 }
 #[test]
 fn svg_author_properties_clone_import_and_supported_promotion_keep_independent_state() {
