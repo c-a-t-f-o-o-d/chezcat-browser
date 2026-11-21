@@ -78,6 +78,8 @@ mod script_attr;
 mod script_hidden_inputs;
 #[path = "script_text_inputs.rs"]
 mod script_text_inputs;
+#[path = "script_textarea_interface.rs"]
+mod script_textarea_interface;
 #[path = "script_input_accessors.rs"]
 mod script_input_accessors;
 #[path = "script_content_editable.rs"]
@@ -2976,6 +2978,7 @@ impl Bridge<'_> {
             || self.html_offset_member(object, property)
             || self.scroll_offset_member(object, property)
             || self.input_accessor_member(object, property)
+            || self.textarea_value_member(object, property)
             || self.canvas_member(object, property)
             || property == "getContext" && self.canvas_receiver(object)
             || self.text_prototype_property(object, property)
@@ -3087,7 +3090,7 @@ impl Host for Bridge<'_> {
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement");
+            return matches!(interface, "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement" | "HTMLTextAreaElement");
         }
         self.exposed_native_prototype(object)
     }
@@ -3316,6 +3319,7 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.textarea_value_member(object,property) {return true;}
         if property == "innerHTML" && self.template_receiver(object) { return true; }
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
@@ -3353,6 +3357,7 @@ impl Host for Bridge<'_> {
         if let Some((name, true)) = script_canvas::accessor(method) {
             return self.canvas_receiver(object).then_some(name);
         }
+        if script_textarea_interface::accessor(method)==Some(true) {return self.textarea_value_receiver(object).then_some("value");}
         if let Some((name, true)) = script_input_accessors::accessor(method) {
             return self.input_receiver(object).then_some(name);
         }
@@ -3529,6 +3534,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if method==crate::javascript::HTML_FORM_SUBMIT && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
@@ -3634,6 +3640,7 @@ impl Host for Bridge<'_> {
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
+        if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
             || matches!(property, "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
@@ -3788,6 +3795,7 @@ impl Host for Bridge<'_> {
                 else { Err(("TypeError", "Canvas operation requires its genuine native receiver.".into())) };
         }
         if object==WINDOW && method=="getComputedStyle" || script_computed_style::index(object).is_some() {return self.validate_computed_call(object,method,args);}
+        if script_textarea_interface::accessor(method).is_some() {return self.validate_textarea_value(object);}
         if script_input_accessors::accessor(method).is_some() {return self.validate_input_accessor(object);}
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
@@ -4135,6 +4143,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
@@ -5675,6 +5684,7 @@ impl Host for Bridge<'_> {
         if let Some((name, false)) = script_canvas::accessor(method) {
             return self.canvas_dimension_get(object, name);
         }
+        if script_textarea_interface::accessor(method)==Some(false) {return self.get(object,"value");}
         if let Some((name, false)) = script_input_accessors::accessor(method) {
             self.validate_input_accessor(object).map_err(|(_, reason)| reason)?;
             return self.get(object, name);

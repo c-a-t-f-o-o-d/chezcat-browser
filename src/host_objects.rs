@@ -557,6 +557,9 @@ impl Runtime {
             if name == "HTMLSlotElement" {
                 self.define_node_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
+            if name == "HTMLTextAreaElement" {
+                self.define_node_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
+            }
             if name == "HTMLInputElement" {
                 for (key, getter, setter) in [
                     ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),

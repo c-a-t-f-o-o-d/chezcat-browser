@@ -1600,3 +1600,22 @@ queueing protections remain. Submitting still bypasses constraint validation,
 submit events and submitter inclusion through the existing backend. This slice
 does not add requestSubmit, reset/validation methods, full reflected form IDL,
 indexed form collections or RadioNodeList behavior.
+
+
+## Native textarea interface and canonical value
+
+HTMLTextAreaElement is the genuine owner-realm interface for real textarea nodes,
+with HTMLElement ancestry, class tag and illegal direct construction. Its shared
+value accessor uses the admitted native editor for parsed, fragment-created,
+cloned and detached controls. Setting value performs one DOMString conversion,
+treats null as empty and preserves native newline normalization, dirty/default
+state and the existing script-versus-user editing rules. Getter/setter names,
+lengths and enumerable/configurable descriptors are canonical. Own/prototype
+author shadows do not alter what a saved native accessor reads or writes.
+
+Wrong brands refuse before coercion. Saved foreign access remains origin-checked;
+inert textarea identity does not create native editor state, and value access
+there explicitly returns NotSupportedError. Native quota/copy and unsupported
+unpaired-text refusal preserve the editor and recover through a later valid set.
+Existing default/interior-write, owner, form and resource guards remain. The
+remaining textarea IDL is not claimed by this value/identity increment.

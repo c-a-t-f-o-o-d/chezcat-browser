@@ -58,12 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The later actual Windows check on clean `2497be9` at November 20, 23:37 UTC
-still renders a skeleton. It reaches missing `HTMLFormElement` in type metadata
-at 21740:111, with the earlier Range reference error absent in that distinct
-live response cohort. Shared form interface behavior is the next selected
-increment; this observation does not establish a usable shell. See the
-[source-bound checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint).
+The latest actual Windows check on clean `bddb41a` at November 21, 00:02 UTC
+still renders a skeleton. It reaches missing `HTMLTextAreaElement` in dynamic
+application type metadata at 19335:330. The earlier form reference error is
+absent in this distinct live cohort. Native textarea interface/value behavior
+is the next selected increment; a usable shell remains unproved. The
+[source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
+retain the prior `2497be9` and owner-supplied observations separately.
 
 The November 20 owner checkpoint on clean development source `cffb9d1` decoded
 the main application script and completed 42 of 43 script executions, then stopped

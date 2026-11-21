@@ -19,6 +19,20 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The next isolated signed-out Windows run at **2026-11-21T00:02:35Z** used clean
+[`bddb41a`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/bddb41a1ee3e55ba465931296beda91795ea58c8),
+with JavaScript enabled and images off. The saved HTML reports `LOGGED_IN=false`.
+It reaches the dynamic application bundle and stops at missing
+`HTMLTextAreaElement`, originally at 19335:330 in type metadata; 2222:68 is the
+rethrow. There were 44 script executions (43 successful), 39 listeners and one
+escaped error. The inspected render remains a skeleton, without the usable
+site shell or later journey milestones. The earlier form reference error is
+absent in this distinct live cohort; external JavaScript body hashes remain
+unavailable, so this is not an identical-input comparison. Existing security
+and native-resource checks remain enabled.
+
+**Previous isolated development run.**
+
 A later isolated Windows run at **2026-11-20T23:37:19Z** used clean
 [`2497be9`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/2497be93f3c7376131b40be29cc29274364c7193),
 with JavaScript enabled, images off and a fresh signed-out profile. The saved
