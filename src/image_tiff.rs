@@ -9,7 +9,6 @@ use super::{dimensions, pixel, reserved, Bitmap, ImageResult, MAX_INPUT_BYTES};
 use std::collections::BTreeMap;
 
 const MAX_FIELDS: usize = 4096;
-const MAX_SEGMENTS: usize = 65_536;
 const MAX_FIELD_VALUES: usize = 262_144;
 const MAX_RASTER_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SEGMENT_BYTES: usize = 32 * 1024 * 1024;
@@ -993,8 +992,11 @@ pub(super) fn decode(data: &[u8], check: Check<'_>) -> ImageResult<Bitmap> {
     let segments = per_plane
         .checked_mul(planes)
         .ok_or("TIFF segment count overflow.")?;
-    if segments > MAX_SEGMENTS || offsets.len() != segments || lengths.len() != segments {
-        return Err("TIFF segment tables have the wrong count or exceed 65536 segments.".into());
+    // Geometry and the admitted field arrays bound this traversal. Each segment
+    // also retains its source-extent, cancellation, decoded-byte and work checks;
+    // a separate record ceiling rejects valid small planar images unnecessarily.
+    if offsets.len() != segments || lengths.len() != segments {
+        return Err("TIFF segment tables have the wrong count.".into());
     }
     let jpeg = compression == 7;
     if jpeg
@@ -1183,6 +1185,10 @@ pub(super) fn decode(data: &[u8], check: Check<'_>) -> ImageResult<Bitmap> {
         raster.render(&values, &mut work)
     }
 }
+
+#[cfg(test)]
+#[path = "image_tiff_capacity_tests.rs"]
+mod capacity_tests;
 
 #[cfg(test)]
 mod tests {
