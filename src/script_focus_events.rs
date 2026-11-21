@@ -1,6 +1,8 @@
 //! Trusted focus changes from the displayed native form controls.
 use super::*;
 impl Page {
+    pub(crate) fn take_native_focus_loss(&mut self)->bool{std::mem::take(&mut self.state.dom.native_focus_removed)}
+
     pub(crate) fn focus_transition(
         &mut self,
         doc: &mut Document,
@@ -9,6 +11,8 @@ impl Page {
         next: Option<usize>,
     ) -> Outcome {
         let before = self.state.errors;
+        self.state.dom.native_focus_removed=false;
+        if doc.native_focus.get()!=next{doc.native_focus.set(next);self.state.layout_changed();}
         if previous == next || !self.state.enabled || !doc.scripting_enabled {
             return Outcome::default();
         }

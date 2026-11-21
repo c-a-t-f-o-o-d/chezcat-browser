@@ -8340,3 +8340,7 @@ mod css_text;
 #[cfg(test)]
 #[path="script_structural_selector_tests.rs"]
 mod structural_selector_tests;
+
+#[cfg(test)]
+#[path="script_native_focus_selector_tests.rs"]
+mod native_focus_selector_tests;

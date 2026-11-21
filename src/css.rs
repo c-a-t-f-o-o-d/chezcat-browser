@@ -661,6 +661,8 @@ struct Compound {
     attributes: Vec<AttributeSelector>,
     root: bool,
     checked: bool,
+    focus:bool,
+    focus_within:bool,
     disabled: bool,
     negations: Vec<Vec<Selector>>,
     structural:Vec<structural::Predicate>,
@@ -2401,6 +2403,8 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             attributes: Vec::new(),
             root: false,
             checked: false,
+            focus:false,
+            focus_within:false,
             disabled: false,
             negations: Vec::new(),
             structural:Vec::new(),
@@ -2474,6 +2478,10 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                         part.structural.push(structural::parse(name,source,&mut position)?);specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("root") {
                         part.root=true;specificity.1+=1;
+                    } else if name.eq_ignore_ascii_case("focus") {
+                        part.focus=true;specificity.1+=1;
+                    } else if name.eq_ignore_ascii_case("focus-within") {
+                        part.focus_within=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("checked") {
                         part.checked=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("disabled") {
@@ -2770,6 +2778,20 @@ struct MatchContext<'a> {
 }
 
 impl<'a> MatchContext<'a> {
+    fn focus_matches(&self,node:usize,within:bool,budget:&mut usize)->bool{
+        let Some(focus)=self.doc.native_focus.get()else{return false;};
+        if !within && focus!=node{return false;}
+        if !self.doc.nodes.get(focus).is_some_and(|n|matches!(n.kind,NodeKind::Element{..})){return false;}
+        let(mut current,mut contains)=(Some(focus),false);
+        for _ in 0..self.doc.nodes.len(){
+            if *budget==0{return false;}*budget-=1;
+            let Some(index)=current else{return false;};contains|=index==node;
+            if index==0{return contains;}
+            current=self.parents.get(index).copied().flatten();
+        }
+        false
+    }
+
     fn previous_element(&self,node:usize,budget:&mut usize)->Option<usize> {
         let Some(slots)=self.sibling_slots else{return self.previous_elements.get(node).copied().flatten();};
         let parent=self.parents.get(node).copied().flatten()?;
@@ -2933,6 +2955,8 @@ fn matches_selector(
                 }
             }
         }
+        if compound.focus {if !context.focus_matches(node,false,budget){return false;}}
+        else if compound.focus_within && !context.focus_matches(node,true,budget){return false;}
         for predicate in &compound.structural{if !predicate.matches(context,node,budget){return false;}}
         if compound.checked {
             let initial = match tag.as_str() {

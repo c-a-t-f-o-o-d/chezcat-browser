@@ -34,6 +34,7 @@ pub(super) struct DomState {
     pub(super) created: node_sets::NodeSet,
     pub(super) connected: Vec<bool>,
     pub(super) pending_focus: Option<usize>,
+    pub(super) native_focus_removed:bool,
     pub(super) collections: Vec<dom_collections::TagCollection>,
     pub(super) child_lists: identity_map::IdentityMap<usize>,
     pub(super) inert_child_lists: identity_map::IdentityMap<u32>,
@@ -292,6 +293,9 @@ impl State {
         self.tree = tree;
         self.dom.connected = connected;
         self.dirty = false;
+        if doc.native_focus.get().is_some_and(|node|!self.dom.connected.get(node).copied().unwrap_or(false)){
+            doc.native_focus.set(None);self.dom.native_focus_removed=true;self.layout_changed();
+        }
         Ok(())
     }
 }
