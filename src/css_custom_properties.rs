@@ -20,7 +20,7 @@ impl Default for Budget {
     fn default() -> Self { Self::with_remaining(8 * 1024 * 1024, 8 * 1024 * 1024) }
 }
 impl Budget {
-    fn with_remaining(work: usize, copies: usize) -> Self {
+    pub(super) fn with_remaining(work: usize, copies: usize) -> Self {
         Self { work, copies, used_work: 0, used_copies: 0, failed_work: false, failed_copies: false }
     }
     pub(super) fn remaining(&self) -> (usize, usize) { (self.work, self.copies) }

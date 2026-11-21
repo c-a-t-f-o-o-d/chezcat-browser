@@ -8,7 +8,7 @@ pub(super) fn compute<'a>(
     node: usize,
     tag: &str,
     outer: bool,
-    parent: Option<&crate::image::SvgGeometry>,
+    parent: Option<&crate::image::SvgStyle>,
     parent_known: bool,
     font: f32,
     root: f32,
@@ -16,15 +16,15 @@ pub(super) fn compute<'a>(
     declarations: impl Iterator<Item = &'a Declaration>,
     variables: &custom_properties::Variables,
     budget: &mut custom_properties::Budget,
-) -> Option<crate::image::SvgGeometry> {
+) -> Option<crate::image::SvgStyle> {
     if !font_known {
         return None;
     }
-    let mut value = crate::image::SvgGeometry::new(font as f64, root as f64);
+    let mut value = crate::image::SvgStyle::new(font as f64, root as f64);
     if let NodeKind::Element { attrs, .. } = &doc.nodes[node].kind {
         for attr in attrs {
             if attr.name.namespace.is_some()
-                || !crate::image::SvgGeometry::property(&attr.name.qualified)
+                || !crate::image::SvgStyle::property(&attr.name.qualified)
             {
                 continue;
             }
@@ -35,7 +35,7 @@ pub(super) fn compute<'a>(
         }
     }
     for d in declarations {
-        if !crate::image::SvgGeometry::property(&d.name) {
+        if !crate::image::SvgStyle::property(&d.name) {
             continue;
         }
         budget.work(d.value.len().checked_add(1)?).ok()?;
@@ -43,7 +43,7 @@ pub(super) fn compute<'a>(
         let text = if custom_properties::has_var(&d.value) {
             substituted = variables.substitute(&d.value, budget).ok()?;
             match substituted.as_deref() {
-                Some(text) => match crate::image::SvgGeometry::valid(tag, &d.name, text, outer) {
+                Some(text) => match crate::image::SvgStyle::valid(tag, &d.name, text, outer) {
                     Ok(true) => text,
                     Ok(false) => "initial",
                     Err(_) => {
@@ -56,7 +56,7 @@ pub(super) fn compute<'a>(
         } else {
             d.value.as_str()
         };
-        match crate::image::SvgGeometry::valid(tag, &d.name, text, outer) {
+        match crate::image::SvgStyle::valid(tag, &d.name, text, outer) {
             Ok(false) => continue,
             Err(_) => {
                 value.mark_unknown(&d.name);

@@ -77,11 +77,11 @@ fn svg_geometry_inapplicable_declarations_do_not_disable_unrelated_path_paint() 
 #[test]
 fn svg_geometry_context_uses_typed_values_without_rewriting_source_and_preserves_refusals() {
     let source = b"<svg width='20' height='10'><rect width='20' height='10' fill='red'/></svg>";
-    let mut root = ComputedGeometry::new(16., 16.);
+    let mut root = ComputedValues::new(16., 16.);
     root.apply(None, "svg", "width", "20", false, true).unwrap();
     root.apply(None, "svg", "height", "10", false, true)
         .unwrap();
-    let mut rect = ComputedGeometry::new(16., 16.);
+    let mut rect = ComputedValues::new(16., 16.);
     rect.apply(Some(&root), "rect", "width", "5px", true, false)
         .unwrap();
     rect.apply(Some(&root), "rect", "height", "10px", true, false)
@@ -107,7 +107,7 @@ fn svg_geometry_context_uses_typed_values_without_rewriting_source_and_preserves
             .unwrap_err()
             .contains("unavailable")
     );
-    let mut path = ComputedGeometry::new(16., 16.);
+    let mut path = ComputedValues::new(16., 16.);
     path.mark_unknown("width");
     let path_image = decode_context(
         b"<svg width='20' height='10'><path d='M0 0L10 0L0 10Z' fill='red'/></svg>",

@@ -6217,3 +6217,7 @@ mod svg_cascade_paint_tests;
 #[cfg(test)]
 #[path="app_console_diagnostics_tests.rs"]
 mod console_diagnostics_tests;
+
+#[cfg(test)]
+#[path="app_svg_shared_paint_tests.rs"]
+mod svg_shared_paint_tests;

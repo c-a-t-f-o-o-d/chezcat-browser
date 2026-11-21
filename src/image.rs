@@ -22,7 +22,8 @@ mod png;
 mod simple;
 #[path = "image_svg.rs"]
 mod svg;
-pub(crate) use svg::ComputedGeometry as SvgGeometry;
+pub(crate) use svg::ComputedValues as SvgStyle;
+pub(crate) use svg::PaintValues as SvgPaint;
 #[path = "image_tiff.rs"]
 mod tiff;
 #[path = "image_webp.rs"]
@@ -754,6 +755,6 @@ mod tests {
 
 /// Passive inline SVG rasterization at an already-resolved layout viewport.
 /// Intrinsic resource sizing remains separate in the caller's source cache.
-pub(crate) fn decode_svg_context(data:&[u8],used:Option<(usize,usize)>,geometry:&[SvgGeometry],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+pub(crate) fn decode_svg_context(data:&[u8],used:Option<(usize,usize)>,geometry:&[SvgStyle],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     svg::decode_context(data,used,Some(geometry),check)
 }
