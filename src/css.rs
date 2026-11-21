@@ -378,6 +378,7 @@ pub enum LineHeight {
 #[derive(Clone, Debug)]
 pub struct Style {
     pub display: Display,
+    pub(crate) display_alias:Option<&'static str>,
     pub position: Position,
     /// A non-none identity translation still establishes a containing block.
     pub transform: Transform,
@@ -451,6 +452,7 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             display: Display::Inline,
+            display_alias:None,
             position: Position::Static,
             transform: Transform::None,
             overflow: Overflow::default(),
@@ -1452,7 +1454,17 @@ fn compute_cascade(
     }
     check_css_deadline(meter.as_deref().and_then(CssBudget::deadline)
         .or_else(|| transform_meter.as_deref().and_then(CssBudget::deadline)))?;
-    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes), stylesheet_cache:prepared.cache })
+    let mut presentation=Vec::new();
+    // The transform-only layout path keeps its existing no-property cost.
+    // Presentation reads can request a funded complete snapshot separately.
+    if transform_meter.is_none()||meter.is_some(){
+        if let Some(meter)=meter.as_deref_mut(){meter.presentation(computed.len())?;}
+        presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
+        let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
+        if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
+        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color}));
+    }
+    Ok(CascadeOutput { styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -1508,6 +1520,7 @@ fn user_agent(style: &mut Style, tag: &str, link: bool, hidden: bool) {
     ) {
         style.display = Display::Block;
     }
+    if tag=="li"{style.display_alias=Some("list-item");}
     if hidden
         || matches!(
             tag,
@@ -1531,7 +1544,7 @@ fn user_agent(style: &mut Style, tag: &str, link: bool, hidden: bool) {
             style.legacy_align = Some(Align::Center);
         }
         "table" => style.display = Display::Table,
-        "thead" | "tbody" | "tfoot" => style.display = Display::TableRowGroup,
+        "thead" | "tbody" | "tfoot" => {style.display=Display::TableRowGroup;style.display_alias=match tag{"thead"=>Some("table-header-group"),"tfoot"=>Some("table-footer-group"),_=>None};},
         "tr" => style.display = Display::TableRow,
         "td" | "th" => {
             style.display = Display::TableCell;
@@ -3439,7 +3452,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
     let value = declaration.value.trim().to_ascii_lowercase();
     if custom_properties::layout_property(&declaration.name)&&matches!(value.as_str(),"inherit"|"initial"|"unset"){custom_properties::reset_box(style,parent,&declaration.name,value=="inherit");return;}
     match declaration.name.as_str() {
-        "display" => {if let Some(value)=display_value(&value){style.display=value;}},
+        "display" => {if let Some(parsed)=display_value(&value){style.display=parsed;style.display_alias=match value.as_str(){"list-item"=>Some("list-item"),"table-header-group"=>Some("table-header-group"),"table-footer-group"=>Some("table-footer-group"),_=>None};}},
         "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
         "inset" => {
             if value == "inherit" {

@@ -247,7 +247,11 @@ impl Geometry {
         host_work: &mut usize,
         copy_work: &mut usize,
     ) -> Result<&crate::css::ComputedProperties, String> {
-        if self.computed_properties.is_none() {
+        self.computed_snapshot_with_presentation(doc,forms,host_work,copy_work,false)
+    }
+    pub(crate) fn presentation_snapshot(&mut self,doc:&Document,forms:&Forms,host_work:&mut usize,copy_work:&mut usize)->Result<&crate::css::ComputedProperties,String>{self.computed_snapshot_with_presentation(doc,forms,host_work,copy_work,true)}
+    fn computed_snapshot_with_presentation(&mut self,doc:&Document,forms:&Forms,host_work:&mut usize,copy_work:&mut usize,presentation:bool)->Result<&crate::css::ComputedProperties,String>{
+        if self.computed_properties.as_ref().is_none_or(|snapshot|presentation&&!snapshot.has_presentation()) {
             if self.remaining == 0 {
                 return Err(format!("DOM geometry layout limit reached ({} rebuilds per job).", self.limits.layouts_per_job));
             }

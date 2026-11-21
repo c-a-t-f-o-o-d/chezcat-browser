@@ -2208,3 +2208,21 @@ and exact pixels, preserves editing and activates the link at its new hit target
 Existing substitution/storage/work refusal guards are retained. This does not
 add general typed math, viewport lengths, inline-flex or complete CSSOM/layout,
 and does not establish real-site shell improvement.
+
+
+## Actual computed display and foreground
+
+Supported getComputedStyle display/color attribute and getPropertyValue reads
+come from immutable scalar data captured by the actual renderer's cascade.
+Declarations retain only their genuine target/owner and read the current cache,
+so class, inline, variable and connection changes remain live. Opaque foreground
+colors serialize as native rgb values; supported list/table-group display
+keywords retain their identity rather than the layout's grouped classification.
+
+Presentation backing, cascade work and complete output bytes are paid before
+publication. Specialized transform-only computation keeps its no-property cost;
+a later presentation read obtains a funded complete snapshot, preserving old
+cache state and counters on failure. No second cascade or inline approximation
+is introduced. An original App fixture checks that live reads agree with actual
+text paint, changed geometry, stable editing and native anchor hit/navigation.
+Other CSSOM/display/color families and full website usability remain unfinished.

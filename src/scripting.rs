@@ -8321,3 +8321,7 @@ mod placeholder_tests;
 
 #[path="script_placeholder.rs"]
 mod placeholder;
+
+#[cfg(test)]
+#[path="script_computed_presentation_tests.rs"]
+mod computed_presentation_tests;

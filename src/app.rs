@@ -6101,3 +6101,7 @@ mod placeholder_tests;
 #[cfg(test)]
 #[path="app_layout_variable_tests.rs"]
 mod layout_variable_tests;
+
+#[cfg(test)]
+#[path="app_computed_presentation_tests.rs"]
+mod computed_presentation_tests;
