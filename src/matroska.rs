@@ -12,7 +12,6 @@ struct Element {
 }
 struct Reader<'a> {
     data: &'a [u8],
-    left: usize,
     check: &'a dyn Fn() -> Result<(), String>,
 }
 fn vint(data: &[u8], at: &mut usize, id: bool) -> Result<u64, String> {
@@ -44,10 +43,12 @@ impl Reader<'_> {
         if *at == end {
             return Ok(None);
         }
-        if *at > end || end > self.data.len() || self.left == 0 {
-            return Err("Matroska element boundary/work allowance exceeded.".into());
+        if *at > end || end > self.data.len() {
+            return Err("Matroska element boundary exceeded.".into());
         }
-        self.left -= 1;
+        // Each finite element advances over checked ID/size bytes and its
+        // payload. The fixed-depth passes below read a header at most twice;
+        // ignored Void records retain no per-element allocation.
         let parent = &self.data[..end];
         let id = vint(parent, at, true)?;
         let len = usize::try_from(vint(parent, at, false)?)
@@ -171,7 +172,6 @@ pub fn load(
     }
     let mut r = Reader {
         data: &data,
-        left: al.chunks,
         check,
     };
     let mut at = 0;
@@ -210,7 +210,7 @@ pub fn load(
     }
     let (mut scale, mut info, mut tracks, mut declared) = (1_000_000u64, false, None, None);
     let mut pos = segment.body.start;
-    // Read track metadata before the second, bounded pass over Clusters.
+    // Read track metadata before the second finite pass over Clusters.
     while let Some(e) = r.next(&mut pos, segment.body.end)? {
         match e.id {
             0x1549a966 => {
@@ -416,6 +416,10 @@ pub fn load(
 }
 
 #[cfg(test)]
+#[path = "matroska_capacity_tests.rs"]
+mod capacity_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     const FIXTURE: &[u8] = include_bytes!("../tools/fixtures/scene-av.mkv");
@@ -501,7 +505,7 @@ mod tests {
         };
         assert!(load(FIXTURE.to_vec(), vl, audio::Limits::default(), &|| Ok(())).is_err());
         let al = audio::Limits {
-            chunks: 8,
+            channels: 1,
             ..audio::Limits::default()
         };
         assert!(load(FIXTURE.to_vec(), media::Limits::default(), al, &|| Ok(())).is_err());
