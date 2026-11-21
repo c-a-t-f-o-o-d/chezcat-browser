@@ -19,6 +19,21 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T00:44:53Z** used clean
+[`94ba833`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/94ba833341601e890ee8b62c6ba6d0f0548d5a23),
+with JavaScript enabled and images off; saved HTML reports `LOGGED_IN=false`.
+The first escaped failure is now missing `XMLHttpRequest` in an unguarded
+`XMLHttpRequest.prototype.fetch` probe, originally 28091:544; 5966:53 is the
+rethrow. There were 43 script executions (42 successful), 22 listeners and one
+escaped error. Actual pixels remain a skeleton without usable site search or
+later journey milestones. The prior FocusEvent reference error is absent in
+this distinct response cohort; external JavaScript body hashes are unavailable,
+so this is not an identical-input comparison. Genuine XHR implementation checks
+are separate from a new site result. Existing security/native-resource guards
+remain enabled, and the optional nonstandard prototype.fetch stays absent.
+
+**Previous owner checkpoint.**
+
 The owner's **2026-11-21T00:36:03Z** signed-out navigation reports a dirty
 development build based on `6c92856`; the base hash does not identify its
 uncommitted edits or executable. It still shows a skeleton and hidden search.

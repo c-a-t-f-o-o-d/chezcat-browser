@@ -158,6 +158,8 @@ mod generator_functions;
 mod host_objects;
 #[path = "event_interface.rs"]
 mod event_interface;
+#[path="xhr_interface.rs"]
+pub(crate) mod xhr_interface;
 #[path = "event_listener.rs"]
 mod event_listener;
 #[path = "media_interface.rs"]
@@ -553,6 +555,10 @@ pub struct NativeAttributeChange {
 }
 
 pub trait Host {
+    fn prepare_request_call(&mut self,_object:u32,_method:&str,_args:&[Value],_binary:Option<Vec<u8>>)->Result<xhr_interface::Call,xhr_interface::Error>{Err(xhr_interface::Error::Exception("NotSupportedError","Script requests are unavailable.".into()))}
+    fn begin_request_notification(&mut self,_notification:xhr_interface::Notification)->Result<Option<usize>,String>{Ok(None)}
+    fn finish_request_abort(&mut self,_target:u32,_generation:u64){}
+    fn cancel_request_work(&mut self){}
     fn prepare_range_operation(&mut self,_receiver:u32,_method:&str,_args:&[Value]) -> Result<(),range_interface::Error> { Err(range_interface::Error::Exception("NotSupportedError","DOM ranges are unavailable.".into())) }
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
@@ -9140,6 +9146,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if kind == "NotSupportedError"
                 && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause")
                 || kind == "InvalidCharacterError"
@@ -9251,7 +9258,7 @@ impl Runtime {
         } else {
             self.prepare_child_list_write(object, method, args, host)?
         };
-        let result=host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new);
+        let result=if xhr_interface::operation(method).is_some(){self.call_request_operation(object,method,args,host)}else{host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new)};
         self.finish_tree_observation(observation, host)?;
         if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}
         if self.drain_native_promise_effects(host)?!=0 {

@@ -535,3 +535,14 @@ impl Runtime {
         Ok(output)
     }
 }
+
+impl Runtime {
+    /// Original decoder shared with document-owned request adapters. This does
+    /// not expose a new JS API or bypass the active job's work/string budgets.
+    pub(crate) fn decode_request_text(&mut self,bytes:&[u8],label:&str)->Result<String,String> {
+        let encoding=if bytes.starts_with(&[0xef,0xbb,0xbf]) {Encoding::Utf8}else if bytes.starts_with(&[0xff,0xfe]) {Encoding::Utf16Le}else if bytes.starts_with(&[0xfe,0xff]) {Encoding::Utf16Be}else{Encoding::label(label).ok_or_else(||format!("Request text encoding {label} is not implemented."))?};
+        self.work(bytes.len()).map_err(Fault::display)?;
+        let mut decoder=Decoder{encoding,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0};
+        self.decode_text_bytes(&mut decoder,bytes,false).map_err(Fault::display)
+    }
+}

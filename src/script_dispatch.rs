@@ -295,10 +295,11 @@ impl Bridge<'_> {
         handle.checked_sub(0x9000_0000).and_then(|id|self.state.standalone_targets.get(id as usize)).copied()
             .or_else(|| self.message_port_owner(handle))
             .or_else(|| self.media_query_owner(handle))
+            .or_else(|| self.xhr_owner(handle))
     }
 
     pub(super) fn event_target_count(&self) -> usize {
-        self.state.standalone_targets.len()
+        self.state.xhr.records.len().saturating_mul(2).saturating_add(self.state.standalone_targets.len())
             .saturating_add(self.state.abort_signals.len())
             .saturating_add(self.state.message_channels.port_count())
             .saturating_add(self.state.media_queries.len())
@@ -514,8 +515,9 @@ impl Bridge<'_> {
         }
     }
     pub(super) fn synthetic_callback_error(&mut self, token: usize, message: &str) {
-        if self.state.synthetic_dispatches.get(token).is_some() {
-            self.state.error("Synthetic event listener", message);
+        if let Some(frame)=self.state.synthetic_dispatches.get(token) {
+            let trusted=self.state.created_events[frame.event].trusted;
+            self.state.error(if trusted {"Native event listener"}else{"Synthetic event listener"},message);
         }
     }
     pub(super) fn finish_synthetic_dispatch(&mut self, token: usize) -> bool {

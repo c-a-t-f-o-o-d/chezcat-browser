@@ -164,6 +164,8 @@ pub use page_navigation::Navigation;
 mod script_forms;
 #[path = "script_resources.rs"]
 mod script_resources;
+#[path="script_xhr.rs"]
+mod script_xhr;
 pub use script_resources::DynamicScript;
 #[cfg(test)]
 pub use script_resources::ScriptRequest;
@@ -556,6 +558,7 @@ struct State {
     created_events: Vec<script_created_events::CreatedEvent>,
     standalone_targets: Vec<u32>,
     message_channels: script_message_channel::State,
+    xhr:script_xhr::State,
     media_queries: Vec<String>,
     abort_signals: Vec<script_abort::Record>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
@@ -646,6 +649,7 @@ impl State {
             created_events: Vec::new(),
             standalone_targets: Vec::new(),
             message_channels: script_message_channel::State::default(),
+            xhr:script_xhr::State::default(),
             media_queries: Vec::new(),
             abort_signals: Vec::new(),
             synthetic_dispatches: Vec::new(),
@@ -1267,6 +1271,8 @@ impl Page {
         runtime.define_mouse_event_interface(WINDOW).expect("fixed MouseEvent interface");
         runtime.define_keyboard_event_interface(WINDOW).expect("fixed KeyboardEvent interface");
         runtime.define_focus_event_interface(WINDOW).expect("fixed FocusEvent interface");
+        runtime.define_progress_event_interface(WINDOW).expect("fixed ProgressEvent interface");
+        runtime.define_xhr_interfaces(WINDOW).expect("fixed XMLHttpRequest interfaces");
         runtime.define_node_interfaces(WINDOW,dom_tree::NODE_CONSTANTS,Some((IMAGE_FACTORY,"Image"))).expect("fixed Node interfaces");
         runtime.define_range_interfaces(WINDOW).expect("fixed range interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
@@ -2176,7 +2182,7 @@ impl Page {
         if !self.state.enabled {
             return "JavaScript did not run for this document (disabled or blocked by document policy).\n".into();
         }
-        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Unmarked HTTP(S) dynamic LINK stylesheets use guarded cross-origin loading; marked stylesheets retain exact-origin checks. Checked innerHTML replaces ordinary HTML fragments with inert injected scripts and real image queues; unsupported parser recovery and native form/resource changes reject before replacement. Modules, persistent storage, fetch and XHR are not implemented.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
+        let mut text = format!("ChezCat JavaScript subset\n{} script(s), {} active listener(s), {} error(s).\n{} pending timer(s), {} timer callback(s) executed.\nClassic scripts run after parsing. Events come from supported controls/forms and completed dynamic scripts/stylesheets.\nFunction timers use the document queue. Bounded eval follows the document CSP.\nLocation inspection reflects the displayed document; same-origin assign/replace/reload and href/search/hash writes queue navigation.\nSession cookies are memory-only with host-only/Domain scope and bundled public-suffix boundaries; document.cookie excludes HttpOnly entries.\nDynamic external classic scripts use CSP, MIME, request-blocking and bounded source checks; cross-origin HTTPS scripts omit credentials. Crossorigin-marked scripts require same-origin at every hop. Unmarked HTTP(S) dynamic LINK stylesheets use guarded cross-origin loading; marked stylesheets retain exact-origin checks. Checked innerHTML replaces ordinary HTML fragments with inert injected scripts and real image queues; unsupported parser recovery and native form/resource changes reject before replacement. Modules, persistent storage and Fetch are not implemented. XMLHttpRequest has a finite original asynchronous main-document HTTP(S) text-response adapter, buffered completion, native progress and explicit unsupported preflight/response/auth/child cases.\n\n", self.state.executed, self.state.listeners.len(), self.state.errors, self.state.timers.len(), self.state.timer_callbacks);
         let attribution = self.runtime.string_work_failure_report();
         let reachability = self.runtime.persistent_allocation_report();
         let promises = self.runtime.promise_state_report();
@@ -2733,7 +2739,7 @@ impl Bridge<'_> {
     fn handler_event_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
         // Keep native on* property availability unchanged. Custom names are
         // accepted through add/removeEventListener on existing EventTargets.
-        let allowed = event == "abort" && self.abort_signal_owner(handle).is_some()
+        let allowed = self.xhr_index(handle).is_some() && matches!(event,"readystatechange"|"loadstart"|"progress"|"abort"|"error"|"load"|"timeout"|"loadend") || event == "abort" && self.abort_signal_owner(handle).is_some()
             || event == "message" && self.message_port_owner(handle).is_some()
             || self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
@@ -2753,7 +2759,7 @@ impl Bridge<'_> {
 
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
-            .then_some("abort").or_else(|| self.media_handler_event(object,property))
+            .then_some("abort").or_else(||self.xhr_handler_event(object,property)).or_else(|| self.media_handler_event(object,property))
             .or_else(|| self.message_handler_event(object, property)) else {
             return Ok(None);
         };
@@ -2771,7 +2777,7 @@ impl Bridge<'_> {
 
     fn set_handler(&mut self, object: u32, property: &str, value: Value) -> Result<bool, String> {
         let Some(event) = (property == "onabort" && self.abort_signal_owner(object).is_some())
-            .then_some("abort").or_else(|| self.media_handler_event(object,property))
+            .then_some("abort").or_else(||self.xhr_handler_event(object,property)).or_else(|| self.media_handler_event(object,property))
             .or_else(|| self.message_handler_event(object, property)) else {
             return Ok(false);
         };
@@ -2966,6 +2972,8 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
+
         if script_element_properties::ordinary_interface_member(property) && self.form_named_control(object,property) {return false;}
         self.ordinary_attribute_method(object,property)
             || parent_children::member(property) && self.parent_node_receiver(object)
@@ -2994,6 +3002,10 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn prepare_request_call(&mut self,object:u32,method:&str,args:&[Value],binary:Option<Vec<u8>>)->Result<crate::javascript::xhr_interface::Call,crate::javascript::xhr_interface::Error>{self.xhr_call(object,method,args,binary)}
+    fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
+    fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
+    fn cancel_request_work(&mut self){self.xhr_cancel_all();}
     fn prepare_range_operation(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error> { self.validate_range_call(receiver,method,args) }
     fn tree_walker_document(&self, document: u32) -> bool {
         document == DOCUMENT
@@ -3103,6 +3115,8 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if let Some((window,interface))=self.xhr_interface(object){return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,interface))});}
+
         if let Some(window)=self.range_owner(object) { return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"Range"))}); }
         if self.event_target_interface(object) {
             return Some(crate::javascript::NativeAncestry { window: object, constructor: Some((object, "Window")) });
@@ -3125,6 +3139,7 @@ impl Host for Bridge<'_> {
                 else if self.mouse_receiver(object) {"MouseEvent"}
                 else if self.keyboard_receiver(object) {"KeyboardEvent"}
                 else if self.focus_receiver(object) {"FocusEvent"}
+                else if self.progress_receiver(object) {"ProgressEvent"}
                 else if self.ui_receiver(object) {"UIEvent"}
                 else {"Event"};
             return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,interface))});
@@ -3198,6 +3213,8 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.xhr_index(object).is_some(){return false;}
+
         if property=="submit" && self.form_submit_method(object).is_some() {return false;}
         if self.range_owner(object).is_some() {return false;}
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
@@ -3236,6 +3253,8 @@ impl Host for Bridge<'_> {
     }
 
     fn ordinary_lookup_tail(&self, object:u32) -> bool {
+        if self.xhr_index(object).is_some(){return true;}
+
         if self.form_receiver(object) && self.class_list_element_receiver(object) {return true;}
         self.location_instance_owner(object).is_some() || object == HISTORY || self.attr_receiver(object)
             || self.text_or_comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
@@ -3326,6 +3345,8 @@ impl Host for Bridge<'_> {
     }
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if self.xhr_index(object).is_some(){return property=="responseType";}
+
         if self.textarea_value_member(object,property) {return true;}
         if property == "innerHTML" && self.template_receiver(object) { return true; }
         if object == DOCUMENT && property == "textContent" {return true;}
@@ -3355,6 +3376,8 @@ impl Host for Bridge<'_> {
         self.prepare_media_microtask(object,script_media::interface_operation(member).unwrap_or(member),args,setter)
     }
     fn native_setter_property(&self,object:u32,method:&str)->Option<&'static str>{
+        if self.xhr_index(object).is_some(){return crate::javascript::xhr_interface::setter(method).map(|name|match name {"timeout"=>"timeout","withCredentials"=>"withCredentials","responseType"=>"responseType","onreadystatechange"=>"onreadystatechange","onloadstart"=>"onloadstart","onprogress"=>"onprogress","onabort"=>"onabort","onerror"=>"onerror","onload"=>"onload","ontimeout"=>"ontimeout","onloadend"=>"onloadend",_=>unreachable!()});}
+
         if method == ELEMENT_INNER_HTML_SET && (self.attr_element_receiver(object) || self.template_receiver(object)) {
             return Some("innerHTML");
         }
@@ -3378,6 +3401,8 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if self.xhr_index(object).is_some(){return property=="timeout";}
+
         if self.canvas_member(object, property) {return true;}
         if script_scroll_offsets::axis(property).is_some() && self.element_selector_receiver(object) {return true;}
         if property=="currentTime" && self.media_interface_receiver(object) {return true;}
@@ -3387,6 +3412,8 @@ impl Host for Bridge<'_> {
     }
 
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
+
         if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END) { return &[(1,false)]; }
         if method == script_inert_documents::parser::PARSE { return &[(0, true), (1, true)]; }
         if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
@@ -3430,7 +3457,7 @@ impl Host for Bridge<'_> {
         if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {
             return if self.is_frame_handle(object)||self.inert_node_type(object).is_some() {&[]} else {&[(0,true)]};
         }
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && matches!(method,"replaceState"|"pushState") { return &[(1, true), (2, true)]; }
@@ -3541,6 +3568,8 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
+
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if method==crate::javascript::HTML_FORM_SUBMIT && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
@@ -3594,6 +3623,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return Some(object);}
+        if self.event_target_interface(object)&&method.starts_with("\0ProgressEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0Media.")
             || self.event_target_interface(object)&&method.starts_with("\0Video.") {return Some(object);}
         if self.media_element_receiver(object)&&matches!(method,"load"|"pause"|"play") {return Some(WINDOW);}
@@ -3601,7 +3631,7 @@ impl Host for Bridge<'_> {
     }
 
     fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
-        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"CustomEvent")) {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"CustomEvent")) {
             return None;
         }
         if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
@@ -3660,6 +3690,8 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
+
         if crate::javascript::range_interface::operation(method) { return crate::javascript::range_interface::arity(method); }
         if let Some(method)=script_named_map::operation(method){return match method{"item"|"getNamedItem"=>1,"getNamedItemNS"=>2,_=>0};}
         if method == script_inert_documents::parser::PARSE { return 2; }
@@ -3682,7 +3714,7 @@ impl Host for Bridge<'_> {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
         }
         if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {return 1;}
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
@@ -3747,6 +3779,14 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if self.event_target_interface(object)&&matches!(method,"XMLHttpRequestEventTarget"|"XMLHttpRequestUpload"){return Err(("TypeError","Illegal request interface constructor.".into()));}
+        if method.starts_with("\0XHR.") {
+            if let Some(name)=crate::javascript::xhr_interface::getter(method).or_else(||crate::javascript::xhr_interface::setter(method)){return self.xhr_validate_member(object,name);}
+            if !self.xhr_index(object).is_some_and(|(_,upload)|!upload){return Err(("TypeError","Request operations require a genuine XMLHttpRequest.".into()));}
+            if !self.state.enabled||!self.doc.scripting_enabled{return Err(("InvalidStateError","Script requests are disabled.".into()));}
+            return Ok(());
+        }
+
         if method==crate::javascript::HTML_FORM_SUBMIT && self.inert_interface(object)==Some("HTMLFormElement") {
             return Err(("NotSupportedError","Inert form submission has no native form backend.".into()));
         }
@@ -3849,7 +3889,7 @@ impl Host for Bridge<'_> {
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
             return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
         }
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"CustomEvent")&&self.event_target_interface(object) {
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"CustomEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
                 return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
@@ -3865,6 +3905,7 @@ impl Host for Bridge<'_> {
         if method.starts_with("\0UIEvent.")&&!self.ui_receiver(object) {
             return Err(("TypeError","UIEvent operation requires a genuine UIEvent.".into()));
         }
+        if method.starts_with("\0ProgressEvent.")&&!self.progress_receiver(object) {return Err(("TypeError","ProgressEvent operation requires a genuine ProgressEvent.".into()));}
         if method.starts_with("\0FocusEvent.")&&!self.focus_receiver(object) {return Err(("TypeError","FocusEvent operation requires a genuine FocusEvent.".into()));}
         if method.starts_with("\0KeyboardEvent.")&&!self.keyboard_receiver(object) {
             return Err(("TypeError","KeyboardEvent operation requires a genuine KeyboardEvent.".into()));
@@ -3989,6 +4030,8 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if self.xhr_index(object).is_some(){return self.xhr_validate_set(object,property,value);}
+
         if self.content_editable_attribute(object,property) {return self.validate_content_editable_value(object,value);}
         if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
             return Err(("NotSupportedError", format!("Canvas 2D drawing state {property:?} is not implemented.")));
@@ -4048,7 +4091,7 @@ impl Host for Bridge<'_> {
     }
 
     fn setter_dom_exception(&self,object:u32,property:&str,kind:&str)->bool {
-        kind=="SyntaxError" && self.content_editable_attribute(object,property)
+        self.xhr_index(object).is_some()&&!matches!(kind,"TypeError"|"RangeError") || kind=="SyntaxError" && self.content_editable_attribute(object,property)
     }
 
     fn resolve_member_before_call(&self, object: u32) -> bool {
@@ -4085,6 +4128,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.xhr_index(object).is_some(){return None;}
+
         if self.attribute_method_member(object,property){return None;}
         if self.inert_interface(object).is_some() { return self.inert_factory(object, property); }
         if script_inline_style::handle(object) {
@@ -4152,6 +4197,12 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
+            let Some((_,upload))=self.xhr_index(receiver) else{return false};
+            let name=crate::javascript::xhr_interface::getter(method).or_else(||crate::javascript::xhr_interface::setter(method));
+            return !upload||name.is_some_and(|name|self.xhr_handler_event(receiver,name).is_some());
+        }
+
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
@@ -4247,6 +4298,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return self.keyboard_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return self.focus_receiver(receiver);}
+        if self.event_target_interface(object)&&method.starts_with("\0ProgressEvent.") {return self.progress_receiver(receiver);}
         if self.event_target_interface(object)&&(method.starts_with("\0MouseEvent.")||matches!(method,"initMouseEvent"|"getModifierState")) {
             return self.mouse_receiver(receiver);
         }
@@ -4535,6 +4587,7 @@ impl Host for Bridge<'_> {
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
         if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
         if method=="FocusEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view","relatedTarget"]));}
+        if method=="ProgressEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","lengthComputable","loaded","total"]));}
         if method=="KeyboardEvent"&&self.event_target_interface(object) {return Some((1,&[
             "bubbles","cancelable","composed","detail","view",
             "altKey","ctrlKey","metaKey","modifierAltGraph","modifierCapsLock","modifierFn","modifierFnLock",
@@ -4559,6 +4612,7 @@ impl Host for Bridge<'_> {
         if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
             return matches!(member, "colorSpace" | "colorType").then_some(true);
         }
+        if method=="ProgressEvent"&&self.event_target_interface(object)&&matches!(member,"loaded"|"total"){return Some(false);}
         if method=="KeyboardEvent"&&self.event_target_interface(object) {
             if matches!(member,"key"|"code") {return Some(true);}
             if matches!(member,"detail"|"location"|"keyCode"|"charCode") {return Some(false);}
@@ -4608,6 +4662,7 @@ impl Host for Bridge<'_> {
         if method=="MouseEvent"&&self.event_target_interface(object) {return self.construct_mouse_event(object,args,fields);}
         if method=="KeyboardEvent"&&self.event_target_interface(object) {return self.construct_keyboard_event(object,args,fields);}
         if method=="FocusEvent"&&self.event_target_interface(object) {return self.construct_focus_event(object,args,fields);}
+        if method=="ProgressEvent"&&self.event_target_interface(object) {return self.construct_progress_event(object,args,fields);}
         if matches!(method, "addEventListener" | "removeEventListener") {
             self.state.work(1)?;
             self.event_listener(object, method, args, fields)
@@ -4700,6 +4755,8 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.xhr_index(object).is_some(){return Ok(self.xhr_member(object,property));}
+
         if self.range_owner(object).is_some() {self.state.work(1)?;return Ok(false);}
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(false);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(false);}
@@ -4998,6 +5055,8 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if let Some(value)=self.xhr_get(object,property){return value;}
+
         if self.range_owner(object).is_some() { self.state.work(1)?;return Ok(Value::Undefined); }
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return Ok(Value::Undefined);}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return Ok(Value::Undefined);}
@@ -5361,6 +5420,8 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.xhr_index(object).is_some(){return self.xhr_set(object,property,value).unwrap();}
+
         if property == "innerHTML" && self.template_receiver(object) {
             let source = if matches!(value, Value::Null) { String::new() } else { self.text(&value)? };
             return self.set_template_html(object, &source);
@@ -5634,6 +5695,9 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="XMLHttpRequest"&&self.event_target_interface(object){return self.xhr_new(object);}
+        if let Some(property)=crate::javascript::xhr_interface::getter(method){return self.xhr_get(object,property).unwrap_or_else(||Err("XHR receiver is invalid.".into()));}
+
         let method=if method==crate::javascript::HTML_FORM_SUBMIT {"submit"}else{method};
         if crate::javascript::range_interface::operation(method) { return self.range_call(object,method,args); }
         if object==WINDOW && method=="matchMedia" {return self.create_media_query(args);}
@@ -5759,6 +5823,7 @@ impl Host for Bridge<'_> {
         if method=="\0KeyboardEvent.getModifierState" {return self.keyboard_modifier_state(object,args);}
         if let Some(property)=method.strip_prefix("\0KeyboardEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0FocusEvent.get.") {return self.get(object,property);}
+        if let Some(property)=method.strip_prefix("\0ProgressEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0MouseEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0CustomEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0UIEvent.get.") {return self.get(object,property);}
@@ -8096,3 +8161,7 @@ mod script_keyboard_event_tests;
 #[cfg(test)]
 #[path = "script_range_tests.rs"]
 mod range_tests;
+
+#[cfg(test)]
+#[path="script_xhr_tests.rs"]
+mod script_xhr_tests;

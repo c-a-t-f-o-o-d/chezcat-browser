@@ -42,7 +42,7 @@ fn point(app:&App,name:&str)->(i32,i32){let node=node(app,name);let rect=app.pag
 fn edit(app:&mut App,text:&str){assert!(!app.failed,"Fixture page failed: {}",app.status);let(x,y)=point(app,"q");app.pointer_down(x,y,false);app.pointer_up(x,y);app.key(0x41,true,false,false);app.paste(text);assert_eq!(app.forms.controls[&node(app,"q")].value.text(),text);}
 fn tap(app:&mut App,name:&str){let(x,y)=point(app,name);app.pointer_down(x,y,false);app.pointer_up(x,y);}
 fn until(session:&mut Session,mut ready:impl FnMut(&mut Session)->bool){let deadline=Instant::now()+Duration::from_secs(15);while !ready(session){session.poll(4).unwrap();assert!(Instant::now()<deadline,"Real session ownership fixture timed out.");thread::sleep(Duration::from_millis(2));}}
-fn received()->crate::http::Response{crate::http::Response{document_timing:None,redirected:false,url:crate::url::parse("https://download.invalid/session.bin").unwrap().0,fragment:None,status:200,protocol:Some("TLS 1.3"),request_is_post:true,cookie_same_site:false,headers:vec![("content-disposition".into(),"attachment; filename=session.bin".into())],body:b"browser download".to_vec(),events:Vec::new()}}
+fn received()->crate::http::Response{crate::http::Response{document_timing:None,redirected:false,url:crate::url::parse("https://download.invalid/session.bin").unwrap().0,fragment:None,status:200,status_text:"OK".into(),encoded_body_bytes:b"browser download".len(),protocol:Some("TLS 1.3"),request_is_post:true,cookie_same_site:false,headers:vec![("content-disposition".into(),"attachment; filename=session.bin".into())],body:b"browser download".to_vec(),events:Vec::new()}}
 
 #[test]
 fn session_core_real_tabs_keep_independent_forms_vm_source_scroll_and_back_history(){

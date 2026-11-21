@@ -60,6 +60,7 @@ mod random;
 mod script_geometry;
 mod scripting;
 mod script_storage;
+mod script_request_core;
 mod search;
 mod svg_reference;
 mod text;

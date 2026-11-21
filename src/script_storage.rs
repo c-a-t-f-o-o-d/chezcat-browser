@@ -10,6 +10,11 @@ impl Lease {
         Ok(Self{used,bytes})
     }
     pub(crate) fn empty(used:Arc<AtomicUsize>)->Self{Self{used,bytes:0}}
+    pub(crate) fn replace(&mut self,old:usize,new:usize,limit:usize)->Result<(),String> {
+        if old>self.bytes{return Err("Script storage replacement ownership mismatch.".into());}
+        if new>=old {let added=Self::new(self.used.clone(),new-old,limit)?;self.merge(added);}else{let refund=old-new;self.bytes-=refund;self.used.fetch_sub(refund,Ordering::AcqRel);}
+        Ok(())
+    }
     pub(crate) fn merge(&mut self,mut other:Self){assert!(Arc::ptr_eq(&self.used,&other.used));self.bytes+=other.bytes;other.bytes=0;}
 }
 impl Drop for Lease {fn drop(&mut self){if self.bytes!=0{self.used.fetch_sub(self.bytes,Ordering::AcqRel);}}}

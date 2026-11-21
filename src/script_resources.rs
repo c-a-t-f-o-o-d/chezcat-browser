@@ -105,6 +105,7 @@ impl Page {
     }
 
     pub fn clear_host_requests(&mut self) {
+        self.state.xhr.cancel();
         self.clear_message_tasks();
         self.clear_stylesheet_requests();
         self.clear_image_requests();
