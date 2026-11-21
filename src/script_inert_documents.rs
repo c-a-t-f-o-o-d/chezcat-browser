@@ -5,6 +5,8 @@ use std::rc::Rc;
 
 #[path = "script_inert_mutation.rs"]
 mod mutation;
+#[path="script_inert_selectors.rs"]
+mod selectors;
 
 #[path = "script_dom_parser.rs"]
 pub(super) mod parser;

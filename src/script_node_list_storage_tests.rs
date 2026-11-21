@@ -17,7 +17,7 @@ fn browser_node_lists_exceed_former_identity_result_and_total_reference_counts()
     execute(&mut page,&mut doc,&mut forms,"for(var i=0;i<180;i++)document.querySelectorAll('div');document.body.removeChild(tail);if(kept.length!==6000||kept[5999]!==tail||named.length!==5999)throw 'snapshot and live semantics';");
     assert_eq!(page.state.node_list_references,181*6000);
     assert!(page.state.node_list_references>1_048_576);
-    let payload=page.state.node_lists.iter().map(|list|match list{NodeList::Name(name)=>name.capacity(),NodeList::Snapshot(nodes)=>nodes.capacity()*size_of::<usize>(),NodeList::MutationSnapshot(nodes)=>nodes.capacity()*size_of::<u32>(),_=>0}).sum::<usize>();
+    let payload=page.state.node_lists.iter().map(|list|match list{NodeList::Name(name)=>name.capacity(),NodeList::Snapshot(nodes)=>nodes.capacity()*size_of::<usize>(),NodeList::HandleSnapshot(nodes)=>nodes.capacity()*size_of::<u32>(),_=>0}).sum::<usize>();
     assert!(page.state.retained>=payload+page.state.node_lists.capacity()*size_of::<NodeList>());
     assert!(page.state.retained<=page.state.retained_limit);
 }

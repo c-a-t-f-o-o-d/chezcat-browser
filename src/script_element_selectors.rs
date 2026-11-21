@@ -7,8 +7,8 @@ use super::*;
 
 pub(super) fn operation(method: &str) -> Option<&'static str> {
     match method {
-        "\0Element.querySelector" => Some("querySelector"),
-        "\0Element.querySelectorAll" => Some("querySelectorAll"),
+        "\0Element.querySelector" | "\0Document.querySelector" | "\0DocumentFragment.querySelector" => Some("querySelector"),
+        "\0Element.querySelectorAll" | "\0Document.querySelectorAll" | "\0DocumentFragment.querySelectorAll" => Some("querySelectorAll"),
         "\0Element.matches" => Some("matches"),
         "\0Element.closest" => Some("closest"),
         _ => None,
@@ -34,6 +34,17 @@ impl Bridge<'_> {
         self.element_selector_receiver(object)||self.inert_node_type(object)==Some(1)
     }
 
+    pub(super) fn selector_operation_receiver(&self,object:u32,method:&str)->bool{
+        if method.starts_with("\0Document."){object==DOCUMENT||self.inert_node_type(object)==Some(9)||self.frame_contains_node(object).is_some_and(|(_,node)|node==0)}
+        else if method.starts_with("\0DocumentFragment."){match self.inert_node_type(object){Some(kind)=>kind==11,None=>self.fragment_receiver(object)}}
+        else{self.canonical_selector_receiver(object)}
+    }
+    pub(super) fn validate_selector_operation_receiver(&self,object:u32,method:&str)->Result<(),(&'static str,String)>{
+        if method.starts_with("\0Document.")||method.starts_with("\0DocumentFragment."){
+            if !self.selector_operation_receiver(object,method){return Err(("TypeError","Selector operation requires a genuine receiver implementing its defining interface.".into()));}
+            if self.is_frame_handle(object){return Err(("NotSupportedError","Blank child Document queries are not implemented.".into()));}Ok(())
+        }else{self.validate_element_selector_receiver(object)}
+    }
     pub(super) fn validate_element_selector_receiver(&self, object: u32)
         -> Result<(), (&'static str, String)>
     {
@@ -46,7 +57,6 @@ impl Bridge<'_> {
         if self.is_frame_handle(object) {
             return Err(("NotSupportedError", "Blank child Element queries are not implemented.".into()));
         }
-        if self.inert_node_type(object)==Some(1){return Err(("NotSupportedError","Inert Element selector operations are not implemented.".into()));}
         Ok(())
     }
 }

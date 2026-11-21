@@ -3473,8 +3473,8 @@ impl Host for Bridge<'_> {
             };
         }
         if self.computed_style_receiver(object) {return match method {"getPropertyValue"|"removeProperty"=>&[(0,true)],"setProperty"=>&[(0,true),(1,true),(2,true)],_=>&[]};}
-        if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {
-            return if self.is_frame_handle(object)||self.inert_node_type(object).is_some() {&[]} else {&[(0,true)]};
+        if script_element_selectors::operation(method).is_some() && self.selector_operation_receiver(object,method) {
+            return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
         }
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return &[(0,true)];}
@@ -3737,7 +3737,7 @@ impl Host for Bridge<'_> {
         if self.computed_style_receiver(object) || (STYLE_BASE..DATASET_BASE).contains(&object) {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
         }
-        if script_element_selectors::operation(method).is_some() && self.canonical_selector_receiver(object) {return 1;}
+        if script_element_selectors::operation(method).is_some() && self.selector_operation_receiver(object,method) {return 1;}
         if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
@@ -3769,7 +3769,7 @@ impl Host for Bridge<'_> {
         }
         if node_index(object).is_some() && matches!(method, "setAttribute" | "insertBefore" | "replaceChild") {
             2
-        } else if (object == DOCUMENT || node_index(object).is_some())
+        } else if (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9|11)))
             && matches!(
                 method,
                 "querySelector" | "querySelectorAll" | "matches" | "closest"
@@ -3883,7 +3883,7 @@ impl Host for Bridge<'_> {
             return Err(("TypeError","ParentNode getter requires a genuine accessible parent node.".into()));
         }
         let method=if let Some(operation)=script_element_selectors::operation(method) {
-            self.validate_element_selector_receiver(object)?;
+            self.validate_selector_operation_receiver(object,method)?;
             operation
         } else {method};
         if self.event_target_interface(object) && matches!(method, "Text" | "Comment") {
@@ -4007,7 +4007,7 @@ impl Host for Bridge<'_> {
         }
         if script_class_list::element(object).is_some() { return self.class_list_validate(object,method,args); }
         self.dom_validate_call(object, method, args)?;
-        if (object == DOCUMENT || node_index(object).is_some())
+        if (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9|11)))
             && matches!(
                 method,
                 "querySelector" | "querySelectorAll" | "matches" | "closest"
@@ -4296,7 +4296,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return self.collection_receiver(receiver);}
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return self.named_map_receiver(receiver);}
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
-        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.canonical_selector_receiver(receiver);}
+        if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.selector_operation_receiver(receiver,method);}
         if self.event_target_interface(object) {
             if let Some(interface) = Slottable::getter(method) {return self.slottable(receiver) == Some(interface);}
             if let Some((family,_))=script_element_siblings::operation(method) {return self.element_sibling_family(receiver)==Some(family);}
@@ -5830,7 +5830,7 @@ impl Host for Bridge<'_> {
         if method=="\0HTMLCollection.namedItem"{return self.tag_collection_call(object,"namedItem",args);}
         if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
         let method=if let Some(operation)=script_element_selectors::operation(method) {
-            self.validate_element_selector_receiver(object).map_err(|(_,message)|message)?;
+            self.validate_selector_operation_receiver(object,method).map_err(|(_,message)|message)?;
             operation
         } else {method};
         if let Some((family,next))=script_element_siblings::operation(method) {
@@ -6034,6 +6034,10 @@ impl Host for Bridge<'_> {
                 "cancelAnimationFrame" => return self.state.cancel_animation_frame(args),
                 _ => {}
             }
+        }
+        if matches!(method,"querySelector"|"querySelectorAll"|"matches"|"closest")&&self.inert_node_type(object).is_some(){
+            let Some(Value::String(source))=args.first() else{return Err("Inert selector requires a converted selector string.".into());};
+            return self.inert_selector_query(object,method,source);
         }
         if matches!(method, "querySelector" | "querySelectorAll")
             && (object == DOCUMENT || node_index(object).is_some())
@@ -8237,3 +8241,7 @@ mod nested_template_tests;
 #[cfg(test)]
 #[path="script_error_event_tests.rs"]
 mod error_event_tests;
+
+#[cfg(test)]
+#[path="script_inert_selector_tests.rs"]
+mod inert_selector_tests;

@@ -58,13 +58,14 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `c3081a5` at November 21, 04:04 UTC
-completes all 43 script executions but still renders a skeleton. DOMContentLoaded
-then references missing ErrorEvent in a polyfill error-reporting fallback. The
-connected increment supplies real ErrorEvent fields and synthetic delivery;
-an underlying application exception may remain and must be checked on actual
-site execution. The older Hq timer binding remains untraced, without a resolution
-claim from its absence in a short checkpoint.
+The active P1 package completes known template preparation, import and activation
+contracts before another site milestone check. Nested content, ordinary metadata,
+live ParentNode views and finite child moves/import are integrated. Inert selector
+queries are the current connected increment; mixed-resource/nested import,
+namespace-aware SVG and remaining mutation/lifecycle scheduling stay open.
+The last actual clean `fff35f8` run at November 21, 04:13 UTC completed all 43
+script executions and 61 callbacks without escaped errors but still rendered the
+skeleton and logged an opaque error object. No usable shell is demonstrated.
 These implementation checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.

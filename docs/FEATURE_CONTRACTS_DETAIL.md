@@ -1873,3 +1873,32 @@ error propagation or legacy Window.onerror handling. Legacy initErrorEvent and
 createEvent(ErrorEvent) are not exposed. Constructor success does not establish
 site bootstrap or resolve an underlying exception reported by page code. See the
 [HTML ErrorEvent interface](https://html.spec.whatwg.org/multipage/webappapis.html#the-errorevent-interface).
+
+
+## Inert selectors and genuine query snapshots
+
+Inert Elements implement querySelector/querySelectorAll/matches/closest using the
+same native CSS matcher as main-document nodes. Inert Documents and fragments
+have their own canonical query methods, with defining-interface brands checked
+before selector conversion. Conversion may mutate the tree; matching reads the
+actual topology afterward. Existing child-origin and unsupported-child-query
+guards remain active. Unsupported selector syntax remains a catchable SyntaxError.
+
+A paid temporary read-only view carries actual attributes, namespace provenance,
+parents and sibling slots into the shared matcher without a markup roundtrip.
+Traversal preserves depth-first document order and ancestor/sibling semantics.
+Template hosts have no ordinary descendants; their separate content fragments
+must be queried explicitly. Only a genuine Document grants :root semantics.
+Unknown foreign provenance and grammar outside the existing subset remain
+explicitly unavailable. This adds no alternate selector engine or CSS grammar.
+
+querySelectorAll publishes a static NodeList of real native handles after scratch,
+copy and retained-result admission. Membership stays fixed while the referenced
+nodes retain current parent/attribute state through moves, clones and imports.
+Refusal publishes no partial list or tree change. The original App fixture removes
+declarative metadata, queries nested content, moves it through an inert fragment,
+clones/deep-imports ordinary content and checks painted glyphs with stable editor
+and link targets. Mixed-resource/nested-template main adoption, dynamic SVG and
+remaining lifecycle/scheduling routes are separate unfinished P1 contracts.
+See [DOM queries](https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall)
+and [Web IDL operation functions](https://webidl.spec.whatwg.org/#es-operations).

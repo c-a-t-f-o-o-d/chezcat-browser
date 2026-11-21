@@ -19,6 +19,26 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The last isolated signed-out Windows run at **2026-11-21T04:13:04Z** used clean
+[`fff35f8`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/fff35f8e9dc80e5ec33a1b82b648bcdba5c5cae7),
+including genuine ErrorEvent records. All 43 script executions and 61 callback
+invocations succeeded, with 49 listeners and zero escaped script errors. The
+inspected page still shows the skeleton without usable header/guide/search.
+A console.error entry contains an opaque script object; the underlying reported
+failure remains untraced. Zero escaped errors does not establish initialization.
+Images were off, fresh HTTPS/trust/origin/resource guards remained active, and
+external JavaScript body hashes are unavailable. Later journey milestones are
+not demonstrated.
+
+Development follows the known template/fragment/import/activation package before
+another site milestone check. The connected inert-query App fixture establishes
+real stamping operations and paint in that fixture. Mixed import/activation,
+namespace-aware SVG and remaining mutation/lifecycle integration remain open.
+A merge alone does not schedule a live-site run; package readiness or a specific
+blocking unknown determines the next site checkpoint.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T04:04:08Z** used clean
 [`c3081a5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/c3081a51d137dcc845905e051a5d80246e84b719),
 including genuine nested template fragments. JavaScript was enabled and images
