@@ -3,6 +3,8 @@
 use super::*;
 use std::rc::Rc;
 
+#[path="script_inert_content.rs"]
+mod content;
 #[path="script_inert_observation.rs"]
 mod observation;
 #[path = "script_inert_mutation.rs"]
@@ -929,24 +931,7 @@ impl Bridge<'_> {
         let generated_base = arena.generated.len();
         // Leave immutable raw sources in the inert arena. A separate reserved
         // document slot keeps the Node identity stable across owner changes.
-        let base = self.doc.nodes.len();
-        let can_park = count <= self.state.node_limit
-            .saturating_sub(base.saturating_add(self.state.blank_frame_nodes))
-            .min(((STYLE_BASE - NODE_BASE) as usize).saturating_sub(base));
-        let mut handles = Vec::new();
-        handles.try_reserve_exact(count + 1).map_err(|_| "Cannot reserve template node links.")?;
-        handles.push(fragment);
-        let mut parked = 0;
-        for (offset, node) in parsed.nodes.iter().skip(1).enumerate() {
-            let handle = if can_park && template_node_can_park(node) {
-                let handle = node_handle(base + parked);
-                parked += 1;
-                handle
-            } else {
-                first + offset as u32
-            };
-            handles.push(handle);
-        }
+        let (handles,parked)=self.template_replacement_handles(fragment,&parsed)?;
         let mut template_links=Vec::new();template_links.try_reserve_exact(nested.len()).map_err(|_|"Cannot reserve nested template indexes.")?;
         let mut nested_roots=Vec::new();nested_roots.try_reserve_exact(parsed.nodes.len()).map_err(|_|"Cannot reserve nested template roots.")?;nested_roots.resize(parsed.nodes.len(),None);
         for (offset,&local) in nested.iter().enumerate(){let fragment=first+count as u32+offset as u32;nested_roots[local]=Some(fragment);template_links.push((handles[local],fragment));}
@@ -1049,6 +1034,7 @@ impl Bridge<'_> {
             self.state.tree.active.push(false);
             self.state.dom.connected.push(false);
         }
+        self.state.dom_committed();
         Ok(())
     }
 

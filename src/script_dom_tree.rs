@@ -1595,7 +1595,7 @@ impl Bridge<'_> {
     ) -> Result<bool, String> {
         if self.fragment_receiver(object) {
             if property=="nodeValue" {self.state.work(1)?;return Ok(true);}
-            if property=="textContent" {return Err("DocumentFragment textContent replacement is not implemented; no children were changed.".into());}
+            if property=="textContent" {let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(value)?};let node=self.dom_node(object)?;self.set_text_content(node,text)?;return Ok(true);}
         }
         if node_index(object).is_none() {
             return Ok(false);

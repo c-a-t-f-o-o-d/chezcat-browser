@@ -2068,5 +2068,31 @@ records. Notifications use existing observer and Promise/microtask scheduling.
 The connected original App fixture uses a trusted event to change inert data;
 its observer callback imports mixed nested-template/style/native-control/SVG/link
 content and checks exact vector/text pixels, stable editing and link activation.
-Whole-content replacement, reflected property notifications and transient subtree
-registrations after removal remain separate unfinished observation routes.
+Selected whole-content replacement now has the preflight described below.
+Reflected property notifications and transient subtree registrations after
+removal remain separate unfinished observation routes.
+
+
+## Whole-content replacement notifications
+
+Main element textContent/innerHTML and separate template innerHTML replacement
+admit one child-list record with actual direct old/new node identities before
+publishing the tree. Main DocumentFragment and inert HTML element/fragment
+textContent replacements create genuine owned Text nodes and detach saved old
+children without changing their data. Empty-to-empty replacement queues nothing.
+Template content stays outside its host's descendant tree.
+
+When observers match a markup write, preflight reuses the original checked parser
+and shared template handle projection, paying its additional native work. The
+setter then follows the same identity calculation without an intervening author
+callback. Native observation storage is reserved before commit; unsupported
+resources or native allocation refusal leave the tree and records unchanged.
+Node text conversion precedes preflight, including reentrant DOM changes.
+
+Focused fixtures cover real snapshots, parked/inert identity fallback and refusal
+recovery. An original App fixture replaces an observed template from a trusted
+callback, stamps mixed nested/style/native-control/SVG/link content from the
+queued observer, and checks actual pixels, editing and anchor activation. Existing
+unknown foreign, SVG text-shape and native-resource retirement guards remain.
+This does not establish live-site initialization or finish property/transient
+observation routes.

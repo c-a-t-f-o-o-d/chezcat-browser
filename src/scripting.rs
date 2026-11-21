@@ -2643,7 +2643,7 @@ impl Bridge<'_> {
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
-        if !text_container(name) && !detached_style {
+        if !text_container(name) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
             return Err(
                 "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
@@ -3073,6 +3073,9 @@ impl Host for Bridge<'_> {
         self.child_list_change_plan(target, method, args)
     }
 
+    fn mutation_content_target(&mut self,target:u32,property:&str)->Result<Option<u32>,String>{self.content_observation_target(target,property)}
+    fn mutation_content_changes(&mut self,target:u32,property:&str,value:&Value)->Result<Vec<crate::javascript::NativeChildListChange>,String>{self.content_observation_changes(target,property,value)}
+
     fn mutation_attribute_change(&mut self, target: u32, method: &str, args: &[Value])
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
     {
@@ -3367,6 +3370,8 @@ impl Host for Bridge<'_> {
 
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.xhr_index(object).is_some(){return property=="responseType";}
+        if property=="textContent"&&self.text_content_receiver(object){return true;}
+        if self.mutation_observation_target(object)==Some(true)&&matches!(property,"data"|"nodeValue"){return true;}
         if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
 
         if self.iframe_sandbox_member(object,property) {return true;}
@@ -3703,7 +3708,7 @@ impl Host for Bridge<'_> {
     }
 
     fn nullish_string_setter(&self, object: u32, property: &str) -> bool {
-        (self.attr_receiver(object) || self.comment_receiver(object) || self.fragment_receiver(object) || matches!(self.inert_node_type(object),Some(3|7|8))) && matches!(property, "nodeValue" | "textContent")
+        (self.attr_receiver(object) || self.comment_receiver(object) || self.fragment_receiver(object) || self.text_content_receiver(object)) && matches!(property, "nodeValue" | "textContent")
     }
 
     fn null_string_setter(&self, object: u32, property: &str) -> bool {
@@ -5483,6 +5488,7 @@ impl Host for Bridge<'_> {
             return self.set_template_html(object, &source);
         }
         if self.inert_interface(object).is_some() {
+            if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(&value)?};return self.replace_inert_text_content(object,text);}
             if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=self.text(&value)?;return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));
@@ -8270,3 +8276,10 @@ mod dynamic_svg_tests;
 #[cfg(test)]
 #[path="script_inert_observation_tests.rs"]
 mod inert_observation_tests;
+
+#[cfg(test)]
+#[path="script_content_observation_tests.rs"]
+mod content_observation_tests;
+
+#[path="script_content_observation.rs"]
+mod content_observation;

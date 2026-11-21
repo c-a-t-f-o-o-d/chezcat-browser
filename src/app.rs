@@ -6076,3 +6076,7 @@ mod dynamic_svg_tests;
 #[cfg(test)]
 #[path="app_inert_observation_tests.rs"]
 mod inert_observation_tests;
+
+#[cfg(test)]
+#[path="app_content_observation_tests.rs"]
+mod content_observation_tests;
