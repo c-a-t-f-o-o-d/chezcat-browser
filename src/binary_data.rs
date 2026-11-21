@@ -595,7 +595,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn new_buffer(&mut self, length: usize) -> Result<usize, Fault> {
+    pub(super) fn new_buffer(&mut self, length: usize) -> Result<usize, Fault> {
         self.check_binary_storage(length)?;
         self.ensure_global_intrinsics("ArrayBuffer")?;
         self.check_binary_storage(length)?;

@@ -415,7 +415,7 @@ impl Runtime {
     }
 
     fn plain_array_storage(object: &Object) -> bool {
-        object.date.is_none() && object.headers.is_none() && object.url.is_none() && object.rect.is_none() && object.dom_exception.is_none() && object.primitive.is_none()
+        object.date.is_none() && object.headers.is_none() && object.response.is_none() && object.url.is_none() && object.rect.is_none() && object.dom_exception.is_none() && object.primitive.is_none()
             && object.promise.is_none() && object.arguments.is_none() && object.binary.is_none() && object.collection.is_none()
             && object.iterator.is_none() && object.generator.is_none() && object.text.is_none() && object.regexp.is_none() && object.error_name.is_none()
             && object.proxy.is_none()
@@ -573,6 +573,7 @@ impl Runtime {
                     if let Some(generator) = &object.generator { generator.reachability_edges(&mut add); }
                     if let Some(url) = &object.url { url.reachability_edges(&mut add); }
                     if let Some(headers) = &object.headers { headers.reachability_edges(&mut add); }
+                    if let Some(response) = &object.response { response.reachability_edges(&mut add); }
                     if let Some(promise) = &object.promise { promise.reachability_edges(&mut add); }
                 }
             }

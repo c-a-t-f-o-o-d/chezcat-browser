@@ -3,7 +3,13 @@
 //! No network I/O or script emulation occurs in this value layer.
 use super::function_reachability::Edge;
 use super::{Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, Value};
-type Pair = (String, String);
+pub(super) type Pair = (String, String);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Guard {
+    None,
+    Response,
+    Immutable,
+}
 #[derive(Default)]
 pub(super) struct Roots {
     prototype: Option<usize>,
@@ -19,7 +25,7 @@ impl Roots {
 pub(super) enum Data {
     List {
         pairs: Vec<Pair>,
-        immutable: bool,
+        guard: Guard,
     },
     Iterator {
         source: usize,
@@ -49,7 +55,7 @@ impl Op {
         }
     }
 }
-fn bytes(pairs: &Vec<Pair>) -> Result<usize, Fault> {
+pub(super) fn bytes(pairs: &Vec<Pair>) -> Result<usize, Fault> {
     pairs.iter().try_fold(
         pairs
             .capacity()
@@ -131,7 +137,7 @@ impl Runtime {
     }
     /// Charge owned conversion scratch across user callbacks and unwind it on
     /// both success and failure. Nested conversions share the ordinary ledger.
-    fn headers_hold<T>(
+    pub(super) fn headers_hold<T>(
         &mut self,
         held: usize,
         run: impl FnOnce(&mut Self) -> Result<T, Fault>,
@@ -153,7 +159,11 @@ impl Runtime {
         copy.push_str(text);
         Ok(copy)
     }
-    fn headers_byte_string(&mut self, value: Value, host: &mut dyn Host) -> Result<String, Fault> {
+    pub(super) fn headers_byte_string(
+        &mut self,
+        value: Value,
+        host: &mut dyn Host,
+    ) -> Result<String, Fault> {
         let primitive = self.primitive_with_hint(value, true, host)?;
         self.work(primitive.bytes())?;
         let text = match primitive {
@@ -236,7 +246,11 @@ impl Runtime {
         }
         Ok((first.unwrap(), second.unwrap()))
     }
-    fn headers_input(&mut self, value: Value, host: &mut dyn Host) -> Result<Vec<Pair>, Fault> {
+    pub(super) fn headers_input(
+        &mut self,
+        value: Value,
+        host: &mut dyn Host,
+    ) -> Result<Vec<Pair>, Fault> {
         if matches!(value, Value::Undefined) {
             return Ok(Vec::new());
         }
@@ -358,27 +372,49 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         let input = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
         let input = self.headers_input(input, host)?;
+        self.headers_from_converted(input, Guard::None)
+    }
+    pub(super) fn headers_from_converted(
+        &mut self,
+        input: Vec<Pair>,
+        guard: Guard,
+    ) -> Result<Value, Fault> {
         let held = bytes(&input)?;
         self.headers_hold(held, |runtime| {
             let mut pairs = Vec::new();
             // Web IDL converts the whole HeadersInit before validating headers.
             for (name, value) in input {
                 let pair = runtime.headers_normalize(name, value)?;
-                runtime.headers_insert(&mut pairs, pair, false)?;
+                if guard != Guard::Response
+                    || !matches!(pair.0.as_str(), "set-cookie" | "set-cookie2")
+                {
+                    runtime.headers_insert(&mut pairs, pair, false)?;
+                }
             }
             runtime.ensure_global_intrinsics("Headers")?;
             let retained = runtime.headers_room(bytes(&pairs)?)?;
             let id = runtime.new_object(None)?;
-            runtime.objects[id].headers = Some(Data::List {
-                pairs,
-                immutable: false,
-            });
+            runtime.objects[id].headers = Some(Data::List { pairs, guard });
             runtime.objects[id].prototype = runtime.headers_roots.prototype.map(Ordinary::Object);
             runtime.value_bytes = retained;
             Ok(Value::Object(id))
         })
     }
 
+    pub(super) fn headers_clone_native(&mut self, id: usize) -> Result<Value, Fault> {
+        self.headers_id(&Value::Object(id), false)?;
+        let guard = match self.objects[id].headers.as_ref().unwrap() {
+            Data::List { guard, .. } => *guard,
+            _ => unreachable!(),
+        };
+        let mut pairs = Vec::new();
+        let mut index = 0usize;
+        while let Some(pair) = self.headers_pair_copy(id, index)? {
+            self.headers_push(&mut pairs, pair)?;
+            index += 1;
+        }
+        self.headers_from_converted(pairs, guard)
+    }
     fn headers_id(&self, this: &Value, iterator: bool) -> Result<usize, Fault> {
         if let Value::Object(id) = this {
             let data = self.object(*id)?.headers.as_ref();
@@ -555,11 +591,21 @@ impl Runtime {
         if matches!(
             self.objects[id].headers,
             Some(Data::List {
-                immutable: true,
+                guard: Guard::Immutable,
                 ..
             })
         ) {
             return Err(invalid("Headers are immutable."));
+        }
+        if matches!(
+            self.objects[id].headers,
+            Some(Data::List {
+                guard: Guard::Response,
+                ..
+            })
+        ) && matches!(key.as_str(), "set-cookie" | "set-cookie2")
+        {
+            return Ok(Value::Undefined);
         }
         let old = bytes(self.headers_pairs(id))?;
         self.headers_room(old)?;

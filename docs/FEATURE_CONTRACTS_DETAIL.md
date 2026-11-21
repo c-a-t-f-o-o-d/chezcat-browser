@@ -2300,5 +2300,41 @@ mutation after argument conversion; request/response adapter guards remain separ
 An original App test transfers authored Headers through the real XHR adapter and
 verifies a loopback POST/body, combined header values, native cookie ownership,
 forbidden Host/Cookie filtering, HttpOnly response filtering and rendered response
-text. This is a Headers/transport integration result. Fetch, Response, streaming
-bodies and actual-site request/body success are not supplied by this increment.
+text. This is a Headers/transport integration result. Fetch, streaming bodies and actual-site request/body success are not supplied
+by the Headers increment.
+
+## Buffered Response values and native Body consumption
+
+Response has canonical readonly status/type/URL/redirect/header/body-use slots over
+private native data. Constructors implement ResponseInit dictionary conversion,
+unsigned-short status conversion followed by the 200-599 check, ByteString reason
+phrases, null-body status rejection and genuine response-guarded Headers. Authored
+Set-Cookie fields are filtered by that guard. Header identity is stable; clones
+have independent native lists. Response.error creates a status-zero network-error
+value with immutable Headers; it does not perform or claim a network request.
+Response.json serializes actual data with the existing original JSON engine.
+
+Body strings undergo USVString conversion; ArrayBuffer and view bodies snapshot
+the actual byte range after dictionary conversion, and URLSearchParams uses its
+native post-conversion serializer. Supported content types are supplied only for
+those genuine body kinds and do not replace explicit Content-Type values. Body
+text/JSON always use UTF-8 with BOM handling, independently of XHR charset sniffing.
+ArrayBuffer/Uint8Array results use the response's relevant realm and copied bytes.
+
+Text, JSON, arrayBuffer and bytes return intrinsic Promises with genuine queued
+reactions and ordinary thenable resolution. Invalid brands, used bodies and JSON
+syntax errors reject with actual exceptions; resource/capability faults remain
+fatal. Null bodies can be consumed repeatedly without becoming used. Non-null
+branches become used once, clones remain independent, and clone-after-use rejects.
+Immutable source bytes are shared across clones; consumed branches release them,
+and the last branch refunds their actual backing even when consumption fails.
+Native metadata, conversion scratch and copied outputs retain ordinary allocation,
+work, copy and owner-realm checks. The new value is rooted across Promise creation.
+
+ReadableStream access, Blob/FormData and static redirect are not implemented in
+this buffered increment. A non-null body getter explicitly refuses rather than
+claiming null or supplying an empty/fake stream; it remains non-null in that sense
+after consumption. Network Fetch still needs its real shared transport adapter.
+An original App fixture consumes actual loopback XHR JSON through Response and
+queued Body jobs, updates real text pixels and keeps native editing/link targets.
+This is a connected fixture result, not actual-site initialization or playback.

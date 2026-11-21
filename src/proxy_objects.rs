@@ -27,6 +27,7 @@ impl Runtime {
             || object.date.is_some()
             || object.url.is_some()
             || object.headers.is_some()
+            || object.response.is_some()
             || object.rect.is_some()
             || object.dom_exception.is_some()
             || object.primitive.is_some()

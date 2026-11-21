@@ -453,3 +453,22 @@ r.open('POST','/headers-post');h.forEach(function(value,name){r.setRequestHeader
     assert!(app.page.runs.iter().any(|run|run.text=="header-response"));
     assert!(!app.cookies.document(&url).contains("private_http"));
 }
+
+#[test]
+fn fetch_response_actual_app_consumes_real_xhr_json_in_queued_native_body_promise() {
+    let site=Site::new();site.page("/response-home",r#"
+var out=document.getElementById('out');out.style.cssText='position:absolute;left:10px;top:10px;width:200px;height:30px;color:#123456';var neighbor=document.createElement('input');neighbor.id='body-neighbor';neighbor.value='seed';neighbor.style.cssText='position:absolute;left:10px;top:50px;width:180px;height:30px';document.body.appendChild(neighbor);var stable=document.createElement('a');stable.id='body-stable';stable.href='#destination';stable.style.cssText='position:absolute;display:block;left:10px;top:100px;width:100px;height:24px;background-color:#2040e0';document.body.appendChild(stable);var request=new XMLHttpRequest();request.onload=function(){var response=new Response(request.responseText,{status:request.status,headers:{'Content-Type':request.getResponseHeader('Content-Type')}}),copy=response.clone();if(response.headers.get('content-type')!=='application/json'||response.bodyUsed||copy.bodyUsed)throw 'real response before consumption';var promise=response.json();if(!response.bodyUsed||copy.bodyUsed)throw 'independent native use';promise.then(function(data){if(data.actual!==true)throw 'real response JSON';document.getElementById('out').textContent=data.title;document.title='Response body complete';});};request.open('GET','/response-json');request.send();
+"#,"");
+    site.put("/response-json",200,"Content-Type: application/json\r\n",b"{\"actual\":true,\"title\":\"NativeBody\"}");
+    site.routes.lock().unwrap().iter_mut().find(|route|route.path=="/response-json").unwrap().delay=Duration::from_millis(100);
+    let mut app=App::new();app.set_javascript_enabled(true);site.open(&mut app,"/response-home");
+    let neighbor=node(&app,"body-neighbor");let stable=node(&app,"body-stable");let r=app.page.controls.iter().find(|r|r.node==neighbor).unwrap();let(x,y)=(r.x+10,app.content_top()+r.y+10-app.scroll);app.pointer_down(x,y,false);app.pointer_up(x,y);app.paste("edited");
+    let v=&app.forms.controls[&neighbor].value;let editor=(v.text(),v.cursor,v.anchor,v.offset);
+    until(&mut app,|app|app.document.title=="Response body complete");clean(&app);
+    assert_eq!(site.count("/response-json"),1);assert!(app.page.runs.iter().any(|run|run.text=="NativeBody"));
+    let v=&app.forms.controls[&neighbor].value;assert_eq!((v.text(),v.cursor,v.anchor,v.offset),editor);
+    assert_eq!(app.page.link_node_at(25,110),Some(stable));let canvas=app.draw();let top=(app.content_top()+10-app.scroll) as usize;
+    assert!((top..top+30).any(|y|canvas.pixels[y*canvas.width+10..y*canvas.width+210].contains(&0x123456)));
+    assert_eq!(canvas.pixels[(app.content_top()+110-app.scroll) as usize*canvas.width+25]&0xffffff,0x2040e0);
+    let y=app.content_top()+110-app.scroll;app.pointer_down(25,y,false);app.pointer_up(25,y);assert_eq!(app.location.fragment,"destination");
+}
