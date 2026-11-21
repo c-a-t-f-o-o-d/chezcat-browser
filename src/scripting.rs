@@ -5912,7 +5912,7 @@ impl Host for Bridge<'_> {
         }
         if let Some(property)=parent_children::operation(method) {return self.parent_node_get(object,property);}
         if let Some(property) = node_traversal_property(method) {
-            return self.get(object, property);
+            return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };

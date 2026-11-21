@@ -110,7 +110,7 @@ fn fragment_author_prototype_metadata_attr_child_getters_and_foreign_saved_opera
 var owner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get,connected=Object.getOwnPropertyDescriptor(Node.prototype,'isConnected').get,attr=document.createAttribute('data-original');if(owner.call(attr)!==document||connected.call(attr))throw 'real Attr Node metadata';
 var fragment=document.createDocumentFragment(),hits=0,state={},P=Object.create(DocumentFragment.prototype,{binding:{get:function(){hits++;return state;}}});Object.setPrototypeOf(fragment,P);
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,d=frame.contentDocument,b=d.body;if(owner.call(d)!==null||owner.call(b)!==d||!connected.call(d)||!connected.call(b))throw 'real read-only child metadata';
-var read=w.Function('node','return node.binding;'),set=w.Function('node','proto','return Object.setPrototypeOf(node,proto);'),native=w.Function('getter','node','return getter.call(node);');if(read(fragment)!==state||hits!==1||set(fragment,P)!==fragment||native(owner,fragment)!==document)throw 'same origin saved operations';
+var selfRead=w.Function('return document.body.ownerDocument===document && document.body.isConnected && window===self;'),read=w.Function('node','return node.binding;'),set=w.Function('node','proto','return Object.setPrototypeOf(node,proto);'),native=w.Function('getter','node','return getter.call(node);');if(read(fragment)!==state||hits!==1||set(fragment,P)!==fragment||native(owner,fragment)!==document)throw 'same origin saved operations';
 "#,
     );
     page.set_location(
@@ -130,7 +130,7 @@ var read=w.Function('node','return node.binding;'),set=w.Function('node','proto'
         assert_eq!(out.errors, 1, "{source}: {}", page.report());
         assert!(page.report().contains("origin") || page.report().contains("Security"));
     }
-    run(&mut doc,&mut forms,&mut page,"if(hits!==1||fragment.ownerDocument!==document||fragment.isConnected||Object.getPrototypeOf(fragment)!==P)throw 'foreign author effects';");
+    run(&mut doc,&mut forms,&mut page,"if(hits!==1||fragment.ownerDocument!==document||fragment.isConnected||Object.getPrototypeOf(fragment)!==P||!selfRead())throw 'foreign author effects or actual child owner recovery';");
 }
 
 #[test]
