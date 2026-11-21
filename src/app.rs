@@ -6046,3 +6046,7 @@ mod error_event_tests;
 #[cfg(test)]
 #[path="app_inert_selector_tests.rs"]
 mod inert_selector_tests;
+
+#[cfg(test)]
+#[path="app_passive_html_import_tests.rs"]
+mod passive_html_import_tests;

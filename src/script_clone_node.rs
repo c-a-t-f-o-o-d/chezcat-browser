@@ -6,7 +6,8 @@ use script_inert_documents::ImportSource;
 pub(super) const CLONE_METHOD: &str = "\0Node.cloneNode";
 
 pub(super) fn ordinary_clone_element(name: &str) -> bool {
-    (text_container(name) && !matches!(name, "button" | "legend"))
+    crate::html::valid_custom_element_name(name)
+        || (text_container(name) && !matches!(name, "button" | "legend"))
         || matches!(name, "nav" | "main" | "section" | "article" | "aside" | "header"
             | "footer" | "address" | "figure" | "figcaption" | "ol" | "ul" | "dl"
             | "table" | "caption" | "col" | "colgroup" | "thead" | "tbody" | "tfoot"
