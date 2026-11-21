@@ -1972,3 +1972,30 @@ no detached requests, fetches/decodes original loopback images, checks load-even
 metadata and exact painted colors, clones a loaded image into a new request and
 verifies editor state plus actual pointer link navigation. This is focused App
 evidence, not a fresh site result or completion of responsive/resource support.
+
+
+## Inline style clone/import and atomic mixed stamping
+
+Plain-text HTML STYLE clone/import preserves actual attributes, source text and
+destination ownership without copying an active sheet. Passive is metadata uses
+the same admission as existing template style promotion; no custom registry or
+upgrade behavior is fabricated. Real STYLE hosts are queryable, while their raw
+text remains excluded from ordinary visible layout/traversal and protected
+mutation routes still apply.
+
+Created/imported style moves, fragment splices and replacements prepare one
+batch over the existing inline source/CSP planner. Native preflight temporarily
+journals only the changed sources' old contributions, projects every new accepted
+source against cumulative byte/rule limits, and restores the source map/counters
+on both success and refusal. Source-ownership and withheld-flag backing are
+reserved and charged before publication. The tree and accepted/withheld sources
+commit together without author callbacks. A later refusal publishes no earlier
+sheet or tree prefix. Multiple styles in an inert promotion use the same batch.
+
+CSP, duplicate-nonce evidence, MIME and existing finite media/text-shape guards
+remain active; withheld styles remain real DOM without applying a fake cascade.
+The original App fixture stamps styles with a native input and decoded image,
+checks glyph/background colors, moves a style out and back, preserves editor
+state and activates an actual link. This is package fixture evidence. It does
+not establish the real site's shell, complete CSSOM/constructible sheets,
+arbitrary loaded-resource adoption or completion of the remaining P1 package.

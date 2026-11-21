@@ -48,7 +48,7 @@ pub(super) fn inert_dom_tag(name: &str, scripting: bool) -> bool {
 
 // Keep the host element visible to queries while excluding its inert children.
 pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) -> bool {
-    name == "script" || matches!(name, "iframe" | "template") && namespace == crate::html::Namespace::Html
+    name == "script" || matches!(name, "iframe" | "template" | "style") && namespace == crate::html::Namespace::Html
 }
 
 fn common_node_property(name: &str) -> bool {
@@ -1110,15 +1110,13 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    pub(super) fn mutation_subtree(&mut self, root: usize) -> Result<(Vec<usize>, usize), String> {
-        self.mutation_subtree_for_fragment(root, false)
-    }
-
     /// Only innerHTML opts in to traversal of an old bare LINK. Its separate
     /// precommit stylesheet-state check must pass before children are replaced.
     pub(super) fn mutation_subtree_for_fragment(&mut self, root: usize, bare_links: bool) -> Result<(Vec<usize>, usize), String> {
         self.checked_mutation_subtree(root, bare_links, false)
     }
+
+    pub(super) fn mutation_subtree_with_styles(&mut self,root:usize)->Result<(Vec<usize>,usize),String>{self.checked_mutation_subtree(root,false,true)}
 
     fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
@@ -1157,7 +1155,7 @@ impl Bridge<'_> {
                         | "template"
                         | "video" | "audio" | "source"
                 )
-                || name == "style" && !(direct_style && root == node && self.created_html_style(node))
+                || name == "style" && !(direct_style && self.created_html_style(node))
                 || matches!(name, "option" | "optgroup") && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
@@ -1255,9 +1253,9 @@ impl Bridge<'_> {
         self.mutation_ancestors(parent)?;
         let source_parent = self.state.tree.parents[child];
         if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
-        let (incoming_nodes, depth) = self.mutation_subtree(child)?;
+        let (incoming_nodes, depth) = self.mutation_subtree_with_styles(child)?;
         self.validate_button_children(parent,&incoming_nodes)?;
-        let (outgoing_nodes, _) = self.mutation_subtree(old)?;
+        let (outgoing_nodes, _) = self.mutation_subtree_with_styles(old)?;
         if self.doc.nodes[parent].namespace != crate::html::Namespace::Html && !self.fragment_receiver(node_handle(parent))
             || matches!(tag(self.doc, parent), "script" | "link" | "iframe")
             || incoming_nodes.iter().chain(&outgoing_nodes).any(|&node|
@@ -1308,6 +1306,8 @@ impl Bridge<'_> {
         incoming_set.extend(incoming_nodes.iter().copied());
         let connected = self.state.dom.connected[parent];
         let changed_layout = connected || self.state.dom.connected[child];
+        if incoming_nodes.iter().any(|&node|tag(self.doc,node)=="style"){self.validate_style_destination(parent)?;}
+        let sheets=self.prepare_style_transfers(&incoming_nodes,&outgoing_nodes,connected)?;
         let images = self.prepare_image_connections(&incoming_nodes, connected)?;
 
         let form_plan = self.prepare_select_form_change(None, &[(old, None), (child, Some(parent))])?;
@@ -1340,7 +1340,7 @@ impl Bridge<'_> {
             else { self.state.detached_nodes.insert(node); }
         }
         form_plan.commit(self.forms);
-        self.commit_image_connections(images);
+        self.commit_image_connections(images);self.commit_inline_sheet_batch(sheets);
         self.state.dom_committed();
         self.state.dirty = true;
         if changed_layout { self.state.layout_changed(); }
@@ -1404,24 +1404,9 @@ impl Bridge<'_> {
         if let Some(old_parent) = old_parent {
             self.mutation_ancestors(old_parent)?;
         }
-        let direct_style = self.created_html_style(child);
-        if direct_style {
-            // Other entry points separately validate fragment splices, native
-            // resources and namespaces. Never admit one through this path.
-            let mut current = Some(parent);
-            while let Some(node) = current.filter(|&n| n != 0) {
-                self.state.work(1)?;
-                let name = tag(self.doc, node);
-                if self.doc.nodes[node].namespace != crate::html::Namespace::Html
-                    || crate::html::is_void(name) || inert_dom_tag(name, self.doc.scripting_enabled) {
-                    return Err("Inline stylesheet connection requires an ordinary HTML parent.".into());
-                }
-                current = self.state.tree.parents[node];
-            }
-        }
-        let (descendants, depth) = self.checked_mutation_subtree(child, false, direct_style).map_err(|error| format!(
-            "{error} Operation={method}; parent={parent}<{:?}>; child={child}<{:?}>; old_parent={old_parent:?}; reference={reference:?}.",
-            prefix(tag(self.doc, parent), 64), prefix(tag(self.doc, child), 64)))?;
+        let (descendants, depth) = self.checked_mutation_subtree(child, false, true).map_err(|error| format!(
+            "{error} Operation={method}; parent={parent}; child={child}; old_parent={old_parent:?}."))?;
+        if method!="removeChild"&&descendants.iter().any(|&node|tag(self.doc,node)=="style"){self.validate_style_destination(parent)?;}
         self.validate_button_children(parent,&descendants)?;
         self.state.work(descendants.len().saturating_mul(2))?;
         if descendants.iter().any(|&node| self.fresh_text_input(node) || self.owned_native_checkbox(node) || self.owned_native_radio(node) || self.owned_native_textarea(node) || self.fresh_button(node) || self.native_button(node))
@@ -1446,7 +1431,7 @@ impl Bridge<'_> {
         )?;
         let was_connected = self.state.dom.connected[child];
         let connected = method != "removeChild" && self.state.dom.connected[parent];
-        let sheet = if direct_style { Some(self.prepare_inline_sheet(child, connected)?) } else { None };
+        let sheets=self.prepare_style_transfers(&descendants,&[],connected)?;
         let image_plans = self.prepare_image_connections(&descendants, connected)?;
         let frames = self.prepare_blank_frames(&descendants, connected, parent)?;
         let form_plan = self.prepare_select_form_change(None, &[(child, if method == "removeChild" { None } else { Some(parent) })])?;
@@ -1503,7 +1488,7 @@ impl Bridge<'_> {
             }
         }
         form_plan.commit(self.forms);
-        if let Some(sheet) = sheet { self.commit_inline_sheet(child, sheet); }
+        self.commit_inline_sheet_batch(sheets);
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();

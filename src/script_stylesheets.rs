@@ -57,10 +57,14 @@ pub(super) struct StylesheetState {
     pub source_rules: usize,
     pub sources: HashMap<usize, crate::css::StylesheetUsage>,
     pub source_capacity: usize,
+    pub withheld_capacity: usize,
     pub sources_prepared: bool,
     pub source_setup_error: Option<String>,
     pub in_flight: usize,
 }
+
+#[path="script_style_batches.rs"]
+mod batches;
 
 pub(super) enum InlineSheetPlan {
     Disconnected,
@@ -87,7 +91,7 @@ pub(super) fn bare_fragment_link(doc: &Document, node: usize) -> bool {
 
 impl StylesheetState {
     pub(super) fn source_metadata_bytes(&self) -> usize {
-        self.source_capacity * std::mem::size_of::<(usize, crate::css::StylesheetUsage)>()
+        self.source_capacity * std::mem::size_of::<(usize, crate::css::StylesheetUsage)>() + self.withheld_capacity*std::mem::size_of::<usize>()
     }
 
     fn retire_source(&mut self, node: usize) {
@@ -136,29 +140,20 @@ impl State {
         };
         let total = limits.accept(source, used)?;
         let record = crate::css::StylesheetUsage { bytes: total.bytes - used.bytes, rules: total.rules - used.rules };
-        if !self.stylesheets.sources.contains_key(&node) && self.stylesheets.sources.len() == self.stylesheets.sources.capacity() {
-            let slot = std::mem::size_of::<(usize, crate::css::StylesheetUsage)>();
-            // HashMap deletion can lower insertion capacity without releasing
-            // its allocation. Rehash that same reservation before growing it.
-            let before = self.stylesheets.source_capacity;
-            self.work(before.saturating_mul(2))?;
-            let available = self.retained_limit.saturating_sub(self.retained);
-            let capacity = if self.stylesheets.sources.len() < before { before } else {
-                let growth = before.max(4).min(available / slot);
-                if growth == 0 { return Err("Stylesheet source ownership storage exhausted.".into()); }
-                before.checked_add(growth).ok_or("Stylesheet ownership capacity overflow.")?
-            };
-            let mut replacement = HashMap::new();
-            replacement.try_reserve(capacity).map_err(|_| "Cannot allocate stylesheet source ownership.")?;
-            let added = (replacement.capacity() - before).checked_mul(slot).ok_or("Stylesheet ownership size overflow.")?;
-            let retained = self.retained.checked_add(added).filter(|bytes| *bytes <= self.retained_limit)
-                .ok_or_else(|| format!("Stylesheet source ownership exceeds host retained storage ({} bytes).", self.retained_limit))?;
-            replacement.extend(self.stylesheets.sources.drain());
-            self.stylesheets.source_capacity = replacement.capacity();
-            self.stylesheets.sources = replacement;
-            self.retained = retained;
-        }
+        self.reserve_stylesheet_source_slots(usize::from(!self.stylesheets.sources.contains_key(&node)))?;
         Ok((record, total))
+    }
+
+    fn reserve_stylesheet_source_slots(&mut self,added:usize)->Result<(),String>{
+        let required=self.stylesheets.sources.len().checked_add(added).ok_or("Stylesheet source count overflow.")?;
+        if required<=self.stylesheets.sources.capacity(){return Ok(());}
+        let slot=std::mem::size_of::<(usize,crate::css::StylesheetUsage)>();let before=self.stylesheets.source_capacity;let available=self.retained_limit.saturating_sub(self.retained);
+        self.work(before.saturating_mul(2))?;
+        let target=if required<=before{before}else{before.checked_add(before.max(4).max(required-before).min(available/slot)).filter(|target|*target>=required).ok_or("Stylesheet source ownership storage exhausted.")?};
+        let mut replacement=HashMap::new();replacement.try_reserve(target).map_err(|_|"Cannot allocate stylesheet source ownership.")?;
+        let bytes=replacement.capacity().checked_sub(before).and_then(|slots|slots.checked_mul(slot)).ok_or("Stylesheet ownership capacity overflow.")?;
+        let copied=self.stylesheets.sources.len().checked_mul(slot).ok_or("Stylesheet ownership movement overflow.")?;
+        self.replace_storage(0,bytes,copied)?;replacement.extend(self.stylesheets.sources.drain());self.stylesheets.source_capacity=replacement.capacity();self.stylesheets.sources=replacement;Ok(())
     }
 
     fn commit_stylesheet_source(&mut self, node: usize, source: crate::css::StylesheetUsage, total: crate::css::StylesheetUsage) {
@@ -175,7 +170,7 @@ impl Page {
             let (accepted, _, total) = crate::css::accepted_stylesheets(doc, external);
             let mut records = HashMap::new();
             records.try_reserve(accepted.len()).map_err(|_| "Cannot reserve stylesheet source ownership.")?;
-            let bytes = records.capacity().checked_mul(std::mem::size_of::<(usize, crate::css::StylesheetUsage)>())
+            let bytes = records.capacity().checked_mul(std::mem::size_of::<(usize, crate::css::StylesheetUsage)>()).and_then(|bytes|doc.withheld_inline_styles.capacity().checked_mul(std::mem::size_of::<usize>()).and_then(|flags|bytes.checked_add(flags)))
                 .ok_or("Stylesheet source ownership size overflow.")?;
             if bytes > self.state.limits.host.retained_bytes {
                 return Err("Stylesheet source ownership exceeds host retained storage.".into());
@@ -187,6 +182,7 @@ impl Page {
             Ok((records, total))
         })();
         self.state.stylesheets.sources_prepared = true;
+        self.state.stylesheets.withheld_capacity=doc.withheld_inline_styles.capacity();
         match result {
             Ok((records, total)) => {
                 self.state.stylesheets.source_capacity = records.capacity();
@@ -311,7 +307,7 @@ impl Bridge<'_> {
         }
         validate_inline_sheet_media(self.doc.attr(node, "media"))?;
         if self.doc.attr(node, "type").is_some_and(|kind| !kind.is_empty() && !kind.eq_ignore_ascii_case("text/css")) {
-            self.doc.withheld_inline_styles.try_reserve(1).map_err(|_| "Stylesheet state reservation failed.")?;
+            self.reserve_inline_withheld(1)?;
             return Ok(InlineSheetPlan::Withheld(None));
         }
         if bytes > self.doc.stylesheet_limits.sheet_bytes {
@@ -323,30 +319,14 @@ impl Bridge<'_> {
         if let Err(reason) = self.state.dynamic.policy.allows_inline_style(
             usize::MAX, crate::csp::nonce(self.doc, node), &source,
         ) {
-            self.doc.withheld_inline_styles.try_reserve(1).map_err(|_| "Stylesheet state reservation failed.")?;
+            self.reserve_inline_withheld(1)?;
             return Ok(InlineSheetPlan::Withheld(Some(reason)));
         }
         let (source, total) = self.state.prepare_stylesheet_source(node, &source, self.doc.stylesheet_limits)?;
         Ok(InlineSheetPlan::Admitted { source, total })
     }
 
-    pub(super) fn commit_inline_sheet(&mut self, node: usize, sheet: InlineSheetPlan) {
-        match sheet {
-            InlineSheetPlan::Disconnected => {
-                self.doc.withheld_inline_styles.remove(&node);
-                self.state.stylesheets.retire_source(node);
-            }
-            InlineSheetPlan::Withheld(reason) => {
-                self.doc.withheld_inline_styles.insert(node);
-                self.state.stylesheets.retire_source(node);
-                if let Some(reason) = reason { self.state.log(&reason); }
-            }
-            InlineSheetPlan::Admitted { source, total } => {
-                self.doc.withheld_inline_styles.remove(&node);
-                self.state.commit_stylesheet_source(node, source, total);
-            }
-        }
-    }
+
 
     pub(super) fn removable_fragment_link(&mut self, node: usize) -> Result<bool, String> {
         self.state.work(1 + self.state.stylesheets.pending.len())?;
@@ -823,3 +803,7 @@ mod source_lifetime_tests {
         assert!(first.cancel.load(Ordering::Acquire));assert!(!page.owns_dynamic_stylesheet(&first));assert!(page.owns_dynamic_stylesheet(&second));
     }
 }
+
+#[cfg(test)]
+#[path="script_style_import_tests.rs"]
+mod import_tests;
