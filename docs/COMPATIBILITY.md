@@ -19,6 +19,25 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T03:28:33Z** used clean
+[`d8957da`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/d8957da57a583220b915165afe87e6f18c130702),
+including attribute-specific supported-token queries. JavaScript was enabled and
+images off; saved HTML reports `LOGGED_IN=false`. Inspected pixels still show a
+skeleton without usable header/guide/search. The sole escaped failure is missing
+`WheelEvent` at 40747:73 in handler metadata (5966:53 rethrow). Execute counts were
+44 attempted, 43 successful and one failed; invocation counts were 61/61/0.
+The prior sandbox query callback failures are absent in this distinct cohort.
+External JavaScript body hashes are unavailable; this is not an exact-byte replay.
+
+The owner's separate clean `d8957da` navigation at **03:26:36Z** reports the
+original WheelEvent metadata failure at 40735:73 and later timer 7 calling
+undefined `Hq(64,N)` at 461:80. Its binding and relationship to aborted startup
+remain unproved. The sandbox fault is absent; a successful native XHR telemetry
+request does not establish feed/search loading. Neither observation proves a
+usable shell or later journey milestones. Existing guards remain active.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T03:15:00Z** used clean
 [`e3f721d`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e3f721d8cef5d175618318040c5c941348aee62c),
 including live sandbox attribute lists. JavaScript was enabled and images off;
@@ -31,7 +50,7 @@ three errors; invocation counts were 26 attempted, 24 successful and two failed.
 This distinct live cohort has no exported JavaScript body hashes. Existing
 security/resource guards remain active; later journey milestones are unproved.
 
-The owner's separate clean `ae478b5` navigation at **03:06:04Z** still shows the
+The earlier owner's separate clean `ae478b5` navigation at **03:06:04Z** still shows the
 skeleton and the same original WheelEvent metadata failure, plus the earlier
 sandbox-property failure. A later owner console adds timer 7 calling undefined
 `Hq(64,N)` at 461:80. The binding and its relationship to aborted startup are

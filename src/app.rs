@@ -6030,3 +6030,7 @@ mod animation_event_tests;
 #[cfg(test)]
 #[path="app_iframe_sandbox_tests.rs"]
 mod iframe_sandbox_tests;
+
+#[cfg(test)]
+#[path="app_wheel_event_tests.rs"]
+mod wheel_event_tests;

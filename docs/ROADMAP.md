@@ -58,13 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `e3f721d` at November 21, 03:15 UTC
-still renders a skeleton. Main execution first fails on missing `WheelEvent`
-metadata at 40735:73; two callbacks also hit the unsupported token-list supports
-query at 6503:35. The connected query increment reports actual sandbox token
-support (currently no supported permission-relaxation flags), retaining the
-unsupported-context guard. Genuine WheelEvent support follows. The owner's
-separate later Hq timer call remains untraced and is not assigned a guessed API.
+The latest isolated Windows check on clean `d8957da` at November 21, 03:28 UTC
+still renders a skeleton. Main execution fails on missing `WheelEvent` metadata
+at 40747:73; prior sandbox query callback failures are absent. The connected
+WheelEvent increment supplies genuine retained constructor fields and ancestry,
+while preserving the current mouse-family dispatch refusal. Native wheel delivery
+remains open. The owner's separate later Hq timer call remains untraced and is
+not assigned a guessed API.
 These implementation checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
