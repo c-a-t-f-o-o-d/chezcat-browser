@@ -575,6 +575,8 @@ pub trait Host {
         -> Result<Vec<NativeChildListChange>, String> { Ok(Vec::new()) }
     fn mutation_content_target(&mut self,_target:u32,_property:&str)->Result<Option<u32>,String>{Ok(None)}
     fn mutation_content_changes(&mut self,_receiver:u32,_property:&str,_value:&Value)->Result<Vec<NativeChildListChange>,String>{Ok(Vec::new())}
+    fn mutation_attribute_setter_change(&mut self,_target:u32,_property:&str)->Result<Option<(u32,NativeAttributeChange)>,String>{Ok(None)}
+    fn mutation_attribute_operation_change(&mut self,_target:u32,_method:&str)->Result<Option<(u32,NativeAttributeChange)>,String>{Ok(None)}
     fn mutation_attribute_change(&mut self, _target: u32, _method: &str, _args: &[Value])
         -> Result<Option<NativeAttributeChange>, String> { Ok(None) }
     fn mutation_node_list(&mut self, _nodes: &[u32]) -> Result<u32, String> {
@@ -9152,6 +9154,7 @@ impl Runtime {
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
+            if method=="setAttributeNS"&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
                 && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause")
                 || kind == "InvalidCharacterError"
@@ -9258,11 +9261,7 @@ impl Runtime {
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
-        let observation = if matches!(method, "setAttribute" | "removeAttribute" | "setAttributeNS" | "removeAttributeNS") {
-            self.prepare_attribute_write(object, method, args, host)?
-        } else {
-            self.prepare_child_list_write(object, method, args, host)?
-        };
+        let observation = self.prepare_operation_observation(object,method,args,host)?;
         let result=if xhr_interface::operation(method).is_some(){self.call_request_operation(object,method,args,host)}else{host.call_with_dictionary(object, method, args, fields.as_deref()).map_err(Fault::new)};
         self.finish_tree_observation(observation, host)?;
         if let Ok(value)=&result {self.finish_new_event_result(object,method,value,host)?;}

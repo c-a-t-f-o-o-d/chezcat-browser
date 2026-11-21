@@ -270,7 +270,9 @@ impl Bridge<'_> {
         let value=self.text(args.get(1).ok_or("setAttribute requires a value.")?)?;
         self.write_inert_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
     }
-    pub(super) fn write_inert_attribute(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{
+    pub(super) fn write_inert_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded)}
+    pub(super) fn write_inert_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,true,false)}
+    fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<String>,expanded:bool,require_existing:bool)->Result<(),String>{
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let owner_document=inert.owner;
         let (source,initial_template)=match inert.kind{
@@ -291,7 +293,7 @@ impl Bridge<'_> {
         let work=attrs.iter().fold(attrs.len().saturating_add(1),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;
         let slot=self.inert_element_attributes(object).unwrap().iter().position(|attr|if expanded{attr.name.same_expanded_name(&name)}else{attr.name.qualified==name.qualified});
         if slot.is_none()&&value.is_none(){return Ok(());}
-        if expanded&&slot.is_none(){return Err("Attached inert Attr is missing from its owner.".into());}
+        if require_existing&&slot.is_none(){return Err("Attached inert Attr is missing from its owner.".into());}
         let attached=if value.is_none(){
             self.state.attribute_lookup_work()?;
             let actual=&self.inert_element_attributes(object).unwrap()[slot.unwrap()].name;

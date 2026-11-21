@@ -638,7 +638,7 @@ impl Bridge<'_> {
                 }
             }
         }
-        if method == "setAttributeNS" && self.attr_element_receiver(object) {
+        if method == "setAttributeNS" && self.attribute_names_receiver(object) {
             if let (Some(namespace), Some(Value::String(name))) = (args.first(), args.get(1)) {
                 let ns = match namespace { Value::String(text) if !text.is_empty() => Some(text.as_str()), _ => None };
                 super::script_attribute_names::validate_namespace(ns, name)?;
