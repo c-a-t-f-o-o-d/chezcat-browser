@@ -49,10 +49,26 @@ fn node_base_uri_inert_document_first_base_live_attributes_import_and_promotion(
         &mut page,
         r#"
 var get=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get,parsed=new DOMParser().parseFromString('<html><head><base href="https://inert-node-base.test/one/"><base href="https://ignored-node-base.test/"></head><body><p id="p">inert</p></body></html>','text/html'),p=parsed.querySelector('#p'),base=parsed.head.firstChild;
-if(parsed.baseURI!=='https://inert-node-base.test/one/'||p.baseURI!==parsed.baseURI||get.call(p.firstChild)!==parsed.baseURI)throw 'inert actual first base';base.setAttribute('href','https://inert-node-base.test/two/');if(p.baseURI!=='https://inert-node-base.test/two/')throw 'live inert base attribute';base.setAttribute('href','data:text/plain,blocked');if(p.baseURI!==parsed.URL)throw 'disallowed base scheme fallback';
+if(parsed.baseURI!=='https://inert-node-base.test/one/'||p.baseURI!==parsed.baseURI||get.call(p.firstChild)!==parsed.baseURI)throw 'inert actual first base';var probes=0,nativeQuery=Document.prototype.querySelector,nativeAttribute=Element.prototype.getAttribute;Document.prototype.querySelector=function(){probes++;throw 'author query';};Element.prototype.getAttribute=function(){probes++;throw 'author attribute';};if(p.baseURI!=='https://inert-node-base.test/one/'||probes)throw 'base getter ran author code';Document.prototype.querySelector=nativeQuery;Element.prototype.getAttribute=nativeAttribute;base.setAttribute('href','https://inert-node-base.test/two/');if(p.baseURI!=='https://inert-node-base.test/two/')throw 'live inert base attribute';base.setAttribute('href','data:text/plain,blocked');if(p.baseURI!==parsed.URL)throw 'disallowed base scheme fallback';
 var template=document.createElement('template');template.innerHTML='<span>staged</span>';var staged=template.content.firstChild,owner=staged.ownerDocument;if(staged.baseURI!=='about:blank'||owner.baseURI!=='about:blank')throw 'template owner base';var imported=document.importNode(p,true);if(imported.baseURI!==document.baseURI||p.baseURI!==parsed.URL)throw 'import owner';document.body.appendChild(template.content);if(staged.ownerDocument!==document||staged.baseURI!==document.baseURI)throw 'promoted owner base';
 "#,
     );
+    run(
+        &mut doc,
+        &mut forms,
+        &mut page,
+        "var longPath='x';while(longPath.length<20000)longPath=longPath+longPath;base.setAttribute('href','https://inert-node-base.test/'+longPath);",
+    );
+    let commits = page.state.dom_commits;
+    let out = page.console_eval(&mut doc, &mut forms, "p.baseURI;");
+    assert_eq!(out.errors, 1, "{}", page.report());
+    assert!(
+        page.report().contains("URL length limit"),
+        "{}",
+        page.report()
+    );
+    assert_eq!(page.state.dom_commits, commits);
+    run(&mut doc,&mut forms,&mut page,"base.setAttribute('href','https://inert-node-base.test/recovered/');if(p.baseURI!=='https://inert-node-base.test/recovered/')throw 'projection refusal recovery';");
 }
 #[test]
 fn node_base_uri_history_fallback_changes_and_explicit_base_stays_native() {

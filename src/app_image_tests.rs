@@ -668,6 +668,7 @@ fn node_base_uri_actual_app_admitted_csp_base_history_resources_editor_pixels_an
         let (x,y)=(rect.x+8,app.content_top()+rect.y+8-app.scroll);
         app.pointer_down(x,y,false);app.pointer_up(x,y);app.paste("edited");
         let v=&app.forms.controls[&entry].value;let editor=(v.text(),v.cursor,v.anchor,v.offset);
+        assert!(editor.0.contains("edited"),"trusted native editing must occur");
         let before=site.requests.lock().unwrap().len();
         let initial=if explicit {site.location("/assets/").display()}else{site.location(path).display()};
         eval(&mut app,&format!("if(document.baseURI!=={}||document.body.baseURI!==document.baseURI||img.baseURI!==document.baseURI)throw 'actual admitted base';var getBase=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get;",format!("{initial:?}")));
