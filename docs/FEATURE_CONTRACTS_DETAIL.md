@@ -1640,3 +1640,43 @@ there explicitly returns NotSupportedError. Native quota/copy and unsupported
 unpaired-text refusal preserve the editor and recover through a later valid set.
 Existing default/interior-write, owner, form and resource guards remain. The
 remaining textarea IDL is not claimed by this value/identity increment.
+
+## Original script request and XMLHttpRequest increment
+
+The shared asynchronous request core owns document epochs, immutable request
+snapshots and cancellation generations. It reuses the original HTTP/TLS,
+framing/decoding, cookies, blocking and tracing paths. Script method/header/body
+representation is distinct from native form payloads. GET, HEAD, POST, PUT,
+PATCH, DELETE and OPTIONS use real wire methods and bodies. HEAD retains the
+actual reason phrase and headers without reading/decompressing a response body.
+Form submission limits and navigation/replay guards remain independent.
+
+CSP connect-src falls back to default-src, applies all relevant policies and is
+checked on every redirect before contact. Safe CORS requests use real origin,
+credential, redirect-taint and response checks; Set-Cookie is never script-readable.
+Preflight-required requests and conservative privileged-header redirects are
+refused rather than sent under a no-CORS shortcut. Worker/pending/completion
+backing, policy/header/body snapshots and held responses have ownership leases;
+refusal and cancellation preserve admitted work and retire stale generations.
+
+XMLHttpRequest and its upload target have canonical owner-realm interfaces over
+actual records. The main document adapter supplies ordered coercions, real
+readonly state, ordinary prototype/expando behavior and protected Event/ProgressEvent
+notifications. Opened-state changes and abort notify synchronously through the
+existing reentrant dispatcher; network results return to the App thread. Requests
+snapshot text/primitive or actual buffer/view bytes. Text decoding reuses the
+original decoder and MIME override/UTF-8 request charset rules. Non-2xx HTTP
+responses retain their actual status/body. Native App tests include rendered
+response text/pixels, stable editor/link targets, POST/cookies, CSP no-contact,
+reopening during headers, timeout, HEAD and document navigation cancellation.
+
+This is a buffered adapter: header/loading/completion notifications currently
+follow receipt of a complete bounded response, with actual received-body counts.
+There is no incremental reader or stream facade. Synchronous XHR, explicit auth,
+child-window dispatch, preflight, Blob/FormData/Document serialization, non-text
+response types and XML response documents remain unsupported. In-flight timeout
+changes are refused. Fetch, Headers, Request, Response and stream bodies remain
+separate work. The optional nonstandard XMLHttpRequest.prototype.fetch is absent.
+Implementation checks do not establish a usable site or successful application
+API requests. See the [XHR standard](https://xhr.spec.whatwg.org/) and
+[Fetch standard](https://fetch.spec.whatwg.org/).

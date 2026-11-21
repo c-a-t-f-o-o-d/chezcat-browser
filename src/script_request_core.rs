@@ -21,6 +21,7 @@ pub(crate) struct Request {
     pub timeout_ms: u32,
     pub started: Instant,
     pub response_limit: usize,
+    pub force_preflight: bool,
     _storage: Lease,
 }
 impl Request {
@@ -37,11 +38,17 @@ impl Request {
         limit: usize,
     ) -> Result<Arc<Self>, String> {
         let bytes = std::mem::size_of::<Self>()
-            .checked_add(6 * std::mem::size_of::<usize>() + std::mem::size_of::<AtomicBool>())
+            .checked_add(5 * std::mem::size_of::<usize>())
             .and_then(|bytes| bytes.checked_add(url_bytes(&target)))
             .and_then(|bytes| bytes.checked_add(url_bytes(&origin)))
             .and_then(|bytes| bytes.checked_add(outgoing.payload_bytes()))
-            .and_then(|bytes| bytes.checked_add(policy.owned_bytes()))
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    policy
+                        .owned_bytes()
+                        .saturating_sub(std::mem::size_of::<crate::csp::PolicySet>()),
+                )
+            })
             .ok_or("Script request snapshot storage overflow.")?;
         let storage = Lease::new(used, bytes, limit)?;
         Ok(Arc::new(Self {
@@ -55,6 +62,7 @@ impl Request {
             timeout_ms,
             started: Instant::now(),
             response_limit,
+            force_preflight: false,
             _storage: storage,
         }))
     }
@@ -82,6 +90,7 @@ struct Job {
     request: Arc<Request>,
     blocking: Arc<crate::blocking::Policy>,
     network: crate::network_trace::Trace,
+    _storage: Lease,
 }
 struct Shared {
     queue: VecDeque<Job>,
@@ -196,7 +205,16 @@ impl Worker {
                 let mut result = if request.timeout_ms != 0 && remaining.is_none() {
                     Err(Failure::Timeout)
                 } else {
-                    let filter = |url: &HttpUrl| job.blocking.check(url);
+                    let filter = |url: &HttpUrl| {
+                        job.blocking.check(url)?;
+                        if request.force_preflight && !request.origin.same_origin(url) {
+                            return Err(
+                                "XHR upload listeners require an unimplemented CORS preflight."
+                                    .into(),
+                            );
+                        }
+                        Ok(())
+                    };
                     let mut pool = http::Pool::new(&request.cancel, &trust)
                         .with_cookie_session(cookies.clone(), Some(request.origin.clone()))
                         .with_network_trace(job.network)
@@ -270,6 +288,11 @@ impl Worker {
         if state.stopping {
             return Err("Script request worker is stopping.".into());
         }
+        let storage = Lease::new(
+            state.used.clone(),
+            blocking.owned_bytes() + 2 * std::mem::size_of::<usize>(),
+            state.limit,
+        )?;
         let count = state
             .completed
             .len()
@@ -299,6 +322,7 @@ impl Worker {
             request,
             blocking,
             network,
+            _storage: storage,
         });
         self.state.1.notify_one();
         Ok(())
@@ -523,9 +547,33 @@ mod tests {
         assert!(worker.poll().is_none());
         assert!(worker.state.0.lock().unwrap().queue.is_empty());
         worker.state.0.lock().unwrap().limit = 1024 * 1024;
-        let mut policy=crate::csp::PolicySet::new(&crate::navigation::Location {url:Some(url.clone()),path:None,fragment:String::new(),root:None});
+        let mut policy = crate::csp::PolicySet::new(&crate::navigation::Location {
+            url: Some(url.clone()),
+            path: None,
+            fragment: String::new(),
+            root: None,
+        });
         policy.add_header("connect-src 'none'");
-        let denied=Request::prepare(Id{receiver:0x8e000000,generation:2},url.clone(),url.clone(),http::ScriptRequest {method:http::ScriptMethod::Get,headers:Vec::new(),body:Vec::new()},http::ScriptCredentials::SameOrigin,policy,0,4096,used.clone(),1024*1024).unwrap();
+        let denied = Request::prepare(
+            Id {
+                receiver: 0x8e000000,
+                generation: 2,
+            },
+            url.clone(),
+            url.clone(),
+            http::ScriptRequest {
+                method: http::ScriptMethod::Get,
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
+            http::ScriptCredentials::SameOrigin,
+            policy,
+            0,
+            4096,
+            used.clone(),
+            1024 * 1024,
+        )
+        .unwrap();
         worker
             .submit(
                 1,

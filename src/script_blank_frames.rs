@@ -264,7 +264,7 @@ impl Bridge<'_> {
     pub(super) fn frame_native_property(&self, handle: u32, name: &str) -> bool {
         self.frame_context(handle).is_some() && (self.owns_global_property(name)
             || matches!(name, "parent" | "top" | "frameElement" | "closed" | "length" | "origin"
-                | "setTimeout" | "clearTimeout" | "fetch" | "XMLHttpRequest" | "frames"))
+                | "setTimeout" | "clearTimeout" | "fetch" | "frames"))
     }
 
     pub(super) fn frame_content(&self, node: usize, property: &str) -> Option<Value> {

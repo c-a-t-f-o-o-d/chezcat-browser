@@ -37,6 +37,8 @@ mod input_harness;
 mod observations;
 #[path = "app_keyboard.rs"]
 pub(crate) mod keyboard;
+#[path="app_script_requests.rs"]
+mod script_requests;
 #[path = "app_scripts.rs"]
 mod script_jobs;
 #[cfg(test)]
@@ -261,6 +263,7 @@ pub struct App {
     cookies: std::sync::Arc<crate::cookies::Session>,
     cookie_same_site: bool,
     dynamic_scripts: Option<script_jobs::Worker>,
+    script_requests:Option<crate::script_request_core::Worker>,
     dynamic_pending: usize,
     dynamic_stylesheets: Option<style_jobs::Worker>,
     pending_stylesheets: usize,
@@ -394,6 +397,7 @@ impl App {
             cookies: std::sync::Arc::new(crate::cookies::Session::default()),
             cookie_same_site: false,
             dynamic_scripts: None,
+            script_requests:None,
             dynamic_pending: 0,
             dynamic_stylesheets: None,
             pending_stylesheets: 0,
@@ -549,6 +553,7 @@ impl App {
             worker.set_wake(wake.clone());
         }
         if let Some(worker) = &self.dynamic_images { worker.set_wake(wake.clone()); }
+        if let Some(worker)=&self.script_requests{worker.set_wake(wake.clone());}
         self.wake = wake;
     }
     /// Called at startup; trust is immutable for all requests in this worker.
@@ -780,7 +785,7 @@ impl App {
         let pause_changed=if self.scripting.as_ref().is_some_and(|p|p.has_media_tasks()) {self.flush_embedded_video()} else {false};
         self.inspector.invalidate();
         let responsive_changed = self.process_responsive_images() | self.poll_responsive_image_events();
-        let script_changed = self.poll_dynamic_scripts()
+        let script_changed = self.poll_native_script_requests() | self.process_native_script_requests() | self.poll_dynamic_scripts()
             | self.process_script_requests()
             | self.poll_dynamic_stylesheets()
             | self.process_stylesheet_requests()
@@ -1137,7 +1142,7 @@ impl App {
             }
             let due = match self.next_page_timer() {
                 Some(due) => due,
-                None if self.is_loading() => {
+                None if self.is_loading() || self.scripting.as_ref().is_some_and(|page|page.has_native_script_requests()) => {
                     std::time::Instant::now() + std::time::Duration::from_millis(10)
                 }
                 None => break,
@@ -6013,3 +6018,7 @@ mod document_properties_tests;
 #[cfg(test)]
 #[path = "app_range_tests.rs"]
 mod range_tests;
+
+#[cfg(test)]
+#[path="app_xhr_tests.rs"]
+mod xhr_tests;

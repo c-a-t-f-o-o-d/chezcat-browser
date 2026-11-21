@@ -448,6 +448,7 @@ enum UiRecord {
     Mouse(UiData,MouseData),
     Keyboard(UiData,KeyboardData),
     Focus(UiData,Option<u32>),
+    Progress(crate::javascript::xhr_interface::Progress),
 }
 impl UiRecord {
     fn prepare(ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>)->Result<Self,String>{
@@ -458,8 +459,8 @@ impl UiRecord {
             _=>return Err("Event UI family data is inconsistent.".into()),
         })
     }
-    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base=>None}}
-    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base=>None}}
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)=>None}}
     fn mouse(&self)->Option<&MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
     fn mouse_mut(&mut self)->Option<&mut MouseData>{if let Self::Mouse(_,mouse)=self{Some(mouse)}else{None}}
     fn keyboard(&self)->Option<&KeyboardData>{if let Self::Keyboard(_,key)=self{Some(key)}else{None}}
@@ -630,6 +631,16 @@ impl Bridge<'_> {
         self.state.created_events[id].data=UiRecord::Focus(UiData {view,detail},related);
         Ok(value)
     }
+    pub(super) fn construct_progress_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
+        let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
+        let integer=|key| {let value=field(key).map_or(0.0,Value::to_number);if !value.is_finite() {0}else{value.trunc().rem_euclid(18446744073709551616.0) as u64}};
+        let progress=crate::javascript::xhr_interface::Progress {length_computable:field("lengthComputable").is_some_and(Value::truthy),loaded:integer("loaded"),total:integer("total")};
+        let value=self.construct_base_event(owner,args,fields)?;
+        let Value::Host(handle)=value else {unreachable!()};let id=self.created_event_index(handle).unwrap();
+        self.state.created_events[id].data=UiRecord::Progress(progress);Ok(value)
+    }
+    pub(super) fn progress_receiver(&self,handle:u32)->bool {self.created_event_index(handle).is_some_and(|id|matches!(self.state.created_events[id].data,UiRecord::Progress(_)))}
+    pub(super) fn progress_property(&self,object:u32,name:&str)->bool {self.progress_receiver(object)&&matches!(name,"lengthComputable"|"loaded"|"total")}
     pub(super) fn focus_receiver(&self,handle:u32)->bool {
         self.created_event_index(handle).is_some_and(|id|matches!(self.state.created_events[id].data,UiRecord::Focus(..)))
             || self.state.event.as_ref().is_some_and(|event|event.handle==handle&&event.focus.is_some())
@@ -719,7 +730,7 @@ impl Bridge<'_> {
         Ok(())
     }
     pub(super) fn event_native_member(&self,object:u32,name:&str)->bool {
-        base_property(name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
+        base_property(name) || self.progress_property(object,name) || matches!(name,"constructor"|"__proto__"|"srcElement"|"returnValue"|"composedPath"|"initEvent"|"preventDefault"|"stopPropagation"|"stopImmediatePropagation")
             || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.focus_receiver(object) && name=="relatedTarget"
@@ -797,7 +808,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
@@ -807,7 +818,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
+            base_property(name) || self.progress_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()
@@ -841,6 +852,8 @@ impl Bridge<'_> {
             let event = &self.state.created_events[id];
             let native = |handle: Option<u32>| handle.map_or(Value::Null, Value::Host);
             Ok(match name {
+                "lengthComputable" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Bool(data.length_computable)},
+                "loaded"|"total" if matches!(event.data,UiRecord::Progress(_)) => {let UiRecord::Progress(data)=event.data else {unreachable!()};Value::Number(if name=="loaded" {data.loaded}else{data.total} as f64)},
                 "relatedTarget" if matches!(event.data,UiRecord::Focus(..)) => {let UiRecord::Focus(_,related)=&event.data else {unreachable!()};native(*related)},
                 "target" | "srcElement" => native(event.target),
                 "currentTarget" => native(event.current),

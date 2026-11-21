@@ -342,6 +342,7 @@ impl App {
         if let Some(worker) = &self.dynamic_scripts {
             worker.cancel();
         }
+        self.script_requests=None;
         self.dynamic_pending = 0;
         if let Some(page) = &mut self.scripting {
             page.cancel_media_selection();
@@ -362,7 +363,7 @@ impl App {
     pub(super) fn process_script_requests(&mut self) -> bool {
         self.apply_media_pause();
         let effects=self.poll_media_promise_cleanup();
-        self.process_script_requests_after_cleanup() | effects
+        self.process_script_requests_after_cleanup() | effects | self.process_native_script_requests()
     }
     fn process_script_requests_after_cleanup(&mut self) -> bool {
         if self.script_jobs_paused() {

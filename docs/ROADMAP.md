@@ -58,13 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest owner Windows check at November 21, 00:36 UTC used a dirty development
-build based on `6c92856` and still shows a skeleton. It reaches missing FocusEvent
-in onFocusOut metadata at 27041:350. The base hash does not identify the dirty
-edits or executable. A separate clean `6c92856` run at 00:21 UTC first failed on
-FocusEvent at 22346:68. These are distinct response cohorts. Genuine FocusEvent
-and native control transitions are the selected increment; their implementation
-checks do not prove a usable shell. The
+The latest isolated Windows check on clean `94ba833` at November 21, 00:44 UTC
+still renders a skeleton. It first fails on missing XMLHttpRequest in an
+unguarded prototype.fetch probe at 28091:544. This is a distinct response cohort
+from the owner dirty-build observation. Genuine shared asynchronous script
+requests and the XHR adapter are the next connected increment; the optional
+nonstandard member stays absent. Implementation checks do not prove site data
+success or a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.
 
