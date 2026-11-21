@@ -6242,3 +6242,7 @@ mod bigint_width_tests;
 #[cfg(test)]
 #[path="app_svg_author_properties_tests.rs"]
 mod svg_author_properties_tests;
+
+#[cfg(test)]
+#[path="app_fragment_author_prototype_tests.rs"]
+mod fragment_author_prototype_tests;
