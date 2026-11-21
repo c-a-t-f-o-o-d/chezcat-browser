@@ -23,6 +23,8 @@ mod sizing_math;
 pub use sizing_math::CalculatedLength;
 #[path="css_custom_properties.rs"]
 mod custom_properties;
+#[path="css_svg_geometry.rs"]
+mod svg_geometry;
 #[path="css_computed_style.rs"]
 mod computed_style;
 pub(crate) use computed_style::{CascadeOutput, ComputedProperties, ComputedStyleUnavailable, CssBudget};
@@ -1049,6 +1051,7 @@ fn compute_cascade(
     let mut overflow_known = vec![[true; 2]; doc.nodes.len()];
     let mut position_known = vec![true; doc.nodes.len()];
     let mut canvas_foregrounds = HashMap::new();
+    let mut svg_geometry = HashMap::new();
     let mut touch_actions: HashMap<usize, Option<TouchAction>> = HashMap::new();
     let mut font_sizes: HashMap<usize, Option<f32>> = HashMap::new();
     // Default opacity 1 requires no retained per-node allocation. A None entry
@@ -1400,6 +1403,20 @@ fn compute_cascade(
             style.root_font_size = root_font_size;
         }
         style.line_height = line_height::computed(style.line_height,style.font_size,style.root_font_size);
+        if node.namespace==crate::html::Namespace::Svg {
+            let parent_geometry=parents[index].and_then(|id|svg_geometry.get(&id)).and_then(Option::as_ref);
+            let outer=tag=="svg" && parents[index].is_none_or(|id|doc.nodes[id].namespace!=crate::html::Namespace::Svg);
+            let charge=|meter:&mut CssBudget<'_>|->Result<(),String>{
+                meter.work(1)?;
+                meter.copies(std::mem::size_of::<(usize,Option<crate::image::SvgGeometry>)>().checked_mul(6).and_then(|n|n.checked_add(9*32)).ok_or("SVG computed geometry backing overflow.")?)
+            };
+            if let Some(meter)=meter.as_deref_mut() {charge(meter)?;}
+            else if let Some(meter)=transform_meter.as_deref_mut() {charge(meter)?;}
+            let resolve=|budget:&mut custom_properties::Budget|svg_geometry::compute(doc,index,tag,outer,parent_geometry,parent_geometry.is_some(),style.font_size,style.root_font_size,font_known&&root_font_known,applicable.iter().map(|(_,d)|*d),&variables[index],budget);
+            let geometry=if let Some(meter)=meter.as_deref_mut() {meter.variables(&mut variable_budget,resolve)?} else if let Some(meter)=transform_meter.as_deref_mut() {meter.variables(&mut variable_budget,resolve)?} else {resolve(&mut variable_budget)};
+            svg_geometry.try_reserve(1).map_err(|_|"SVG computed geometry snapshot reservation failed.")?;
+            svg_geometry.insert(index,geometry);
+        }
         let viewport_length=|value|sizing_math::resolve_viewport(value,environment);
         style.width=viewport_length(style.width);style.height=viewport_length(style.height);style.min_width=viewport_length(style.min_width);style.min_height=viewport_length(style.min_height);style.max_width=style.max_width.map(viewport_length);style.max_height=style.max_height.map(viewport_length);style.flex_basis=viewport_length(style.flex_basis);style.margin=style.margin.map(viewport_length);style.padding=style.padding.map(viewport_length);style.gap=style.gap.map(viewport_length);
         // Height inherits its computed length, not a parent's em/rem token.
@@ -1497,7 +1514,7 @@ fn compute_cascade(
         if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
         presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events,z_index:style.z_index.clone()}));
     }
-    Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation), stylesheet_cache:prepared.cache })
+    Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation, svg_geometry), stylesheet_cache:prepared.cache })
 }
 
 fn prefix(text: &str, maximum: usize) -> &str {
@@ -5418,3 +5435,7 @@ mod interaction_style;
 
 #[path="css_z_index.rs"]
 pub(crate) mod z_index;
+
+#[cfg(test)]
+#[path="css_svg_geometry_tests.rs"]
+mod svg_geometry_tests;

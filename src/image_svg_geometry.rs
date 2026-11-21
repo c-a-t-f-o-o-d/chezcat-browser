@@ -30,7 +30,7 @@ impl Value {
         Ok(Some(value))
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Geometry {
     values: [Value; 9],
 }
@@ -205,4 +205,11 @@ pub(super) fn font_size(
         }
     }
     Ok(())
+}
+
+pub(super) fn valid(tag: &str, key: &str, text: &str, outer: bool) -> ImageResult<bool> {
+    let Some(index) = property(key) else { return Ok(false); };
+    if !applies(tag,index,outer) { return Ok(false); }
+    if matches!(text.trim().to_ascii_lowercase().as_str(),"inherit"|"initial"|"unset"|"revert"|"revert-layer") { return Ok(true); }
+    Ok(parse(text,true,index>=5)?.is_some())
 }

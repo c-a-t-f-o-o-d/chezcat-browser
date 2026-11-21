@@ -22,6 +22,7 @@ mod png;
 mod simple;
 #[path = "image_svg.rs"]
 mod svg;
+pub(crate) use svg::ComputedGeometry as SvgGeometry;
 #[path = "image_tiff.rs"]
 mod tiff;
 #[path = "image_webp.rs"]

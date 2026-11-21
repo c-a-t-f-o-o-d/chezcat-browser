@@ -26,6 +26,7 @@ struct Snapshot {
     touch_actions: HashMap<usize, Option<TouchAction>>,
     font_sizes: HashMap<usize, Option<f32>>,
     presentation:Vec<ComputedPresentation>,
+    svg_geometry:HashMap<usize,Option<crate::image::SvgGeometry>>,
 }
 impl ComputedProperties {
     #[allow(clippy::too_many_arguments)]
@@ -42,6 +43,7 @@ impl ComputedProperties {
         touch_actions: HashMap<usize, Option<TouchAction>>,
         font_sizes: HashMap<usize, Option<f32>>,
         presentation:Vec<ComputedPresentation>,
+        svg_geometry:HashMap<usize,Option<crate::image::SvgGeometry>>,
     ) -> Self {
         Self(Rc::new(Snapshot {
             variables,
@@ -56,6 +58,7 @@ impl ComputedProperties {
             touch_actions,
             font_sizes,
             presentation,
+            svg_geometry,
         }))
     }
     pub(crate) fn read(
@@ -130,6 +133,12 @@ impl ComputedProperties {
         }
         self.0.transforms.get(node).copied().flatten()
             .map(Some).ok_or(ComputedStyleUnavailable)
+    }
+    pub(crate) fn read_svg_geometry(&self,node:usize)->Result<Option<&crate::image::SvgGeometry>,ComputedStyleUnavailable> {
+        if !self.0.complete {return Err(ComputedStyleUnavailable);}
+        match self.0.svg_geometry.get(&node) {
+            Some(Some(value))=>Ok(Some(value)),Some(None)=>Err(ComputedStyleUnavailable),None=>Ok(None),
+        }
     }
     pub(crate) fn has_transform_geometry(&self) -> bool {
         self.0.has_transform_geometry
