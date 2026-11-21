@@ -292,8 +292,9 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
     }} Ok(Some(output))
 }
 
+pub(super) fn layout_property(name:&str)->bool{matches!(name,"width"|"height"|"min-width"|"min-height"|"max-width"|"max-height"|"display"|"box-sizing"|"flex-grow"|"flex-shrink"|"flex-basis"|"flex"|"flex-direction"|"flex-wrap"|"flex-flow"|"gap"|"row-gap"|"column-gap")}
 fn box_property(name:&str)->bool {
-    matches!(name,"margin"|"margin-top"|"margin-right"|"margin-bottom"|"margin-left"|
+    layout_property(name) || matches!(name,"margin"|"margin-top"|"margin-right"|"margin-bottom"|"margin-left"|
         "padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size"|"height")
         || ["top","right","bottom","left"].iter().any(|side|
             name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
@@ -302,7 +303,17 @@ fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
-    if name=="height" {return height_value(value,Length::Auto).is_some();}
+    if matches!(name,"width"|"height"|"min-width"|"min-height"|"flex-basis"){return sizing_value(value,Length::Auto).is_some();}
+    if matches!(name,"max-width"|"max-height"){return max_sizing_value(value).is_some();}
+    if name=="display"{return display_value(value).is_some();}
+    if name=="box-sizing"{return matches!(value,"content-box"|"border-box");}
+    if matches!(name,"flex-grow"|"flex-shrink"){return flex_factor(value).is_some();}
+    if name=="flex"{return flex_shorthand(value).is_some();}
+    if name=="flex-direction"{return flex_direction(value).is_some();}
+    if name=="flex-wrap"{return flex_wrap(value).is_some();}
+    if name=="flex-flow"{return flex_flow_value(value).is_some();}
+    if name=="gap"{return gap_values(value).is_some();}
+    if matches!(name,"row-gap"|"column-gap"){return value=="normal"||max_sizing_value(value).is_some_and(|value|value.is_some());}
     if name=="font-size" {return font_size_value(value,INITIAL_FONT_SIZE,INITIAL_FONT_SIZE).is_some();}
     if name=="color" {return value=="currentcolor" || color(value).is_some();}
     if matches!(name,"background-color"|"background") {
@@ -320,9 +331,20 @@ fn valid_box(name:&str,value:&str)->bool {
     let shorthand=matches!(name,"border-width"|"border-style"|"border-color");
     !parts.is_empty() && parts.len()<=if shorthand{4}else{1} && parts.iter().all(|part|valid(part))
 }
-fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
+fn inherited_layout_length(value:Length,parent:&Style)->Length{
+    let pixels=match value{Length::Em(value)=>value as f64*parent.font_size as f64,Length::Rem(value)=>value as f64*parent.root_font_size as f64,_=>return value};
+    Length::Px(pixels.clamp(-(f32::MAX as f64),f32::MAX as f64)as f32)
+}
+pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
-    if name=="height" {style.height=source.height;return;}
+    let length=|value|if inherit{inherited_layout_length(value,parent)}else{value};
+    match name{
+        "width"=>{style.width=length(source.width);return;},"height"=>{style.height=length(source.height);return;},"min-width"=>{style.min_width=length(source.min_width);return;},"min-height"=>{style.min_height=length(source.min_height);return;},"max-width"=>{style.max_width=source.max_width.map(length);return;},"max-height"=>{style.max_height=source.max_height.map(length);return;},
+        "display"=>{style.display=source.display;return;},"box-sizing"=>{style.border_box=source.border_box;return;},
+        "flex-grow"=>{style.flex_grow=source.flex_grow;return;},"flex-shrink"=>{style.flex_shrink=source.flex_shrink;return;},"flex-basis"=>{style.flex_basis=length(source.flex_basis);return;},"flex"=>{style.flex_grow=source.flex_grow;style.flex_shrink=source.flex_shrink;style.flex_basis=length(source.flex_basis);return;},
+        "flex-direction"=>{style.flex_direction=source.flex_direction;return;},"flex-wrap"=>{style.flex_wrap=source.flex_wrap;return;},"flex-flow"=>{style.flex_direction=source.flex_direction;style.flex_wrap=source.flex_wrap;return;},
+        "gap"=>{style.gap=source.gap.map(length);return;},"row-gap"=>{style.gap[0]=length(source.gap[0]);return;},"column-gap"=>{style.gap[1]=length(source.gap[1]);return;},_=>{},
+    }
     if name=="color" {style.color=source.color;return;}
     if name=="font-size" {style.font_size=source.font_size;return;}
     if matches!(name,"background-color"|"background") {

@@ -3342,9 +3342,23 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
     ))
 }
 
-// Shared finite height grammar for literal and substituted longhands. Separate
+fn display_value(value:&str)->Option<Display>{Some(match value{
+    "none"=>Display::None,"block"|"list-item"=>Display::Block,"inline"=>Display::Inline,"inline-block"=>Display::InlineBlock,"flex"=>Display::Flex,"grid"=>Display::Grid,"table"=>Display::Table,"table-row-group"|"table-header-group"|"table-footer-group"=>Display::TableRowGroup,"table-row"=>Display::TableRow,"table-cell"=>Display::TableCell,_=>return None,
+})}
+fn flex_flow_value(value:&str)->Option<(FlexDirection,bool)>{
+    let mut direction=None;let mut wrap=None;let mut count=0;
+    for part in value.split_ascii_whitespace(){count+=1;if let Some(value)=flex_direction(part){if direction.replace(value).is_some(){return None;}}else if let Some(value)=flex_wrap(part){if wrap.replace(value).is_some(){return None;}}else{return None;}}
+    (count!=0).then_some((direction.unwrap_or(FlexDirection::Row),wrap.unwrap_or(false)))
+}
+fn max_sizing_value(value:&str)->Option<Option<Length>>{
+    let value=value.trim();if value.eq_ignore_ascii_case("none"){return Some(None);}
+    if !value.is_ascii()||value.bytes().any(|b|b.is_ascii_whitespace()){return None;}
+    parse_length(value,false,false).map(Some)
+}
+
+// Shared finite sizing grammar for literal and substituted longhands. Separate
 // tokens cannot form a dimension, including var(--number)px after substitution.
-fn height_value(value: &str, parent: Length) -> Option<Length> {
+fn sizing_value(value: &str, parent: Length) -> Option<Length> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("inherit") { return Some(parent); }
     if value.eq_ignore_ascii_case("initial") || value.eq_ignore_ascii_case("unset") {
@@ -3423,22 +3437,9 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
 
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
     let value = declaration.value.trim().to_ascii_lowercase();
+    if custom_properties::layout_property(&declaration.name)&&matches!(value.as_str(),"inherit"|"initial"|"unset"){custom_properties::reset_box(style,parent,&declaration.name,value=="inherit");return;}
     match declaration.name.as_str() {
-        "display" => match value.as_str() {
-            "none" => style.display = Display::None,
-            "block" | "list-item" => style.display = Display::Block,
-            "inline" => style.display = Display::Inline,
-            "inline-block" => style.display = Display::InlineBlock,
-            "flex" => style.display = Display::Flex,
-            "grid" => style.display = Display::Grid,
-            "table" => style.display = Display::Table,
-            "table-row-group" | "table-header-group" | "table-footer-group" => {
-                style.display = Display::TableRowGroup
-            }
-            "table-row" => style.display = Display::TableRow,
-            "table-cell" => style.display = Display::TableCell,
-            _ => {}
-        },
+        "display" => {if let Some(value)=display_value(&value){style.display=value;}},
         "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
         "inset" => {
             if value == "inherit" {
@@ -3698,40 +3699,12 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 style.padding = values;
             }
         }
-        "width" => {
-            if let Some(value) = parse_length(&value, true, false) {
-                style.width = value;
-            }
-        }
-        "max-width" => {
-            if value == "none" {
-                style.max_width = None;
-            } else if let Some(value) = parse_length(&value, false, false) {
-                style.max_width = Some(value);
-            }
-        }
-        "height" => {
-            if let Some(value) = height_value(&value, parent.height) {
-                style.height = value;
-            }
-        }
-        "min-width" => {
-            if let Some(value) = parse_length(&value, true, false) {
-                style.min_width = value;
-            }
-        }
-        "min-height" => {
-            if let Some(value) = parse_length(&value, true, false) {
-                style.min_height = value;
-            }
-        }
-        "max-height" => {
-            if value == "none" {
-                style.max_height = None;
-            } else if let Some(value) = parse_length(&value, false, false) {
-                style.max_height = Some(value);
-            }
-        }
+        "width" => {if let Some(value)=sizing_value(&value,parent.width){style.width=value;}}
+        "height" => {if let Some(value)=sizing_value(&value,parent.height){style.height=value;}}
+        "min-width" => {if let Some(value)=sizing_value(&value,parent.min_width){style.min_width=value;}}
+        "min-height" => {if let Some(value)=sizing_value(&value,parent.min_height){style.min_height=value;}}
+        "max-width" => {if let Some(value)=max_sizing_value(&value){style.max_width=value;}}
+        "max-height" => {if let Some(value)=max_sizing_value(&value){style.max_height=value;}}
         "box-sizing" => match value.as_str() {
             "content-box" | "initial" | "unset" => style.border_box = false,
             "border-box" => style.border_box = true,
@@ -3748,28 +3721,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                 style.flex_wrap = value;
             }
         }
-        "flex-flow" => {
-            let mut direction = None;
-            let mut wrap = None;
-            let mut valid = true;
-            for part in value.split_ascii_whitespace() {
-                if let Some(value) = flex_direction(part) {
-                    if direction.replace(value).is_some() {
-                        valid = false;
-                    }
-                } else if let Some(value) = flex_wrap(part) {
-                    if wrap.replace(value).is_some() {
-                        valid = false;
-                    }
-                } else {
-                    valid = false;
-                }
-            }
-            if valid {
-                style.flex_direction = direction.unwrap_or(FlexDirection::Row);
-                style.flex_wrap = wrap.unwrap_or(false);
-            }
-        }
+        "flex-flow"=>{if let Some((direction,wrap))=flex_flow_value(&value){style.flex_direction=direction;style.flex_wrap=wrap;}}
         "justify-content" => {
             if let Some(value) = flex_pack(&value) {
                 style.justify_content = value;
@@ -3805,7 +3757,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "flex-basis" => {
-            if let Some(value) = parse_length(&value, true, false) {
+            if let Some(value) = sizing_value(&value,parent.flex_basis) {
                 style.flex_basis = value;
             }
         }
@@ -5311,3 +5263,7 @@ mod translate_tests;
 #[cfg(test)]
 #[path="css_attribute_substring_tests.rs"]
 mod attribute_substring_tests;
+
+#[cfg(test)]
+#[path="css_layout_variable_tests.rs"]
+mod layout_variable_tests;
