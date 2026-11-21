@@ -118,12 +118,14 @@ impl Bridge<'_> {
                 ImportSource::Parsed { node, .. } => {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                        if node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
+                        let svg=node.namespace==crate::html::Namespace::Svg;
+                        if svg&&!crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}
+                        if !svg&&(node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
                         if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|self.inert_node_type(child)!=Some(3)){return Err("Imported STYLE requires plain direct text children.".into());}
-                        if attrs.iter().any(|attr| attr.name.namespace.is_some()
+                        if !svg&&attrs.iter().any(|attr| attr.name.namespace.is_some()
                             || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
                         }
@@ -206,6 +208,7 @@ impl Bridge<'_> {
         while staged.len() < plan.len() {
             let offset = staged.len();
             let (source, parent, depth) = plan[offset];
+            self.validate_svg_node(source)?;
             let image=tag(self.doc,source)=="img";
             let style=tag(self.doc,source)=="style";
             if image{self.validate_plain_image(source)?;}
@@ -228,9 +231,10 @@ impl Bridge<'_> {
                 self.state.work(attrs.len())?;
                 let textarea = tag == "textarea" && self.owned_native_textarea(source);
                 let radio = tag == "input" && self.owned_native_radio(source);
-                if item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image || style)
+                let svg=item.namespace==crate::html::Namespace::Svg;
+                if !svg&&(item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_none()
-                        && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is"))) {
+                        && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
                 }
                 if textarea || radio {

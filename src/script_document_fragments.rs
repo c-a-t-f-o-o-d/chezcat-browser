@@ -60,7 +60,7 @@ impl Bridge<'_> {
                 if !seen.insert(node) {return Err("Fragment donor repeats a Node identity.".into());}
                 if node==parent {return Err("HierarchyRequestError: Fragment insertion would create a cycle.".into());}
                 if matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment)
-                    || self.doc.nodes[node].namespace.is_foreign()
+                    || self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
                     || matches!(tag(self.doc,node),"script"|"link"|"iframe") {
                     return Err("Fragment batch resource, nested-container or foreign insertion is not implemented; no tree was changed.".into());
                 }
@@ -78,7 +78,7 @@ impl Bridge<'_> {
         }
         if parent_depth.saturating_add(maximum_depth)>128 {return Err("Fragment insertion depth limit reached; no tree was changed.".into());}
         let outgoing=if let Some(old)=old {self.mutation_subtree_with_styles(old)?.0} else {Vec::new()};
-        if outgoing.iter().any(|&node|self.doc.nodes[node].namespace.is_foreign()
+        if outgoing.iter().any(|&node|self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
             || matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("Fragment replacement cannot retire foreign or script/stylesheet/frame resources; no tree was changed.".into());
         }
@@ -101,6 +101,7 @@ impl Bridge<'_> {
         let mut overrides=Vec::new();overrides.try_reserve(roots.len()+usize::from(old.is_some())).map_err(|_|"Fragment owner projection reservation failed.")?;
         for &root in &roots {overrides.push((root,Some(parent)));}
         if let Some(old)=old {overrides.push((old,None));}
+        for &root in &roots{self.validate_svg_edge(node_handle(parent),node_handle(root))?;}
         let connected=self.state.dom.connected[parent];
         if incoming.iter().any(|&node|tag(self.doc,node)=="style"){self.validate_style_destination(parent)?;}
         let sheets=self.prepare_style_transfers(&incoming,&outgoing,connected)?;

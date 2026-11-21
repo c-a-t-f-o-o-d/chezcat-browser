@@ -8255,3 +8255,10 @@ mod passive_html_import_tests;
 #[cfg(test)]
 #[path="script_native_control_import_tests.rs"]
 mod native_control_import_tests;
+
+#[path="script_svg_dom.rs"]
+mod svg_dom;
+
+#[cfg(test)]
+#[path="script_dynamic_svg_tests.rs"]
+mod dynamic_svg_tests;

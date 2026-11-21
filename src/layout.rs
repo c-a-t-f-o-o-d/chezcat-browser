@@ -1226,8 +1226,10 @@ impl Engine<'_> {
         matches!(&self.doc.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "img")
             || self.video(node)
             || self.canvas(node)
+            || self.inline_svg(node)
             || self.loaded_image_control(node)
     }
+    fn inline_svg(&self,node:usize)->bool {self.doc.nodes[node].namespace==crate::html::Namespace::Svg&&matches!(&self.doc.nodes[node].kind,NodeKind::Element{tag,..} if tag=="svg")}
     fn video(&self,node:usize)->bool {self.doc.nodes[node].namespace==crate::html::Namespace::Html&&matches!(&self.doc.nodes[node].kind,NodeKind::Element {tag,..} if tag=="video")}
     fn canvas(&self, node: usize) -> bool {
         self.doc.scripting_enabled && crate::html_canvas::element(self.doc, node)
@@ -2117,7 +2119,7 @@ impl Engine<'_> {
                     self.separate("\n");
                     return;
                 }
-                if tag == "img" || self.video(index) || self.canvas(index) {
+                if tag == "img" || self.video(index) || self.canvas(index) || self.inline_svg(index) {
                     if style.display.block_level() {
                         self.finish_line(false, 0);
                         self.separate("\n");
@@ -2892,14 +2894,14 @@ impl Engine<'_> {
                     },
                 }
             }
-            NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.canvas(node) || self.loaded_image_control(node) => {
+            NodeKind::Element { tag, .. } if tag == "img" || self.video(node) || self.canvas(node) || self.inline_svg(node) || self.loaded_image_control(node) => {
                 let width = if self.canvas(node) {
                     let mut intrinsic_style = style.clone();
                     if matches!(intrinsic_style.width, Length::Percent(_)) {
                         intrinsic_style.width = Length::Auto;
                     }
                     self.image_dimensions(node, &intrinsic_style, 0).0
-                } else if tag != "img" && !self.video(node) {
+                } else if tag != "img" && !self.video(node) && !self.inline_svg(node) {
                     let mut intrinsic_style = style.clone();
                     if matches!(intrinsic_style.width, Length::Percent(_)) {
                         intrinsic_style.width = Length::Auto;

@@ -55,6 +55,8 @@ mod platform_continuation;
 pub use platform_continuation::{PlatformCompletion, PlatformRequest};
 #[path = "app_anchor.rs"]
 pub(crate) mod anchor;
+#[path = "app_inline_svg.rs"]
+mod inline_svg;
 #[path = "app_images.rs"]
 mod image_jobs;
 #[path = "app_responsive_images.rs"]
@@ -219,6 +221,7 @@ pub struct App {
     base_fonts: crate::fonts::Book,
     fonts: crate::fonts::Book,
     images: HashMap<usize, std::sync::Arc<Bitmap>>,
+    inline_svg_sources: HashMap<usize, String>,
     image_densities: HashMap<usize, f64>,
     responsive_images: responsive_images::State,
     animations: HashMap<usize, animation::Playback>,
@@ -355,6 +358,7 @@ impl App {
             base_fonts: crate::fonts::Book::empty(),
             fonts: crate::fonts::Book::empty(),
             images: HashMap::new(),
+            inline_svg_sources: HashMap::new(),
             image_densities: HashMap::new(),
             responsive_images: responsive_images::State::default(),
             animations: HashMap::new(),
@@ -1632,6 +1636,7 @@ impl App {
         self.scripting = None;
         self.base_location = loaded.base;
         self.base_is_document_url = loaded.base_is_document_url;
+        self.inline_svg_sources.clear();
         self.document = loaded.document;
         self.stylesheet_cache = None;
         // The viewport may have changed since loading began. Startup scripts
@@ -1752,6 +1757,7 @@ impl App {
         }
     }
     fn reflow(&mut self) {
+        self.sync_inline_svg();
         self.anchor_geometry_scope = std::rc::Rc::new(());
         let environment=Some(self.css_media_environment());
         self.document.media_environment=environment;
@@ -6062,3 +6068,7 @@ mod style_import_tests;
 #[cfg(test)]
 #[path="app_template_main_import_tests.rs"]
 mod template_main_import_tests;
+
+#[cfg(test)]
+#[path="app_dynamic_svg_tests.rs"]
+mod dynamic_svg_tests;

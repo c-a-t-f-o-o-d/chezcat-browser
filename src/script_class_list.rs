@@ -43,7 +43,7 @@ impl Bridge<'_> {
     pub(super) fn class_list_element_receiver(&self, object: u32) -> bool {
         self.attr_element_receiver(object)
             && node_index(object)
-                .is_some_and(|node| self.doc.nodes[node].namespace == crate::html::Namespace::Html)
+                .is_some_and(|node| matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg))
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
         element(object).is_some_and(|element| self.class_list_element_receiver(element) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
@@ -51,7 +51,7 @@ impl Bridge<'_> {
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
         let node = self.node(element)?;
-        if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
+        if !matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) {
             return Err("Class token list requires known attribute namespace provenance.".into());
         }
         if !self.class_list_receiver(object){return Err("Invalid attribute token list receiver.".into());}
