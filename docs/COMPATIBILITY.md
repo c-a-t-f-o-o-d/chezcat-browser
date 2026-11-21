@@ -19,6 +19,23 @@
 
 ### Latest reviewed signed-out homepage checkpoint
 
+The isolated signed-out Windows run at **2026-11-21T04:04:08Z** used clean
+[`c3081a5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/c3081a51d137dcc845905e051a5d80246e84b719),
+including genuine nested template fragments. JavaScript was enabled and images
+off. All 43 script executions succeeded, but inspected pixels still show the
+skeleton without usable header/guide/search. DOMContentLoaded fails on missing
+`ErrorEvent` at 72:194 in a polyfill error-reporting fallback. That secondary
+failure may mask an earlier exception; its resolution is not established by
+constructor tests. There were 49 listeners and one escaped error. The prior
+nested-template parser refusal is absent in this distinct live cohort.
+
+Existing transport/trust/origin/resource guards remain active. External script
+body hashes are unavailable; later journey milestones remain unproved. The
+connected ErrorEvent increment supplies genuine retained data and synthetic
+propagation, without claiming automatic global error reporting or a working site.
+
+**Previous isolated development run.**
+
 The isolated signed-out Windows run at **2026-11-21T03:42:22Z** used clean
 [`0f24be5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/0f24be5cb6de6c6194ac210185f8d4dab82faaf6),
 including genuine WheelEvent records. JavaScript was enabled and images off;

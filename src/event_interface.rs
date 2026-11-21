@@ -343,6 +343,35 @@ impl Runtime {
         self.restore_transient_marker(marker);result.map_err(Fault::display)
     }
 
+    pub fn define_error_event_interface(&mut self,window:u32)->Result<(),String> {
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let parent=*self.native_constructor_prototypes.get(&(window,"Event"))
+                .ok_or_else(||Fault::new("ErrorEvent requires the canonical Event interface."))?;
+            let parent_constructor=self.objects[parent].properties.get("constructor")
+                .ok_or_else(||Fault::new("Canonical Event constructor is unavailable."))?.value.as_value()?.clone();
+            let Value::Function(parent_constructor)=parent_constructor else {return Err(Fault::new("Canonical Event constructor is invalid."));};
+            let allocation=self.allocate_host_function_with_length(window,"ErrorEvent",1).map_err(Fault::new)?;
+            if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
+            let constructor=Value::Function(allocation.id);
+            self.objects[self.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent_constructor));
+            let prototype=self.new_object(None)?;
+            self.objects[prototype].prototype=Some(Ordinary::Object(parent));
+            self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+            self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+            for (name,operation) in [("message","\0ErrorEvent.get.message"),("filename","\0ErrorEvent.get.filename"),("lineno","\0ErrorEvent.get.lineno"),("colno","\0ErrorEvent.get.colno"),("error","\0ErrorEvent.get.error")] {
+                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
+                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+            }
+            self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("ErrorEvent".into()),Some((false,false,true)))?;
+            self.native_constructor_prototypes.insert((window,"ErrorEvent"),prototype);
+            self.put_binding(self.global_environment,"ErrorEvent".into(),Some(constructor),super::Declaration::Var,false)?;
+            self.global_attributes.insert("ErrorEvent".into(),(false,true,true));
+            Ok(())
+        })();
+        self.restore_transient_marker(marker);result.map_err(Fault::display)
+    }
+
     pub fn define_animation_event_interface(&mut self,window:u32)->Result<(),String> {
         let marker=self.inhibit_transient_collection();
         let result=(|| {

@@ -6038,3 +6038,7 @@ mod wheel_event_tests;
 #[cfg(test)]
 #[path="app_nested_template_tests.rs"]
 mod nested_template_tests;
+
+#[cfg(test)]
+#[path="app_error_event_tests.rs"]
+mod error_event_tests;
