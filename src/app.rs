@@ -6246,3 +6246,7 @@ mod svg_author_properties_tests;
 #[cfg(test)]
 #[path="app_fragment_author_prototype_tests.rs"]
 mod fragment_author_prototype_tests;
+
+#[cfg(test)]
+#[path="app_custom_host_content_tests.rs"]
+mod custom_host_content_tests;

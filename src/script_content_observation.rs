@@ -35,7 +35,7 @@ impl Bridge<'_> {
                 && matches!(item.kind, NodeKind::Element { .. })
                 && !matches!(tag(self.doc, node), "script" | "style")
         } else {
-            text_container(tag(self.doc, node))
+            self.text_content_container(node)
                 || self.created_html_style(node) && self.state.detached_nodes.contains(&node)
                 || matches!(item.kind, NodeKind::DocumentFragment)
         };

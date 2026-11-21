@@ -28,6 +28,7 @@ fn custom_host_content_native_text_replacement_records_range_and_saved_identity(
         &mut page,
         r#"
 var host=document.getElementById('host'),old=host.firstChild,nested=old.nextSibling,list=host.childNodes,range=new Range(),observer=new MutationObserver(function(){}),set=Object.getOwnPropertyDescriptor(Node.prototype,'textContent').set;range.setStart(old.firstChild,1);range.setEnd(nested.firstChild,3);observer.observe(host,{childList:true});var conversions=0;set.call(host,{toString:function(){conversions++;return 'A<&';}});var records=observer.takeRecords();if(conversions!==1||host.textContent!=='A<&'||host.innerHTML!=='A&lt;&amp;'||list.length!==1||host.firstChild.nodeType!==3||old.parentNode!==null||nested.parentNode!==null||old.textContent!=='old'||nested.textContent!=='nested'||old.isConnected||nested.isConnected)throw 'actual native replacement';if(records.length!==1||records[0].target!==host||records[0].removedNodes.length!==2||records[0].removedNodes[0]!==old||records[0].removedNodes[1]!==nested||records[0].addedNodes.length!==1||records[0].addedNodes[0]!==host.firstChild||records[0].previousSibling!==null||records[0].nextSibling!==null)throw 'whole-content mutation';if(range.startContainer!==host||range.startOffset||range.endContainer!==host||range.endOffset||!range.collapsed)throw 'actual Range retirement';
+for(var tag of ['section','main','nav','article','table','slot']){var passive=document.createElement(tag);passive.textContent='passive';if(passive.firstChild.data!=='passive'||passive.textContent!=='passive')throw 'shared passive container '+tag;}
 var made=document.createElement('created-card');made.textContent='detached';if(made.firstChild.data!=='detached'||made.isConnected)throw 'detached native';document.body.appendChild(made);made.textContent=null;if(made.childNodes.length||made.textContent!=='')throw 'empty replacement';
 "#,
     );
@@ -40,9 +41,20 @@ fn custom_host_content_inert_import_promotion_and_ordinary_parent_remove_passive
         &mut forms,
         &mut page,
         r#"
-var template=document.createElement('template');template.innerHTML='<staged-card><nested-card>staged</nested-card></staged-card>';var staged=template.content.firstChild,owner=staged.ownerDocument;staged.textContent='inert';if(staged.textContent!=='inert'||staged.ownerDocument!==owner)throw 'inert native';var imported=document.importNode(template.content,true),copy=imported.firstChild;copy.textContent='imported';document.getElementById('ordinary').appendChild(imported);if(copy.ownerDocument!==document||copy.textContent!=='imported')throw 'import owner';document.body.appendChild(template.content);staged.textContent='promoted';if(staged.ownerDocument!==document||staged.firstChild.data!=='promoted')throw 'promoted alias';var old=copy;document.getElementById('ordinary').textContent='replacement';if(old.parentNode!==null||old.textContent!=='imported'||document.getElementById('ordinary').firstChild.data!=='replacement')throw 'ordinary parent passive custom retirement';
+var template=document.createElement('template');template.innerHTML='<staged-card><nested-card>staged</nested-card></staged-card>';var staged=template.content.firstChild,owner=staged.ownerDocument;staged.textContent='inert';if(staged.textContent!=='inert'||staged.ownerDocument!==owner)throw 'inert native';var imported=document.importNode(template.content,true),copy=imported.firstChild;copy.textContent='imported';document.getElementById('ordinary').appendChild(imported);if(copy.ownerDocument!==document||copy.textContent!=='imported')throw 'import owner';var reservable=document.createElement('template');reservable.innerHTML='<promoted-card>reserved</promoted-card>';var promoted=reservable.content.firstChild;document.body.appendChild(reservable.content);promoted.textContent='promoted';if(promoted.ownerDocument!==document||promoted.firstChild.data!=='promoted')throw 'promoted alias';var old=copy;document.getElementById('ordinary').textContent='replacement';if(old.parentNode!==null||old.textContent!=='imported'||document.getElementById('ordinary').firstChild.data!=='replacement')throw 'ordinary parent passive custom retirement';
 "#,
     );
+    // Newly constructed inert leaf identities still require a separate genuine
+    // materialization increment. A refusal must not publish a partial tree.
+    let before = (doc.nodes.len(), page.state.dom_commits);
+    let out = page.console_eval(
+        &mut doc,
+        &mut forms,
+        "document.body.appendChild(template.content);",
+    );
+    assert_eq!(out.errors, 1, "{}", page.report());
+    assert_eq!((doc.nodes.len(), page.state.dom_commits), before);
+    run(&mut doc,&mut forms,&mut page,"if(staged.ownerDocument!==owner||staged.textContent!=='inert'||template.content.firstChild!==staged)throw 'unreserved leaf promotion changed tree';");
 }
 #[test]
 fn custom_host_content_protected_controls_and_resources_refuse_without_publication() {
