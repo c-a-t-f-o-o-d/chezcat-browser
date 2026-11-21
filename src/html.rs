@@ -19,11 +19,11 @@ pub(crate) const MAX_LOADED_DOCUMENT_NODES: usize = 262_144;
 const MAX_DEPTH: usize = 128; // Open-element stack, including the synthetic root.
 
 /// A host-only node identity. Vec indices cannot reach usize::MAX, which
-/// represents no focused control. Atomic storage preserves Document's Sync use.
+/// represents no target. Atomic storage preserves Document's Sync use.
 #[derive(Debug)]
-pub(crate) struct NativeFocus(std::sync::atomic::AtomicUsize);
-impl Default for NativeFocus{fn default()->Self{Self(std::sync::atomic::AtomicUsize::new(usize::MAX))}}
-impl NativeFocus{
+pub(crate) struct NativeNode(std::sync::atomic::AtomicUsize);
+impl Default for NativeNode{fn default()->Self{Self(std::sync::atomic::AtomicUsize::new(usize::MAX))}}
+impl NativeNode{
     pub(crate) fn get(&self)->Option<usize>{let node=self.0.load(std::sync::atomic::Ordering::Relaxed);(node!=usize::MAX).then_some(node)}
     pub(crate) fn set(&self,node:Option<usize>){self.0.store(node.unwrap_or(usize::MAX),std::sync::atomic::Ordering::Relaxed);}
 }
@@ -35,7 +35,8 @@ pub struct Document {
     /// Host-only screen context; page script cannot supply viewport or input capabilities.
     pub media_environment: Option<crate::css::MediaEnvironment>,
     /// Host control focus; disconnected targets can be retired by native topology rebuilds.
-    pub(crate) native_focus: NativeFocus,
+    pub(crate) native_focus: NativeNode,
+    pub(crate) native_hover: NativeNode,
     pub title: String,
     /// The committed resource's MIME essence. Synthetic text/image viewers
     /// retain the source type; plain parser callers create HTML documents.
@@ -293,7 +294,8 @@ fn parse_internal(
         scripting_enabled: false,
         nonce_unsafe_nodes: HashSet::new(),
         withheld_inline_styles: HashSet::new(),
-            native_focus: crate::html::NativeFocus::default(),
+            native_focus: crate::html::NativeNode::default(),
+            native_hover: crate::html::NativeNode::default(),
         nodes: vec![Node {
             kind: NodeKind::Element {
                 tag: context.unwrap_or("#document").into(),

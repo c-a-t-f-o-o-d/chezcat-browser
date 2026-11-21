@@ -386,8 +386,7 @@ impl Engine<'_> {
             item_owners[index] = match item {
                 PaintItem::Text(run) => self.run_nodes[*run],
                 PaintItem::Control(control) => self.layout.controls[*control].node,
-                PaintItem::Image { node, .. } | PaintItem::Background { node, .. } => *node,
-                _ => item_owners[index],
+                PaintItem::Image {node,..}|PaintItem::Background{node,..}|PaintItem::Rect{node,..}|PaintItem::RoundedRect{node,..}|PaintItem::HitBox{node,..}=>*node,
             };
         }
         for (index, atom) in self.atoms.iter().enumerate() {

@@ -21,6 +21,7 @@ struct Prepared {
     rules: Vec<Rule>,
     candidates: RuleCandidates,
     has_transform: bool,
+    has_hover:bool,
 }
 
 #[derive(Clone)]
@@ -30,6 +31,7 @@ pub(super) struct ParsedSheets {
     pub cache: Option<StylesheetCache>,
     fresh: Vec<Rule>,
     pub has_transform: bool,
+    pub has_hover:bool,
 }
 
 impl ParsedSheets {
@@ -122,6 +124,7 @@ pub(super) fn prepare(
                 cache: Some(previous.clone()),
                 fresh: Vec::new(),
                 has_transform: previous.0.has_transform,
+                has_hover:previous.0.has_hover,
             });
         }
     }
@@ -140,6 +143,7 @@ pub(super) fn prepare(
     let mut rules = Vec::new();
     let mut complete = errors.is_empty();
     let mut has_transform = false;
+    let mut has_hover=false;
     for (owner, source) in &sources {
         let first = rules.len();
         match parse_sheet_with_media_inner(
@@ -155,6 +159,7 @@ pub(super) fn prepare(
             Ok(()) => {}
         }
         for rule in &mut rules[first..] {
+            has_hover|=rule.selectors.iter().any(Selector::depends_on_hover);
             for declaration in &mut rule.declarations {
                 declaration.stylesheet = Some(*owner);
                 has_transform |= declaration.name == "transform";
@@ -168,6 +173,7 @@ pub(super) fn prepare(
             cache: None,
             fresh: rules,
             has_transform,
+            has_hover,
         });
     }
     let copied = sources.iter().fold(0usize, |sum, (_, source)| {
@@ -195,6 +201,7 @@ pub(super) fn prepare(
             cache: None,
             fresh: rules,
             has_transform,
+            has_hover,
         });
     }
     for (owner, source) in sources {
@@ -207,6 +214,7 @@ pub(super) fn prepare(
                         cache: None,
                         fresh: rules,
                         has_transform,
+                        has_hover,
                     });
                 }
                 copy.push_str(source);
@@ -228,10 +236,12 @@ pub(super) fn prepare(
         rules,
         candidates,
         has_transform,
+        has_hover,
     }));
     Ok(ParsedSheets {
         cache: Some(cache),
         fresh: Vec::new(),
         has_transform,
+        has_hover,
     })
 }

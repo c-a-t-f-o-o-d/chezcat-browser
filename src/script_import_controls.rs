@@ -105,7 +105,8 @@ impl Bridge<'_> {
             scripting_enabled: false,
             nonce_unsafe_nodes: HashSet::new(),
             withheld_inline_styles: HashSet::new(),
-            native_focus: crate::html::NativeFocus::default(),
+            native_focus: crate::html::NativeNode::default(),
+            native_hover: crate::html::NativeNode::default(),
         };
         self.state.retained += temporary;
         let result = (|| {
