@@ -401,16 +401,24 @@ fn parse_internal(
         let starts_template_svg = template_svg && tag.name == "svg" && !tag.closing;
         let inside_template_svg = template_svg && svg.root.is_some();
         if checked {
-            checked_select_tag(&stack, &document, &tag.name, tag.closing)?;
+            // Template contents form a fresh HTML scope. End tags inside one
+            // cannot close an ancestor in the surrounding fragment.
+            let scope_start = stack.iter().rposition(|&node| matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0);
+            let scope = &stack[scope_start..];
+            checked_select_tag(scope, &document, &tag.name, tag.closing)?;
+            if template_svg && tag.name=="template" && svg.root.is_none() && tag.closing {
+                if scope_start>0 {stack.truncate(scope_start);}continue;
+            }
             if tag.name == "textarea" && (tag.closing || tag.self_closing || !tag.clean_syntax) {
                 return Err("HTML fragment TEXTAREA requires an ordinary start tag and a matching end tag.".into());
             }
             if empty_table {
                 position = checked_empty_table_end(input, &tag, &stack, &document)?;
-            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "template" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
+            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
+                || tag.name == "template" && (!template_svg || svg.root.is_some())
                 || tag.name == "svg" && !(starts_template_svg || inside_template_svg)
                 || tag.name == "noscript" && scripting {
-                return Err("HTML fragment structural, table/select or foreign-content recovery is not implemented.".into());
+                return Err(format!("HTML fragment structural, table/select or foreign-content recovery is not implemented (tag {:.32}, closing {}, context {:.32}).",tag.name,tag.closing,context.unwrap_or("#document")));
             }
             if (starts_template_svg || inside_template_svg) && !tag.closing {
                 if let Some((kind,name))=svg_namespace::template_refusal(&tag){
@@ -419,18 +427,18 @@ fn parse_internal(
             }
             if !tag.closing {
                 let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
-                if stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "address" | "aside" | "details" | "dialog" | "dl" | "dt" | "dd" | "figcaption" | "figure" | "hgroup" | "listing" | "menu" | "nav" | "search" | "summary")))) {
+                if scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "address" | "aside" | "details" | "dialog" | "dl" | "dt" | "dd" | "figcaption" | "figure" | "hgroup" | "listing" | "menu" | "nav" | "search" | "summary")))) {
                     return Err("HTML fragment implied definition/heading/block recovery is not implemented.".into());
                 }
             }
             if tag.closing {
-                if tag.name == "br" || tag.name == "p" && !stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if tag == "p")) { return Err("HTML fragment special end-tag recovery is not implemented.".into()); }
-                if let Some(position) = stack.iter().rposition(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
-                    if position > 0 && (fragment_formatting(&tag.name) && position + 1 != stack.len() || stack[position+1..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
+                if tag.name == "br" || tag.name == "p" && !scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if tag == "p")) { return Err("HTML fragment special end-tag recovery is not implemented.".into()); }
+                if let Some(position) = scope.iter().rposition(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
+                    if position > 0 && (fragment_formatting(&tag.name) && position + 1 != scope.len() || scope[position+1..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
                         return Err("HTML fragment formatting-element reconstruction is not implemented.".into());
                     }
                 }
-            } else if fragment_formatting(&tag.name) && stack.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
+            } else if fragment_formatting(&tag.name) && scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
                 return Err("HTML fragment nested formatting recovery is not implemented.".into());
             }
         }
@@ -447,10 +455,8 @@ fn parse_internal(
                     svg.root = None;
                 }
             }
-            if let Some(index) = stack.iter().rposition(|&node| {
-                matches!(&document.nodes[node].kind,
-                    NodeKind::Element { tag: name, .. } if name == &tag.name)
-            }) {
+            let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
+            if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
                 if index > 0 {
                     if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
                         && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
@@ -876,7 +882,7 @@ fn close_in_scope(stack: &mut Vec<usize>, document: &Document, target: &str, bar
                 stack.truncate(position);
                 return;
             }
-            if barriers.contains(&tag.as_str()) {
+            if tag == "template" && document.nodes[stack[position]].namespace == Namespace::Html || barriers.contains(&tag.as_str()) {
                 return;
             }
         }

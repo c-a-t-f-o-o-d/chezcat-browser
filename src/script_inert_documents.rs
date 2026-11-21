@@ -912,7 +912,10 @@ impl Bridge<'_> {
             .ok_or("Template child-link storage overflow.")?;
         let detach_work = root.children.len();
         let count = parsed.nodes.len().checked_sub(1).ok_or("Missing checked fragment root.")?;
-        if count > self.inert_remaining_entries_with_release(released) {
+        let mut nested=Vec::new();nested.try_reserve_exact(count).map_err(|_|"Cannot reserve nested template traversal.")?;
+        for (index,node) in parsed.nodes.iter().enumerate().skip(1){if matches!(&node.kind,NodeKind::Element{tag,..} if tag=="template" && node.namespace==crate::html::Namespace::Html){nested.push(index);}}
+        let total=count.checked_add(nested.len()).ok_or("Nested template identity overflow.")?;
+        if total > self.inert_remaining_entries_with_release(released) {
             return Err("Inert DOM identity limit reached during template replacement.".into());
         }
         self.state.work(detach_work)?;
@@ -939,10 +942,14 @@ impl Bridge<'_> {
             };
             handles.push(handle);
         }
+        let mut template_links=Vec::new();template_links.try_reserve_exact(nested.len()).map_err(|_|"Cannot reserve nested template indexes.")?;
+        let mut nested_roots=Vec::new();nested_roots.try_reserve_exact(parsed.nodes.len()).map_err(|_|"Cannot reserve nested template roots.")?;nested_roots.resize(parsed.nodes.len(),None);
+        for (offset,&local) in nested.iter().enumerate(){let fragment=first+count as u32+offset as u32;nested_roots[local]=Some(fragment);template_links.push((handles[local],fragment));}
+        template_links.sort_unstable_by_key(|entry|entry.0);
         let mut entries = Vec::new();
         let mut generated = Vec::new();
         let mut parked_nodes = Vec::new();
-        entries.try_reserve_exact(count).map_err(|_| "Cannot reserve template replacement identities.")?;
+        entries.try_reserve_exact(total).map_err(|_| "Cannot reserve template replacement identities.")?;
         generated.try_reserve_exact(count).map_err(|_| "Cannot reserve parsed template replacement nodes.")?;
         parked_nodes.try_reserve_exact(parked).map_err(|_| "Cannot reserve parked template identities.")?;
         let mut parents = Vec::new();
@@ -957,13 +964,13 @@ impl Bridge<'_> {
         };
         for (local, node) in parsed.nodes.iter().enumerate() {
             self.state.work(node.children.len().saturating_add(1))?;
-            let parent = Some(handles[local]);
+            let parent = Some(nested_roots[local].unwrap_or(handles[local]));
             for &child in &node.children { parents[child] = parent; }
             if local == 0 { continue; }
             payload = payload.saturating_add(node_bytes(node));
             if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) || tag == "template" {
-                    return Err("Template fragment parsing of foreign or nested template markup is unavailable.".into());
+                if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
+                    return Err("Template fragment parsing of foreign markup is unavailable.".into());
                 }
                 self.state.work(attrs.len())?;
                 payload = payload.saturating_add(tag.len()).saturating_add(href.as_ref().map_or(0, String::len));
@@ -971,9 +978,11 @@ impl Bridge<'_> {
         }
         let root_children = children_for(&parsed.nodes[0].children)?;
         payload = payload.saturating_add(root_children.capacity().saturating_mul(std::mem::size_of::<u32>()));
+        let mut nested_fragments=Vec::new();nested_fragments.try_reserve_exact(nested.len()).map_err(|_|"Cannot reserve nested template fragments.")?;
+        for &local in &nested {let children=children_for(&parsed.nodes[local].children)?;payload=payload.saturating_add(children.capacity().saturating_mul(size_of::<u32>()));nested_fragments.push(Entry::Node(InertNode{kind:Kind::Fragment{template:Some(handles[local])},owner,parent:None,children}));}
         for (offset, mut node) in parsed.nodes.drain(1..).enumerate() {
             let local = offset + 1;
-            let children = children_for(&node.children)?;
+            let children = if nested_roots[local].is_some(){Vec::new()}else{children_for(&node.children)?};
             payload = payload.saturating_add(children.capacity().saturating_mul(std::mem::size_of::<u32>()));
             node.children = Vec::new();
             let inert = InertNode {
@@ -992,6 +1001,7 @@ impl Bridge<'_> {
             }
             generated.push(GeneratedNode { node: Rc::new(node), unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local) });
         }
+        entries.extend(nested_fragments);
         let minimum = self.state.inert_documents.entries.len().checked_add(entries.len())
             .and_then(|required| required.saturating_sub(self.state.inert_documents.entries.capacity()).checked_mul(size_of::<Entry>()))
             .and_then(|bytes| self.state.inert_documents.generated.len().checked_add(generated.len())
@@ -1002,10 +1012,13 @@ impl Bridge<'_> {
             .and_then(|bytes| bytes.checked_sub(payload)).and_then(|bytes| bytes.checked_sub(minimum))
             .ok_or("Parked template identity bundle allowance exhausted.")?;
         let node_minimum = self.main_node_minimum(parked)?;
+        let adopted_minimum=self.state.inert_documents.adopted.minimum_growth(parked_nodes.len())?;
+        let (content_growth,content_bytes)=self.prepare_nested_template_index(&template_links,available.checked_sub(node_minimum).and_then(|v|v.checked_sub(adopted_minimum)).ok_or("Nested template index allowance exhausted.")?)?;
+        let available=available.checked_sub(content_bytes).ok_or("Nested template index allowance exhausted.")?;
         let (index_growth, index_bytes) = self.prepare_adopted_index(parked_nodes.iter().map(|entry| entry.0),
             available.checked_sub(node_minimum).ok_or("Parked main-node backing allowance exhausted.")?)?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(parked, available-index_bytes)?;
-        let metadata = index_bytes.checked_add(node_bytes).ok_or("Parked native/main backing overflow.")?;
+        let metadata = index_bytes.checked_add(content_bytes).and_then(|bytes|bytes.checked_add(node_bytes)).ok_or("Parked native/main backing overflow.")?;
         let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, metadata)?;
         debug_assert_eq!(committed, first);
         self.commit_main_nodes(node_growth);
@@ -1017,6 +1030,8 @@ impl Bridge<'_> {
         }
         arena.generated.extend(generated);
         arena.entries.extend(entries);
+        arena.template_contents.commit(content_growth);
+        for (key,value) in template_links {arena.template_contents.insert(key,value);}
         arena.adopted.commit(index_growth);
         for (key, value) in parked_nodes { arena.adopted.insert(key, value); }
         for _ in 0..parked {
@@ -1244,6 +1259,18 @@ impl Bridge<'_> {
         let metadata = document_bytes.checked_add(content_bytes).ok_or("Template index storage overflow.")?;
         let handle = self.reserve_inert_storage(count, payload, generated, 0, metadata)?;
         Ok((handle, TemplateIndexGrowth { documents, contents: content_growth }))
+    }
+
+    fn prepare_nested_template_index(&mut self,links:&[(u32,u32)],available:usize)->Result<(Option<Vec<(u32,u32)>>,usize),String>{
+        let map=&self.state.inert_documents.template_contents;
+        let length=map.len().checked_add(links.len()).ok_or("Nested template index count overflow.")?;
+        let lookup=(usize::BITS-length.leading_zeros()) as usize+1;
+        self.state.work(links.len().checked_mul(3*lookup+1).ok_or("Nested template index work overflow.")?)?;
+        let map=&self.state.inert_documents.template_contents;let (growth,added)=map.prepare(links.len(),available)?;
+        let mut moved=if growth.is_some(){map.len()}else{0};let mut previous=None;
+        for &(key,_) in links{if previous.is_some_and(|before|before>=key)||map.contains_key(&key){return Err("Nested template index requires distinct unpublished identities.".into());}previous=Some(key);moved=moved.checked_add(map.insert_work(&key)-map.lookup_work()).ok_or("Nested template index movement overflow.")?;}
+        self.state.work(moved)?;self.state.copies(moved.checked_add(links.len()).and_then(|slots|slots.checked_mul(size_of::<(u32,u32)>())).ok_or("Nested template index copy work overflow.")?)?;
+        Ok((growth,added))
     }
 
     fn prepare_adopted_index(&mut self, keys: impl ExactSizeIterator<Item=u32>, available: usize)

@@ -58,13 +58,13 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The latest isolated Windows check on clean `d8957da` at November 21, 03:28 UTC
-still renders a skeleton. Main execution fails on missing `WheelEvent` metadata
-at 40747:73; prior sandbox query callback failures are absent. The connected
-WheelEvent increment supplies genuine retained constructor fields and ancestry,
-while preserving the current mouse-family dispatch refusal. Native wheel delivery
-remains open. The owner's separate later Hq timer call remains untraced and is
-not assigned a guessed API.
+The latest isolated Windows check on clean `0f24be5` at November 21, 03:42 UTC
+completes all 43 script executions but still renders a skeleton. DOMContentLoaded
+then fails in checked HTML fragment parsing. A separate tag/context diagnostic
+identifies nested template markup; the connected increment adds genuine inert
+nested content, scope boundaries, cloning/serialization and transactional indexes.
+The owner's earlier later Hq timer call remains untraced; it is not assigned a
+guessed API or claimed resolved by its absence in this short checkpoint.
 These implementation checks do not prove a usable shell. The
 [source-bound checkpoints](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
 retain prior isolated development and owner-supplied observations separately.

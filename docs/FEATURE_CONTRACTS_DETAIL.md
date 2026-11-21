@@ -1825,3 +1825,27 @@ activation and target-relative dispatch geometry. The existing mouse-family
 dispatch refusal remains active; construction does not scroll or grant trust.
 Legacy createEvent(WheelEvent) and initWheelEvent are not exposed. See the
 [WheelEvent interface](https://www.w3.org/TR/pointerevents4/#interface-wheelevent).
+
+
+## Nested checked template fragments
+
+Template innerHTML accepts nested HTML templates within the existing checked
+fragment subset. Each nested element has an empty ordinary child list and a
+separate stable inert content fragment in the same appropriate template document.
+Template boundaries stop implied paragraph/list closing and ancestor end-tag
+lookup; formatting checks use the current content scope. Existing unsupported
+table/select/foreign recovery remains explicit rather than silently reshaping it.
+Structural refusal diagnostics identify the tag and context without copying
+attributes or fragment text.
+
+Replacement stages all element/source identities, content fragments, parent and
+child links, and the paid content-index growth before publication. Retained,
+copy-work and identity admission remain active; failed replacement preserves old
+content and saved identities. Clone and serialization follow real content links,
+and repeated innerHTML replacements keep detached old nested contents usable.
+Scripts/styles/images in these fragments remain inert. The original App fixture
+clones a nested template and imports its ordinary content into the actual document
+from a trusted button callback, checking painted glyphs, editor state and links.
+This does not add arbitrary template insertion modes, full table/foreign recovery,
+resource activation or complete main-document template adoption. See the
+[HTML template element](https://html.spec.whatwg.org/multipage/scripting.html#the-template-element).

@@ -6034,3 +6034,7 @@ mod iframe_sandbox_tests;
 #[cfg(test)]
 #[path="app_wheel_event_tests.rs"]
 mod wheel_event_tests;
+
+#[cfg(test)]
+#[path="app_nested_template_tests.rs"]
+mod nested_template_tests;
