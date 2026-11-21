@@ -573,6 +573,8 @@ pub trait Host {
     fn observed_attribute_setter(&self, _target: u32, _property: &str) -> Option<&'static str> { None }
     fn mutation_child_list_changes(&mut self, _target: u32, _method: &str, _args: &[Value])
         -> Result<Vec<NativeChildListChange>, String> { Ok(Vec::new()) }
+    fn mutation_content_target(&mut self,_target:u32,_property:&str)->Result<Option<u32>,String>{Ok(None)}
+    fn mutation_content_changes(&mut self,_receiver:u32,_property:&str,_value:&Value)->Result<Vec<NativeChildListChange>,String>{Ok(Vec::new())}
     fn mutation_attribute_change(&mut self, _target: u32, _method: &str, _args: &[Value])
         -> Result<Option<NativeAttributeChange>, String> { Ok(None) }
     fn mutation_node_list(&mut self, _nodes: &[u32]) -> Result<u32, String> {

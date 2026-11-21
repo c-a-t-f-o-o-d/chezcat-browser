@@ -1248,13 +1248,8 @@ impl Runtime {
         }
         let ticket=self.prepare_host_microtask(host,handle,name,std::slice::from_ref(&value),true)?;
         let reflected = host.observed_attribute_setter(handle, name);
-        let observation = if let Some(attribute) = reflected {
-            self.prepare_attribute_write(handle, "setAttributeNS",
-                &[Value::Null, Value::String(attribute.into())], host)
-        } else {
-            self.prepare_character_data_write(handle, name, host)
-        };
-        let observation = match observation {
+        let observation = self.prepare_setter_observation(handle,name,&value,reflected,host);
+        let (observation,tree_observation) = match observation {
             Ok(observation) => observation,
             Err(error) => {
                 self.finish_host_microtask(host, ticket)?;
@@ -1264,7 +1259,7 @@ impl Runtime {
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
         let result=host.set(handle,name,value).map_err(Fault::new);
-        if reflected.is_some() {
+        if tree_observation {
             self.finish_tree_observation(observation, host)?;
         } else {
             self.finish_character_data_write(observation, name, host)?;

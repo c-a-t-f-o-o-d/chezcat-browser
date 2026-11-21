@@ -417,6 +417,10 @@ impl Runtime {
         if self.mutations.child_list_registrations == 0 { return Ok(None); }
         let Some(generation) = host.mutation_tree_generation() else { return Ok(None) };
         let changes = host.mutation_child_list_changes(target, method, args).map_err(Fault::new)?;
+        self.prepare_child_list_changes(target,generation,changes,host)
+    }
+
+    fn prepare_child_list_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         if changes.is_empty() { return Ok(None); }
         let mut entries = Vec::new();
         for change in changes {
@@ -431,6 +435,22 @@ impl Runtime {
             }
         }
         self.prepare_mutation_records(target, generation, entries)
+    }
+
+    pub(super) fn prepare_setter_observation(&mut self,handle:u32,name:&str,value:&Value,reflected:Option<&str>,host:&mut dyn Host)->Result<(Option<PreparedChange>,bool),Fault>{
+        if let Some(attribute)=reflected{return self.prepare_attribute_write(handle,"setAttributeNS",&[Value::Null,Value::String(attribute.into())],host).map(|pending|(pending,true));}
+        if self.mutations.child_list_registrations!=0{
+            if let Some(target)=host.mutation_content_target(handle,name).map_err(Fault::new)?{
+                if !self.matching_observers(target,true,None,host)?.is_empty(){
+                    if let Some(generation)=host.mutation_tree_generation(){
+                        let changes=host.mutation_content_changes(handle,name,value).map_err(Fault::new)?;
+                        return self.prepare_child_list_changes(target,generation,changes,host).map(|pending|(pending,true));
+                    }
+                }
+                return Ok((None,true));
+            }
+        }
+        self.prepare_character_data_write(handle,name,host).map(|pending|(pending,false))
     }
 
     pub(super) fn prepare_attribute_write(&mut self, target: u32, method: &str, args: &[Value], host: &mut dyn Host)
