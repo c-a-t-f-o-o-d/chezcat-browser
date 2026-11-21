@@ -659,6 +659,36 @@ fn history_replace_state_keeps_explicit_base_and_updates_fallback_base_for_real_
     }
 }
 
+#[test]
+fn node_base_uri_actual_app_admitted_csp_base_history_resources_editor_pixels_and_link() {
+    for (path,expected,explicit) in [("/history-explicit-base","/assets/one.ppm",true),("/history-blocked-base","/folder/one.ppm",false)] {
+        let site=Site::new();let mut app=open(&site,path);wait(&mut app,|app|!app.is_loading());
+        let entry=(0..app.document.nodes.len()).find(|&n|app.document.attr(n,"id")==Some("entry")).unwrap();
+        let rect=app.page.controls.iter().find(|r|r.node==entry).unwrap();
+        let (x,y)=(rect.x+8,app.content_top()+rect.y+8-app.scroll);
+        app.pointer_down(x,y,false);app.pointer_up(x,y);app.paste("edited");
+        let v=&app.forms.controls[&entry].value;let editor=(v.text(),v.cursor,v.anchor,v.offset);
+        assert!(editor.0.contains("edited"),"trusted native editing must occur");
+        let before=site.requests.lock().unwrap().len();
+        let initial=if explicit {site.location("/assets/").display()}else{site.location(path).display()};
+        eval(&mut app,&format!("if(document.baseURI!=={}||document.body.baseURI!==document.baseURI||img.baseURI!==document.baseURI)throw 'actual admitted base';var getBase=Object.getOwnPropertyDescriptor(Node.prototype,'baseURI').get;",format!("{initial:?}")));
+        eval(&mut app,"history.replaceState(null,'','/folder/uri-ready.html?keep=2');img.style.cssText='position:absolute;left:10px;top:100px;width:40px;height:20px';var projected=new URL('one.ppm',getBase.call(img)).href;img.src=projected;");
+        wait(&mut app,|app|!app.is_loading());
+        assert!(site.requested(expected),"{path}: {:?}",site.requests.lock().unwrap());
+        assert_eq!(site.requests.lock().unwrap().len(),before+1,"URI reads and History must not fetch");
+        assert_eq!(app.images[&image(&app)].pixels,[0xffff0000;2]);
+        let v=&app.forms.controls[&entry].value;assert_eq!((v.text(),v.cursor,v.anchor,v.offset),editor);
+        let canvas=app.draw();assert_eq!(canvas.pixels[(app.content_top()+110-app.scroll) as usize*canvas.width+20]&0xffffff,0xff0000);
+        eval(&mut app,"var uriLink=document.createElement('a');uriLink.id='uri-link';uriLink.href=location.href+'#destination';uriLink.textContent='Continue';uriLink.style.cssText='position:absolute;left:260px;top:10px;width:120px;height:30px;display:block;background-color:#2040e0';document.body.appendChild(uriLink);if(getBase.call(document)!==img.baseURI||new URL('one.ppm',document.baseURI).href!==projected)throw 'same authority';");
+        let link=(0..app.document.nodes.len()).find(|&n|app.document.attr(n,"id")==Some("uri-link")).unwrap();
+        assert_eq!(app.page.link_node_at(280,20),Some(link));
+        let y=app.content_top()+20-app.scroll;app.pointer_down(280,y,false);app.pointer_up(280,y);
+        assert_eq!(app.location.fragment,"destination");
+        let v=&app.forms.controls[&entry].value;assert_eq!((v.text(),v.cursor,v.anchor,v.offset),editor);
+        assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",app.scripting.as_ref().unwrap().report());
+    }
+}
+
 // Worker-slot controls only: real loopback bytes and the normal decoder, with
 // no claim of background cascade/layout/paint or element-event acceptance.
 fn image_slot_job(app: &App, site: &Site, background: bool, generation: u64, source: &str) -> Job {

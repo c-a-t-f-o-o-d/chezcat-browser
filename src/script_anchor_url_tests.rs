@@ -2,10 +2,12 @@
 use super::*;
 
 fn fixture() -> (Document, Forms, Page) {
+    fixture_page(Page::for_test())
+}
+fn fixture_page(mut page:Page) -> (Document, Forms, Page) {
     let mut doc = crate::html::parse("<!doctype html><title>Anchor projection</title><body><a id=parsed href=initial>Original</a><div id=other></div><svg><a id=foreign href=old></a></svg>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     let base = crate::navigation::address("https://example.test/one/page", &crate::navigation::Location::home()).unwrap();
     page.set_location(&base);
     page.set_resource_base(&base);
@@ -140,7 +142,7 @@ fn anchor_url_namespace_and_unsupported_capabilities_leave_raw_data_intact() {
 
 #[test]
 fn anchor_interface_genuine_nodes_owners_prototypes_and_url_backend() {
-    let (mut doc,mut forms,mut page)=fixture();
+    let (mut doc,mut forms,mut page)=fixture_page(Page::with_limits(crate::javascript::limits::BROWSER));
     run(&mut doc,&mut forms,&mut page,r#"
 var A=HTMLAnchorElement,a=document.getElementById('parsed');
 if(Object.getPrototypeOf(A)!==HTMLElement||Object.getPrototypeOf(A.prototype)!==HTMLElement.prototype||A.prototype.constructor!==A||A.name!=='HTMLAnchorElement'||A.length!==0)throw 'canonical owner chain';

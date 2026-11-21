@@ -386,6 +386,32 @@ impl Bridge<'_> {
         self.frame_get_with_caller(Some(WINDOW),handle,property)
     }
 
+    pub(super) fn frame_node_base_uri(
+        &mut self,
+        caller: Option<u32>,
+        handle: u32,
+    ) -> Option<Result<Value, String>> {
+        let (index, _) = frame_handle(handle)?;
+        self.frame_contains_node(handle)?;
+        Some((|| {
+            self.frame_window_access(caller, window(index))?;
+            let cost = dom_compat::url_copy_cost(
+                "",
+                Some(
+                    &self
+                        .state
+                        .blank_frames
+                        .get(index)
+                        .ok_or("Unknown blank-frame base.")?
+                        .base,
+                ),
+            )?;
+            self.state.work(cost)?;
+            self.state.copies(cost)?;
+            let value = self.state.blank_frames[index].base.display();
+            self.string(&value)
+        })())
+    }
     pub(super) fn frame_get_with_caller(&mut self, caller:Option<u32>, handle:u32, property:&str)->Option<Result<Value,String>> {
         let (index, offset) = frame_handle(handle)?;
         let result = (|| {
