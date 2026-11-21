@@ -17,7 +17,6 @@ type Result<T> = std::result::Result<T, String>;
 type Check<'a> = &'a dyn Fn() -> Result<()>;
 const MAX_DIMENSION: usize = 16_384;
 const MAX_IMAGES: usize = 256;
-const MAX_BLOCKS: usize = 65_536;
 const MAX_WORK: usize = 32 * 1024 * 1024;
 const MAX_ANIMATION_WORK: usize = 128 * 1024 * 1024;
 
@@ -46,7 +45,6 @@ impl Work<'_> {
 struct Reader<'a> {
     data: &'a [u8],
     position: usize,
-    blocks: usize,
 }
 
 impl<'a> Reader<'a> {
@@ -66,10 +64,8 @@ impl<'a> Reader<'a> {
     }
 
     fn block(&mut self, work: &mut Work<'_>) -> Result<&'a [u8]> {
-        self.blocks += 1;
-        if self.blocks > MAX_BLOCKS {
-            return Err("GIF sub-block limit reached (65536).".into());
-        }
+        // Even an empty block consumes its length byte. Checked source extents
+        // and charged bytes bound traversal without a separate record count.
         let length = usize::from(self.byte()?);
         work.spend(1 + length)?;
         self.bytes(length)
@@ -348,7 +344,6 @@ fn decode_internal(data: &[u8], check: Check<'_>, animated: bool) -> Result<Deco
     let mut reader = Reader {
         data,
         position: 0,
-        blocks: 0,
     };
     if !matches!(reader.bytes(6)?, b"GIF87a" | b"GIF89a") {
         return Err("Invalid GIF signature or version.".into());
@@ -635,6 +630,157 @@ mod tests {
         data
     }
 
+    fn with_comment_blocks(data: &[u8], count: usize) -> Vec<u8> {
+        let mut output = data[..25].to_vec(); // Header and original color table.
+        output.extend_from_slice(&[0x21, 0xfe]);
+        for _ in 0..count {
+            output.extend_from_slice(&[1, 0]);
+        }
+        output.push(0);
+        output.extend_from_slice(&data[25..]);
+        output
+    }
+
+    fn with_padding_blocks(data: &[u8], count: usize) -> Vec<u8> {
+        let mut output = data[..data.len() - 2].to_vec();
+        for _ in 0..count {
+            output.extend_from_slice(&[1, 0]);
+        }
+        output.extend_from_slice(&[0, 0x3b]);
+        output
+    }
+
+    fn one_byte_image_blocks(codes: &[u8]) -> Vec<u8> {
+        let original = fixture(1, 1, codes, None);
+        let mut output = original[..36].to_vec();
+        let mut at = 36;
+        while original[at] != 0 {
+            let length = usize::from(original[at]);
+            for &byte in &original[at + 1..at + 1 + length] {
+                output.extend_from_slice(&[1, byte]);
+            }
+            at += 1 + length;
+        }
+        output.extend_from_slice(&original[at..]);
+        output
+    }
+
+    #[test]
+    fn source_bounded_subblocks_preserve_animation_pixels_timing_and_loops() {
+        let first = fixture(1, 1, &[4, 0, 5], None);
+        let second = fixture(1, 1, &[4, 1, 5], None);
+        let mut data = first[..25].to_vec();
+        data.extend_from_slice(&[0x21, 0xff, 11]);
+        data.extend_from_slice(b"NETSCAPE2.0");
+        data.extend_from_slice(&[3, 1, 2, 0, 0]); // Two repeats, three total plays.
+        data.extend_from_slice(&[0x21, 0xf9, 4, 0, 7, 0, 0, 0]);
+        data.extend_from_slice(&first[25..first.len() - 1]);
+        data.extend_from_slice(&[0x21, 0xf9, 4, 0, 11, 0, 0, 0]);
+        data.extend_from_slice(&second[25..]);
+        let data = with_comment_blocks(&data, 65_537);
+        assert_eq!(crate::image::decode(&data).unwrap().pixels, [0xff112131]);
+        let asset = crate::image::decode_asset_checked(&data, &|| Ok(())).unwrap();
+        assert_eq!(asset.bitmap.pixels, [0xff112131]);
+        let animation = asset.animation.unwrap();
+        assert_eq!(animation.plays, Some(3));
+        assert_eq!(animation.frames.len(), 2);
+        assert_eq!(animation.frames[0].bitmap.pixels, [0xff112131]);
+        assert_eq!(animation.frames[1].bitmap.pixels, [0xffd25028]);
+        assert_eq!(animation.frames[0].delay_ms, 70);
+        assert_eq!(animation.frames[1].delay_ms, 110);
+    }
+
+    #[test]
+    fn source_bounded_lzw_subblocks_preserve_pixels_and_late_code_errors() {
+        // Repeated three-bit clear codes yield over 65,536 compressed bytes
+        // without growing either the dictionary or the one-pixel output.
+        let mut codes = vec![4; 180_000];
+        codes.extend_from_slice(&[0, 5]);
+        let data = one_byte_image_blocks(&codes);
+        assert_eq!(decode(&data, &|| Ok(())).unwrap().pixels, [0xff112131]);
+        assert_eq!(
+            decode_asset(&data, &|| Ok(())).unwrap().bitmap.pixels,
+            [0xff112131]
+        );
+        codes.truncate(180_000);
+        codes.extend_from_slice(&[0, 7, 5]);
+        assert!(decode(&one_byte_image_blocks(&codes), &|| Ok(()))
+            .unwrap_err()
+            .contains("undefined dictionary entry"));
+    }
+
+    #[test]
+    fn source_bounded_subblocks_preserve_late_extent_tail_and_trailer_checks() {
+        let original = fixture(1, 1, &[4, 0, 5], None);
+        let padded = with_padding_blocks(&original, 65_537);
+        let mut bad_tail = padded.clone();
+        let last = bad_tail.len() - 3;
+        bad_tail[last] = 1;
+        assert!(decode(&bad_tail, &|| Ok(()))
+            .unwrap_err()
+            .contains("Extra GIF image data"));
+
+        let mut bad_extent = padded.clone();
+        let last = bad_extent.len() - 4;
+        bad_extent[last] = 255;
+        assert!(decode(&bad_extent, &|| Ok(()))
+            .unwrap_err()
+            .contains("Truncated GIF block"));
+
+        assert!(decode(&padded[..padded.len() - 1], &|| Ok(()))
+            .unwrap_err()
+            .contains("Truncated GIF block"));
+        let mut missing_terminator = padded;
+        missing_terminator.remove(missing_terminator.len() - 2);
+        assert!(decode(&missing_terminator, &|| Ok(()))
+            .unwrap_err()
+            .contains("Truncated GIF block"));
+
+        let comments = with_comment_blocks(&original, 65_537);
+        let end = 25 + 2 + 65_537 * 2;
+        let mut truncated = comments[..end].to_vec();
+        truncated.extend_from_slice(&[255, 0]);
+        assert!(decode(&truncated, &|| Ok(()))
+            .unwrap_err()
+            .contains("Truncated GIF block"));
+    }
+
+    #[test]
+    fn source_bounded_subblocks_remain_cancelable_and_work_charged() {
+        let original = fixture(1, 1, &[4, 0, 5], None);
+        for data in [
+            with_comment_blocks(&original, 100_000),
+            with_padding_blocks(&original, 100_000),
+        ] {
+            let calls = Cell::new(0);
+            let error = decode(&data, &|| {
+                calls.set(calls.get() + 1);
+                // Byte charging reaches this check beyond the old block cap.
+                if calls.get() >= 150 {
+                    Err("cancelled during long GIF sub-block scan".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error, "cancelled during long GIF sub-block scan");
+        }
+
+        let mut reader = Reader {
+            data: &[1, 0, 1, 0, 0],
+            position: 0,
+        };
+        let mut work = Work {
+            remaining: 3,
+            until_check: 1,
+            check: &|| Ok(()),
+        };
+        assert_eq!(reader.block(&mut work).unwrap(), [0]);
+        assert!(reader.block(&mut work)
+            .unwrap_err()
+            .contains("work limit reached"));
+    }
+
     #[test]
     fn first_image_and_transparent_indices_reach_the_real_dispatcher() {
         let data = fixture(2, 2, &[4, 0, 4, 1, 4, 2, 4, 3, 5], None);
@@ -740,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_padding_keeps_subblock_limits_and_cancellation() {
+    fn legacy_padding_keeps_byte_bounds_and_cancellation() {
         let complete = fixture(1, 1, &[4, 0, 5], None);
         let mut padded = complete[..complete.len() - 2].to_vec();
         for _ in 0..40 {
@@ -759,14 +905,12 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error, "cancelled in padding");
-        let mut blocks = complete[..complete.len() - 2].to_vec();
-        for _ in 0..MAX_BLOCKS {
-            blocks.extend_from_slice(&[1, 0]);
-        }
-        blocks.extend_from_slice(&[0, 0x3b]);
-        assert!(decode(&blocks, &|| Ok(()))
-            .unwrap_err()
-            .contains("sub-block limit"));
+        let blocks = with_padding_blocks(&complete, 65_537);
+        assert_eq!(decode(&blocks, &|| Ok(())).unwrap().pixels, [0xff112131]);
+        assert_eq!(
+            decode_asset(&blocks, &|| Ok(())).unwrap().bitmap.pixels,
+            [0xff112131]
+        );
     }
 
     #[test]
@@ -861,15 +1005,7 @@ mod tests {
         assert_eq!(error, "cancelled");
         assert_eq!(calls.get(), 4);
         let valid = fixture(1, 1, &[4, 0, 5], None);
-        let mut blocks = valid[..25].to_vec();
-        blocks.extend_from_slice(&[0x21, 0xfe]);
-        for _ in 0..=MAX_BLOCKS {
-            blocks.extend_from_slice(&[1, 0]);
-        }
-        blocks.push(0);
-        blocks.extend_from_slice(&valid[25..]);
-        assert!(decode(&blocks, &|| Ok(()))
-            .unwrap_err()
-            .contains("sub-block limit"));
+        let blocks = with_comment_blocks(&valid, 65_537);
+        assert_eq!(decode(&blocks, &|| Ok(())).unwrap().pixels, [0xff112131]);
     }
 }
