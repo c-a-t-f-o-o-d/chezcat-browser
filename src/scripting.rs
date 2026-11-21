@@ -3135,7 +3135,9 @@ impl Host for Bridge<'_> {
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
-        if self.inert_node_type(object)==Some(1) && self.html_reflection_receiver(object){return Some(WINDOW);}
+        if self.inert_node_type(object)==Some(1)
+            && (self.html_reflection_receiver(object) || self.inert_interface(object)==Some("SVGElement"))
+        {return Some(WINDOW);}
         if self.named_map_receiver(object){return Some(WINDOW);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.inert_adopted_node(object) && self.inert_interface(object)
@@ -8463,3 +8465,7 @@ mod document_active_element_tests;
 #[cfg(test)]
 #[path="script_character_data_properties_tests.rs"]
 mod character_data_properties_tests;
+
+#[cfg(test)]
+#[path="script_svg_author_properties_tests.rs"]
+mod svg_author_properties_tests;
