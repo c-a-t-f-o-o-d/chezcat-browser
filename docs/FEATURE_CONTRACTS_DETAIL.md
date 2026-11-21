@@ -2119,3 +2119,26 @@ writes, imports it, and changes actual rendered pixels through an Attr alias and
 queued observer callback. Native editing and anchor activation stay intact.
 Other reflected-property routes and transient subtree registrations remain
 separate unfinished work; this is not a live-site initialization claim.
+
+
+## Inline style notifications and genuine inert slot data
+
+Supported inline CSS property writes and setProperty/removeProperty prepare
+attribute records for their actual Element's style attribute. Implemented HTML
+string reflections use the same record path. Equal supported declaration values
+and priorities do not rewrite the attribute or cause observer callback loops;
+absent removals and invalid ignored values queue no records. Retained refusal
+preserves both declarations and pending notifications.
+
+Existing HTMLSlotElement.name accessors now read/write genuine inert attribute
+data with defining-interface branding and ordinary DOMString conversion. Inert
+Element/Text assignedSlot getters follow their real ordinary tree and preserve
+foreign-parent refusal. Supported slot clone/import copies the passive element
+and fallback children with correct owners. No shadow root or slot distribution
+is fabricated; matching names in an ordinary tree still yield null assignment.
+
+The actual App fixture delivers an inert slot-name update, imports mixed native
+content, queues a real style callback after Promise work, and verifies text/vector
+pixels, preserved editing and real anchor navigation. Scheduled-peer and same-
+value callback cases exercise the native microtask queue. This does not establish
+live-site initialization or complete transient subtree observation.
