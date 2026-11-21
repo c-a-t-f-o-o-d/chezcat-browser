@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub const MAX_FONT_BYTES: usize = 16 * 1024 * 1024;
-const MAX_TABLES: usize = 256;
 const MAX_POINTS: usize = 65_536;
 const MAX_CONTOURS: usize = 4096;
 const MAX_COMPONENTS: usize = 256;
@@ -111,6 +110,23 @@ fn checksum(data: &[u8], zero_adjustment: bool) -> u32 {
     sum
 }
 
+// OpenType's sfnt search fields are uint16, including the largest power of
+// two at most numTables multiplied by the 16-byte directory-record size.
+// Derive their representability rather than applying an independent table cap.
+fn sfnt_search_fields(count: u16) -> Result<[u16; 3]> {
+    if count == 0 {
+        return Err("Font table directory must contain at least one table.".into());
+    }
+    let count = u32::from(count);
+    let power = 1u32 << count.ilog2();
+    let error = "Font table count cannot be represented by sfnt search fields.";
+    Ok([
+        u16::try_from(power * 16).map_err(|_| error)?,
+        u16::try_from(power.ilog2()).map_err(|_| error)?,
+        u16::try_from((count - power) * 16).map_err(|_| error)?,
+    ])
+}
+
 fn decode_woff(data: &[u8]) -> Result<Vec<u8>> {
     bytes(data, 0, 44)?;
     let flavor = u32_at(data, 4)?;
@@ -122,14 +138,19 @@ fn decode_woff(data: &[u8]) -> Result<Vec<u8>> {
     if u32_at(data, 8)? as usize != data.len() || u16_at(data, 14)? != 0 {
         return Err("Invalid WOFF length or reserved field.".into());
     }
-    let count = usize::from(u16_at(data, 12)?);
+    let count = u16_at(data, 12)?;
+    let search_fields = sfnt_search_fields(count)?;
+    let count = usize::from(count);
     let total = u32_at(data, 16)? as usize;
-    if count == 0 || count > MAX_TABLES || total > MAX_FONT_BYTES {
-        return Err("WOFF table count or decoded size exceeds its limit.".into());
+    if total > MAX_FONT_BYTES {
+        return Err("WOFF decoded size exceeds the 16 MiB limit.".into());
     }
     let directory_end = 44 + count * 20;
     bytes(data, 0, directory_end)?;
-    let mut ranges = vec![(0usize, directory_end)];
+    let mut ranges = Vec::new();
+    ranges.try_reserve_exact(count + 3)
+        .map_err(|_| "Cannot allocate WOFF table ranges.")?;
+    ranges.push((0usize, directory_end));
     let mut decoded_size = 12 + 16 * count;
     let mut previous_tag = None;
     for index in 0..count {
@@ -179,13 +200,17 @@ fn decode_woff(data: &[u8]) -> Result<Vec<u8>> {
     if ranges.windows(2).any(|pair| pair[0].1 > pair[1].0) {
         return Err("Overlapping WOFF blocks.".into());
     }
-    let mut output = vec![0u8; 12 + count * 16];
+    // The complete directory has now validated the decoded size. Reserve that
+    // actual size fallibly so later table appends cannot double past its budget.
+    let mut output = Vec::new();
+    output.try_reserve_exact(total)
+        .map_err(|_| "Cannot allocate decoded WOFF font.")?;
+    output.resize(12 + count * 16, 0);
     output[..4].copy_from_slice(&flavor.to_be_bytes());
     output[4..6].copy_from_slice(&(count as u16).to_be_bytes());
-    let power = 1usize << count.ilog2();
-    output[6..8].copy_from_slice(&((power * 16) as u16).to_be_bytes());
-    output[8..10].copy_from_slice(&(power.ilog2() as u16).to_be_bytes());
-    output[10..12].copy_from_slice(&((count * 16 - power * 16) as u16).to_be_bytes());
+    for (index, field) in search_fields.into_iter().enumerate() {
+        output[6 + index * 2..8 + index * 2].copy_from_slice(&field.to_be_bytes());
+    }
     let mut head_start = None;
     for index in 0..count {
         let at = 44 + index * 20;
@@ -261,14 +286,18 @@ impl Font {
         if version != 0x00010000 && version != u32::from_be_bytes(*b"true") {
             return Err("Unrecognized TrueType font signature.".into());
         }
-        let count = usize::from(u16_at(source, 4)?);
-        if count == 0 || count > MAX_TABLES {
-            return Err("Font table count exceeds its limit.".into());
-        }
+        let count = u16_at(source, 4)?;
+        sfnt_search_fields(count)?;
+        let count = usize::from(count);
         let directory_end = 12 + 16 * count;
         bytes(source, 0, directory_end)?;
+        // BTreeMap allocation remains infallible. Search-field representation
+        // bounds this temporary directory to at most 4095 unique table records.
         let mut tables = BTreeMap::new();
-        let mut ranges = vec![(0usize, directory_end)];
+        let mut ranges = Vec::new();
+        ranges.try_reserve_exact(count + 1)
+            .map_err(|_| "Cannot allocate TrueType table ranges.")?;
+        ranges.push((0usize, directory_end));
         for index in 0..count {
             let at = 12 + index * 16;
             let tag: [u8; 4] = bytes(source, at, 4)?.try_into().unwrap();
