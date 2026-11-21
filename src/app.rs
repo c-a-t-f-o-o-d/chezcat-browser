@@ -1762,10 +1762,10 @@ impl App {
     fn reflow(&mut self) {
         self.sync_native_focus_css();
         let svg_started=std::time::Instant::now();
-        self.sync_inline_svg(svg_started);
-        self.anchor_geometry_scope = std::rc::Rc::new(());
         let environment=Some(self.css_media_environment());
         self.document.media_environment=environment;
+        self.sync_inline_svg(svg_started);
+        self.anchor_geometry_scope = std::rc::Rc::new(());
         if let Some(report)=&mut self.alternate {report.media_environment=environment;}
         self.inspector.invalidate();
         self.select_popup = None;
@@ -6204,3 +6204,7 @@ mod replacement_self_tests;
 #[cfg(test)]
 #[path="app_svg_geometry_tests.rs"]
 mod svg_geometry_tests;
+
+#[cfg(test)]
+#[path="app_svg_cascade_paint_tests.rs"]
+mod svg_cascade_paint_tests;

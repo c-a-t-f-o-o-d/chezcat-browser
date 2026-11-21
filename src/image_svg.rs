@@ -584,6 +584,7 @@ impl ComputedGeometry {
         if result.is_err() || text.trim().eq_ignore_ascii_case("inherit") && inherited_unknown&bit!=0 {self.unknown|=bit;} else {self.unknown&=!bit;}
         Ok(())
     }
+    pub(crate) fn backing_bytes(&self)->usize {if self.geometry.is_some(){std::mem::size_of::<geometry::Geometry>()+2*std::mem::size_of::<usize>()}else{0}}
     pub(crate) fn mark_unknown(&mut self,key:&str) {if let Some(n)=geometry::property(key){self.unknown|=1<<n;}}
     pub(crate) fn resolve(&self,key:&str,reference:f64)->ImageResult<Option<f64>> {
         if geometry::property(key).is_some_and(|n|self.unknown&(1<<n)!=0) {return Err("SVG computed geometry is unavailable.".into());}
@@ -601,6 +602,7 @@ struct Style {
     opacity: f64,
     width: f64,
     geometry:Option<Arc<geometry::Geometry>>,
+    geometry_unknown:u16,
     font_size:f64,
     root_font_size:f64,
     even_odd: bool,
@@ -629,6 +631,7 @@ impl Default for Style {
             opacity: 1.,
             width: 1.,
             geometry:None,
+            geometry_unknown:0,
             font_size:16.,
             root_font_size:16.,
             even_odd: false,
@@ -1024,20 +1027,25 @@ fn rules(nodes: &[Node]) -> ImageResult<Vec<Rule>> {
     Ok(out)
 }
 
-fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool)->ImageResult<Style> {
-    let mut style=parent.clone();style.opacity=1.;style.display=true;style.clip=None;style.mask=None;style.mask_alpha=false;style.mask_mode=None;style.stop_color=0xff000000;style.stop_current=false;style.stop_alpha=1.;style.geometry=None;
+fn computed(node:&Node,parent:&Style,rules:&[Rule],viewport:Point,outer:bool,context:Option<&ComputedGeometry>)->ImageResult<Style> {
+    let mut style=parent.clone();style.opacity=1.;style.display=true;style.clip=None;style.mask=None;style.mask_alpha=false;style.mask_mode=None;style.stop_color=0xff000000;style.stop_current=false;style.stop_alpha=1.;style.geometry=None;style.geometry_unknown=0;
     let inline=node.attr("style").map(declarations).transpose()?.unwrap_or_default();
     fn paint(style:&mut Style,parent:&Style,key:&str,value:&str,viewport:Point,css:bool)->ImageResult<()> {
         if geometry::property(key).is_some(){return Ok(());}
         if key=="font-size"{return geometry::font_size(style,parent,value,css);}
         style_property(style,parent,key,value,viewport)
     }
-    for (key,value) in &node.attrs {if key.starts_with("on"){return Err("SVG event handlers are not executed in image documents.".into());}paint(&mut style,parent,key,value,viewport,false)?;}
+    for (key,value) in &node.attrs {if key.starts_with("on"){return Err("SVG event handlers are not executed in image documents.".into());}if context.is_none()||key!="font-size"{paint(&mut style,parent,key,value,viewport,false)?;}}
     for important in [false,true] {
-        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}}
-        for d in &inline {if d.important==important{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}
+        for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{if context.is_none()||d.key!="font-size"{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}}}
+        for d in &inline {if d.important==important{if context.is_none()||d.key!="font-size"{paint(&mut style,parent,&d.key,&d.value,viewport,true)?;}}}
     }
     if outer{style.root_font_size=style.font_size;}
+    if let Some(context)=context {
+        style.geometry=context.geometry.clone();style.geometry_unknown=context.unknown;
+        style.font_size=context.font;style.root_font_size=context.root_font;
+        return Ok(style);
+    }
     for (key,value) in &node.attrs {geometry::apply(&mut style,parent,&node.name,key,value,false,outer)?;}
     for important in [false,true] {
         for rule in rules {if selector_match(&rule.selector,node){for d in &rule.properties {if d.important==important{geometry::apply(&mut style,parent,&node.name,&d.key,&d.value,true,outer)?;}}}}
@@ -2025,6 +2033,7 @@ fn interpolate(a: u32, b: u32, t: f64) -> u32 {
 
 struct Renderer<'a> {
     nodes: Vec<Node>,
+    geometry:Option<&'a [ComputedGeometry]>,
     rules: Vec<Rule>,
     ids: HashMap<String, usize>,
     styles: Vec<Style>,
@@ -2443,7 +2452,7 @@ impl Renderer<'_> {
             + self.rule_cost
             + 1;
         self.work.tick(cost.checked_mul(4).ok_or("SVG style work overflow.")?)?;
-        computed(&self.nodes[index], parent, &self.rules, self.viewport,index==0)
+        computed(&self.nodes[index], parent, &self.rules, self.viewport,index==0,self.geometry.map(|values|&values[index]))
     }
 
     fn brush(
@@ -2799,9 +2808,9 @@ fn viewbox(node: &Node, width: f64, height: f64) -> ImageResult<(Matrix, Point)>
 }
 
 pub(super) fn decode(data:&[u8],check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
-    decode_viewport(data,None,check)
+    decode_context(data,None,None,check)
 }
-pub(super) fn decode_viewport(data:&[u8],used:Option<(usize,usize)>,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
+pub(super) fn decode_context(data:&[u8],used:Option<(usize,usize)>,geometry:Option<&[ComputedGeometry]>,check:&dyn Fn()->ImageResult<()>)->ImageResult<Bitmap> {
     if data.len() > MAX_SOURCE {
         return Err("SVG image source exceeds 1 MiB.".into());
     }
@@ -2816,6 +2825,10 @@ pub(super) fn decode_viewport(data:&[u8],used:Option<(usize,usize)>,check:&dyn F
     };
     check()?;
     let nodes = parse_xml(text, &mut work)?;
+    if let Some(values)=geometry {
+        if values.len()!=nodes.len() {return Err("SVG computed geometry context does not match the source tree.".into());}
+        work.tick(values.len().checked_mul(std::mem::size_of::<ComputedGeometry>()).ok_or("SVG computed geometry work overflow.")?)?;
+    }
     for node in &nodes {
         if matches!(
             node.name.as_str(),
@@ -2844,7 +2857,7 @@ pub(super) fn decode_viewport(data:&[u8],used:Option<(usize,usize)>,check:&dyn F
         (300., 150.)
     };
     let rules=rules(&nodes)?;
-    let root_style=computed(root,&Style::default(),&rules,fallback,true)?;
+    let root_style=computed(root,&Style::default(),&rules,fallback,true,geometry.and_then(|values|values.first()))?;
     let explicit_width=geometry::resolve(&root_style,"width",fallback.0)?;
     let explicit_height=geometry::resolve(&root_style,"height",fallback.1)?;
     let mut width=explicit_width.unwrap_or(fallback.0);let mut height=explicit_height.unwrap_or(fallback.1);
@@ -2880,6 +2893,7 @@ pub(super) fn decode_viewport(data:&[u8],used:Option<(usize,usize)>,check:&dyn F
     let mut renderer = Renderer {
         styles: vec![Style::default(); nodes.len()],
         nodes,
+        geometry,
         rules,
         ids,
         rule_cost,

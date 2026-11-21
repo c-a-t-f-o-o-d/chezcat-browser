@@ -2,12 +2,20 @@
 //! Snapshots are rebuilt from current DOM data on reflow, never from a loaded
 //! resource or a detached node. Failed replacements discard the previous paint.
 use super::*;
+use crate::css;
 use crate::html::{Namespace, NodeKind};
 
 pub(super) struct Source {
     text: String,
+    geometry:Vec<crate::image::SvgGeometry>,
     intrinsic: Option<(usize, usize)>,
     viewport: Option<(usize, usize)>,
+}
+
+impl Source {
+    fn bytes(text:&String,geometry:&Vec<crate::image::SvgGeometry>)->Option<usize>{
+        geometry.iter().try_fold(text.capacity().checked_add(std::mem::size_of::<Self>())?.checked_add(geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgGeometry>())?)?,|n,g|n.checked_add(g.backing_bytes()))
+    }
 }
 
 pub(super) fn natural_sizes(
@@ -53,8 +61,10 @@ fn escaped(out: &mut String, text: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn source(doc: &Document, root: usize) -> Result<String, String> {
+fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Result<(String,Vec<crate::image::SvgGeometry>), String> {
     let mut out = String::new();
+    let mut geometry=Vec::new();
+    let mut geometry_bytes=0usize;
     let mut stack = Vec::new();
     stack
         .try_reserve(1)
@@ -86,6 +96,11 @@ fn source(doc: &Document, root: usize) -> Result<String, String> {
                         "Inline SVG requires supported passive names and local references.".into(),
                     );
                 }
+                geometry.try_reserve(1).map_err(|_|"Inline SVG computed geometry reservation failed.")?;
+                let value=computed.read_svg_geometry(id).map_err(|_|"Inline SVG computed geometry is unavailable.")?.ok_or("Inline SVG computed geometry is absent.")?;
+                geometry_bytes=geometry_bytes.checked_add(value.backing_bytes()).ok_or("Inline SVG computed geometry backing overflow.")?;
+                geometry.push(value.clone());
+                if geometry.capacity().checked_mul(std::mem::size_of::<crate::image::SvgGeometry>()).and_then(|n|n.checked_add(geometry_bytes)).and_then(|n|n.checked_add(out.capacity())).is_none_or(|bytes|bytes>crate::image::MAX_INPUT_BYTES) {return Err("Inline SVG computed geometry exceeds source cache allowance.".into());}
                 append(&mut out, "<")?;
                 append(&mut out, tag)?;
                 for attr in attrs {
@@ -113,7 +128,7 @@ fn source(doc: &Document, root: usize) -> Result<String, String> {
             _ => return Err("Inline SVG contains unsupported content.".into()),
         }
     }
-    Ok(out)
+    Ok((out,geometry))
 }
 
 impl App {
@@ -148,10 +163,10 @@ impl App {
             }
             source.viewport = None;
             self.images.remove(&node);
-            let bitmap = crate::image::decode_svg_viewport(
+            let bitmap = crate::image::decode_svg_context(
                 source.text.as_bytes(),
-                target.0,
-                target.1,
+                Some(target),
+                &source.geometry,
                 &|| {
                     if started.elapsed() > std::time::Duration::from_secs(45) {
                         Err("Inline SVG image work budget exhausted.".into())
@@ -192,6 +207,7 @@ impl App {
     }
     pub(super) fn sync_inline_svg(&mut self, started: std::time::Instant) {
         let mut previous = std::mem::take(&mut self.inline_svg_sources);
+        let mut computed=None;
         let mut stack = Vec::new();
         if stack.try_reserve(1).is_err() {
             for id in previous.keys() {
@@ -213,14 +229,23 @@ impl App {
             if node.namespace == Namespace::Svg
                 && matches!(&node.kind, NodeKind::Element { tag, .. } if tag=="svg")
             {
-                let candidate = source(&self.document, id);
+                if computed.is_none() {
+                    let checked=|node|self.forms.controls.get(&node).filter(|c|matches!(c.kind,Kind::Checkbox|Kind::Radio)).map(|c|c.checked);
+                    let mut work=usize::MAX;let mut copies=usize::MAX;
+                    let mut budget=css::CssBudget::new(&mut work,&mut copies).with_deadline(Some(started+std::time::Duration::from_secs(45)));
+                    let cascade=css::compute_with_environment_and_properties_budgeted_cached(&self.document,&self.styles,Some(&checked),self.document.media_environment,&mut budget,self.stylesheet_cache.as_ref());
+                    if let Ok(cascade)=&cascade {self.stylesheet_cache=cascade.stylesheet_cache.clone();}
+                    computed=Some(cascade.map(|cascade|cascade.computed_properties));
+                }
+                let candidate = if started.elapsed()>std::time::Duration::from_secs(45) {Err("Inline SVG image work budget exhausted.".into())} else {match computed.as_ref().unwrap() {Ok(values)=>source(&self.document,id,values),Err(error)=>Err(error.clone())}};
                 let old = previous.remove(&id);
                 match candidate {
-                    Ok(source) => {
+                    Ok((source,geometry)) => {
                         let source_bytes = self
                             .inline_svg_sources
                             .values()
-                            .try_fold(source.capacity().saturating_add(std::mem::size_of::<Source>()), |n,s| s.text.capacity().checked_add(std::mem::size_of::<Source>()).and_then(|bytes|n.checked_add(bytes)));
+                            .try_fold(0usize, |n,s|Source::bytes(&s.text,&s.geometry).and_then(|bytes|n.checked_add(bytes)))
+                            .and_then(|n|Source::bytes(&source,&geometry).and_then(|bytes|n.checked_add(bytes)));
                         if source_bytes.is_none_or(|n| n > crate::image::MAX_INPUT_BYTES)
                             || self.inline_svg_sources.try_reserve(1).is_err()
                         {
@@ -230,7 +255,7 @@ impl App {
                                     .into();
                             continue;
                         }
-                        let unchanged = old.as_ref().is_some_and(|s| s.text == source)
+                        let unchanged = old.as_ref().is_some_and(|s| s.text == source && s.geometry==geometry)
                             && self.images.contains_key(&id);
                         let mut intrinsic = old.as_ref().and_then(|s| s.intrinsic);
                         let mut viewport = old.as_ref().and_then(|s| s.viewport);
@@ -238,7 +263,7 @@ impl App {
                             intrinsic = None;
                             viewport = None;
                             self.images.remove(&id);
-                            let bitmap = crate::image::decode_checked(source.as_bytes(), &|| {
+                            let bitmap = crate::image::decode_svg_context(source.as_bytes(), None, &geometry, &|| {
                                 if started.elapsed() > std::time::Duration::from_secs(45) {
                                     Err("Inline SVG image work budget exhausted.".into())
                                 } else {
@@ -281,6 +306,7 @@ impl App {
                             id,
                             Source {
                                 text: source,
+                                geometry,
                                 intrinsic,
                                 viewport,
                             },

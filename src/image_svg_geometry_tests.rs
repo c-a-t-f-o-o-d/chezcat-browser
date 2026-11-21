@@ -73,3 +73,57 @@ fn svg_geometry_inapplicable_declarations_do_not_disable_unrelated_path_paint() 
     );
     assert_eq!(pixel(&img, 10, 10), 0xff008000);
 }
+
+#[test]
+fn svg_geometry_context_uses_typed_values_without_rewriting_source_and_preserves_refusals() {
+    let source = b"<svg width='20' height='10'><rect width='20' height='10' fill='red'/></svg>";
+    let mut root = ComputedGeometry::new(16., 16.);
+    root.apply(None, "svg", "width", "20", false, true).unwrap();
+    root.apply(None, "svg", "height", "10", false, true)
+        .unwrap();
+    let mut rect = ComputedGeometry::new(16., 16.);
+    rect.apply(Some(&root), "rect", "width", "5px", true, false)
+        .unwrap();
+    rect.apply(Some(&root), "rect", "height", "10px", true, false)
+        .unwrap();
+    let context = [root.clone(), rect.clone()];
+    let image = decode_context(source, None, Some(&context), &|| Ok(())).unwrap();
+    assert_eq!((image.width, image.height), (20, 10));
+    assert_eq!(pixel(&image, 2, 5), 0xffff0000);
+    assert_eq!(pixel(&image, 10, 5), 0);
+    assert!(
+        decode_context(source, None, Some(&context[..1]), &|| Ok(()))
+            .unwrap_err()
+            .contains("does not match")
+    );
+    assert!(
+        decode_context(source, None, Some(&context), &|| Err("cancelled".into()))
+            .unwrap_err()
+            .contains("cancelled")
+    );
+    rect.mark_unknown("width");
+    assert!(
+        decode_context(source, None, Some(&[root.clone(), rect]), &|| Ok(()))
+            .unwrap_err()
+            .contains("unavailable")
+    );
+    let mut path = ComputedGeometry::new(16., 16.);
+    path.mark_unknown("width");
+    let path_image = decode_context(
+        b"<svg width='20' height='10'><path d='M0 0L10 0L0 10Z' fill='red'/></svg>",
+        None,
+        Some(&[root.clone(), path]),
+        &|| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        pixel(&path_image, 2, 2),
+        0xffff0000,
+        "inapplicable width does not refuse path paint"
+    );
+    let bad=b"<svg width='20' height='10'><rect width='20' height='10' fill='url(https://unrequested.invalid/p)'/></svg>";
+    assert!(
+        decode_context(bad, None, Some(&context), &|| Ok(())).is_err(),
+        "typed geometry cannot bypass local-paint policy"
+    );
+}
