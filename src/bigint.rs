@@ -415,3 +415,7 @@ if (JSON.stringify(value) !== '"7"') throw 'JSON hook';
         );
     }
 }
+
+#[cfg(test)]
+#[path = "bigint_width_tests.rs"]
+mod width_tests;
