@@ -27,6 +27,7 @@ fn reflected(raw: Option<&str>) -> &'static str {
 impl Bridge<'_> {
     pub(super) fn content_editable_receiver(&self, object: u32) -> bool {
         self.class_list_element_receiver(object)
+            && node_index(object).is_some_and(|node| self.doc.nodes[node].namespace == crate::html::Namespace::Html)
             || self.frame_concrete_html_interface(object).is_some()
             || self.frame_node_interface(object) == Some("HTMLElement")
     }

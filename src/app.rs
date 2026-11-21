@@ -6183,3 +6183,7 @@ mod stacking_tests;
 #[cfg(test)]
 #[path="app_p2_shell_package_tests.rs"]
 mod p2_shell_package_tests;
+
+#[cfg(test)]
+#[path="app_html_reflector_tests.rs"]
+mod html_reflector_tests;

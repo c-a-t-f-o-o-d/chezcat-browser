@@ -793,6 +793,9 @@ pub trait Host {
     }
     /// Node nullable string setters normalize original nullish inputs to empty.
     fn nullish_string_setter(&self, _object: u32, _property: &str) -> bool { false }
+    /// Nullable (boolean or unrestricted double or DOMString): scalar values
+    /// retain their type, while other values undergo DOMString conversion.
+    fn nullable_scalar_setter(&self,_object:u32,_property:&str)->bool{false}
     /// LegacyNullToEmptyString preserves normal undefined/object conversion.
     fn null_string_setter(&self, _object: u32, _property: &str) -> bool { false }
     /// Pure interface checks interleaved with scalar conversion in table order.
@@ -9075,8 +9078,16 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
-        // The style getter ignores arguments; its setter forwards the value.
-        let args = match method { ELEMENT_STYLE_GET=>&[][..],ELEMENT_STYLE_SET=>&args[..args.len().min(1)],_=>args };
+        // Canonical attribute getters ignore arguments; setters use one value.
+        let args = if let Some((_, setter)) = html_reflection_interface::operation(method) {
+            if setter { &args[..args.len().min(1)] } else { &[][..] }
+        } else {
+            match method {
+                ELEMENT_STYLE_GET => &[][..],
+                ELEMENT_STYLE_SET => &args[..args.len().min(1)],
+                _ => args,
+            }
+        };
         if let Some(property)=host.native_setter_property(object,method) {
             // Web IDL attribute setters receive undefined when no argument is
             // supplied. Brand/origin validation preceded any value conversion.
@@ -14085,3 +14096,6 @@ if(errors!==6)throw 'quantifier syntax';'brace-ok';
         );
     }
 }
+
+#[path="html_reflection_interface.rs"]
+pub(crate) mod html_reflection_interface;

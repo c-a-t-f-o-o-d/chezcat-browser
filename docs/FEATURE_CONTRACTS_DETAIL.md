@@ -2244,3 +2244,30 @@ An original App fixture changes calculated width/gap values and checks real
 geometry, exact pixels, stable native editing and the moved link hit/navigation.
 Viewport units, broader algebra/functions and other property consumers remain
 unfinished. This is not evidence of live-site shell initialization.
+
+## Common HTMLElement reflections and author overrides
+
+The canonical HTMLElement prototype owns configurable, enumerable hidden, title,
+lang and dir accessor pairs. Real HTML elements read and write their actual
+main-document or inert-owner attributes. Ordinary own data/accessor descriptors
+on supported HTML instances shadow lookup without replacing the native slots;
+saved native getters and setters bypass those author shadows. Native attribute
+writes retain observation, Attr identity and existing resource/owner guards.
+Inert HTML elements use the same paid, owner-validated ordinary backing store.
+Form named lookup and unrelated native descriptor restrictions remain distinct.
+
+Hidden accepts its nullable boolean/number/string union. Original null/undefined,
+false, zero, NaN and empty strings remove the attribute. ASCII-insensitive
+until-found strings store and read the canonical keyword; other truthy values
+store an empty attribute. Other objects use one String-hint conversion; Symbol
+conversion fails without publication. Title and lang reflect DOMString; dir
+reads canonical ltr/rtl/auto or the empty string while retaining authored raw text.
+Brands and native origin access are checked before coercion. Supported child
+HTML attributes are readable; child-document writes remain refused.
+
+Hidden-until-found reveal, find-in-page and beforematch are not implemented;
+existing hidden layout remains the fallback. SVG is not an HTMLElement receiver.
+The adjacent contentEditable brand check now enforces that same HTML namespace
+boundary instead of accepting SVG through the broader class-list predicate.
+An original App fixture demonstrates reactive show/hide, native link pixels and
+activation with preserved text-editor state; it is not a site initialization claim.
