@@ -173,6 +173,7 @@ pub(super) fn apply(
 }
 pub(super) fn resolve(style: &Style, key: &str, reference: f64) -> ImageResult<Option<f64>> {
     let index = property(key).ok_or("Unknown SVG geometry property.")?;
+    if style.geometry_unknown&(1<<index)!=0 {return Err("SVG computed geometry is unavailable.".into());}
     style
         .geometry
         .as_deref()
