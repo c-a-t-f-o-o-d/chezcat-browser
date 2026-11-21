@@ -6179,3 +6179,7 @@ mod visibility_hit_tests;
 #[cfg(test)]
 #[path="app_stacking_tests.rs"]
 mod stacking_tests;
+
+#[cfg(test)]
+#[path="app_p2_shell_package_tests.rs"]
+mod p2_shell_package_tests;
