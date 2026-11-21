@@ -788,6 +788,10 @@ pub trait Host {
     /// Optional owner for a real native method whose first lookup may occur in
     /// another supported realm. This grants no constructor/prototype capability.
     fn native_method_owner(&self, _object:u32, _method:&str) -> Option<u32> { None }
+    /// Trusted zero-argument getter with a native receiver: no author calls,
+    /// VM-arena results, argument conversion or collection-inhibition escape.
+    /// The existing native dispatch still validates brand, owner and budgets.
+    fn native_leaf_getter(&self, _object:u32, _method:&str)->bool {false}
     /// A genuine canonical attribute setter may reuse the native write pipeline
     /// without performing ordinary property lookup again. Existing hosts opt out.
     fn native_setter_property(&self,_object:u32,_method:&str)->Option<&'static str>{None}
@@ -9485,7 +9489,19 @@ impl Runtime {
         // Keep constructor-only root/error temporaries out of this inlined
         // ordinary-call frame. Recursive calls share the unchanged native-stack
         // and call-depth guards, including the one-MiB try/finally control.
-        let marker = self.publish_call_inputs(&function, &this, args)?;
+        // Audited native leaf getters cannot reenter Script or expose arena
+        // edges. The native-call inhibition below covers their full dispatch;
+        // a redundant callee root need not consume scratch for every DOM read.
+        let leaf = args.is_empty() && matches!(this, Value::Host(_))
+            && matches!(&function, Value::Function(id) if matches!(self.functions.get(*id),
+                Some(Function::Host {object,method,receiver_required:true,constructible:false,..})
+                    if host.native_leaf_getter(*object,method)));
+        let marker = if leaf {
+            let marker=self.transient_marker();
+            self.transient_roots.calls+=1;
+            self.transient_roots.call_scopes=self.transient_roots.call_scopes.saturating_add(1);
+            marker
+        } else {self.publish_call_inputs(&function, &this, args)?};
         if !matches!(&function, Value::Function(id) if matches!(self.functions.get(*id),
             Some(Function::Script { .. } | Function::Bound(_)
                 | Function::Native(Builtin::FunctionMethod("call" | "apply") | Builtin::Eval)))) {
@@ -14157,3 +14173,7 @@ pub(crate) mod html_reflection_interface;
 
 #[path="aria_reflection_interface.rs"]
 pub(crate) mod aria_reflection_interface;
+
+#[cfg(test)]
+#[path="native_leaf_getter_tests.rs"]
+mod native_leaf_getter_tests;
