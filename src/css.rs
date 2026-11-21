@@ -241,6 +241,7 @@ pub enum Display {
     Block,
     Inline,
     InlineBlock,
+    InlineFlex,
     Flex,
     Grid,
     Table,
@@ -250,6 +251,8 @@ pub enum Display {
 }
 
 impl Display {
+    pub fn flex_container(self)->bool{matches!(self,Self::Flex|Self::InlineFlex)}
+    pub fn atomic_inline(self)->bool{matches!(self,Self::InlineBlock|Self::InlineFlex)}
     pub fn block_level(self) -> bool {
         matches!(
             self,
@@ -1414,6 +1417,7 @@ fn compute_cascade(
         };
         style.transform = computed_transform;
         if !transform_known.is_empty() { transform_known[index] = known; }
+        if style.display==Display::InlineFlex && (parent.display.flex_container() || parent.display==Display::Grid || matches!(style.position,Position::Absolute|Position::Fixed)) {style.display=Display::Flex;}
         // Grid children establish independent formatting contexts. Retain the
         // computed blockification for geometry and transform applicability too.
         if parent.display == Display::Grid && matches!(style.display,
@@ -3408,7 +3412,7 @@ fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
 }
 
 fn display_value(value:&str)->Option<Display>{Some(match value{
-    "none"=>Display::None,"block"|"list-item"=>Display::Block,"inline"=>Display::Inline,"inline-block"=>Display::InlineBlock,"flex"=>Display::Flex,"grid"=>Display::Grid,"table"=>Display::Table,"table-row-group"|"table-header-group"|"table-footer-group"=>Display::TableRowGroup,"table-row"=>Display::TableRow,"table-cell"=>Display::TableCell,_=>return None,
+    "none"=>Display::None,"block"|"list-item"=>Display::Block,"inline"=>Display::Inline,"inline-block"=>Display::InlineBlock,"inline-flex"=>Display::InlineFlex,"flex"=>Display::Flex,"grid"=>Display::Grid,"table"=>Display::Table,"table-row-group"|"table-header-group"|"table-footer-group"=>Display::TableRowGroup,"table-row"=>Display::TableRow,"table-cell"=>Display::TableCell,_=>return None,
 })}
 fn flex_flow_value(value:&str)->Option<(FlexDirection,bool)>{
     let mut direction=None;let mut wrap=None;let mut count=0;

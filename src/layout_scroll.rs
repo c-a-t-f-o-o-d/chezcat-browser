@@ -92,7 +92,7 @@ impl Engine<'_> {
         }
         self.layout.scroll_heights = heights;
         for (node, style) in self.styles.iter().enumerate() {
-            if style.display == Display::Flex
+            if style.display.flex_container()
                 && style.flex_direction == FlexDirection::ColumnReverse
                 && self.layout.client_boxes[node].is_some()
             {
