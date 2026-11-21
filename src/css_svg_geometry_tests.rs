@@ -115,3 +115,50 @@ fn svg_shared_geometry_media_changes_and_budget_refusal_recover_without_stale_sn
     let recovered = compute_with_environment_and_properties(&doc, &HashMap::new(), None, env(300.));
     assert_eq!(value(&recovered, &doc, "a", "width", 40.), Some(10.));
 }
+
+#[test]
+fn svg_shared_geometry_font_presentation_hint_and_sparse_lookup_preserve_uncertainty() {
+    let doc=crate::html::parse("<html><body><svg font-size='20'><g><rect id=a width='3' style='width:2em;height:1rem'></rect><rect id=b font-size='30' style='font-size:12px;width:2em'></rect></g></svg></body></html>");
+    let out = compute_with_environment_and_properties(&doc, &HashMap::new(), None, None);
+    assert_eq!(value(&out, &doc, "a", "width", 40.), Some(40.));
+    assert_eq!(value(&out, &doc, "a", "height", 40.), Some(16.));
+    assert_eq!(value(&out, &doc, "b", "width", 40.), Some(24.));
+    assert!(out
+        .computed_properties
+        .read_svg_geometry(doc.nodes.len())
+        .is_err());
+    let node = id(&doc, "a");
+    let vars = custom_properties::Variables::default();
+    let mut denied = custom_properties::Budget::default().operation(0, 0);
+    assert!(svg_geometry::compute(
+        &doc,
+        node,
+        "rect",
+        false,
+        None,
+        false,
+        16.,
+        16.,
+        true,
+        std::iter::empty(),
+        &vars,
+        &mut denied
+    )
+    .is_none());
+    let mut recovered = custom_properties::Budget::default();
+    assert!(svg_geometry::compute(
+        &doc,
+        node,
+        "rect",
+        false,
+        None,
+        false,
+        16.,
+        16.,
+        true,
+        std::iter::empty(),
+        &vars,
+        &mut recovered
+    )
+    .is_some());
+}

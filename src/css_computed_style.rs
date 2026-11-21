@@ -135,6 +135,7 @@ impl ComputedProperties {
             .map(Some).ok_or(ComputedStyleUnavailable)
     }
     pub(crate) fn read_svg_geometry(&self,node:usize)->Result<Option<&crate::image::SvgGeometry>,ComputedStyleUnavailable> {
+        if !*self.0.eligible.get(node).ok_or(ComputedStyleUnavailable)? {return Ok(None);}
         if !self.0.complete {return Err(ComputedStyleUnavailable);}
         match self.0.svg_geometry.get(&node) {
             Some(Some(value))=>Ok(Some(value)),Some(None)=>Err(ComputedStyleUnavailable),None=>Ok(None),

@@ -72,3 +72,51 @@ pub(super) fn compute<'a>(
     }
     Some(value)
 }
+
+// SVG presentation font size is a zero-specificity author hint, before the
+// matched stylesheet/inline cascade. Unitless attribute numbers are user units.
+pub(super) fn font_hint(
+    style: &mut Style,
+    parent: &Style,
+    text: &str,
+    variables: &custom_properties::Variables,
+    budget: &mut custom_properties::Budget,
+    known: &mut bool,
+    parent_known: bool,
+    root_known: bool,
+) {
+    if text.len() > 2048
+        || budget
+            .copy(
+                text.len()
+                    .saturating_add(std::mem::size_of::<Declaration>())
+                    .saturating_add(2),
+            )
+            .is_err()
+    {
+        *known = false;
+        return;
+    }
+    let text = text.trim();
+    let value = if text.parse::<f64>().is_ok_and(|n| n.is_finite()) {
+        format!("{text}px")
+    } else {
+        text.to_owned()
+    };
+    let declaration = Declaration {
+        name: "font-size".into(),
+        value,
+        important: false,
+        stylesheet: None,
+    };
+    custom_properties::apply_font_size(
+        style,
+        parent,
+        &declaration,
+        variables,
+        budget,
+        known,
+        parent_known,
+        root_known,
+    );
+}

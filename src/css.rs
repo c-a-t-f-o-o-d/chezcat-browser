@@ -1315,6 +1315,14 @@ fn compute_cascade(
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
         let parent_font_known=parents[index].and_then(|parent|font_sizes.get(&parent)).is_none_or(Option::is_some);
         let mut font_known=parent_font_known;
+        if node.namespace==crate::html::Namespace::Svg {
+            if let Some(text)=doc.attr(index,"font-size") {
+                let hint=|budget:&mut custom_properties::Budget|svg_geometry::font_hint(&mut style,&parent,text,&variables[index],budget,&mut font_known,parent_font_known,root_font_known);
+                if let Some(meter)=meter.as_deref_mut(){meter.variables(&mut variable_budget,hint)?;}
+                else if let Some(meter)=transform_meter.as_deref_mut(){meter.variables(&mut variable_budget,hint)?;}
+                else {let mut hint=hint;hint(&mut variable_budget);}
+            }
+        }
         let mut sheet_touch_action = Some(TouchAction::AUTO);
         let mut touch_action = Some(TouchAction::AUTO);
         let parent_touch_action = parents[index].and_then(|parent| touch_actions.get(&parent)).copied().unwrap_or(Some(TouchAction::AUTO));
