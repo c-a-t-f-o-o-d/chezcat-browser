@@ -29,6 +29,10 @@ mod deadline_tests;
 #[path = "http_capacity_tests.rs"]
 mod capacity_tests;
 
+#[cfg(test)]
+#[path = "http_field_capacity_tests.rs"]
+mod field_capacity_tests;
+
 #[path = "http_connect.rs"]
 mod connection;
 use connection::connect;
@@ -88,7 +92,6 @@ pub const USER_AGENT: &str = concat!("ChezCat/", env!("CARGO_PKG_VERSION"));
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 const MAX_CHUNK_METADATA: usize = 512 * 1024;
-const MAX_HEADERS: usize = 200;
 const MAX_REDIRECTS: usize = 5;
 const MAX_CONTENT_CODINGS: usize = 4;
 const MAX_EMPTY_CODINGS: usize = 32;
@@ -1645,6 +1648,8 @@ impl<'a, R: Read> Input<'a, R> {
             }
             self.account(budget, 1)?;
             let byte = self.byte()?;
+            line.try_reserve(1)
+                .map_err(|_| "Could not reserve HTTP line storage.")?;
             line.push(byte);
             if byte == b'\n' {
                 if line.len() < 2 || line[line.len() - 2] != b'\r' {
@@ -2023,13 +2028,18 @@ fn field(line: &[u8]) -> Result<(String, String), String> {
     {
         return Err("HTTP field contains a forbidden control character.".into());
     }
-    let name: String = line[..colon]
-        .iter()
-        .map(|byte| char::from(byte.to_ascii_lowercase()))
-        .collect();
+    let mut name = String::new();
+    name.try_reserve_exact(colon)
+        .map_err(|_| "Could not reserve HTTP field name.")?;
+    name.extend(line[..colon].iter().map(|byte| char::from(byte.to_ascii_lowercase())));
     // Field bytes above ASCII remain opaque Latin-1 values, not lossy UTF-8.
-    let value = value.iter().copied().map(char::from).collect();
-    Ok((name, value))
+    let mut decoded = String::new();
+    let bytes = value.len().checked_add(value.iter().filter(|byte| !byte.is_ascii()).count())
+        .ok_or("HTTP field value size overflow.")?;
+    decoded.try_reserve_exact(bytes)
+        .map_err(|_| "Could not reserve HTTP field value.")?;
+    decoded.extend(value.iter().copied().map(char::from));
+    Ok((name, decoded))
 }
 
 fn fields<R: Read>(
@@ -2041,9 +2051,6 @@ fn fields<R: Read>(
         let line = input.line(Budget::Headers)?;
         if line.is_empty() {
             return Ok(headers);
-        }
-        if headers.len() == MAX_HEADERS {
-            return Err("HTTP field count exceeds 200.".into());
         }
         let entry = field(&line)?;
         if trailers
@@ -2068,6 +2075,11 @@ fn fields<R: Read>(
         {
             return Err("HTTP trailer attempts to supply a prohibited field.".into());
         }
+        // Every field consumes at least a name byte, colon and CRLF from the
+        // shared header-byte budget. Retained descriptors and UTF-8 values
+        // therefore grow with admitted input, without a separate field count.
+        headers.try_reserve(1)
+            .map_err(|_| "Could not reserve HTTP field storage.")?;
         headers.push(entry);
     }
 }
@@ -2108,13 +2120,13 @@ fn framing(status: u16, version_10: bool, headers: &[(String, String)]) -> Resul
         if version_10 {
             return Err("HTTP/1.0 cannot use Transfer-Encoding.".into());
         }
-        let codings: Vec<&str> = headers
+        let mut codings = headers
             .iter()
             .filter(|(name, _)| name == "transfer-encoding")
             .flat_map(|(_, value)| value.split(','))
-            .map(|value| value.trim_matches([' ', '\t']))
-            .collect();
-        if codings.len() != 1 || !codings[0].eq_ignore_ascii_case("chunked") {
+            .map(|value| value.trim_matches([' ', '\t']));
+        if !codings.next().is_some_and(|coding| coding.eq_ignore_ascii_case("chunked"))
+            || codings.next().is_some() {
             return Err("Only a single chunked HTTP transfer coding is supported.".into());
         }
         return Ok(Framing::Chunked);
@@ -2705,9 +2717,9 @@ mod tests {
         assert!(parse(line.as_bytes(), 0).unwrap_err().contains("line"));
         let many = format!(
             "HTTP/1.1 200 OK\r\n{}\r\n",
-            "X: x\r\n".repeat(MAX_HEADERS + 1)
+            "X: x\r\n".repeat(201)
         );
-        assert!(parse(many.as_bytes(), 0).unwrap_err().contains("count"));
+        assert_eq!(parse(many.as_bytes(), 0).unwrap().headers.len(), 201);
         let large = format!(
             "HTTP/1.1 200 OK\r\n{}\r\n",
             format!("X: {}\r\n", "x".repeat(7000)).repeat(5)
