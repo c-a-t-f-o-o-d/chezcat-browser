@@ -2491,10 +2491,26 @@ syntax does not displace an earlier winner, and a later valid declaration can
 recover an unavailable property. Sparse snapshot backing and variable work use the
 existing CSS admission paths; a failed computation publishes no replacement.
 
-This is the computation boundary, not yet a connection from the shared snapshot
-to inline image painting. The painter still uses its existing geometry cascade;
-shared external descendant geometry/variable repaint remains the next increment.
+Inline SVG painting now consumes this typed geometry snapshot through a separate
+internal renderer context. Source serialization preserves author attributes and
+preorder identity; a context/source node-count mismatch refuses. Static image
+SVG retains its own image-local cascade. Inline rendering obtains the document
+cascade before intrinsic image sizing, with the same media/checked state as the
+subsequent layout and the existing image deadline. The prepared stylesheet cache
+is reused; selector computation currently occurs for intrinsic paint and layout.
+Cached source identity includes computed geometry and fonts, so external sheet,
+variable, media or DOM changes invalidate paint even when SVG markup is unchanged.
+Geometry context backing joins existing source-cache admission; decoded bitmap
+admission, local references and cancellation remain checked.
+
+The original App fixture first reproduces ignored external descendant geometry,
+then verifies native dynamic SVG pixels, inherited-variable changes, media resize,
+refusal/stale-paint removal and recovery with edited input and real link activation.
+An unsupported winner retains the existing unavailable-image indication. Clearing
+an obsolete SVG failure status requires successful source and viewport stages;
+other status messages are preserved. Shared descendant paint properties/variables
+remain outside this geometry context.
 CSS math, rollback, wider units and full SVG/font/viewport semantics are unfinished.
-No author DOM/style attributes are rewritten. Six focused computation/refusal
+No author DOM/style attributes are rewritten. Focused computation, renderer-context and connected App/refusal
 checks and the selected affected CSS/SVG cases do not establish actual-site shell
 readiness or complete SVG conformance.

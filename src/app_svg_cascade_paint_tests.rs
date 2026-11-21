@@ -94,6 +94,7 @@ var ns='http://www.w3.org/2000/svg',icon=document.createElementNS(ns,'svg'),shap
         app.status
     );
     eval(&mut app, "shape.style.width='10px';");
+    assert!(!app.status.starts_with("Inline SVG"),"resolved paint must clear its obsolete failure: {}",app.status);
     assert_eq!(pixel(&mut app, 25, 20), 0x20a040);
     assert_eq!(pixel(&mut app, 35, 20), 0xffffff);
     let v = &app.forms.controls[&neighbor].value;

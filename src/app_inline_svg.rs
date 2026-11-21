@@ -132,7 +132,8 @@ fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Res
 }
 
 impl App {
-    pub(super) fn sync_inline_svg_viewports(&mut self, started: std::time::Instant) {
+    pub(super) fn sync_inline_svg_viewports(&mut self, started: std::time::Instant) -> bool {
+        let mut success=true;
         for at in 0..self.page.items.len() {
             let layout::PaintItem::Image {
                 node,
@@ -197,15 +198,18 @@ impl App {
                         self.images.insert(node, std::sync::Arc::new(bitmap));
                         source.viewport = Some(target);
                     } else {
+                        success=false;
                         self.status =
                             "Inline SVG used viewport exceeds decoded image allowance.".into();
                     }
                 }
-                Err(error) => self.status = format!("Inline SVG was not painted: {error}"),
+                Err(error) => {success=false;self.status = format!("Inline SVG was not painted: {error}");},
             }
         }
+        success
     }
-    pub(super) fn sync_inline_svg(&mut self, started: std::time::Instant) {
+    pub(super) fn sync_inline_svg(&mut self, started: std::time::Instant) -> bool {
+        let mut success=true;
         let mut previous = std::mem::take(&mut self.inline_svg_sources);
         let mut computed=None;
         let mut stack = Vec::new();
@@ -214,16 +218,18 @@ impl App {
                 self.images.remove(id);
             }
             self.status = "Inline SVG traversal reservation failed.".into();
-            return;
+            return false;
         }
         stack.push(0);
         let mut visited = 0usize;
         while let Some(id) = stack.pop() {
             visited += 1;
             if visited > self.document.nodes.len() {
+                success=false;self.status="Inline SVG document topology is cyclic or duplicated.".into();
                 break;
             }
             let Some(node) = self.document.nodes.get(id) else {
+                success=false;self.status="Inline SVG document node is unavailable.".into();
                 break;
             };
             if node.namespace == Namespace::Svg
@@ -250,6 +256,7 @@ impl App {
                             || self.inline_svg_sources.try_reserve(1).is_err()
                         {
                             self.images.remove(&id);
+                            success=false;
                             self.status =
                                 "Inline SVG source cache allowance or reservation exhausted."
                                     .into();
@@ -294,10 +301,12 @@ impl App {
                                     {
                                         self.images.insert(id, std::sync::Arc::new(bitmap));
                                     } else {
+                                        success=false;
                                         self.status = "Inline SVG decoded image allowance or reservation exhausted.".into();
                                     }
                                 }
                                 Err(error) => {
+                                    success=false;
                                     self.status = format!("Inline SVG was not painted: {error}");
                                 }
                             }
@@ -313,6 +322,7 @@ impl App {
                         );
                     }
                     Err(error) => {
+                        success=false;
                         self.images.remove(&id);
                         self.status = format!("Inline SVG was not painted: {error}");
                     }
@@ -324,6 +334,7 @@ impl App {
                 continue;
             }
             if stack.try_reserve(node.children.len()).is_err() {
+                success=false;self.status="Inline SVG traversal reservation failed.".into();
                 break;
             }
             stack.extend(node.children.iter().rev().copied());
@@ -331,5 +342,6 @@ impl App {
         for id in previous.keys() {
             self.images.remove(id);
         }
+        success
     }
 }

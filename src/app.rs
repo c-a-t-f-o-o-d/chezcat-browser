@@ -1764,7 +1764,8 @@ impl App {
         let svg_started=std::time::Instant::now();
         let environment=Some(self.css_media_environment());
         self.document.media_environment=environment;
-        self.sync_inline_svg(svg_started);
+        let previous_svg_error=self.status.starts_with("Inline SVG");
+        let svg_complete=self.sync_inline_svg(svg_started);
         self.anchor_geometry_scope = std::rc::Rc::new(());
         if let Some(report)=&mut self.alternate {report.media_environment=environment;}
         self.inspector.invalidate();
@@ -1801,7 +1802,11 @@ impl App {
                 self.stylesheet_cache.as_ref(),
             )
         };
-        if self.alternate.is_none() { self.stylesheet_cache = self.page.stylesheet_cache.clone();self.sync_inline_svg_viewports(svg_started); }
+        if self.alternate.is_none() {
+            self.stylesheet_cache = self.page.stylesheet_cache.clone();
+            let viewports_complete=self.sync_inline_svg_viewports(svg_started);
+            if previous_svg_error && svg_complete && viewports_complete && self.status.starts_with("Inline SVG") {self.status="Ready".into();}
+        }
         self.sync_background_images();
         self.sync_media_controls();
         self.observe_layout();
