@@ -26,6 +26,7 @@ impl Bridge<'_> {
             return Ok(Vec::new());
         };
         let Some(Value::Host(handle)) = args.first() else { return Ok(Vec::new()); };
+        if matches!(method,"appendChild"|"insertBefore")&&self.inert_node_type(*handle).is_some_and(|kind|kind!=11){return self.inert_direct_insertion_changes(receiver,method,args);}
         if matches!(method, "appendChild" | "insertBefore") && self.checked_inert_fragment(*handle).is_some() {
             let children = self.inert_children(*handle).unwrap();
             if children.is_empty() { return Ok(Vec::new()); }

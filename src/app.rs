@@ -6286,3 +6286,7 @@ mod document_clone_tests;
 #[cfg(test)]
 #[path="app_node_adoption_tests.rs"]
 mod node_adoption_tests;
+
+#[cfg(test)]
+#[path="app_inert_direct_insertion_tests.rs"]
+mod inert_direct_insertion_tests;
