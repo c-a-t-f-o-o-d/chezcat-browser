@@ -1,8 +1,24 @@
 {
   "schema": 1,
   "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
+  "release_candidate": {
+    "version": "0.82.0-alpha.2",
+    "integrated_through": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+    "status": "Owner-requested candidate; exact tagged checks, publication and downloaded-asset verification pending",
+    "verified_downloadable_baseline": "v0.82.0-alpha.1",
+    "measurement_scope": "Existing source-bound workflow records retain their original revisions and are not alpha.2 runtime results",
+    "latest_reported_homepage_checkpoint": {
+      "source_commit": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
+      "integrated_via_pr": 429,
+      "visible_result": "Skeleton remains; usable header, guide and search field are not established",
+      "execution_result": "DOM walker reached its 30-second deadline",
+      "later_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+      "later_source_note": "PR #430 is integrated, but no post-PR #430 live acceptance result is recorded",
+      "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
+    }
+  },
   "source_baseline": {
-    "scope": "Latest source-bound workflow results for the integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",
+    "scope": "Historical source-bound workflow results for the alpha.1 integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",
     "integrated_source": "60895467068d87ed49a045751b20e47309a0ab58",
     "previous_tag": "v0.81.0-alpha.3",
     "previous_tag_source": "57cc1d53db3860012b229530d8b7695e3f007f63",

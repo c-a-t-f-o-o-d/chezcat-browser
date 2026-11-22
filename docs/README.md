@@ -48,5 +48,10 @@ The verified downloadable baseline is
 from tagged source `f2e1823266a7c08c89bce7293572d801da62053c`. Download and runtime
 checks are recorded alongside earlier releases in the [release history](RELEASING.md#published-baseline).
 
+The `0.82.0-alpha.2` release candidate collects integrated source through
+`1de1f24`. Its [change summary](../CHANGELOG.md#0820-alpha2) and current capability
+records describe the candidate; Windows release gates and verified delivery
+remain pending.
+
 Named releases require an explicit owner request. The development agent owns
 failure diagnosis for ordinary PRs and releases.

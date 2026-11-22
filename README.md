@@ -73,31 +73,41 @@ These are **implemented slices, not complete standards support**. The
 their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da62053c`.
 [Download and runtime checks](docs/RELEASING.md#published-baseline)
 
+**Release candidate `0.82.0-alpha.2`** consolidates the integrated changes through
+`1de1f24`. Its [source notes](CHANGELOG.md#0820-alpha2) describe the new scope;
+Windows release validation and verified publication are still pending. The
+published download above remains the verified baseline until delivery completes.
+
 Commit-identified development downloads and a possible `dev` channel remain
 roadmap items, not advertised delivery options. The CI badge reports source
 privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
 
-*Snapshot: November 18, 2026 · published `0.82.0-alpha.1`, source `f2e1823`.*
+*Snapshot: November 21, 2026 · integrated source `1de1f24`; release candidate
+`0.82.0-alpha.2`.*
 
 | State | Improvement | Evidence and boundary |
 | :--- | :--- | :--- |
-| ✅ **Merged** | **Shared string and DOM primitives** | [PR #29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29): `String.prototype.concat`, hidden-input state, and genuine `Node.getRootNode()` behavior. |
-| ✅ **Merged** | **Anchor URL reflection** | [PR #30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30): scoped live HTTP(S) URL values used by ordinary page code. |
-| ✅ **Merged** | **Text-input fragments without lost edits** | [PR #32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32): staged native input creation, retained edited/default values, Reset behavior, and focus retirement. |
-| ✅ **Merged** | **CSS variables in padding and borders** | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31): inherited custom properties and measured box/pixel improvements. |
-| ✅ **Merged** | **Async functions and arrows** | Original pages verify ordering, rejection handling, native input and visible updates as `await` resumes through the Promise job queue. |
-| ✅ **Merged** | **Weak collections and Proxy for ordinary objects** | Bounded WeakMap/WeakSet identity, selected non-callable Proxy traps, and receiver-aware Reflect.get/set retain explicit realm, allocation and native-access limits. |
-| ✅ **Merged** | **Native forms and DOM identity** | Created checkboxes/radios, checkbox/TEXTAREA fragments, independent TEXTAREA/radio clones, ordinary tree cloning and bounded SVG/iframe interface identity. |
-| ✅ **Merged** | **More shared CSS layout and paint** | Line-height/height variables, calculated physical box spacing, circular corners, background clipping and a bounded single-column implicit grid. |
+| ✅ **Merged** | **Async, generators and language primitives** | Expanded supported `await`/`yield` paths, async iteration, BigInt width conversion and UTF-16/RegExp behavior retain explicit syntax and work boundaries. |
+| ✅ **Merged** | **Templates and genuine DOM mutations** | Inert HTML/template clone, import, stamping and observers preserve node identities, edited controls and resource authority. [Selected component path](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416) |
+| ✅ **Merged** | **Native interfaces and author properties** | Range, event families, canonical descriptors and supported author prototypes extend real DOM behavior. Full native Custom Elements and Shadow DOM remain incomplete. |
+| ✅ **Merged** | **Native base URLs and relative resources** | [PR #429](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429): `Node.baseURI` follows admitted owner/document bases; an App fixture checks relative images, edited input and links. |
+| ✅ **Merged** | **Asynchronous requests and response bodies** | Finite main-document text XHR and original Headers/Response primitives; global Fetch, preflight, streaming and wider response cases remain gaps. |
+| ✅ **Merged** | **Shared CSS and SVG presentation** | Sizing math, viewport units, inline-flex, focus/hover, visibility/stacking and supported SVG CSS geometry/cascade/paint use shared layout and input paths. |
+| ✅ **Merged** | **Capacity and storage corrections** | Iterative flattening and checked compiler/runtime/DOM/resource storage remove selected independent count ceilings. Image, font, HTTP and media paths retain real format/output/work guards. |
+| ✅ **Merged** | **Faster development builds and test pages** | `build_dev.cmd` reuses incremental development artifacts; the home page adds test websites and original scenarios. Normal release optimization is preserved. |
 
-The recorded **jQuery 4.0.0** app passes startup, trusted input and a timer update.
+Earlier recorded **jQuery 4.0.0** app checks pass startup, trusted input and a timer update.
 Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
 updates. The pinned Bootstrap 5.3.9 dropdown passes trusted open, choice and close
 at 640 and 1280 px. Legacy jQuery stops during attribute detection, and ReactDOM
 stops before the component mounts. The scorecard identifies the build and last
 successful interaction for each app. [Compatibility records](docs/COMPATIBILITY.md)
+
+The latest recorded signed-out YouTube check on `cad5f7c` still shows a skeleton
+and reaches a script deadline during DOM traversal. PR #430 improves one original
+traversal fixture; a usable YouTube homepage or playback has not been demonstrated.
 
 ### Next: useful pages, then measured speed and stronger isolation
 
@@ -155,12 +165,14 @@ created checkboxes/radios and checkbox/TEXTAREA fragments preserve native form
 state. TEXTAREA and radio clones retain independent live/default state. Unsupported
 control, resource and ownership cases still reject without partial publication.
 
-Finite base/derived classes, supported async-function/arrow await forms, weak
-collections and ordinary-object Proxy/Reflect operations are implemented. Their
-syntax, traps and host coverage remain bounded. Shadow DOM, arbitrary input-type
-transitions, modules and broader host APIs remain gaps. Event/UIEvent/CustomEvent
-and finite MouseEvent interfaces preserve branded state. Listener objects resolve
-`handleEvent` at delivery. Broader event and keyboard/pointer behavior remains limited.
+Finite base/derived classes, supported async/await and generator forms, BigInt,
+weak collections and ordinary-object Proxy/Reflect operations are implemented.
+Their syntax, traps and host coverage remain bounded. Inert templates, supported
+clone/import/mutations, observers, Range and author properties use real native
+identities. Full native Custom Elements/Shadow DOM, arbitrary input-type
+transitions, modules and broader host APIs remain gaps. Supported mouse, keyboard,
+focus, wheel, animation and error events preserve branded state. Listener objects
+resolve `handleEvent` at delivery; wider event/pointer behavior remains limited.
 
 The software renderer supports calculated spacing, custom properties, rounded boxes
 and implicit single-column grids. Support for Google Search, Images, and Maps
