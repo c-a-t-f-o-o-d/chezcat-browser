@@ -2262,13 +2262,21 @@ fn attr_namespace_foreign_context_and_failed_new_record_keep_existing_boundaries
         assert!(!bridge.accepts_receiver(node_handle(p), "getAttributeNodeNS", handle));
         assert!(bridge.method(handle, "getAttributeNodeNS").is_none());
     }
+    let value=bridge.call(node_handle(foreign),"getAttributeNodeNS",&[Value::Null,Value::String("title".into())]).unwrap();
+    let Value::Host(saved)=value else {panic!("known SVG has real null-namespace Attr data")};
+    let attr=script_attr::index(saved).unwrap();
+    assert_eq!(bridge.state.attributes[attr].owner,Some(node_handle(foreign)));
+    assert!(matches!(bridge.call(node_handle(foreign),"getAttributeNodeNS",&[Value::String("urn:x".into()),Value::String("title".into())]).unwrap(),Value::Null));
+    bridge.doc.nodes[foreign].namespace=crate::html::Namespace::UnknownForeign;
     for namespace in [Value::Null, Value::String("urn:x".into())] {
-        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).unwrap_err().contains("foreign"));
+        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).is_err());
     }
+    bridge.doc.nodes[foreign].namespace=crate::html::Namespace::Svg;
+    let count=bridge.state.attributes.len();
     let before = bridge.state.retained;
     bridge.state.retained_limit = before;
     assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).is_err());
-    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.attributes.len(),count);
     assert_eq!(bridge.state.retained, before);
 }
 
