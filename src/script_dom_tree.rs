@@ -614,8 +614,7 @@ impl Bridge<'_> {
         }
         if object==DOCUMENT && method=="createAttributeNS" {
             if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
-                let namespace=match namespace{Value::String(value) if !value.is_empty()=>Some(value.as_str()),_=>None};
-                super::script_attribute_names::validate_namespace(namespace,name)?;
+                super::script_attribute_names::validate_namespace_value(namespace,name)?;
             }
         }
         if (object == DOCUMENT || self.inert_document(object)) && method=="createElementNS" {
@@ -636,8 +635,7 @@ impl Bridge<'_> {
         }
         if method == "setAttributeNS" && self.attribute_names_receiver(object) {
             if let (Some(namespace), Some(Value::String(name))) = (args.first(), args.get(1)) {
-                let ns = match namespace { Value::String(text) if !text.is_empty() => Some(text.as_str()), _ => None };
-                super::script_attribute_names::validate_namespace(ns, name)?;
+                super::script_attribute_names::validate_namespace_value(namespace, name)?;
             }
         }
         if method == "compareDocumentPosition" {

@@ -31,7 +31,7 @@ impl Bridge<'_> {
         self.state.copies(
             name.local()
                 .len()
-                .saturating_add(name.namespace_uri().map_or(0, str::len))
+                .saturating_add(name.namespace_uri().map_or(0, DomString::used_bytes))
                 .saturating_add(old_length),
         )?;
         let old = slot
@@ -43,7 +43,7 @@ impl Bridge<'_> {
             local_name: script_clone_node::copy_text(name.local())?,
             namespace: name
                 .namespace_uri()
-                .map(script_clone_node::copy_text)
+                .map(DomString::try_clone)
                 .transpose()?,
             old_value: old,
         })

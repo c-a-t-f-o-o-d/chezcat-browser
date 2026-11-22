@@ -73,7 +73,7 @@ fn passive_attribute(tag:&str,key:&str,value:&str)->bool{match key {
 pub(super) fn dom_name(name:&str)->bool{matches!(name,"svg"|"defs"|"g"|"mask"|"clipPath"|"linearGradient"|"radialGradient"|"stop"|"symbol"|"use"|"circle"|"ellipse"|"line"|"path"|"polygon"|"polyline"|"rect")}
 pub(super) fn dom_attribute(tag:&str,name:&super::AttributeName,value:&str)->bool{
     if !dom_name(tag){return false;}
-    if let Some(namespace)=&name.namespace{return match namespace.uri.as_str(){
+    if let Some(namespace)=&name.namespace{return match namespace.uri.scalar().unwrap_or(""){
         "http://www.w3.org/1999/xlink"=>namespace.local=="href"&&namespace.prefix.as_deref()==Some("xlink")&&matches!(tag,"use"|"linearGradient"|"radialGradient")&&crate::svg_reference::fragment(value).is_some(),
         "http://www.w3.org/2000/xmlns/"=>(namespace.local=="xmlns"&&namespace.prefix.is_none()&&value=="http://www.w3.org/2000/svg")||(namespace.local=="xlink"&&namespace.prefix.as_deref()==Some("xmlns")&&value=="http://www.w3.org/1999/xlink"),
         _=>false,

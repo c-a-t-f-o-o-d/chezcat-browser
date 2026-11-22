@@ -122,7 +122,7 @@ impl Bridge<'_>{
             let(class,names,attrs)=self.namespace_facts(element)?;
             let namespace=element_names::namespace(class,names)?;
             if element_names::prefix(class,names)?.is_none()&&!matches!(namespace,NamespaceRef::Null){return Ok(Value::Bool(namespace_matches(namespace,query)));}
-            if let Some(declaration)=attrs.iter().find(|attr|attr.name.namespace_uri()==Some("http://www.w3.org/2000/xmlns/")&&attr.name.prefix().is_none()&&attr.name.local()=="xmlns"){
+            if let Some(declaration)=attrs.iter().find(|attr|attr.name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/")&&attr.name.prefix().is_none()&&attr.name.local()=="xmlns"){
                 return Ok(Value::Bool(namespace_matches(NamespaceRef::Owned(&declaration.value),query)));
             }
             current=self.namespace_parent_element(element);

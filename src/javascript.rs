@@ -572,7 +572,7 @@ pub struct NativeChildListChange {
 
 pub struct NativeAttributeChange {
     pub local_name: String,
-    pub namespace: Option<String>,
+    pub namespace: Option<crate::dom_string::DomString>,
     pub old_value: Option<Value>,
 }
 

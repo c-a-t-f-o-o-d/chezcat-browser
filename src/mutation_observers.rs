@@ -92,7 +92,7 @@ impl Record {
                     .saturating_mul(std::mem::size_of::<u32>())));
         let attribute_bytes = self.attribute.as_ref().map_or(0, |change|
             std::mem::size_of::<NativeAttributeChange>().saturating_add(change.local_name.capacity())
-                .saturating_add(change.namespace.as_ref().map_or(0, String::capacity)));
+                .saturating_add(change.namespace.as_ref().map_or(0, crate::dom_string::DomString::capacity)));
         std::mem::size_of::<Self>().saturating_add(self.old_value.bytes())
             .saturating_add(child_references).saturating_add(attribute_bytes)
     }
@@ -610,12 +610,8 @@ impl Runtime {
             "type" => Ok(Value::String(if record.child_list.is_some() { "childList" }
                 else if record.attribute.is_some() { "attributes" } else { "characterData" }.into())),
             "attributeName" | "attributeNamespace" => {
-                let name = record.attribute.as_ref().and_then(|change| if field == "attributeName" {
-                    Some(change.local_name.as_str())
-                } else { change.namespace.as_deref() });
-                let value = name.map_or(Value::Null, |name| Value::String(name.into()));
-                self.work(value.bytes())?;
-                Ok(value)
+                let value=if let Some(change)=record.attribute.as_ref(){if field=="attributeName"{Value::String(change.local_name.clone())}else{match change.namespace.as_ref(){None=>Value::Null,Some(uri)=>match uri.raw_units(){Some(u)=>Value::StringUnits(u.to_vec()),None=>Value::String(uri.scalar().map_err(Fault::new)?.into())}}}}else{Value::Null};
+                self.work(value.bytes())?;Ok(value)
             }
             "previousSibling" => Ok(record.child_list.as_ref().and_then(|change| change.previous).map_or(Value::Null, Value::Host)),
             "nextSibling" => Ok(record.child_list.as_ref().and_then(|change| change.next).map_or(Value::Null, Value::Host)),

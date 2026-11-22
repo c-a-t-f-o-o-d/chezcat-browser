@@ -162,31 +162,35 @@ pub struct AttributeName {
 
 #[derive(Debug)]
 pub struct AttributeNamespace {
-    pub uri: String,
+    pub uri: DomString,
     pub prefix: Option<String>,
     pub local: String,
 }
 
 impl AttributeName {
     pub fn unqualified(qualified: String) -> Self { Self { qualified, namespace: None } }
-    pub fn namespace_uri(&self) -> Option<&str> { self.namespace.as_ref().map(|ns| ns.uri.as_str()) }
+    pub fn namespace_uri(&self) -> Option<&DomString> { self.namespace.as_ref().map(|ns| &ns.uri) }
     pub fn prefix(&self) -> Option<&str> { self.namespace.as_ref().and_then(|ns| ns.prefix.as_deref()) }
     pub fn local(&self) -> &str { self.namespace.as_ref().map_or(&self.qualified, |ns| &ns.local) }
     pub fn html_is(&self, name: &str) -> bool { self.namespace.is_none() && self.qualified == name }
     pub fn matches(&self, namespace: Option<&str>, local: &str) -> bool {
-        self.namespace_uri() == namespace && self.local() == local
+        self.matches_dom(namespace.map(crate::dom_string::DomStringRef::Scalar),local)
     }
-    pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches(other.namespace_uri(), other.local()) }
+    pub(crate) fn matches_dom(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:&str)->bool{
+        let equal=match(self.namespace_uri(),namespace){(None,None)=>true,(Some(a),Some(b))=>a.code_units().eq(b.code_units()),_=>false};equal&&self.local()==local
+    }
+    pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches_dom(other.namespace_uri().map(DomString::view), other.local()) }
     pub fn bytes(&self) -> usize {
-        self.qualified.len() + self.namespace.as_ref().map_or(0, |ns| ns.uri.len() + ns.local.len() + ns.prefix.as_ref().map_or(0, String::len))
+        self.qualified.len() + self.namespace.as_ref().map_or(0, |ns| ns.uri.used_bytes() + ns.local.len() + ns.prefix.as_ref().map_or(0, String::len))
     }
     pub(crate) fn owned_bytes(&self)->usize {
         self.qualified.capacity()+self.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,String::capacity))
     }
     // Callers charge bytes before cloning retained native metadata.
-    pub fn copy(&self) -> Self {
-        Self { qualified: self.qualified.clone(), namespace: self.namespace.as_ref().map(|ns|
-            AttributeNamespace { uri: ns.uri.clone(), prefix: ns.prefix.clone(), local: ns.local.clone() }) }
+    pub fn copy(&self) -> Result<Self,String> {
+        fn copy(text:&str)->Result<String,String>{let mut result=String::new();result.try_reserve_exact(text.len()).map_err(|_|"Cannot reserve copied attribute name.")?;result.push_str(text);Ok(result)}
+        Ok(Self { qualified: copy(&self.qualified)?, namespace: self.namespace.as_ref().map(|ns|
+            Ok::<_,String>(AttributeNamespace { uri: ns.uri.try_clone()?, prefix: ns.prefix.as_deref().map(copy).transpose()?, local: copy(&ns.local)? })).transpose()? })
     }
 }
 
