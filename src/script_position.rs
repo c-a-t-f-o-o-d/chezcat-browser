@@ -2,6 +2,8 @@
 //! https://dom.spec.whatwg.org/#dom-node-comparedocumentposition
 use super::*;
 
+pub(super) const METHOD:&str="\0Node.compareDocumentPosition";
+
 pub(super) struct PositionPath {
     pub(super) root: u32,
     pub(super) steps: Vec<usize>,
@@ -101,6 +103,7 @@ impl Bridge<'_> {
             let children = &self.doc.nodes.get(parent).ok_or("Invalid position parent.")?.children;
             self.state.work(children.len())?;
             let ordinal = children.iter().position(|&child| child == node).ok_or("Position parent/child mismatch.")?;
+            self.state.copies(size_of::<usize>())?;
             steps.try_reserve(1).map_err(|_| "Unable to allocate Node position path.")?;
             steps.push(ordinal);
             node = parent;
@@ -113,15 +116,17 @@ impl Bridge<'_> {
         if let Some(id) = script_attr::index(handle) {
             let attr = self.state.attributes.get(id).ok_or("Invalid Attr position handle.")?;
             return match attr.owner {
-                Some(owner) => {let node=node_index(owner).filter(|_|self.inert_node_type(owner).is_none()).ok_or("Inert Attr position traversal is unavailable.")?;self.main_position_path(node, Some(id))},
+                Some(owner) => {if self.inert_node_type(owner).is_some(){return self.inert_position_path(owner,Some(id));}let node=node_index(owner).ok_or("Missing Attr owner position.")?;self.main_position_path(node, Some(id))},
                 None => Ok(PositionPath { root: handle, steps: Vec::new(), attribute: Some(id) }),
             };
         }
+        if self.inert_node_type(handle).is_some(){return self.inert_position_path(handle,None);}
         let node = if handle == DOCUMENT { 0 } else { self.dom_node(handle)? };
         self.main_position_path(node, None)
     }
 
     pub(super) fn compare_document_position(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
+        self.validate_node_position(object,args).map_err(|(_,e)|e)?;
         let Some(Value::Host(other)) = args.first() else { return Err("compareDocumentPosition requires a Node.".into()); };
         if !self.namespace_receiver(object) || !self.namespace_receiver(*other) {
             return Err("compareDocumentPosition requires genuine accessible Nodes.".into());
@@ -137,9 +142,10 @@ impl Bridge<'_> {
         if this.steps == other.steps {
             return Ok(Value::Number(match (this.attribute, other.attribute) {
                 (Some(this), Some(other)) => {
-                    let owner = self.state.attributes[this].owner.and_then(node_index).ok_or("Missing main Attr owner.")?;
-                    let NodeKind::Element { attrs, .. } = &self.doc.nodes[owner].kind else { return Err("Invalid Attr owner.".into()); };
-                    self.state.work(attrs.iter().fold(attrs.len(), |work, attr| work.saturating_add(attr.name.bytes().saturating_mul(2))))?;
+                    let owner = self.state.attributes[this].owner.ok_or("Missing Attr owner.")?;
+                    let attrs=self.element_attribute_source(owner).ok_or("Invalid position Attr owner.")?;
+                    let work=attrs.iter().try_fold(attrs.len(),|n,attr|attr.name.bytes().checked_mul(2).and_then(|bytes|n.checked_add(bytes)).ok_or("Attr position comparison work overflow."))?;self.state.work(work)?;
+                    let attrs=self.element_attribute_source(owner).unwrap();
                     let this_name = &self.state.attributes[this].name;
                     let other_name = &self.state.attributes[other].name;
                     let this_order = attrs.iter().position(|attr| attr.name.same_expanded_name(this_name)).ok_or("Attached Attr is missing from its owner.")?;
@@ -157,5 +163,10 @@ impl Bridge<'_> {
             10.0
         } else if this.steps < other.steps { 4.0 } else { 2.0 };
         Ok(Value::Number(value))
+    }
+
+    pub(super) fn validate_node_position(&self,object:u32,args:&[Value])->Result<(),(&'static str,String)>{
+        self.native_node_access(object)?;
+        match args.first(){Some(Value::Host(other))=>self.native_node_access(*other),_=>Err(("TypeError","compareDocumentPosition requires a genuine Node argument.".into()))}
     }
 }

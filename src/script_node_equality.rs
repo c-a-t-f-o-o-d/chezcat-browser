@@ -29,9 +29,9 @@ impl View<'_>{
 }
 impl Bridge<'_>{
  pub(in crate::scripting) fn validate_node_equality(&self,object:u32,args:&[Value])->Result<(),(&'static str,String)>{
-  self.equality_access(object)?;match args.first(){None=>Err(("TypeError","Node equality requires a nullable Node argument.".into())),Some(Value::Null|Value::Undefined)=>Ok(()),Some(Value::Host(other))=>self.equality_access(*other),_=>Err(("TypeError","Node equality requires a genuine Node or null.".into()))}
+  self.native_node_access(object)?;match args.first(){None=>Err(("TypeError","Node equality requires a nullable Node argument.".into())),Some(Value::Null|Value::Undefined)=>Ok(()),Some(Value::Host(other))=>self.native_node_access(*other),_=>Err(("TypeError","Node equality requires a genuine Node or null.".into()))}
  }
- fn equality_access(&self,object:u32)->Result<(),(&'static str,String)>{
+ pub(in crate::scripting) fn native_node_access(&self,object:u32)->Result<(),(&'static str,String)>{
   if self.inert_node_type(object).is_some(){if self.state.navigation_incumbent.is_some_and(|window|window!=WINDOW){self.frame_window_access(self.state.navigation_incumbent,WINDOW).map_err(|e|("SecurityError",e))?;}return Ok(());}
   self.contains_node_identity(object).map(|_|())
  }
@@ -51,7 +51,7 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn node_equality(&mut self,object:u32,args:&[Value],same:bool)->Result<Value,String>{
   self.validate_node_equality(object,args).map_err(|(_,e)|e)?;self.state.work(1)?;let Some(Value::Host(other))=args.first()else{return Ok(Value::Bool(false));};if same||object==*other{return Ok(Value::Bool(object==*other));}self.state.rebuild(self.doc)?;
   let mut stack=Vec::new();self.state.copies(size_of::<(u32,u32)>())?;stack.try_reserve_exact(1).map_err(|_|"Cannot reserve Node equality stack.")?;stack.push((object,*other));let maximum=self.doc.nodes.len().checked_add(self.inert_node_count()).and_then(|n|n.checked_add(self.state.blank_frame_nodes)).and_then(|n|n.checked_add(self.state.attributes.len())).and_then(|n|n.checked_add(1)).ok_or("Node equality traversal bound overflow.")?;let mut visited=0usize;
-  while let Some((a,b))=stack.pop(){visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic Node equality tree.")?;self.equality_access(a).map_err(|(_,e)|e)?;self.equality_access(b).map_err(|(_,e)|e)?;
+  while let Some((a,b))=stack.pop(){visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic Node equality tree.")?;self.native_node_access(a).map_err(|(_,e)|e)?;self.native_node_access(b).map_err(|(_,e)|e)?;
    // Attached Attr lookup visits the owner's actual attribute list. Charge
    // that scan before borrowing its current value, including long name keys.
    for handle in [a,b]{if let Some(attr)=script_attr::index(handle).and_then(|id|self.state.attributes.get(id)){if let Some(owner)=attr.owner{let cost=self.element_attribute_source(owner).ok_or("Missing equality Attr owner.")?.iter().try_fold(1usize,|n,a|n.checked_add(a.name.bytes()).and_then(|n|n.checked_add(1)).ok_or("Node equality Attr lookup work overflow."))?;self.state.work(cost)?;}}}

@@ -3766,7 +3766,7 @@ impl Host for Bridge<'_> {
         if method==script_node_root::ROOT_METHOD && self.get_root_receiver(object) {return Some(0);}
         if method == script_clone_node::CLONE_METHOD { return Some(0); }
         if script_inert_documents::node_equality::operation(method){return Some(1);}
-        if method == script_node_contains::CONTAINS_METHOD { return Some(1); }
+        if method == script_node_contains::CONTAINS_METHOD || method==script_position::METHOD { return Some(1); }
         if object==DOCUMENT && method=="createComment" {return Some(1);}
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return Some(0);}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return Some(1);}
@@ -3790,6 +3790,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&method==script_position::METHOD{return Some(object);}
         if self.event_target_interface(object)&&script_inert_documents::node_equality::operation(method){return Some(object);}
         if script_attr::node_method(method)&&self.event_target_interface(object){return Some(object);}
         if script_attr::member_operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -3904,6 +3905,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method==script_position::METHOD{return &[0];}
         if script_inert_documents::node_equality::operation(method){return &[0];}
         if method=="replaceChild"&&self.inert_replace_receiver(object){return &[0,1];}
         if crate::javascript::range_interface::node_argument(method) { return &[0]; }
@@ -3933,6 +3935,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==script_position::METHOD{return 1;}
         if script_inert_documents::node_equality::operation(method){return 1;}
         if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
         if let Some((_,setter))=script_attr::member_operation(method){return usize::from(setter);}
@@ -4151,6 +4154,7 @@ impl Host for Bridge<'_> {
         if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
         if method==node_normalize_interface::METHOD{return if self.normalize_receiver(object){Ok(())}else{Err(("TypeError","normalize requires a genuine supported Node.".into()))};}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
+        if method==script_position::METHOD{return self.validate_node_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.validate_node_equality(object,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
@@ -4579,7 +4583,7 @@ impl Host for Bridge<'_> {
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
             if parent(object) {return parent(receiver);}
         }
-        if self.event_target_interface(object)&&script_inert_documents::node_equality::operation(method){return self.namespace_receiver(receiver);}
+        if self.event_target_interface(object)&&(script_inert_documents::node_equality::operation(method)||method==script_position::METHOD){return self.namespace_receiver(receiver);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.get_root_receiver(receiver);}
         if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.clone_node_receiver(receiver); }
         if self.event_target_interface(object) && method == script_node_contains::CONTAINS_METHOD {
@@ -6193,6 +6197,7 @@ impl Host for Bridge<'_> {
                 Value::Null
             });
         }
+        if method==script_position::METHOD{return self.compare_document_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.node_equality(object,args,method==script_inert_documents::node_equality::SAME);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
         if method == script_clone_node::CLONE_METHOD { return self.clone_node(object, args.first().is_some_and(Value::truthy)); }
@@ -8813,3 +8818,7 @@ mod shared_normalize_tests;
 #[cfg(test)]
 #[path="script_node_equality_tests.rs"]
 mod node_equality_tests;
+
+#[cfg(test)]
+#[path="script_inert_position_tests.rs"]
+mod inert_position_tests;

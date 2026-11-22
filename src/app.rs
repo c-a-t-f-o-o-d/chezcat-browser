@@ -6368,6 +6368,10 @@ mod node_namespace_lookup_tests;
 mod node_equality_tests;
 
 #[cfg(test)]
+#[path="app_inert_position_tests.rs"]
+mod inert_position_tests;
+
+#[cfg(test)]
 #[path="app_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
 
