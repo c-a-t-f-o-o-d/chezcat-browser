@@ -32,6 +32,24 @@
       "bytes": 671621,
       "git_blob": "0c2b2c2864d0e415be5b7eaede9612dea3868d58",
       "sha256": "89af20dd867c84cefb710b1790229786cfef2bf11916361a210d81b90381e267"
+    },
+    {
+      "path": "index-big5.txt",
+      "bytes": 688943,
+      "git_blob": "1db48f33fe06864a2955962d6679cb624c74d1ad",
+      "sha256": "08e24270c8e95d998c994c03f907e972480dc01f58743e078654cc466203c8ff"
+    },
+    {
+      "path": "index-jis0208.txt",
+      "bytes": 275768,
+      "git_blob": "078394db64616dcbc4ed2925f789ba72206f23fc",
+      "sha256": "341dcde7e8b984e9c7bbf5ed75c8da7c6087d47083a1a2b3ed558bfd5bef9468"
+    },
+    {
+      "path": "index-jis0212.txt",
+      "bytes": 210734,
+      "git_blob": "8a75fbcfd94037223b0fd750a90b0ab0f5315dde",
+      "sha256": "6ac698a473822b282ff4f4d4f17873b970612ef9bd232e03941854c09b67c7ee"
     }
   ]
 }

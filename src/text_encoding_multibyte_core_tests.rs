@@ -29,7 +29,11 @@ fn rows(source: &str) -> Vec<(u32, u32)> {
 }
 
 fn raw_index(source: &str, expected_count: usize) -> Vec<Option<char>> {
-    let mut index = vec![None; 23_940];
+    raw_index_sized(source, expected_count, 23_940)
+}
+
+fn raw_index_sized(source: &str, expected_count: usize, size: usize) -> Vec<Option<char>> {
+    let mut index = vec![None; size];
     let raw = rows(source);
     assert_eq!(raw.len(), expected_count);
     for (pointer, scalar) in raw {
@@ -211,6 +215,10 @@ impl ChunkDecoder {
                     output.push(scalar);
                     count
                 }
+                Step::Pair(first, second, count) => {
+                    output.extend([first, second]);
+                    count
+                }
                 Step::Invalid(count) => {
                     output.push('\u{fffd}');
                     count
@@ -224,7 +232,12 @@ impl ChunkDecoder {
             consumed += count;
         }
         self.pending.drain(..consumed);
-        let maximum = if self.encoding == Encoding::EucKr { 1 } else { 3 };
+        let maximum = match self.encoding {
+            Encoding::Gbk | Encoding::Gb18030 => 3,
+            Encoding::EucJp => 2,
+            Encoding::Big5 | Encoding::ShiftJis | Encoding::EucKr => 1,
+            Encoding::Iso2022Jp => unreachable!("stateful decoder has its own tests"),
+        };
         assert!(self.pending.len() <= maximum, "too much retained input");
         if !stream {
             assert!(self.pending.is_empty());
@@ -255,6 +268,12 @@ fn multibyte_canonical_names_aliases_and_empty_prefix() {
             "gbk", "iso-ir-58", "x-gbk",
         ]),
         (Encoding::Gb18030, "gb18030", &["gb18030"]),
+        (Encoding::Big5, "big5", &["big5", "big5-hkscs", "cn-big5", "csbig5", "x-x-big5"]),
+        (Encoding::EucJp, "euc-jp", &["cseucpkdfmtjapanese", "euc-jp", "x-euc-jp"]),
+        (Encoding::ShiftJis, "shift_jis", &[
+            "csshiftjis", "ms932", "ms_kanji", "shift-jis", "shift_jis", "sjis",
+            "windows-31j", "x-sjis",
+        ]),
         (Encoding::EucKr, "euc-kr", &[
             "cseuckr", "csksc56011987", "euc-kr", "iso-ir-149", "korean", "ks_c_5601-1987",
             "ks_c_5601-1989", "ksc5601", "ksc_5601", "windows-949",
@@ -268,7 +287,11 @@ fn multibyte_canonical_names_aliases_and_empty_prefix() {
         assert_eq!(encoding.step(&[], true), Step::Incomplete);
         assert_eq!(encoding.step(&[], false), Step::Incomplete);
     }
-    for label in ["GBK", " gbk", "euc-kr\n", "utf-8", "big5", "shift_jis", "gb18030-extra", ""] {
+    assert_eq!(Encoding::Iso2022Jp.name(), "iso-2022-jp");
+    for label in ["csiso2022jp", "iso-2022-jp"] {
+        assert_eq!(Encoding::from_label(label), Some(Encoding::Iso2022Jp));
+    }
+    for label in ["GBK", " gbk", "euc-kr\n", "utf-8", "cp932", "big5-extra", "gb18030-extra", ""] {
         assert_eq!(Encoding::from_label(label), None, "{label:?}");
     }
 }
@@ -470,4 +493,314 @@ fn multibyte_every_stream_split_and_eof_reset_preserves_output() {
     let mut decoder = ChunkDecoder::new(Encoding::EucKr);
     assert!(decoder.feed(&[0x81], true).is_empty());
     assert_eq!(decoder.feed(&[0x5b], true), vec!['\u{fffd}', '[']);
+}
+
+
+const BIG5_INDEX: &str = include_str!("../tools/reference/multibyte-encodings/index-big5.txt");
+const JIS0208_INDEX: &str = include_str!("../tools/reference/multibyte-encodings/index-jis0208.txt");
+const JIS0212_INDEX: &str = include_str!("../tools/reference/multibyte-encodings/index-jis0212.txt");
+const NEW_PREFIX_ENCODINGS: [Encoding; 3] = [Encoding::Big5, Encoding::EucJp, Encoding::ShiftJis];
+
+struct EastAsianOracle {
+    big5: Vec<Option<char>>,
+    jis0208: Vec<Option<char>>,
+    jis0212: Vec<Option<char>>,
+}
+
+impl EastAsianOracle {
+    fn new() -> Self {
+        Self {
+            big5: raw_index_sized(BIG5_INDEX, 18_590, 126 * 157),
+            jis0208: raw_index_sized(JIS0208_INDEX, 7_724, 60 * 188),
+            jis0212: raw_index_sized(JIS0212_INDEX, 6_067, 94 * 94),
+        }
+    }
+
+    fn decode(&self, encoding: Encoding, bytes: &[u8]) -> Vec<char> {
+        let mut queue: VecDeque<u8> = bytes.iter().copied().collect();
+        let mut leading = None;
+        let mut jis0212 = false;
+        let mut output = Vec::new();
+        loop {
+            let Some(byte) = queue.pop_front() else {
+                if leading.is_some() {
+                    output.push('\u{fffd}');
+                }
+                return output;
+            };
+            if let Some(lead) = leading.take() {
+                if encoding == Encoding::EucJp {
+                    if lead == 0x8e && (0xa1..=0xdf).contains(&byte) {
+                        output.push(char::from_u32(0xff61 + u32::from(byte) - 0xa1).unwrap());
+                        continue;
+                    }
+                    if lead == 0x8f && (0xa1..=0xfe).contains(&byte) {
+                        leading = Some(byte);
+                        jis0212 = true;
+                        continue;
+                    }
+                }
+                let mapped = match encoding {
+                    Encoding::Big5 => {
+                        if (0x40..=0x7e).contains(&byte) || (0xa1..=0xfe).contains(&byte) {
+                            let pointer = (usize::from(lead) - 0x81) * 157
+                                + usize::from(byte) - if byte < 0x7f { 0x40 } else { 0x62 };
+                            let pair = match pointer {
+                                1133 => Some(['\u{ca}', '\u{304}']),
+                                1135 => Some(['\u{ca}', '\u{30c}']),
+                                1164 => Some(['\u{ea}', '\u{304}']),
+                                1166 => Some(['\u{ea}', '\u{30c}']),
+                                _ => None,
+                            };
+                            if let Some(pair) = pair {
+                                output.extend(pair);
+                                continue;
+                            }
+                            self.big5[pointer]
+                        } else {
+                            None
+                        }
+                    }
+                    Encoding::EucJp => {
+                        let selected = if jis0212 { &self.jis0212 } else { &self.jis0208 };
+                        jis0212 = false;
+                        if (0xa1..=0xfe).contains(&lead) && (0xa1..=0xfe).contains(&byte) {
+                            selected[(usize::from(lead) - 0xa1) * 94 + usize::from(byte) - 0xa1]
+                        } else {
+                            None
+                        }
+                    }
+                    Encoding::ShiftJis => {
+                        if (0x40..=0x7e).contains(&byte) || (0x80..=0xfc).contains(&byte) {
+                            let pointer = (usize::from(lead) - if lead < 0xa0 { 0x81 } else { 0xc1 })
+                                * 188 + usize::from(byte) - if byte < 0x7f { 0x40 } else { 0x41 };
+                            if (8836..=10715).contains(&pointer) {
+                                char::from_u32(0xe000 + pointer as u32 - 8836)
+                            } else {
+                                self.jis0208[pointer]
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    _ => unreachable!(),
+                };
+                if let Some(scalar) = mapped {
+                    output.push(scalar);
+                } else {
+                    if byte.is_ascii() {
+                        queue.push_front(byte);
+                    }
+                    output.push('\u{fffd}');
+                }
+            } else if byte.is_ascii() || (encoding == Encoding::ShiftJis && byte == 0x80) {
+                output.push(char::from(byte));
+            } else if encoding == Encoding::ShiftJis && (0xa1..=0xdf).contains(&byte) {
+                output.push(char::from_u32(0xff61 + u32::from(byte) - 0xa1).unwrap());
+            } else {
+                let is_lead = match encoding {
+                    Encoding::Big5 => (0x81..=0xfe).contains(&byte),
+                    Encoding::EucJp => byte == 0x8e || byte == 0x8f || (0xa1..=0xfe).contains(&byte),
+                    Encoding::ShiftJis => (0x81..=0x9f).contains(&byte) || (0xe0..=0xfc).contains(&byte),
+                    _ => unreachable!(),
+                };
+                if is_lead {
+                    leading = Some(byte);
+                } else {
+                    output.push('\u{fffd}');
+                }
+            }
+        }
+    }
+}
+
+fn big5_bytes(pointer: usize) -> [u8; 2] {
+    let remainder = pointer % 157;
+    [(pointer / 157 + 0x81) as u8,
+        (remainder + if remainder < 63 { 0x40 } else { 0x62 }) as u8]
+}
+
+fn shift_jis_bytes(pointer: usize) -> [u8; 2] {
+    let lead = pointer / 188;
+    let trail = pointer % 188;
+    [(lead + if lead < 31 { 0x81 } else { 0xc1 }) as u8,
+        (trail + if trail < 63 { 0x40 } else { 0x41 }) as u8]
+}
+
+#[test]
+fn multibyte_big5_every_pointer_preserves_pinned_data_and_two_scalar_exceptions() {
+    let oracle = EastAsianOracle::new();
+    let mut supplementary = 0;
+    for pointer in 0..126 * 157 {
+        let bytes = big5_bytes(pointer);
+        let expected = match pointer {
+            1133 => Step::Pair('\u{ca}', '\u{304}', 2),
+            1135 => Step::Pair('\u{ca}', '\u{30c}', 2),
+            1164 => Step::Pair('\u{ea}', '\u{304}', 2),
+            1166 => Step::Pair('\u{ea}', '\u{30c}', 2),
+            _ => match oracle.big5[pointer] {
+                Some(scalar) => {
+                    supplementary += usize::from(u32::from(scalar) > 0xffff);
+                    Step::Character(scalar, 2)
+                }
+                None => Step::Invalid(if bytes[1].is_ascii() { 1 } else { 2 }),
+            },
+        };
+        for stream in [false, true] {
+            assert_eq!(Encoding::Big5.step(&bytes, stream), expected,
+                "Big5 pointer {pointer}, stream {stream}");
+        }
+    }
+    assert_eq!(supplementary, 1713);
+    assert_eq!(Encoding::Big5.step(&big5_bytes(947), false), Step::Character('\u{27267}', 2));
+}
+
+#[test]
+fn multibyte_euc_jp_both_planes_match_every_pinned_index_position_and_hole() {
+    let oracle = EastAsianOracle::new();
+    for pointer in 0..94 * 94 {
+        let lead = (pointer / 94 + 0xa1) as u8;
+        let trail = (pointer % 94 + 0xa1) as u8;
+        for (bytes, mapped) in [
+            (vec![lead, trail], oracle.jis0208[pointer]),
+            (vec![0x8f, lead, trail], oracle.jis0212[pointer]),
+        ] {
+            let expected = match mapped {
+                Some(scalar) => Step::Character(scalar, bytes.len()),
+                None => Step::Invalid(bytes.len()),
+            };
+            for stream in [false, true] {
+                assert_eq!(Encoding::EucJp.step(&bytes, stream), expected,
+                    "EUC-JP pointer {pointer}, {bytes:x?}, stream {stream}");
+            }
+        }
+    }
+}
+
+#[test]
+fn multibyte_shift_jis_every_pointer_covers_pinned_index_holes_and_eudc() {
+    let oracle = EastAsianOracle::new();
+    for pointer in 0..60 * 188 {
+        let bytes = shift_jis_bytes(pointer);
+        let scalar = if (8836..=10715).contains(&pointer) {
+            char::from_u32(0xe000 + pointer as u32 - 8836)
+        } else {
+            oracle.jis0208[pointer]
+        };
+        let expected = match scalar {
+            Some(scalar) => Step::Character(scalar, 2),
+            None => Step::Invalid(if bytes[1].is_ascii() { 1 } else { 2 }),
+        };
+        for stream in [false, true] {
+            assert_eq!(Encoding::ShiftJis.step(&bytes, stream), expected,
+                "Shift_JIS pointer {pointer}, stream {stream}");
+        }
+    }
+    assert_eq!(Encoding::ShiftJis.step(&[0xf0, 0x40], false), Step::Character('\u{e000}', 2));
+    assert_eq!(Encoding::ShiftJis.step(&[0xf9, 0xfc], false), Step::Character('\u{e757}', 2));
+}
+
+#[test]
+fn multibyte_big5_japanese_every_single_byte_preserves_ascii_halfwidth_and_eof() {
+    for encoding in NEW_PREFIX_ENCODINGS {
+        for byte in 0u8..=255 {
+            let is_lead = match encoding {
+                Encoding::Big5 => (0x81..=0xfe).contains(&byte),
+                Encoding::EucJp => byte == 0x8e || byte == 0x8f || (0xa1..=0xfe).contains(&byte),
+                Encoding::ShiftJis => (0x81..=0x9f).contains(&byte) || (0xe0..=0xfc).contains(&byte),
+                _ => unreachable!(),
+            };
+            for stream in [false, true] {
+                let expected = if byte.is_ascii() || (encoding == Encoding::ShiftJis && byte == 0x80) {
+                    Step::Character(char::from(byte), 1)
+                } else if encoding == Encoding::ShiftJis && (0xa1..=0xdf).contains(&byte) {
+                    Step::Character(char::from_u32(0xff61 + u32::from(byte) - 0xa1).unwrap(), 1)
+                } else if is_lead && stream {
+                    Step::Incomplete
+                } else {
+                    Step::Invalid(1)
+                };
+                assert_eq!(encoding.step(&[byte], stream), expected,
+                    "{encoding:?} byte {byte:x}, stream {stream}");
+            }
+        }
+    }
+    for byte in 0xa1..=0xdf {
+        assert_eq!(Encoding::EucJp.step(&[0x8e, byte], true),
+            Step::Character(char::from_u32(0xff61 + u32::from(byte) - 0xa1).unwrap(), 2));
+    }
+}
+
+#[test]
+fn multibyte_big5_japanese_all_byte_pairs_match_stateful_restoration_oracle() {
+    let oracle = EastAsianOracle::new();
+    for encoding in NEW_PREFIX_ENCODINGS {
+        for first in 0u8..=255 {
+            for second in 0u8..=255 {
+                let bytes = [first, second];
+                assert_eq!(core_output(encoding, &bytes), oracle.decode(encoding, &bytes),
+                    "{encoding:?} {bytes:x?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn multibyte_euc_jp_every_introducer_tail_restores_only_ascii_and_resets_plane() {
+    let oracle = EastAsianOracle::new();
+    for introducer in [0x8e, 0x8f] {
+        for second in 0u8..=255 {
+            for third in 0u8..=255 {
+                let bytes = [introducer, second, third, 0xa1, 0xa1];
+                assert_eq!(core_output(Encoding::EucJp, &bytes), oracle.decode(Encoding::EucJp, &bytes),
+                    "{bytes:x?}");
+            }
+        }
+    }
+    assert_eq!(core_output(Encoding::EucJp, &[0x8f, 0xa1, b'"']), vec!['\u{fffd}', '"']);
+    assert_eq!(core_output(Encoding::EucJp, &[0x8f, b'"']), vec!['\u{fffd}', '"']);
+    assert_eq!(core_output(Encoding::EucJp, &[0x8e, 0xe0]), vec!['\u{fffd}']);
+}
+
+#[test]
+fn multibyte_big5_japanese_all_chunk_splits_and_empty_eof_preserve_output() {
+    let oracle = EastAsianOracle::new();
+    let cases: &[&[u8]] = &[
+        &[], &[0], &[0x80], &[0x81], &[0x8e], &[0x8f], &[0x8f, 0xa1],
+        &[0x8f, 0xa1, b'"', 0xa1, 0xa1],
+        &[0x8f, 0xa2, 0xaf, 0x8e, 0xa1, 0x8e, 0xdf, b'Z'],
+        &[0x8f, 0xa2, 0x8f, 0xa2, 0xaf, b'!'],
+        &[0x81, 0x22, 0x81, 0x7f, 0x81, 0x80, 0x81, 0xff],
+        &[0x87, 0x45, 0x88, 0x62, 0x88, 0x64, 0x88, 0xa3, 0x88, 0xa5],
+        &[0xf0, 0x40, 0xf9, 0xfc, 0xfa, 0x40, 0xfc, 0xfc, 0xff],
+        &[0x8f, 0xfe, 0xfe, 0x8f, 0xa2, 0xaf, 0x8f, 0xa2],
+    ];
+    for encoding in NEW_PREFIX_ENCODINGS {
+        for bytes in cases {
+            let expected = oracle.decode(encoding, bytes);
+            for first in 0..=bytes.len() {
+                for second in first..=bytes.len() {
+                    let mut decoder = ChunkDecoder::new(encoding);
+                    let mut output = decoder.feed(&bytes[..first], true);
+                    output.extend(decoder.feed(&bytes[first..second], true));
+                    output.extend(decoder.feed(&bytes[second..], true));
+                    output.extend(decoder.feed(&[], false));
+                    assert_eq!(output, expected, "{encoding:?} {bytes:x?}, splits {first}/{second}");
+                    assert!(decoder.feed(&[], false).is_empty());
+                    assert_eq!(decoder.feed(b"reset", false), vec!['r', 'e', 's', 'e', 't']);
+                }
+            }
+            let mut decoder = ChunkDecoder::new(encoding);
+            let mut output = Vec::new();
+            for byte in *bytes {
+                output.extend(decoder.feed(&[*byte], true));
+            }
+            output.extend(decoder.feed(&[], false));
+            assert_eq!(output, expected, "{encoding:?} one-byte chunks {bytes:x?}");
+        }
+    }
+    let mut decoder = ChunkDecoder::new(Encoding::EucJp);
+    assert!(decoder.feed(&[0x8f, 0xa1], true).is_empty());
+    assert_eq!(decoder.feed(&[], false), vec!['\u{fffd}']);
+    assert_eq!(decoder.feed(&[0xa1, 0xa1], false), vec!['\u{3000}']);
 }

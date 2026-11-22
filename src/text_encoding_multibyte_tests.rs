@@ -293,7 +293,7 @@ fn multibyte_shared_request_text_retains_bom_override_and_utf8_body_rules() {
         }
     }
     assert_eq!(engine.decode_body_utf8(&[0xd6, 0xd0]).unwrap(), "\u{fffd}\u{fffd}");
-    assert!(engine.decode_request_text(&[65], "shift_jis").is_err());
+    assert!(engine.decode_request_text(&[65], "replacement").is_err());
 }
 
 #[test]

@@ -217,7 +217,7 @@ if(d.decode(bom).length!==3||d.decode(bom)!==new TextDecoder('x-user-defined',{i
 fn single_byte_label_validation_options_order_and_native_brands_remain_real() {
     succeeds(r#"
 function rejects(f,name){try{f();}catch(e){if(e.name===name)return;throw e;}throw 'missing '+name;}
-for(var label of ['',null,'unknown','replacement','iso-2022-cn','hz-gb-2312','big5','euc-jp','iso-2022-jp','shift_jis','\vwindows-1251','windows-1251\u00a0']){
+for(var label of ['',null,'unknown','replacement','iso-2022-cn','hz-gb-2312','\vwindows-1251','windows-1251\u00a0']){
   rejects(function(){new TextDecoder(label);},'RangeError');
 }
 var log=[],label={toString:function(){log.push('label');return 'cp1251';}},options={
@@ -291,7 +291,7 @@ fn single_byte_request_text_uses_the_same_indexes_and_retains_bom_override() {
             .unwrap(),
         "é"
     );
-    assert!(engine.decode_request_text(&[65], "shift_jis").is_err());
+    assert!(engine.decode_request_text(&[65], "replacement").is_err());
 }
 
 #[test]

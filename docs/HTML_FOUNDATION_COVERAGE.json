@@ -818,7 +818,10 @@
         "src/text_encoding_multibyte_data.rs",
         "src/text_encoding_multibyte_core_tests.rs",
         "src/text_encoding_multibyte_tests.rs",
-        "tools/reference/multibyte-encodings/manifest.json"
+        "tools/reference/multibyte-encodings/manifest.json",
+        "src/text_encoding_iso2022jp.rs",
+        "src/text_encoding_iso2022jp_tests.rs",
+        "src/text_encoding_east_asian_tests.rs"
       ],
       "contracts": [
         {
@@ -827,7 +830,8 @@
           "status": "partial",
           "verification": [
             "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed.",
-            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02."
+            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02.",
+            "Independent Big5/Japanese decoder increment: TextDecoder and shared request-text decoding implement Big5, EUC-JP, ISO-2022-JP and Shift_JIS (18 labels), using original Rust algorithms and pinned normative Big5/JIS indexes. Seven new pure-prefix witnesses cover index grids/holes, all byte pairs, EUC-JP introducers, Big5 two-scalar/supplementary mappings and Shift_JIS EUDC; five ISO-2022-JP witnesses cover modes, repeated/invalid escapes, restoration and every selected chunk split/EOF. Twelve native API witnesses add aliases, actual UTF-16 output, BufferSource/options/reentry, copied state, fatal reset, request/BOM rules and output/work refusal with retained-decoder recovery. These supplementary selections are fixed before native execution. Validation belongs to the integrating source; browser WPT/App evidence and full F02 remain open."
           ],
           "dependency_details": []
         },
@@ -837,7 +841,8 @@
           "status": "partial",
           "verification": [
             "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed.",
-            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02."
+            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02.",
+            "Independent Big5/Japanese decoder increment: TextDecoder and shared request-text decoding implement Big5, EUC-JP, ISO-2022-JP and Shift_JIS (18 labels), using original Rust algorithms and pinned normative Big5/JIS indexes. Seven new pure-prefix witnesses cover index grids/holes, all byte pairs, EUC-JP introducers, Big5 two-scalar/supplementary mappings and Shift_JIS EUDC; five ISO-2022-JP witnesses cover modes, repeated/invalid escapes, restoration and every selected chunk split/EOF. Twelve native API witnesses add aliases, actual UTF-16 output, BufferSource/options/reentry, copied state, fatal reset, request/BOM rules and output/work refusal with retained-decoder recovery. These supplementary selections are fixed before native execution. Validation belongs to the integrating source; browser WPT/App evidence and full F02 remain open."
           ],
           "dependency_details": []
         },
@@ -862,7 +867,7 @@
         "F05",
         "F10"
       ],
-      "evidence_selection_status": "The supplementary single-byte increment fixes nine native test functions and eight data/provenance controls. The Chinese/Korean increment fixes ten native API test functions, eight exhaustive pure-core test functions with fixed byte-pair/four-byte-pointer selections and twelve data/provenance controls in the named source files before execution. Both use Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c; no runtime output selects or drops a case. Full-package required browser, remaining decoder/encoder and loader selections remain to be frozen before their execution.",
+      "evidence_selection_status": "The supplementary single-byte increment fixes nine native test functions and eight data/provenance controls. The Chinese/Korean increment fixes ten native API test functions, eight exhaustive pure-core test functions with fixed byte-pair/four-byte-pointer selections and twelve data/provenance controls in the named source files before execution. Both use Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c; no runtime output selects or drops a case. Full-package required browser, remaining decoder/encoder and loader selections remain to be frozen before their execution. The Big5/Japanese increment fixes twelve new native API functions, seven new prefix functions, five ISO-2022-JP functions and seventeen total multibyte data/provenance controls before execution; existing decoder tests remain selected. Required browser/App selections remain separate.",
       "open_after_single_byte_increment": [
         "Legacy multibyte decoders and stateful error/EOF behavior",
         "Applicable legacy encoders",
@@ -872,6 +877,13 @@
       ],
       "open_after_chinese_korean_increment": [
         "Big5, EUC-JP, ISO-2022-JP and Shift_JIS decoders, with stateful error/EOF behavior",
+        "Replacement decoder where required outside the TextDecoder constructor",
+        "Applicable legacy encoders",
+        "Document transport/meta charset selection, confidence, sniff and restart",
+        "Complete MIME and local/network/DOMParser routing",
+        "Required unchanged browser evidence and Windows App integration"
+      ],
+      "open_after_big5_japanese_increment": [
         "Replacement decoder where required outside the TextDecoder constructor",
         "Applicable legacy encoders",
         "Document transport/meta charset selection, confidence, sniff and restart",
@@ -3782,9 +3794,11 @@
         "csbig5",
         "x-x-big5"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs, src/text_encoding_iso2022jp_tests.rs and src/text_encoding_east_asian_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser/App evidence remain open."
+      ]
     },
     {
       "name": "EUC-JP",
@@ -3793,9 +3807,11 @@
         "euc-jp",
         "x-euc-jp"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs, src/text_encoding_iso2022jp_tests.rs and src/text_encoding_east_asian_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser/App evidence remain open."
+      ]
     },
     {
       "name": "ISO-2022-JP",
@@ -3803,9 +3819,11 @@
         "csiso2022jp",
         "iso-2022-jp"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs, src/text_encoding_iso2022jp_tests.rs and src/text_encoding_east_asian_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser/App evidence remain open."
+      ]
     },
     {
       "name": "Shift_JIS",
@@ -3819,9 +3837,11 @@
         "windows-31j",
         "x-sjis"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs, src/text_encoding_iso2022jp_tests.rs and src/text_encoding_east_asian_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser/App evidence remain open."
+      ]
     },
     {
       "name": "EUC-KR",
