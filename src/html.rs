@@ -258,7 +258,7 @@ pub(crate) fn parse_loaded_document(
 }
 
 /// Inert documents reuse the tokenizer with cancellation and strict capacity
-/// admission. Only this caller retains document-level declaration metadata.
+/// admission. The returned index identifies the actual retained doctype node.
 pub(crate) fn parse_inert_html(
     input: &str, nodes: usize, check_cancel: &dyn Fn() -> Result<(), String>,
 ) -> Result<(Document, Option<usize>), String> {

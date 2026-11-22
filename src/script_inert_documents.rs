@@ -1307,7 +1307,8 @@ impl Bridge<'_> {
                         return Err("Cloning this inert document node is unavailable.".into()),
                 }
             };
-            payload = payload.saturating_add(string_bytes)
+            let owned=match &kind {Kind::Element(text)=>text.capacity(),Kind::Text(text)=>text.capacity(),Kind::ProcessingInstruction{target,data}=>target.capacity().saturating_add(data.capacity()),Kind::Doctype(data)=>data.capacity(),_=>0};
+            payload = payload.saturating_add(owned)
                 .saturating_add(children.capacity().saturating_mul(size_of::<u32>()));
             staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
         }

@@ -620,6 +620,9 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if self.doctype_receiver(object)&&matches!(method,"appendChild"|"insertBefore"|"replaceChild"|"removeChild"){
+            return Err(if method=="removeChild"{("NotFoundError","A DocumentType has no children.".into())}else{("HierarchyRequestError","A DocumentType cannot contain children.".into())});
+        }
         if method==script_inert_documents::CREATE_DOCTYPE {
             let invalid=match args.first(){Some(Value::String(s))=>s.encode_utf16().any(|u|matches!(u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),Some(Value::StringUnits(s))=>s.iter().any(|u|matches!(*u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),_=>false};
             if invalid{return Err(("InvalidCharacterError","Invalid doctype name.".into()));}
@@ -691,11 +694,11 @@ impl Bridge<'_> {
                     return self.validate_inert_fragment_insertion(object, template, method, args);
                 }
             }
-            if !matches!(args.first(), Some(Value::Host(handle)) if node_index(*handle).is_some()) {
-                return Err(("TypeError", format!("{method} requires a DOM node.")));
-            }
             if method!="removeChild"&&args.first().is_some_and(|value|matches!(value,Value::Host(handle) if self.doctype_receiver(*handle))) {
                 return Err(("HierarchyRequestError","DocumentType requires a Document parent.".into()));
+            }
+            if !matches!(args.first(), Some(Value::Host(handle)) if node_index(*handle).is_some()) {
+                return Err(("TypeError", format!("{method} requires a DOM node.")));
             }
             if method == "insertBefore"
                 && !matches!(

@@ -54,6 +54,10 @@ var empty=impl.createDocumentType('','','');if(empty.name!==''||empty.publicId!=
 log='';var caught=false;try{impl.createDocumentType({toString:function(){log+='n';return 'invalid name';}},{toString:function(){log+='p';return '';}},{toString:function(){log+='s';return '';}});}catch(e){caught=e.name==='InvalidCharacterError';}if(!caught||log!=='nps')throw 'ordered conversions before name validation';
 log='';caught=false;try{make.call({}, {toString:function(){log+='bad';return '';}},'','');}catch(e){caught=e instanceof TypeError;}if(!caught||log!=='')throw 'brand before conversion';
 var owner=impl.createHTMLDocument('owner'),inert=owner.implementation.createDocumentType('Original','\ud800','\udfff'),copy=inert.cloneNode(),imported=document.importNode(inert,true);if(inert.ownerDocument!==owner||copy.ownerDocument!==owner||copy.publicId.charCodeAt(0)!==0xd800||imported.ownerDocument!==document||imported.systemId.charCodeAt(0)!==0xdfff)throw 'associated inert implementation owner';
+var element=document.createElement('span'),fragment=document.createDocumentFragment(),inertFragment=owner.createDocumentFragment();
+for(var destination of [element,fragment,owner.body,inertFragment]){caught=false;try{destination.appendChild(inert);}catch(e){caught=e.name==='HierarchyRequestError';}if(!caught||inert.parentNode!==null)throw 'doctype hierarchy precedes adoption';}
+for(var parent of [dt,inert]){caught=false;try{Node.prototype.appendChild.call(parent,element);}catch(e){caught=e.name==='HierarchyRequestError';}if(!caught||element.parentNode!==null||parent.childNodes.length)throw 'doctype cannot own children';}
+
 "#);
     assert!(!page.has_navigation_request());let(a,b,c)=page.take_image_changes();assert!(a.is_empty()&&b.is_empty()&&c.is_empty());
     assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());

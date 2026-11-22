@@ -33,11 +33,11 @@ fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
     assert_eq!(outcome.errors, 0, "{source}\n{}", page.report());
     no_effects(page);
 }
-fn fixture() -> (Document, Forms, Page) {
+fn fixture_with_profile(browser:bool) -> (Document, Forms, Page) {
     let mut doc = crate::html::parse("<!doctype html><title>Original container owners</title><body><main id=main><div id=container></div></main><form id=form><input id=neighbor name=neighbor value=original></form>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
+    let mut page = if browser {Page::new()}else{Page::for_test()};
     let source = location("https://container-owner.test/source");
     page.set_location(&source);
     page.set_resource_base(&source);
@@ -66,6 +66,8 @@ var read=F('node','return node.toString;'),invoke=F('method','node','return meth
     );
     (doc, forms, page)
 }
+
+fn fixture()->(Document,Forms,Page){fixture_with_profile(false)}
 
 #[test]
 fn dom_class_heritage_links_real_interface_objects_without_creating_elements() {
@@ -223,7 +225,7 @@ if(mainBody.toString()!=='[object HTMLBodyElement]'||childBody.toString()!=='[ob
 
 #[test]
 fn container_object_realms_child_construction_and_own_storage_remain_unimplemented() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_with_profile(true);
     run(&mut doc, &mut forms, &mut page, "if(childHtml.toString()!=='[object HTMLHtmlElement]'||childBody.toString()!=='[object HTMLBodyElement]')throw 'admitted concrete child controls';");
     let nodes = format!("{:?}", doc.nodes);
     let commits = page.state.dom_commits;
@@ -307,7 +309,7 @@ if(childBody.toString()!=='[object HTMLBodyElement]'||!(tag in childBody))throw 
 
 #[test]
 fn container_object_realms_inherited_author_setters_retain_rhs_without_own_native_storage() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_with_profile(true);
     let nodes = format!("{:?}", doc.nodes);
     let commits = page.state.dom_commits;
     let neighbor = id(&doc, "neighbor");

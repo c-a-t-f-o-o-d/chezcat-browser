@@ -3874,6 +3874,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
         if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
 
@@ -4414,8 +4415,8 @@ impl Host for Bridge<'_> {
             if matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | script_inert_documents::GET) {
                 return receiver == DOCUMENT || self.inert_document(receiver);
             }
-            if crate::javascript::DOCUMENT_TYPE_GETTERS.iter().any(|(_,operation)|*operation==method){return self.event_target_interface(object)&&self.doctype_receiver(receiver);}
-        if method == PROCESSING_INSTRUCTION_TARGET_GET {
+            if crate::javascript::DOCUMENT_TYPE_GETTERS.iter().any(|(_,operation)|*operation==method){return self.doctype_receiver(receiver);}
+            if method == PROCESSING_INSTRUCTION_TARGET_GET {
                 return self.processing_instruction_receiver(receiver);
             }
             if method == HTML_TEMPLATE_CONTENT_GET { return self.template_receiver(receiver); }
@@ -5494,9 +5495,8 @@ impl Host for Bridge<'_> {
                 // This browser does not send Referer or populate a document
                 // referrer. Expose the actual empty value of that policy.
                 "referrer" => Ok(Value::String(String::new())),
-                // ChezCat currently has one standards layout mode and never
-                // prerenders a hidden speculative document. Report that actual
-                // behavior; quirks-mode layout is not implemented.
+                // Report the actual native document mode. Full quirks layout
+                // consumers remain a separate integration contract.
                 "compatMode" => Ok(Value::String(self.doc.mode.compat_mode().into())),
                 "doctype"=>{self.state.work(self.doc.nodes[0].children.len())?;Ok(self.doc.nodes[0].children.iter().copied().find(|&node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_))).map_or(Value::Null,|node|Value::Host(node_handle(node))))},
                 "prerendering" => Ok(Value::Bool(false)),
@@ -7466,7 +7466,7 @@ document.title=stringify.call(saved)+'|'+document.URL+'|'+document.documentURI;
     #[test]
     fn native_document_methods_metadata_body_load_and_random_match_actual_capabilities() {
         let (doc, _, page, outcome) = setup(
-            "<html><body><p id='out'>Hello</p></body></html>",
+            "<!doctype html><html><body><p id='out'>Hello</p></body></html>",
             &[r#"
 if(typeof document.getElementById!=='function' || document.getElementById!==document.getElementById)throw Error('method identity');
 var get=document.getElementById;

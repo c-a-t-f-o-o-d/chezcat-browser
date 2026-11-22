@@ -143,11 +143,6 @@ impl Bridge<'_> {
                 },
                 crate::html::Namespace::None,
             ),
-            // Doctypes are non-elements. Their data has no selector semantics
-            // in the supported grammar; no corresponding DOM node is created.
-            None if self.inert_node_type(handle) == Some(10) => {
-                (NodeKind::DocumentFragment, crate::html::Namespace::None)
-            }
             _ => return Err("Inert selector node is unavailable.".into()),
         };
         let node = Node {

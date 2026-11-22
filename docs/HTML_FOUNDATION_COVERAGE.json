@@ -227,8 +227,10 @@
         {
           "id": "F01.01",
           "requirement": "HTML/XML kind, MIME, encoding, URL/origin, document modes and doctype",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "Native document-record increment: eight focused original checks, including actual App across all three stored modes, pass. 305 affected checks pass; the separate standards-metadata fixture now supplies its intended HTML doctype. Frozen loaded-doctype/HTML-factory/Text/Attr/USV/owner witnesses pass; XML factory and arbitrary element namespaces still fail. No browser WPT or full parser/layout closure."
+          ],
           "dependency_details": [],
           "detail_requirements": [
             {
@@ -245,7 +247,7 @@
                 "DOMImplementation.createDocument/createHTMLDocument",
                 "loader MIME commit"
               ],
-              "status": "absent",
+              "status": "partial",
               "source_anchors": [
                 "src/html.rs",
                 "src/host_objects.rs",
@@ -262,7 +264,7 @@
                 "F01-xml-document-factory-and-namespace"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Shared explicit DocumentKind and DocumentMode records now travel with supported native documents and scratch views. HTML producers retain actual ownership and MIME metadata. XML constructors/factories and MIME/XML routing remain required and unavailable; the fixed XML-factory witness still fails.",
               "closing_evidence": []
             },
             {
@@ -317,7 +319,11 @@
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/html_doctype.rs",
+                "src/script_dom_parser.rs",
+                "src/script_native_document_records_tests.rs",
+                "src/app_native_document_records_tests.rs"
               ],
               "integration_dependencies": [
                 "F05",
@@ -327,7 +333,7 @@
                 "F01-loaded-doctype-node"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Genuine loaded/inert/factory doctype payloads, canonical getters, exact DOMStrings, owner/order, clone/import, hierarchy refusal, allocation refusal/recovery and cancellation have native original evidence. Frozen loaded-doctype witness passes. Document-root mutation/adoption, full parser recovery and unchanged browser WPT remain open; no package closure.",
               "closing_evidence": []
             },
             {
@@ -345,13 +351,16 @@
                 "compatMode",
                 "layout"
               ],
-              "status": "absent",
+              "status": "partial",
               "source_anchors": [
                 "src/html.rs",
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/html_document_mode.rs",
+                "src/html_doctype.rs",
+                "src/app_native_document_records_tests.rs"
               ],
               "integration_dependencies": [
                 "F05",
@@ -360,7 +369,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Iterative doctype producer applies the reviewed normative identifier classification and retains all three distinct native modes. Main/inert compatMode consumes that state; HTML factory/initial blank are no-quirks and native views inherit owner state. Original App checks exercise all three records without rendering doctype boxes. Full F05 initial/tree recovery, F07 fragment-mode inheritance and F13 quirks layout remain required; native mode/API evidence does not close those integrations.",
               "closing_evidence": []
             }
           ]
