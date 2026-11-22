@@ -40,7 +40,9 @@ impl Bridge<'_> {
         })
     }
     pub(super) fn validate_svg_edge(&mut self, parent: u32, child: u32) -> Result<(), String> {
-        self.state.work(1)?;
+        self.state.work(1)?;self.validate_svg_activation_edge(parent,child)
+    }
+    pub(super) fn validate_svg_activation_edge(&self,parent:u32,child:u32)->Result<(),String>{
         let (pns, ptag, _) = self
             .svg_node_facts(parent)
             .ok_or("SVG parent identity is unavailable.")?;

@@ -85,7 +85,8 @@ impl Bridge<'_> {
                         append(self.state, &mut out, piece)?;
                     }
                 }
-                NodeKind::Element { tag, attrs, .. } => {
+                NodeKind::Element { tag, attrs, expanded_name, .. } => {
+                    if crate::html::element_names::raw_name(expanded_name){return Err("Scalar HTML serialization of raw Element names remains unsupported.".into());}
                     if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
                     if end { append(self.state, &mut out, "</")?; append(self.state, &mut out, tag)?; append(self.state, &mut out, ">")?; continue; }
                     write_open_tag(self.state, &mut out, tag, attrs)?;

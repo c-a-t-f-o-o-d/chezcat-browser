@@ -2470,7 +2470,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             while bytes.get(position).is_some_and(|b| ident(*b)) {
                 position += 1;
             }
-            part.tag = Some(source[start..position].to_ascii_lowercase());
+            part.tag = Some(source[start..position].to_owned());
             specificity.2 += 1;
         }
         loop {
@@ -2814,10 +2814,10 @@ fn html_attribute_insensitive(name: &str) -> bool {
 }
 
 fn ident_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || matches!(byte, b'_' | b'-')
+    byte.is_ascii_alphabetic() || byte>=0x80 || matches!(byte, b'_' | b'-')
 }
 fn ident(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
+    byte.is_ascii_alphanumeric() || byte>=0x80 || matches!(byte, b'_' | b'-')
 }
 
 struct MatchContext<'a> {
@@ -2938,7 +2938,8 @@ fn matches_selector(
         }
         *budget -= 1;
         let Some(crate::html::Node {
-            kind: NodeKind::Element { tag, id, .. },
+            kind: NodeKind::Element { tag, id, expanded_name, .. },
+            namespace,
             ..
         }) = context.doc.nodes.get(node)
         else {
@@ -2966,7 +2967,7 @@ fn matches_selector(
         if compound
             .tag
             .as_ref()
-            .is_some_and(|expected| !context.equal(tag, expected, false, budget))
+            .is_some_and(|expected| !context.text_work(tag.len().saturating_add(crate::html::element_names::copied_bytes(expanded_name)),budget)||!crate::html::element_names::local_matches(tag,expanded_name,expected,*namespace==crate::html::Namespace::Html&&context.doc.kind==crate::html::DocumentKind::Html))
         {
             return false;
         }

@@ -609,6 +609,7 @@ impl Bridge<'_> {
             let invalid=match args.first(){Some(Value::String(s))=>s.encode_utf16().any(|u|matches!(u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),Some(Value::StringUnits(s))=>s.iter().any(|u|matches!(*u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),_=>false};
             if invalid{return Err(("InvalidCharacterError","Invalid doctype name.".into()));}
         }
+        if object==DOCUMENT&&method=="createElement"{if let Some(name)=args.first(){if !super::script_attribute_names::valid_element_local_name_dom(super::script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
         if object==DOCUMENT && method=="createAttribute" {
             if let Some(Value::String(name))=args.first() {if !super::script_attribute_names::valid_attribute_name(name) {return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
         }
@@ -618,9 +619,7 @@ impl Bridge<'_> {
             }
         }
         if (object == DOCUMENT || self.inert_document(object)) && method=="createElementNS" {
-            if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
-                super::script_attribute_names::validate_element_namespace_value(namespace,name)?;
-            }
+            if let(Some(namespace),Some(name))=(args.first(),args.get(1)){super::script_attribute_names::validate_element_namespace_dom(namespace,super::script_attribute_names::converted_name(name)?)?;}
         }
         if matches!(method,"setAttributeNode"|"setAttributeNodeNS") && node_index(object).is_some() {return self.validate_attr_attachment(object,args);}
         if method == "replaceChild" && node_index(object).is_some() {
@@ -637,25 +636,6 @@ impl Bridge<'_> {
         }
         if method == "removeAttributeNode" && node_index(object).is_some() {
             return self.validate_attr_removal(object, args);
-        }
-        if (object == DOCUMENT || self.inert_document(object)) && method == "createElement" {
-            if let Some(Value::String(name)) = args.first() {
-                // This HTML subset accepts bounded ASCII element names. Other
-                // namespaces and customized built-in element options are absent.
-                if name.is_empty()
-                    || name.len() > 128
-                    || !name.as_bytes()[0].is_ascii_alphabetic()
-                    || !name.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.')
-                    })
-                {
-                    return Err((
-                        "InvalidCharacterError",
-                        "Element name is outside the supported ASCII name syntax (128 bytes)."
-                            .into(),
-                    ));
-                }
-            }
         }
         if node_index(object).is_some()
             && matches!(method, "appendChild" | "insertBefore" | "removeChild")
@@ -1722,6 +1702,7 @@ impl Bridge<'_> {
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return self.create_attribute(args,method=="createAttributeNS").map(Some);}
         if object==DOCUMENT&&method=="createElementNS"{return self.create_expanded_element(object,args).map(Some);}
+        if object==DOCUMENT&&method=="createElement"&&(matches!(args.first(),Some(Value::StringUnits(_)))||matches!(args.first(),Some(Value::String(s)) if !s.is_ascii())){return self.create_raw_local_element(object,args).map(Some);}
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
             let value=args.first().ok_or("DOM creation requires one argument.")?;
             let text = if method=="createElement"{DomString::from(self.text(value)?)}else{self.dom_text(value)?};

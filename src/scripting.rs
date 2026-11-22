@@ -3578,7 +3578,9 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        (script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
+        index==0&&dom_collections::operation(method).is_some_and(|(name,_)|name=="getElementsByTagName")
+            ||index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
+            ||(script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
             ||index==0&&matches!(method,"getAttribute"|"getAttributeNode"|"setAttribute"|"removeAttribute"|"hasAttribute")
             ||index==1&&matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS")
             ||script_named_map::operation(method).is_some_and(|name|name=="getNamedItem"&&index==0||name=="getNamedItemNS"&&index==1)
@@ -4016,7 +4018,7 @@ impl Host for Bridge<'_> {
         if let Some(ns)=script_attr::factory_operation(method){return self.validate_attribute_factory(object,args,ns);}
         if let Some((_,document))=dom_collections::operation(method){return if self.collection_interface_receiver(object)==Some(document){Ok(())}else{Err(("TypeError","Live collection method requires its genuine Document or Element receiver.".into()))};}
         if method==xml_documents::CREATE{return self.validate_xml_document_factory(args);}
-        if method=="createElement"&&self.inert_document(object){if let Some(Value::String(name))=args.first(){if !script_attribute_names::valid_element_local_name(name){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
+        if method=="createElement"&&self.inert_document(object){if let Some(name)=args.first(){if !script_attribute_names::valid_element_local_name_dom(script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
 
         if self.event_target_interface(object)&&matches!(method,"XMLHttpRequestEventTarget"|"XMLHttpRequestUpload"){return Err(("TypeError","Illegal request interface constructor.".into()));}
         if method.starts_with("\0XHR.") {
@@ -8702,3 +8704,7 @@ mod attribute_name_tests;
 #[cfg(test)]
 #[path="script_attribute_clone_tests.rs"]
 mod attribute_clone_tests;
+
+#[cfg(test)]
+#[path="script_element_name_units_tests.rs"]
+mod element_name_units_tests;

@@ -18,19 +18,13 @@ pub(super) struct TagCollection {
 
 enum Filter {
     Children(u32),
-    Tag(String,bool),
+    Tag(DomString,bool),
     Classes(Vec<String>),
 }
-fn qualified_matches(tag:&str,prefix:Option<&str>,name:&str,lowercase:bool)->bool{
-    let actual=prefix.unwrap_or("").bytes().chain(prefix.map(|_|b':')).chain(tag.bytes());
-    actual.eq(name.bytes().map(|byte|if lowercase{byte.to_ascii_lowercase()}else{byte}))
+fn qualified_matches(local:crate::dom_string::DomStringRef<'_>,prefix:Option<&DomString>,name:&DomString,lowercase:bool)->bool{
+    let actual=prefix.into_iter().flat_map(DomString::code_units).chain(prefix.map(|_|0x3a)).chain(local.code_units());actual.eq(name.code_units().map(|u|if lowercase&&(0x41..=0x5a).contains(&u){u+0x20}else{u}))
 }
-fn tag_matches(node:&Node,name:&str,html:bool)->Result<bool,String>{
-    let NodeKind::Element{tag,expanded_name,..}=&node.kind else{return Ok(false);};
-    if name=="*"{return Ok(true);}
-    let prefix=crate::html::element_names::prefix(node.namespace,expanded_name)?;
-    Ok(qualified_matches(tag,prefix,name,html&&node.namespace==crate::html::Namespace::Html))
-}
+fn tag_matches(node:&Node,name:&DomString,html:bool)->Result<bool,String>{let NodeKind::Element{tag,expanded_name,..}=&node.kind else{return Ok(false);};if name=="*"{return Ok(true);}let prefix=crate::html::element_names::prefix(node.namespace,expanded_name)?;let local=crate::html::element_names::local(node.namespace,tag,expanded_name)?;Ok(qualified_matches(local,prefix,name,html&&node.namespace==crate::html::Namespace::Html))}
 impl Filter {
     fn owned_bytes(&self) -> usize {
         match self {
@@ -59,13 +53,13 @@ impl Bridge<'_> {
         while let Some(node)=pending.pop(){
             visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or("Cyclic adopted collection topology.")?;self.state.work(1)?;
             let source=self.inert_import_source(node);let element=matches!(source,Some(script_inert_documents::ImportSource::Element(_)|script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{..},..},..}));
-            let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,..},..},..})=>attrs.iter().fold(tag.len()+attrs.len(),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
+            let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,expanded_name,..},..},..})=>attrs.iter().fold(tag.len()+attrs.len()+crate::html::element_names::copied_bytes(expanded_name),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
             let classes=match &self.state.dom.collections[index].filter{Filter::Classes(names)=>names.len(),_=>0};
             if classes!=0{let length=match self.inert_import_source(node){Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..})=>attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("").len(),_=>0};let scans=length.checked_mul(classes).ok_or("Adopted class scan overflow.")?;self.state.work(scans)?;self.state.copies(scans)?;}
             let filter=&self.state.dom.collections[index].filter;let source=self.inert_import_source(node);
             if matches!(source,Some(script_inert_documents::ImportSource::Parsed{node:Node{namespace:crate::html::Namespace::UnknownForeign,..},..})){return Err("Adopted collection requires known namespace provenance.".into());}
             let matched=if !element{false}else{match (filter,source){
-                (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Element(tag)))=>name=="*"||qualified_matches(tag,None,name,*html),
+                (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Element(tag)))=>name=="*"||qualified_matches(crate::dom_string::DomStringRef::Scalar(tag),None,name,*html),
                 (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Parsed{node,..}))=>tag_matches(node,name,*html)?,
                 (Filter::Classes(names),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..}))=>{let class=attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("");names.iter().all(|name|class.split(class_whitespace).any(|token|token==name))},
                 (Filter::Classes(_),_)=>false,_=>return Err("Unsupported adopted collection filter.".into()),
@@ -81,7 +75,7 @@ impl Bridge<'_> {
         object: u32,
         value: &Value,
     ) -> Result<Value, String> {
-        let name = self.text(value)?;
+        let name = self.dom_text(value)?;
         if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
         let root=object;
         let html=self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Html;
@@ -158,7 +152,7 @@ impl Bridge<'_> {
             let node=candidates[position];self.state.work(1)?;
             match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
-                Filter::Tag(_,_)=>self.state.copies(tag(self.doc,node).len())?,
+                Filter::Tag(_,_)=>{let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{unreachable!()};self.state.copies(tag.len().saturating_add(crate::html::element_names::copied_bytes(expanded_name)))?;},
                 Filter::Classes(names)=>{
                     let count=names.len();
                     let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};
