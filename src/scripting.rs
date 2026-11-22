@@ -8822,3 +8822,7 @@ mod node_equality_tests;
 #[cfg(test)]
 #[path="script_inert_position_tests.rs"]
 mod inert_position_tests;
+
+#[cfg(test)]
+#[path="script_inert_attribute_units_tests.rs"]
+mod inert_attribute_units_tests;

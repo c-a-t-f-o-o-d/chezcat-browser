@@ -6372,6 +6372,10 @@ mod node_equality_tests;
 mod inert_position_tests;
 
 #[cfg(test)]
+#[path="app_inert_attribute_units_tests.rs"]
+mod inert_attribute_units_tests;
+
+#[cfg(test)]
 #[path="app_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
 
