@@ -173,3 +173,7 @@ impl Bridge<'_>{
   }Err("Cyclic namespace lookup ancestry.".into())
  }
 }
+
+#[cfg(test)]
+#[path="script_node_namespace_lookup_storage_tests.rs"]
+mod lookup_storage_tests;

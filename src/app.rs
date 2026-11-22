@@ -6358,3 +6358,7 @@ mod document_template_clone_tests;
 #[cfg(test)]
 #[path="app_template_document_children_tests.rs"]
 mod template_document_children_tests;
+
+#[cfg(test)]
+#[path="app_node_namespace_lookup_tests.rs"]
+mod node_namespace_lookup_tests;

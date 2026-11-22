@@ -15,7 +15,7 @@ impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
             "getRootNode" => self.get_root_receiver(object),
-            "isDefaultNamespace"=>self.namespace_receiver(object),
+            "isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"=>self.namespace_receiver(object),
             "cloneNode" => self.root_node_receiver(object),
             // Prototype selection depends on the genuine Node interface. The
             // VM guards property access from its current realm, and the call

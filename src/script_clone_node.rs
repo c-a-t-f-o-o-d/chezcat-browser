@@ -126,7 +126,7 @@ impl Bridge<'_> {
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
                         if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|!matches!(self.inert_node_type(child),Some(3|4))){return Err("Imported STYLE requires plain direct text children.".into());}
-                        if !svg&&attrs.iter().any(|attr| !attr.name.namespace.is_empty()
+                        if !svg&&attrs.iter().any(|attr| !attr.name.namespace.is_empty()&&!attr.name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/")
                             || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
                         }

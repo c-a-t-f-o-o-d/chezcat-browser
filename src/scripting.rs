@@ -2483,7 +2483,7 @@ impl Bridge<'_> {
         self.attribute_dom_named_prepared(node,name,value.map(DomString::from),input)
     }
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
