@@ -112,9 +112,13 @@ with real mutation records, saved identities and native-control boundaries.
 `117bbb5`, preserves newly created inert Text identities through direct promotion
 when native backing is available. [PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435)
 at `ad58c9a` extends reservation to supported inert HTML/custom/style and SVG
-constructors; general inert subtree cloning remains open. These increments require
-a newer development build. They are outside the alpha.2 candidate and do not
-establish a new website result.
+constructors. [PR #437](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/437)
+and [PR #438](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/438) subsequently
+reserve inert subtree-clone and main-template import identities.
+[PR #439](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/439) permits genuine
+Event author chains while preserving native trust and brands. These increments
+require a newer development build; they do not update the alpha.2 candidate or
+establish a usable website.
 
 Earlier recorded **jQuery 4.0.0** app checks pass startup, trusted input and a timer update.
 Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
@@ -123,19 +127,22 @@ at 640 and 1280 px. Legacy jQuery stops during attribute detection, and ReactDOM
 stops before the component mounts. The scorecard identifies the build and last
 successful interaction for each app. [Compatibility records](docs/COMPATIBILITY.md)
 
-The latest recorded signed-out YouTube check on `cad5f7c` still shows a skeleton
+The previously reviewed signed-out YouTube check on `cad5f7c` shows a skeleton
 and reaches a script deadline during DOM traversal. PR #430 improves one original
 traversal fixture; a usable YouTube homepage or playback has not been demonstrated.
 
-### Next: a usable homepage, then search and playback
+### Next: a complete document foundation
 
-| Now | Next foundations | Later, when ready |
+| Now | Product work retained | Wider programs |
 | :--- | :--- | :--- |
-| Complete the known template, DOM, component-activation and input contracts needed for a usable signed-out YouTube homepage. | Real query/results, watch navigation and Back, then advancing decoded video and audio through shared platform behavior. | Broader compatibility, measured performance, sandboxed content processes and GPU rendering with a software fallback. |
+| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Resume the saved YouTube shell → search/results → watch/Back → playback sequence after foundation acceptance. | Complete CSS/JavaScript coverage can be planned next; media, isolation and GPU work retain their explicit contracts. |
 
-Implement known missing contracts in dependency order, using focused checks during
-development and connected App fixtures at package boundaries. Live-site checks
-measure a plausibly ready milestone; a successful PR alone is not site acceptance.
+The [coverage register](docs/HTML_FOUNDATION_COVERAGE.json) inventories requirements,
+not a conformance score. Implement known missing families in dependency order,
+use focused checks during development and connected App checks at package gates.
+Required dependencies stay open until verified; site errors do not choose the
+next task. Completing this baseline will not imply that all HTML platform APIs,
+all websites or YouTube playback work.
 
 **[Explore the full roadmap →](docs/ROADMAP.md)** for milestone IDs, dependencies,
 completion evidence, and deferred work. Isolation and GPU acceleration are planned,
@@ -304,6 +311,7 @@ and the [release procedure](docs/RELEASING.md).
 | Explore | What you will find |
 | :--- | :--- |
 | 🗺️ [**Roadmap**](docs/ROADMAP.md) | Merged work, current milestones, dependencies, and future architecture. |
+| 🧱 [**HTML/XHTML foundation plan**](docs/HTML_FOUNDATION_PLAN.md) | Standards scope, implementation packages, acceptance and the coverage register. |
 | 📋 [**Capabilities**](docs/CAPABILITIES.md) | Implemented behavior, explicit limits, and unsupported areas. |
 | 🧪 [**Compatibility**](docs/COMPATIBILITY.md) | Versioned framework/workflow observations and first remaining blockers. |
 | 🏗️ [**Architecture**](docs/ARCHITECTURE.md) | Component ownership, execution, rendering, and security boundaries. |
