@@ -26,13 +26,13 @@ var name=d.createElementNS('urn:other','q:MiXeD');if(name.ownerDocument!==d||nam
 "#);no_effects(&mut page);
 }
 #[test]
-fn native_xml_document_conversion_namespace_validation_and_unsupported_adoption_are_atomic(){
+fn native_xml_document_conversion_namespace_validation_and_doctype_adoption_are_real(){
     let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
 var order='',make=DOMImplementation.prototype.createDocument,d=make.call(document.implementation,{toString:function(){order+='n';return '\ud800';}},{toString:function(){order+='q';return 'p:Mixed';}},null);if(order!=='nq'||d.documentElement.namespaceURI.charCodeAt(0)!==0xd800||d.documentElement.ownerDocument!==d)throw 'ordered exact factory URI';
 var calls=0,caught=false;try{make.call({}, {toString:function(){calls++;return 'urn:original';}},'Mixed');}catch(e){caught=e instanceof TypeError;}if(!caught||calls)throw 'brand before conversion';
 caught=false;try{document.implementation.createDocument(null,'p:Mixed');}catch(e){caught=e.name==='NamespaceError';}if(!caught)throw 'prefix requires namespace';
 caught=false;try{document.implementation.createDocument('urn:original','Mixed',document.body);}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'doctype argument brand';
-var actual=document.doctype;caught=false;try{document.implementation.createDocument('urn:original','Mixed',actual);}catch(e){caught=e.name==='NotSupportedError';}if(!caught||document.doctype!==actual||actual.parentNode!==document||actual.ownerDocument!==document)throw 'unimplemented adoption has no prefix';
+var actual=document.doctype,moved=document.implementation.createDocument('urn:original','Mixed',actual);if(moved.doctype!==actual||document.doctype!==null||actual.parentNode!==moved||actual.ownerDocument!==moved||moved.firstChild!==actual||moved.lastChild!==moved.documentElement)throw 'genuine adoption and root order';
 "#);no_effects(&mut page);
 }
 #[test]

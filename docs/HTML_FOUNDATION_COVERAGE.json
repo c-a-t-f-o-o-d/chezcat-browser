@@ -268,7 +268,7 @@
                 "F01-xml-document-factory-and-namespace"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Real XMLDocument factory identity and optional root records now preserve actual owners, expanded names, XML case and namespace-based content types. Empty documents have no fabricated HTML nodes. Fixed HTML/XML factory witnesses pass. Non-null doctype adoption, complete document clone/root mutation, XML byte/DTD/entity/CDATA producers, MIME/XML routing and unchanged browser WPT remain required; no package closure.",
+              "supplementary_evidence": "Real XMLDocument factory identity and optional root records now preserve actual owners, expanded names, XML case and namespace-based content types. Empty documents have no fabricated HTML nodes. Fixed HTML/XML factory witnesses pass. complete document clone/root mutation, XML byte/DTD/entity/CDATA producers, MIME/XML routing and unchanged browser WPT remain required; no package closure.",
               "closing_evidence": []
             },
             {
@@ -483,7 +483,10 @@
                 "src/script_template_imports.rs",
                 "src/script_cdata.rs",
                 "src/script_native_cdata_tests.rs",
-                "src/app_native_cdata_tests.rs"
+                "src/app_native_cdata_tests.rs",
+                "src/script_xml_doctype_adoption.rs",
+                "src/script_xml_doctype_adoption_tests.rs",
+                "src/app_xml_doctype_adoption_tests.rs"
               ],
               "integration_dependencies": [
                 "F06",
@@ -492,7 +495,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Genuine native CDATA factory records preserve exact UTF-16, actual XML owner, Text/CharacterData ancestry and kind through supported clone/import/mutation/promotion. Saved identity/author fields/old-value observation, exclusive-Text normalize boundaries, Range strings, actual storage/native-slot fallback/refusal/recovery and connected Windows App text/pixels/editor/link have original evidence. HTML factory rejection and XML closing-delimiter validation preserve ordered IDL conversion. XML byte/DTD/entity/parser/serialization producers, complete CharacterData methods and unchanged browser WPT remain open; no F01/F08 closure.",
+              "supplementary_evidence": "Genuine native CDATA factory records preserve exact UTF-16, actual XML owner, Text/CharacterData ancestry and kind through supported clone/import/mutation/promotion. Saved identity/author fields/old-value observation, exclusive-Text normalize boundaries, Range strings, actual storage/native-slot fallback/refusal/recovery and connected Windows App text/pixels/editor/link have original evidence. HTML factory rejection and XML closing-delimiter validation preserve ordered IDL conversion. XML byte/DTD/entity/parser/serialization producers, complete CharacterData methods and unchanged browser WPT remain open; no F01/F08 closure. Non-null XML factory doctype adoption now moves genuine same-identity leaves from loaded main, parsed/inert or detached sources, preserving payload and updating old child lists/doctype, owner/order, removal observation and main live Ranges. Storage/copy refusal/recovery and original connected App evidence cover this producer; general root mutation/adoptNode/document clone remain required.",
               "closing_evidence": []
             }
           ]
