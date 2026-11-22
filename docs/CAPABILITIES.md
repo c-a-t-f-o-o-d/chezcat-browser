@@ -53,6 +53,12 @@ remain at `36adf20`; these later changes do not update those binaries.
 
 ## Browser and platform
 
+**Active foundation work:** the [HTML/XHTML plan](HTML_FOUNDATION_PLAN.md) defines
+required parsing, XML, DOM, element and interaction coverage. Its
+[register](HTML_FOUNDATION_COVERAGE.json) is an inventory, not evidence that those
+requirements have been implemented or passed. This matrix remains the authority
+for actual supported source behavior.
+
 | Capability | Implemented slice | Important limits |
 | :--- | :--- | :--- |
 | **Async functions, arrows and methods** | Calls return genuine Promises. Implemented await expression, assignment, call, loop, catch and finally forms suspend and resume through the Promise job queue while retaining lexical state, receiver identity and rejection reasons. | Syntax and control-flow coverage remain finite; supported generator suspension is a separate runtime path, not async generator support. Dynamic compilation, suspended storage and execution retain their resource limits. |
