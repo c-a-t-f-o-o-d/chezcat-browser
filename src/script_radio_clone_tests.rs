@@ -187,7 +187,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
             .state
             .attributes
             .iter()
-            .map(|attr| (attr.owner.and_then(node_index), attr.name.qualified.clone(), attr.value.clone()))
+            .map(|attr| (attr.owner.and_then(node_index), attr.name.qualified.clone(), attr.value.scalar().unwrap().to_owned()))
             .collect(),
         controls: forms
             .controls

@@ -2893,9 +2893,11 @@ impl<'a> MatchContext<'a> {
             }
     }
 
-    fn attribute(&self, node: usize, name: &str, budget: &mut usize) -> Option<&'a str> {
+    fn attribute(&self,node:usize,name:&str,budget:&mut usize)->Option<&'a str>{self.dom_attribute(node,name,budget).map(crate::dom_string::DomString::render_projection)}
+
+    fn dom_attribute(&self, node: usize, name: &str, budget: &mut usize) -> Option<&'a crate::dom_string::DomString> {
         if !self.charge_text {
-            return self.doc.attr(node, name);
+            return self.doc.dom_attr(node, name);
         }
         let NodeKind::Element { attrs, .. } = &self.doc.nodes.get(node)?.kind else {
             return None;
@@ -2991,10 +2993,15 @@ fn matches_selector(
             }
         }
         for attribute in &compound.attributes {
-            let Some(actual) = context.attribute(node, &attribute.name, budget) else {
+            let Some(native) = context.dom_attribute(node, &attribute.name, budget) else {
                 return false;
             };
             if let Some(expected) = &attribute.value {
+                if let Some(units)=native.raw_units(){
+                    if !attribute_substrings::matches_units(attribute,units,expected,context,budget){return false;}
+                    continue;
+                }
+                let actual=native.render_projection();
                 let matches=match attribute.operator {
                     AttributeOperator::Exact=>context.equal(actual, expected, attribute.ascii_insensitive, budget),
                     AttributeOperator::Token=>{

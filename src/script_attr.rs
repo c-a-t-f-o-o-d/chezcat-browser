@@ -11,7 +11,7 @@ pub(super) struct Attr {
     pub(super) document: u32,
     pub(super) name: AttributeName,
     // Attached values stay in the element. Removal moves the actual String here.
-    pub(super) value: String,
+    pub(super) value: DomString,
 }
 
 pub(super) fn index(handle: u32) -> Option<usize> {
@@ -104,7 +104,7 @@ impl Bridge<'_> {
         let reservation=self.prepare_attribute_storage(1,0,occupied)?;let added=reservation.added;
         self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
         let handle=ATTR_BASE+self.state.attributes.len() as u32;
-        self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name,value:String::new()});self.state.dom_committed();
+        self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name,value:DomString::new()});self.state.dom_committed();
         Ok(Value::Host(handle))
     }
 
@@ -128,18 +128,18 @@ impl Bridge<'_> {
             || self.dom_stylesheet(node) && matches!(attr.name.qualified.as_str(),"href"|"rel"|"type"|"media"|"as"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"disabled")) {
             return Err("Attribute-node adoption for active script/stylesheet settings is not implemented; no attribute was changed.".into());
         }
-        let name_bytes=attr.name.bytes();let value_bytes=attr.value.len();let value_storage=attr.value.capacity();
+        let name_bytes=attr.name.bytes();let value_bytes=attr.value.used_bytes();let value_storage=attr.value.capacity();
         self.state.copies(name_bytes.checked_mul(2).and_then(|n|n.checked_add(value_bytes)).ok_or("Attribute copy accounting overflow.")?)?;
-        let element_name=copy_name(&self.state.attributes[incoming].name)?;let write_name=copy_name(&element_name)?;let value=copy_text(&self.state.attributes[incoming].value)?;
+        let element_name=copy_name(&self.state.attributes[incoming].name)?;let write_name=copy_name(&element_name)?;let value=self.state.attributes[incoming].value.try_clone()?;
         let slot=self.attribute_slot(node,element_name.namespace_uri(),element_name.local())?;
         self.state.attribute_lookup_work()?;
         let position=self.state.attribute_position(node,&element_name);
         let old_id=position.ok().map(|position|self.state.attached_attributes[position]);
         let (old_name,old_value,old_name_storage,old_value_storage,old_id_storage)=if let Some(slot)=slot {
             let NodeKind::Element{attrs,id,..}=&self.doc.nodes[node].kind else {unreachable!()};let old=&attrs[slot];
-            self.state.copies(old.name.bytes().checked_add(old.value.len()).ok_or("Attribute copy accounting overflow.")?)?;
-            (Some(copy_name(&old.name)?),copy_text(&old.value)?,old.name.owned_bytes(),old.value.capacity(),if element_name.html_is("id"){id.as_ref().map_or(0,String::capacity)}else{0})
-        } else {(None,String::new(),0,0,0)};
+            self.state.copies(old.name.bytes().checked_add(old.value.used_bytes()).ok_or("Attribute copy accounting overflow.")?)?;
+            (Some(copy_name(&old.name)?),old.value.try_clone()?,old.name.owned_bytes(),old.value.capacity(),if element_name.html_is("id"){id.as_ref().map_or(0,String::capacity)}else{0})
+        } else {(None,DomString::new(),0,0,0)};
         let new_old_identity=slot.is_some()&&old_id.is_none();
         let removed=value_storage.checked_add(old_name_storage).ok_or("Attribute accounting overflow.")?;
         let copied_name_storage=element_name.owned_bytes();
@@ -165,7 +165,7 @@ impl Bridge<'_> {
         // can offset a temporary positive transfer balance.
         self.state.retained=if added+backing>=removed {retained_before.checked_add(added+backing-removed)}else{retained_before.checked_sub(removed-added-backing)}
             .ok_or("Attribute retained transfer overflow/underflow.")?;
-        if let Err(error)=self.public_attribute_prepared(node,write_name,Some(value),InputPreparation::Ready(input)) {self.state.retained=retained_before;return Err(error);}
+        if let Err(error)=self.public_dom_attribute(node,write_name,Some(value),InputPreparation::Ready(input)) {self.state.retained=retained_before;return Err(error);}
         if let Some(slot)=slot {let NodeKind::Element{attrs,..}=&mut self.doc.nodes[node].kind else {unreachable!()};attrs[slot].name=element_name;}
         self.commit_attribute_storage(reservation);
         let insert=match position{Ok(position)=>{self.state.attached_attributes.remove(position);position},Err(position)=>position};
@@ -176,7 +176,7 @@ impl Bridge<'_> {
             let handle=ATTR_BASE+self.state.attributes.len() as u32;
             self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name:old_name,value:old_value});Value::Host(handle)
         } else {Value::Null};
-        self.state.attributes[incoming].owner=Some(node_handle(node));self.state.attributes[incoming].document=DOCUMENT;self.state.attributes[incoming].value=String::new();
+        self.state.attributes[incoming].owner=Some(node_handle(node));self.state.attributes[incoming].document=DOCUMENT;self.state.attributes[incoming].value=DomString::new();
         self.state.attached_attributes.insert(insert,incoming);
         Ok(result)
     }
@@ -264,12 +264,12 @@ impl Bridge<'_> {
         let prior = slot.and_then(|index| attrs.get(index));
         let local = prior.map_or(local.as_str(), |attr| attr.name.local());
         let uri = prior.map_or(uri, |attr| attr.name.namespace_uri());
-        let old = prior.map(|attr| attr.value.as_str());
-        self.state.copies(local.len().saturating_add(uri.map_or(0, str::len)).saturating_add(old.map_or(0, str::len)))?;
+        let old = prior.map(|attr| &attr.value);
+        self.state.copies(local.len().saturating_add(uri.map_or(0, str::len)).saturating_add(old.map_or(0,DomString::logical_bytes)))?;
         Ok(Some(crate::javascript::NativeAttributeChange {
             local_name: local.into(),
             namespace: uri.map(str::to_owned),
-            old_value: old.map(str::to_owned),
+            old_value: old.map(Self::dom_string_copy).transpose()?,
         }))
     }
 
@@ -300,10 +300,10 @@ impl Bridge<'_> {
                     Some((owner,slot))
                 }else{None};
                 let text=if let Some((owner,slot))=location{&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].value}else{&self.state.attributes[id].value};
-                let length=text.len();if length>self.state.limits.host.string_bytes{return Err("Attr value exceeds the host string bound.".into());}
+                let length=text.logical_bytes();if length>self.state.limits.host.string_bytes{return Err("Attr value exceeds the host string bound.".into());}
                 self.state.copies(length)?;
                 let text=if let Some((owner,slot))=location{&self.element_attribute_source(owner).ok_or("Invalid Attr owner.")?[slot].value}else{&self.state.attributes[id].value};
-                Ok(Value::String(text.to_owned()))
+                Self::dom_string_copy(text)
             }
             "ownerElement" => Ok(attr.owner.map_or(Value::Null,Value::Host)),
             "ownerDocument" => {
@@ -325,14 +325,14 @@ impl Bridge<'_> {
         if !matches!(property, "value" | "nodeValue" | "textContent") {
             return Err("Attr property is read-only or unsupported.".into());
         }
-        let value = self.text(&value)?;
+        let value = self.dom_text(&value)?;
         if let Some(owner) = self.state.attributes[id].owner {
             self.state.copies(self.state.attributes[id].name.bytes())?;
             let name=copy_name(&self.state.attributes[id].name)?;
-            if self.inert_node_type(owner)==Some(1){self.write_inert_attribute(owner,name,Some(value),true)?;}
-            else{let node=node_index(owner).ok_or("Attr owner is unavailable.")?;self.public_attribute(node,name,Some(value))?;}
+            if self.inert_node_type(owner)==Some(1){self.write_inert_dom_attribute(owner,name,Some(value),true)?;}
+            else{let node=node_index(owner).ok_or("Attr owner is unavailable.")?;self.public_dom_attribute(node,name,Some(value),InputPreparation::Pending)?;}
         } else {
-            self.state.replace_storage(self.state.attributes[id].value.capacity(), value.capacity(),value.len())?;
+            self.state.replace_storage(self.state.attributes[id].value.capacity(), value.capacity(),value.used_bytes())?;
             self.state.attributes[id].value = value;
             self.state.dom_committed();
         }
@@ -366,7 +366,7 @@ impl Bridge<'_> {
         self.state.copies((self.state.attached_attributes.len()-position)*size_of::<usize>())?;
         self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
         let id=self.state.attributes.len();let handle=ATTR_BASE+id as u32;
-        self.state.attributes.push(Attr{owner:Some(owner),document,name,value:String::new()});self.state.attached_attributes.insert(position,id);Ok(Value::Host(handle))
+        self.state.attributes.push(Attr{owner:Some(owner),document,name,value:DomString::new()});self.state.attached_attributes.insert(position,id);Ok(Value::Host(handle))
     }
 
     pub(super) fn get_attribute_node(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
@@ -391,8 +391,8 @@ impl Bridge<'_> {
             let namespace=namespace(args)?;let local=self.text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
             let attrs=self.inert_element_attributes(object).ok_or("Inert attributes are unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;
             let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches(namespace,&local));let Some(slot)=slot else{return Ok(Value::Null);};
-            let length=self.inert_element_attributes(object).unwrap()[slot].value.len();if length>self.state.limits.host.string_bytes{return Err("Inert attribute value exceeds the host allowance.".into());}self.state.copies(length)?;
-            return Ok(Value::String(script_clone_node::copy_text(&self.inert_element_attributes(object).unwrap()[slot].value)?));
+            let length=self.inert_element_attributes(object).unwrap()[slot].value.logical_bytes();if length>self.state.limits.host.string_bytes{return Err("Inert attribute value exceeds the host allowance.".into());}self.state.copies(length)?;
+            return Self::dom_string_copy(&self.inert_element_attributes(object).unwrap()[slot].value);
         }
         let node = self.attr_element_node(object)?;
         let ns = namespace(args)?;
@@ -401,9 +401,9 @@ impl Bridge<'_> {
         let Some(slot) = slot else { return Ok(Value::Null); };
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
         let text = &attrs[slot].value;
-        if text.len() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
-        self.state.copies(text.len())?;
-        Ok(Value::String(text.to_owned()))
+        if text.logical_bytes() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
+        self.state.copies(text.logical_bytes())?;
+        Self::dom_string_copy(text)
     }
 
     pub(super) fn get_attribute_node_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
@@ -423,7 +423,7 @@ impl Bridge<'_> {
     pub(super) fn set_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
         let ns = namespace(args)?;
         let qualified = self.text(args.get(1).ok_or("setAttributeNS requires three arguments.")?)?;
-        let value = self.text(args.get(2).ok_or("setAttributeNS requires three arguments.")?)?;
+        let value = self.dom_text(args.get(2).ok_or("setAttributeNS requires three arguments.")?)?;
         super::script_attribute_names::validate_namespace(ns, &qualified).map_err(|(_, message)| message)?;
         let name = if let Some(uri) = ns {
             let (prefix, local) = qualified.split_once(':').map_or((None, qualified.as_str()), |(p, l)| (Some(p), l));
@@ -431,9 +431,9 @@ impl Bridge<'_> {
             let namespace = AttributeNamespace { uri: uri.into(), prefix: prefix.map(str::to_owned), local: local.into() };
             AttributeName { qualified, namespace: Some(namespace) }
         } else { AttributeName::unqualified(qualified) };
-        if self.inert_node_type(object)==Some(1){self.write_inert_attribute_ns(object,name,Some(value))?;return Ok(Value::Undefined);}
+        if self.inert_node_type(object)==Some(1){self.write_inert_dom_attribute_ns(object,name,Some(value))?;return Ok(Value::Undefined);}
         let node=self.attr_element_node(object)?;
-        self.public_attribute(node, name, Some(value))?;
+        self.public_dom_attribute(node,name,Some(value),InputPreparation::Pending)?;
         Ok(Value::Undefined)
     }
 
@@ -484,6 +484,12 @@ impl Bridge<'_> {
 
     // Resolve a raw QName or expanded name before entering this policy boundary.
     // Only real lower-case null-namespace HTML attributes have native effects.
+    pub(super) fn public_dom_attribute(&mut self,node:usize,name:AttributeName,value:Option<DomString>,input:InputPreparation)->Result<(),String>{
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) {
+            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html || name.namespace.is_some() || !name.qualified.starts_with("data-") {return Err("Unpaired attribute DOMString integration currently requires passive HTML data metadata.".into());}
+            self.attribute_dom_named_prepared(node,name,value,input)
+        }else{self.public_attribute_prepared(node,name,value.map(|v|v.into_parts().0),input)}
+    }
     pub(super) fn public_attribute(&mut self, node: usize, name: AttributeName, value: Option<String>) -> Result<(), String> {
         self.public_attribute_prepared(node,name,value,InputPreparation::Pending)
     }

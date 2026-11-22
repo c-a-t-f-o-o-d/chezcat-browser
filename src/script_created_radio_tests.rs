@@ -169,7 +169,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
             c.value.text(), c.dirty_value, (c.value.cursor, c.value.anchor, c.value.offset),
         ))).collect(),
         attributes: page.state.attributes.iter()
-            .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.clone())).collect(),
+            .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.scalar().unwrap().to_owned())).collect(),
         retained: page.state.retained,
         commits: page.state.dom_commits,
     }

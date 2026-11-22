@@ -26,7 +26,7 @@ impl Bridge<'_> {
         let old_length = slot.map_or(0, |slot| {
             self.element_attribute_source(object).unwrap()[slot]
                 .value
-                .len()
+                .logical_bytes()
         });
         self.state.copies(
             name.local()
@@ -36,9 +36,7 @@ impl Bridge<'_> {
         )?;
         let old = slot
             .map(|slot| {
-                script_clone_node::copy_text(
-                    &self.element_attribute_source(object).unwrap()[slot].value,
-                )
+                Self::dom_string_copy(&self.element_attribute_source(object).unwrap()[slot].value)
             })
             .transpose()?;
         Ok(NativeAttributeChange {

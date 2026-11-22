@@ -476,7 +476,7 @@ impl Runtime {
     fn prepare_attribute_change(&mut self,target:u32,generation:u64,mut change:NativeAttributeChange,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         let observers = self.matching_observers(target, false, Some(&change), host)?;
         if observers.is_empty() { return Ok(None); }
-        let old = change.old_value.take().map_or(Value::Null, Value::String);
+        let old = change.old_value.take().unwrap_or(Value::Null);
         let change = Rc::new(change);
         let mut entries = Vec::new();
         entries.try_reserve_exact(observers.len()).map_err(|_| Fault::new("Cannot reserve attribute records."))?;

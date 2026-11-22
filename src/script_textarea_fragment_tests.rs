@@ -318,7 +318,7 @@ impl Snapshot {
                 .state
                 .attributes
                 .iter()
-                .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.clone()))
+                .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.scalar().unwrap().to_owned()))
                 .collect(),
             retained: page.state.retained,
             commits: page.state.dom_commits,

@@ -58,3 +58,31 @@ fn native_dom_string_unreserved_inert_import_charges_all_owned_code_units_and_pr
     drop(bridge);
     run(&mut doc,&mut forms,&mut page,"var instruction=owner.createProcessingInstruction('original','\\udfff'),copy=document.importNode(instruction,true);if(copy.data!==instruction.data||copy.data.charCodeAt(0)!==0xdfff||copy.target!=='original'||copy.ownerDocument!==document||instruction.ownerDocument!==owner)throw 'real instruction copy';");
 }
+
+#[test]
+fn native_dom_string_attributes_alias_observe_detach_transfer_clone_import_and_promote(){
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var mount=document.getElementById('mount'),root=document.createElement('unit-card'),calls=0;
+root.setAttribute('data-original',{toString:function(){calls++;return '\ud800A';}});
+var attr=root.getAttributeNode('data-original'),list=root.attributes,observer=new MutationObserver(function(){});
+observer.observe(root,{attributes:true,attributeOldValue:true});
+if(calls!==1||attr.value.charCodeAt(0)!==0xd800||root.getAttribute('data-original')!==attr.value||root.getAttributeNS(null,'data-original')!==attr.value||root.dataset.original!==attr.value)throw 'actual Attr DOMString';if(root.matches('[data-original=\"�A\"]')||!root.matches('[data-original]')||!root.matches('[data-original$=A]')||!root.matches('[data-original*=A]'))throw 'selectors compare exact native units';
+attr.nodeValue='\udfffB';var records=observer.takeRecords();if(records.length!==1||records[0].oldValue.charCodeAt(0)!==0xd800||records[0].target!==root||list[0]!==attr||attr.textContent.charCodeAt(0)!==0xdfff)throw 'exact attached alias and observation';
+var copy=root.cloneNode(true),imported=document.importNode(root,true);if(copy.getAttribute('data-original')!==attr.value||imported.getAttributeNode('data-original').value!==attr.value)throw 'actual attribute copies';
+root.removeAttribute('data-original');records=observer.takeRecords();if(attr.ownerElement!==null||attr.value.charCodeAt(0)!==0xdfff||records.length!==1||records[0].oldValue!==attr.value)throw 'retained detached value';attr.textContent='\ud800';root.setAttributeNode(attr);if(attr.ownerElement!==root||root.getAttribute('data-original').charCodeAt(0)!==0xd800||root.attributes[0]!==attr)throw 'real attachment';
+var t=document.createElement('template'),owner=t.content.ownerDocument,inert=owner.createElement('unit-card');t.content.appendChild(inert);inert.setAttribute('data-original','\udfff');var saved=inert.getAttributeNode('data-original');var io=new MutationObserver(function(){});io.observe(inert,{attributes:true,attributeOldValue:true});saved.value='\ud800';records=io.takeRecords();if(saved.ownerDocument!==owner||inert.getAttributeNS(null,'data-original').charCodeAt(0)!==0xd800||records[0].oldValue.charCodeAt(0)!==0xdfff)throw 'inert exact aliases';var inertCopy=inert.cloneNode(true),mainCopy=document.importNode(inert,true);if(inertCopy.getAttribute('data-original')!==saved.value||mainCopy.getAttribute('data-original')!==saved.value)throw 'inert exact copies';mount.appendChild(t.content);if(saved.ownerDocument!==document||saved.ownerElement!==inert||inert.getAttribute('data-original').charCodeAt(0)!==0xd800)throw 'promoted actual Attr';
+"#);
+}
+#[test]
+fn native_dom_string_attribute_storage_refusal_and_active_consumer_refusal_are_atomic(){
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,"var root=document.createElement('span');root.setAttribute('data-original','x');var attr=root.getAttributeNode('data-original'),observer=new MutationObserver(function(){});observer.observe(root,{attributes:true,attributeOldValue:true});");
+    let before=(page.state.retained,page.state.dom_commits);let limit=page.state.retained_limit;
+    page.state.retained_limit=before.0+3;
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"attr.value='\\ud800';").errors,1);
+    assert_eq!((page.state.retained,page.state.dom_commits),before);page.state.retained_limit=limit;
+    run(&mut doc,&mut forms,&mut page,"if(attr.value!=='x'||observer.takeRecords().length)throw 'no publication';attr.value='\\ud800';if(observer.takeRecords()[0].oldValue!=='x')throw 'recovery';");
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"root.setAttribute('style','\\udfff');").errors,1);
+    run(&mut doc,&mut forms,&mut page,"if(root.getAttribute('style')!==null||observer.takeRecords().length||attr.value.charCodeAt(0)!==0xd800)throw 'active guard kept native values';");
+}

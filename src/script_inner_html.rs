@@ -42,7 +42,7 @@ pub(super) fn write_open_tag(state: &mut State, out: &mut String, tag: &str, att
         if let Some(prefix) = prefix { append(state, out, prefix)?; append(state, out, attr.name.local())?; }
         else { append(state, out, &attr.name.qualified)?; }
         append(state, out, "=\"")?;
-        escaped(state, out, &attr.value, true, false)?;
+        escaped(state, out, attr.value.scalar()?, true, false)?;
         append(state, out, "\"")?;
     }
     append(state, out, ">")?;

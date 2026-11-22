@@ -83,3 +83,23 @@ pub(super) fn matches(
         AttributeOperator::Exact | AttributeOperator::Token => unreachable!(),
     }
 }
+
+// Native unpaired units must never compare as their display replacements.
+// The existing scalar fast paths remain unchanged. Raw comparisons precharge
+// their full comparison bound and allocate no input-sized scratch storage.
+pub(super) fn matches_units(selector:&AttributeSelector,actual:&[u16],expected:&str,context:&MatchContext<'_>,budget:&mut usize)->bool{
+    let count=expected.encode_utf16().count();
+    let cost=actual.len().saturating_add(1).saturating_mul(expected.len().saturating_add(1));
+    if !context.text_work(cost,budget){return false;}
+    let fold=|u:u16|if selector.ascii_insensitive&&(65..=90).contains(&u){u+32}else{u};
+    let equal=|units:&[u16]|units.iter().copied().map(fold).eq(expected.encode_utf16().map(fold));
+    match selector.operator {
+        AttributeOperator::Exact=>equal(actual),
+        AttributeOperator::Token=>count!=0&&!expected.bytes().any(|b|matches!(b,b' '|b'\t'|b'\n'|b'\r'|0x0c))
+            &&actual.split(|u|matches!(*u,0x20|0x09|0x0a|0x0d|0x0c)).any(equal),
+        AttributeOperator::Dash=>actual.len()>=count&&(actual.len()==count||actual[count]==0x2d)&&equal(&actual[..count]),
+        AttributeOperator::Prefix=>count!=0&&actual.len()>=count&&equal(&actual[..count]),
+        AttributeOperator::Suffix=>count!=0&&actual.len()>=count&&equal(&actual[actual.len()-count..]),
+        AttributeOperator::Substring=>count!=0&&actual.len()>=count&&actual.windows(count).any(equal),
+    }
+}

@@ -340,12 +340,15 @@ impl Bridge<'_> {
     }
     pub(super) fn set_inert_attribute(&mut self,object:u32,args:&[Value])->Result<Value,String>{
         let name=crate::html::AttributeName::unqualified(self.text(args.first().ok_or("setAttribute requires a name.")?)?);
-        let value=self.text(args.get(1).ok_or("setAttribute requires a value.")?)?;
-        self.write_inert_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
+        let value=self.dom_text(args.get(1).ok_or("setAttribute requires a value.")?)?;
+        self.write_inert_dom_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
     }
-    pub(super) fn write_inert_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded)}
-    pub(super) fn write_inert_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,true,false)}
-    fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<String>,expanded:bool,require_existing:bool)->Result<(),String>{
+    pub(super) fn write_inert_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),expanded,expanded)}
+    pub(super) fn write_inert_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),true,false)}
+    pub(super) fn write_inert_dom_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,true,false)}
+    pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded)}
+    fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool)->Result<(),String>{
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (name.namespace.is_some()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let owner_document=inert.owner;
         let (source,initial_template)=match inert.kind{
@@ -375,8 +378,8 @@ impl Bridge<'_> {
         if let Some((position,_))=attached{self.state.copies((self.state.attached_attributes.len()-position-1)*size_of::<usize>())?;}
         let actual=slot.map_or(&name,|slot|&self.inert_element_attributes(object).unwrap()[slot].name);
         let mirror=usize::from(actual.html_is("id")||actual.html_is("href"));
-        let input=name.owned_bytes().checked_add(value.as_ref().map_or(0,String::capacity)).ok_or("Inert attribute input storage overflow.")?;
-        let added=if value.is_some(){input.checked_add(if slot.is_none(){size_of::<crate::html::Attribute>()}else{0}).and_then(|bytes|bytes.checked_add(value.as_ref().map_or(0,String::len).saturating_mul(mirror))).ok_or("Inert attribute staging storage overflow.")?}else{0};
+        let input=name.owned_bytes().checked_add(value.as_ref().map_or(0,DomString::capacity)).ok_or("Inert attribute input storage overflow.")?;
+        let added=if value.is_some(){input.checked_add(if slot.is_none(){size_of::<crate::html::Attribute>()}else{0}).and_then(|bytes|bytes.checked_add(value.as_ref().map_or(0,DomString::used_bytes).saturating_mul(mirror))).ok_or("Inert attribute staging storage overflow.")?}else{0};
         if minimum.checked_add(added).is_none_or(|bytes|bytes>self.state.retained_limit.saturating_sub(self.state.retained)){return Err("Inert attribute source copy allowance exhausted.".into());}
         self.state.copies(minimum.saturating_add(added))?;
         let mut kind=if let Some(source)=source{script_clone_node::copy_node_kind(&self.parsed_source(source).unwrap().0.kind)?}else{
@@ -435,14 +438,14 @@ impl Bridge<'_> {
         let Some(index) = attrs.iter().position(|attr| attr.name.qualified == name) else {
             return Ok(Value::Null);
         };
-        let size = attrs[index].value.len();
+        let size = attrs[index].value.logical_bytes();
         if size > self.state.limits.host.string_bytes {
             return Err("Attribute value exceeds the host string bound.".into());
         }
         self.state.copies(size)?;
         let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
         let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
-        Ok(Value::String(attrs[index].value.clone()))
+        Self::dom_string_copy(&attrs[index].value)
     }
 
     pub(super) fn checked_inert_fragment(&self, object: u32) -> Option<Option<u32>> {

@@ -272,20 +272,20 @@ impl Bridge<'_> {
         let prior = slot.map(|slot| &self.inert_element_attributes(object).unwrap()[slot]);
         let name = prior.map_or(local.as_str(), |attr| attr.name.local());
         let uri = prior.map_or(namespace, |attr| attr.name.namespace_uri());
-        let old = prior.map(|attr| attr.value.as_str());
+        let old = prior.map(|attr| &attr.value);
         self.state.copies(
             name.len()
                 .saturating_add(uri.map_or(0, str::len))
-                .saturating_add(old.map_or(0, str::len)),
+                .saturating_add(old.map_or(0,DomString::logical_bytes)),
         )?;
         let prior = slot.map(|slot| &self.inert_element_attributes(object).unwrap()[slot]);
         let name = prior.map_or(local.as_str(), |attr| attr.name.local());
         let uri = prior.map_or(namespace, |attr| attr.name.namespace_uri());
-        let old = prior.map(|attr| attr.value.as_str());
+        let old = prior.map(|attr| &attr.value);
         Ok(Some(NativeAttributeChange {
             local_name: name.into(),
             namespace: uri.map(str::to_owned),
-            old_value: old.map(str::to_owned),
+            old_value: old.map(Self::dom_string_copy).transpose()?,
         }))
     }
 }
