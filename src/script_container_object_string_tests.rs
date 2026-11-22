@@ -352,7 +352,7 @@ access.restore();
 if (childBody.toString() !== '[object HTMLBodyElement]' || childBody.ownerDocument !== frame.contentDocument)
     throw 'child container canonical restoration';
 
-var locationWrites = 0, attrWrites = 0,
+var locationWrites = 0, attrWrites = 0, attrReceiver = null, attrValue = null,
     attr = document.getElementById('container').getAttributeNode('id');
 Object.defineProperty(Object.prototype, 'prototype', {
     configurable: true,
@@ -360,28 +360,30 @@ Object.defineProperty(Object.prototype, 'prototype', {
 });
 Object.defineProperty(Node.prototype, 'unimplementedAuthorKey', {
     configurable: true,
-    set: function(v) { attrWrites++; }
+    set: function(v) { attrWrites++; attrReceiver = this; attrValue = v; }
 });
 "#);
     assert_eq!(out.errors, 0, "{}", page.report());
     let commits = page.state.dom_commits;
     for statement in [
         "location.prototype = value;",
-        "attr.unimplementedAuthorKey = value;",
     ] {
         let out = page.console_eval(&mut doc, &mut forms, statement);
         assert_eq!(out.errors, 1, "{statement}\n{}", page.report());
         assert_eq!(page.state.dom_commits, commits);
         assert!(!page.has_navigation_request());
     }
+    let out=page.console_eval(&mut doc,&mut forms,"attr.unimplementedAuthorKey = value;");
+    assert_eq!(out.errors,0,"{}",page.report());
+    assert_eq!(page.state.dom_commits,commits);
     let out = page.console_eval(
         &mut doc,
         &mut forms,
         r#"
-if (locationWrites !== 0 || attrWrites !== 0 || record.calls !== 1
+if (locationWrites !== 0 || attrWrites !== 1 || attrReceiver !== attr || attrValue !== value || record.calls !== 1
     || location.href !== 'https://container-string.test/setters'
     || attr.value !== 'container' || attr.ownerElement !== document.getElementById('container'))
-    throw 'unsupported writes invoked author setters or changed native state';
+    throw 'Location refusal and genuine Attr author setter preserve native state';
 delete Object.prototype.prototype;
 delete Node.prototype.unimplementedAuthorKey;
 if (childBody.toString() !== '[object HTMLBodyElement]')
