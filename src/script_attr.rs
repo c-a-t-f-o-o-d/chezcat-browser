@@ -4,6 +4,7 @@ use super::*;
 use crate::html::{AttributeName, AttributeNamespace};
 
 pub(super) const ATTR_BASE: u32 = 0x8200_0000;
+pub(super) fn node_method(method:&str)->bool{matches!(method,"getAttributeNode"|"getAttributeNodeNS"|"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")}
 pub(super) fn factory_operation(method:&str)->Option<bool>{match method{crate::javascript::DOCUMENT_CREATE_ATTRIBUTE=>Some(false),crate::javascript::DOCUMENT_CREATE_ATTRIBUTE_NS=>Some(true),_=>None}}
 #[cfg(test)]
 mod factory_storage_tests{
@@ -82,6 +83,22 @@ fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn canonical_attribute_node_member(&self,object:u32,property:&str)->bool{node_method(property)&&(self.inert_node_type(object)==Some(1)||self.attr_element_receiver(object))&&!self.form_named_control(object,property)}
+    pub(super) fn set_inert_attribute_node(&mut self,object:u32,args:&[Value])->Result<Value,String>{
+        self.validate_attr_attachment(object,args).map_err(|(_,message)|message)?;let Value::Host(handle)=args[0]else{unreachable!()};let incoming=index(handle).unwrap();if self.state.attributes[incoming].owner==Some(object){return Ok(Value::Host(handle));}
+        let Value::Host(document)=self.inert_get(object,"ownerDocument")?else{return Err("Inert attachment document is unavailable.".into());};
+        let attr=&self.state.attributes[incoming];let released=attr.value.capacity();self.state.copies(attr.name.bytes().checked_add(attr.value.used_bytes()).ok_or("Inert Attr input copy overflow.")?)?;let name=copy_name(&self.state.attributes[incoming].name)?;let value=self.state.attributes[incoming].value.try_clone()?;
+        let attrs=self.element_attribute_source(object).ok_or("Inert attachment Element is unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,attr|n.saturating_add(attr.name.bytes()));self.state.work(work)?;let slot=self.element_attribute_source(object).unwrap().iter().position(|attr|attr.name.same_expanded_name(&name));self.state.attribute_lookup_work()?;let position=self.state.attribute_owner_position(object,&name);let old_id=position.ok().map(|at|self.state.attached_attributes[at]);let new_old=slot.is_some()&&old_id.is_none();
+        let (old_name,old_value)=if let Some(slot)=slot{let old=&self.element_attribute_source(object).unwrap()[slot];self.state.copies(old.value.used_bytes().checked_add(if new_old{old.name.bytes()}else{0}).ok_or("Inert Attr old copy overflow.")?)?;let old=&self.element_attribute_source(object).unwrap()[slot];(if new_old{Some(copy_name(&old.name)?)}else{None},old.value.try_clone()?)}else{(None,DomString::new())};
+        let added=old_value.capacity().checked_add(old_name.as_ref().map_or(0,owned_name_bytes)).ok_or("Inert Attr identity payload overflow.")?;let retained=self.state.retained;let occupied=retained.checked_add(added).and_then(|n|n.checked_sub(released)).ok_or("Inert Attr identity accounting overflow.")?;let reservation=self.prepare_attribute_storage(usize::from(new_old),usize::from(old_id.is_none()),occupied)?;let adjusted=occupied.checked_add(reservation.added).ok_or("Inert Attr backing accounting overflow.")?;
+        self.state.copies(self.state.attached_attributes.len().checked_mul(2*size_of::<usize>()).and_then(|n|n.checked_add(usize::from(new_old)*size_of::<Attr>())).and_then(|n|n.checked_add(2*size_of::<u32>()+size_of::<usize>())).ok_or("Inert Attr index movement overflow.")?)?;
+        self.state.retained=adjusted;if let Err(error)=self.write_inert_attribute_node_value(object,name,value){self.state.retained=retained;return Err(error);}
+        // The source and every identity buffer are admitted. No callbacks or
+        // fallible work separate owner/value/index publication.
+        self.commit_attribute_storage(reservation);let insert=match position{Ok(at)=>{self.state.attached_attributes.remove(at);at},Err(at)=>at};
+        let result=if let Some(old)=old_id{self.state.attributes[old].owner=None;self.state.attributes[old].value=old_value;Value::Host(ATTR_BASE+old as u32)}else if let Some(name)=old_name{let old=ATTR_BASE+self.state.attributes.len() as u32;self.state.attributes.push(Attr{owner:None,document,name,value:old_value});Value::Host(old)}else{Value::Null};
+        self.state.attributes[incoming].owner=Some(object);self.state.attributes[incoming].document=document;self.state.attributes[incoming].value=DomString::new();self.state.attached_attributes.insert(insert,incoming);Ok(result)
+    }
     pub(super) fn canonical_attr_member(&self,object:u32,property:&str)->bool{self.attr_receiver(object)&&matches!(property,"namespaceURI"|"prefix"|"localName"|"name"|"value"|"ownerElement"|"specified")}
     pub(super) fn canonical_attribute_factory_member(&self,object:u32,property:&str)->bool{matches!(property,"createAttribute"|"createAttributeNS")&&(object==DOCUMENT||self.inert_document(object))}
     pub(super) fn validate_attribute_factory(&self,document:u32,args:&[Value],namespaced:bool)->Result<(),(&'static str,String)>{
@@ -151,6 +168,7 @@ impl Bridge<'_> {
     /// The element value/effects commit once through the existing checked path.
     /// All identity/name/value staging precedes it; nothing fallible follows it.
     pub(super) fn set_attribute_node(&mut self,object:u32,args:&[Value])->Result<Value,String> {
+        if self.inert_node_type(object)==Some(1){return self.set_inert_attribute_node(object,args);}
         self.validate_attr_attachment(object,args).map_err(|(_,message)|message)?;
         let node=self.attr_element_node(object)?;
         let Value::Host(handle)=args[0] else {unreachable!()};let incoming=index(handle).unwrap();
@@ -405,7 +423,7 @@ impl Bridge<'_> {
     pub(super) fn get_attribute_node(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
         if self.inert_node_type(object)==Some(1){
             let mut text=self.text(args.first().ok_or("getAttributeNode requires a name.")?)?;
-            if matches!(self.inert_get(object,"namespaceURI")?,Value::String(ref uri) if uri=="http://www.w3.org/1999/xhtml"){text.make_ascii_lowercase();}
+            if self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html)&&matches!(self.inert_get(object,"namespaceURI")?,Value::String(ref uri) if uri=="http://www.w3.org/1999/xhtml"){text.make_ascii_lowercase();}
             let attrs=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?;
             let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.qualified.len()));
             self.state.work(work)?;let slot=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?.iter().position(|attr|attr.name.qualified==text);
@@ -507,6 +525,7 @@ impl Bridge<'_> {
         self.validate_attr_removal(object, args).map_err(|(_, message)| message)?;
         let Value::Host(handle) = args[0] else { unreachable!() };
         let id = index(handle).unwrap();
+        if self.inert_node_type(object)==Some(1){self.state.copies(self.state.attributes[id].name.bytes())?;let name=copy_name(&self.state.attributes[id].name)?;self.write_inert_dom_attribute_ns(object,name,None)?;return Ok(Value::Host(handle));}
         self.state.copies(self.state.attributes[id].name.bytes())?;
         let attr = &self.state.attributes[id];
         let name = attr.name.copy();

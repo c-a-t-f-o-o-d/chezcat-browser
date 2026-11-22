@@ -3207,6 +3207,7 @@ impl Host for Bridge<'_> {
         if self.message_instance(object).is_some() { return Some(WINDOW); }
         self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
+        if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
         if self.canonical_attribute_factory_member(object,property){return false;}
         if self.canonical_collection_member(object,property){return false;}
@@ -3347,6 +3348,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
         if self.canonical_attribute_factory_member(object,property){return false;}
         if self.canonical_collection_member(object,property){return false;}
@@ -3595,6 +3597,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{&[(0,true),(1,true)]}else{&[(0,true)]};}
         if dom_collections::operation(method).is_some(){return &[(0,true)];}
         if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
@@ -3720,6 +3723,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if script_attr::node_method(method){return Some(if method=="getAttributeNodeNS"{2}else{1});}
         if let Some(ns)=script_attr::factory_operation(method){return Some(if ns{2}else{1});}
         if dom_collections::operation(method).is_some(){return Some(1);}
         if method==xml_documents::CREATE{return Some(2);}
@@ -3761,6 +3765,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if script_attr::node_method(method)&&self.event_target_interface(object){return Some(object);}
         if script_attr::member_operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_attr::factory_operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if dom_collections::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -3847,6 +3852,7 @@ impl Host for Bridge<'_> {
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if method=="getAttributeNodeNS"&&index==0{return true;}
         if script_attr::factory_operation(method)==Some(true)&&index==0{return true;}
         if method==xml_documents::CREATE&&index==0{return true;}
         if (STYLE_BASE..DATASET_BASE).contains(&object) && method == "setProperty" && index == 2 { return true; }
@@ -3900,6 +3906,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
         if let Some((_,setter))=script_attr::member_operation(method){return usize::from(setter);}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{2}else{1};}
         if dom_collections::operation(method).is_some(){return 1;}
@@ -3997,6 +4004,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if script_attr::node_method(method){if !(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1)){return Err(("TypeError","Attribute-node method requires a genuine Element.".into()));}return match method{"setAttributeNode"|"setAttributeNodeNS"=>self.validate_attr_attachment(object,args),"removeAttributeNode"=>self.validate_attr_removal(object,args),_=>Ok(())};}
         if script_attr::member_operation(method).is_some(){return if self.attr_receiver(object){Ok(())}else{Err(("TypeError","Attr operation requires a genuine Attr.".into()))};}
         if self.attr_receiver(object)&&dom_tree::node_mutation_method(method){return Err(if method=="removeChild"{("NotFoundError","An Attr has no children.".into())}else{("HierarchyRequestError","An Attr cannot contain children.".into())});}
         if let Some(ns)=script_attr::factory_operation(method){return self.validate_attribute_factory(object,args,ns);}
@@ -4361,6 +4369,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if self.canonical_attribute_node_member(object,property)||script_attr::node_method(property)&&self.form_named_control(object,property){return None;}
         if self.canonical_attribute_factory_member(object,property){return None;}
         if matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
         if self.canonical_collection_member(object,property){return None;}
@@ -4435,6 +4444,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if script_attr::node_method(method){return self.event_target_interface(object)&&(self.attr_element_receiver(receiver)||self.inert_node_type(receiver)==Some(1));}
         if script_attr::member_operation(method).is_some(){return self.event_target_interface(object)&&self.attr_receiver(receiver);}
         if script_attr::factory_operation(method).is_some(){return self.event_target_interface(object)&&(receiver==DOCUMENT||self.inert_document(receiver));}
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
@@ -5029,6 +5039,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canonical_attribute_node_member(object,property){return Ok(false);}
         if self.canonical_attr_member(object,property){return Ok(false);}
         if self.canonical_attribute_factory_member(object,property){return Ok(false);}
         if self.canonical_collection_member(object,property){return Ok(false);}
@@ -5992,6 +6003,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if script_attr::node_method(method){return match method{"getAttributeNode"=>self.get_attribute_node(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"removeAttributeNode"=>self.remove_attribute_node(object,args),_=>self.set_attribute_node(object,args)};}
         if let Some((name,setter))=script_attr::member_operation(method){return if setter{Err("Attr setters require the native conversion transaction.".into())}else{self.attr_get(object,name)};}
         if let Some(ns)=script_attr::factory_operation(method){return self.create_attribute_for_document(object,args,ns);}
         if let Some((name,_))=dom_collections::operation(method){let value=args.first().ok_or("A live collection operation requires one argument.")?;return if name=="getElementsByTagName"{self.create_tag_collection(object,value)}else{self.create_class_collection(object,value)};}
@@ -8664,3 +8676,6 @@ mod domparser_node_identity_tests;
 #[cfg(test)]
 #[path="script_inert_attribute_factory_tests.rs"]
 mod inert_attribute_factory_tests;
+#[cfg(test)]
+#[path="script_inert_attribute_attachment_tests.rs"]
+mod inert_attribute_attachment_tests;

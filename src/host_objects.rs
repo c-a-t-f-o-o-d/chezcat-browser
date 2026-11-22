@@ -346,8 +346,8 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
-                    for(key,operation)in[("getElementsByTagName",super::ELEMENT_GET_ELEMENTS_TAG),("getElementsByClassName",super::ELEMENT_GET_ELEMENTS_CLASS)]{
-                        let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
+                    for(key,operation,length)in[("getElementsByTagName",super::ELEMENT_GET_ELEMENTS_TAG,1),("getElementsByClassName",super::ELEMENT_GET_ELEMENTS_CLASS,1),("getAttributeNode","getAttributeNode",1),("getAttributeNodeNS","getAttributeNodeNS",2),("setAttributeNode","setAttributeNode",1),("setAttributeNodeNS","setAttributeNodeNS",1),("removeAttributeNode","removeAttributeNode",1)]{
+                        let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
                         if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
                         self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
                         self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;

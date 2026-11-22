@@ -373,11 +373,12 @@ impl Bridge<'_> {
         let value=self.dom_text(args.get(1).ok_or("setAttribute requires a value.")?)?;
         self.write_inert_dom_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
     }
-    pub(super) fn write_inert_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),expanded,expanded)}
-    pub(super) fn write_inert_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),true,false)}
-    pub(super) fn write_inert_dom_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,true,false)}
-    pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded)}
-    fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool)->Result<(),String>{
+    pub(super) fn write_inert_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),expanded,expanded,false)}
+    pub(super) fn write_inert_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<String>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value.map(DomString::from),true,false,false)}
+    pub(super) fn write_inert_dom_attribute_ns(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,true,false,false)}
+    pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded,false)}
+    pub(in crate::scripting) fn write_inert_attribute_node_value(&mut self,object:u32,name:crate::html::AttributeName,value:DomString)->Result<(),String>{self.write_inert_attribute_mode(object,name,Some(value),true,false,true)}
+    fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool,replace_name:bool)->Result<(),String>{
         if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (name.namespace.is_some()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let (source,initial_template)=match inert.kind{
@@ -392,8 +393,8 @@ impl Bridge<'_> {
             let Kind::Element(tag)=&inert.kind else{unreachable!()};
             (crate::html::Namespace::Html,tag.len().saturating_add(size_of::<Node>()+2*size_of::<usize>()),false)
         };
-        if let Some(value)=value.as_deref(){if namespace==crate::html::Namespace::Svg{let tag=match self.inert_import_source(object){Some(ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,..},..},..})=>tag.as_str(),_=>return Err("Inert SVG source is unavailable.".into())};if !crate::html::svg_dom_attribute(tag,&name,value){return Err("Inert SVG attribute is outside the passive/local-reference policy.".into());}}else if namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}}
-        if namespace==crate::html::Namespace::Html&&!expanded{name.qualified.make_ascii_lowercase();}
+        if let Some(value)=value.as_deref().filter(|_|!replace_name&&!(expanded&&require_existing)){if namespace==crate::html::Namespace::Svg{let tag=match self.inert_import_source(object){Some(ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,..},..},..})=>tag.as_str(),_=>return Err("Inert SVG source is unavailable.".into())};if !crate::html::svg_dom_attribute(tag,&name,value){return Err("Inert SVG attribute is outside the passive/local-reference policy.".into());}}else if namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}}
+        if namespace==crate::html::Namespace::Html&&!expanded&&self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html){name.qualified.make_ascii_lowercase();}
         let attrs=self.inert_element_attributes(object).ok_or("Inert Element attributes are unavailable.")?;
         let work=attrs.iter().fold(attrs.len().saturating_add(1),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;
         let slot=self.inert_element_attributes(object).unwrap().iter().position(|attr|if expanded{attr.name.same_expanded_name(&name)}else{attr.name.qualified==name.qualified});
@@ -420,7 +421,7 @@ impl Bridge<'_> {
         if changes_id{*id=value.as_deref().map(script_clone_node::copy_text).transpose()?;}
         if changes_href{*href=value.as_deref().map(script_clone_node::copy_text).transpose()?;}
         let removed=match(slot,value){
-            (Some(slot),Some(value))=>{attrs[slot].value=value;None},
+            (Some(slot),Some(value))=>{if replace_name{attrs[slot]=crate::html::Attribute{name,value};}else{attrs[slot].value=value;}None},
             (None,Some(value))=>{attrs.try_reserve_exact(1).map_err(|_|"Could not reserve inert attribute entry.")?;attrs.push(crate::html::Attribute{name,value});None},
             (Some(slot),None)=>Some(attrs.remove(slot)),(None,None)=>unreachable!(),
         };
@@ -451,7 +452,7 @@ impl Bridge<'_> {
         let NodeKind::Element { attrs, .. } = &node.kind else {
             return Err("getAttribute requires an Element.".into());
         };
-        let html = node.namespace == crate::html::Namespace::Html;
+        let html = node.namespace == crate::html::Namespace::Html&&self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html);
         let count = attrs.len();
         let work = attrs.iter().map(|attr| attr.name.qualified.len()).sum::<usize>();
         self.state.work(count)?;
