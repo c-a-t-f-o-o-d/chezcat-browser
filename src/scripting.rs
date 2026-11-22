@@ -8731,3 +8731,7 @@ mod inert_template_import_tests;
 #[cfg(test)]
 #[path="script_generic_document_tests.rs"]
 mod generic_document_tests;
+
+#[cfg(test)]
+#[path="script_document_template_clone_tests.rs"]
+mod document_template_clone_tests;
