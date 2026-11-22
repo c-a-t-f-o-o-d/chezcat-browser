@@ -94,7 +94,7 @@ impl Bridge<'_>{
             Some(GeneratedNode{node:Rc::new(node),unsafe_nonce:false})
         }else{None};
         let mut entries=Vec::new();entries.try_reserve_exact(count).map_err(|_|"Cannot reserve staged XML identities.")?;
-        entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));
+        entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,base_url_override:None,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));
         entries.push(Entry::Implementation);
         if root_handle.is_some(){entries.push(Entry::Node(InertNode{kind:Kind::Parsed{source:ParsedSource::Generated(generated_base),initial_template:None},owner:first,parent:Some(first),children:Vec::new()}));}
         let native=adoption.as_ref().and_then(|plan|plan.native);

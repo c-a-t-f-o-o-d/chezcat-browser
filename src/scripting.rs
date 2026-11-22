@@ -4088,7 +4088,7 @@ impl Host for Bridge<'_> {
             };
         }
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
-        if method == script_clone_node::CLONE_METHOD { return self.validate_clone_receiver(object); }
+        if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
         if method == script_node_contains::CONTAINS_METHOD { return self.validate_node_contains(object, args); }
         let method=script_media::interface_operation(method).unwrap_or(method);
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
@@ -8607,3 +8607,6 @@ mod xml_doctype_adoption_tests;
 #[cfg(test)]
 #[path="script_document_children_tests.rs"]
 mod document_children_tests;
+#[cfg(test)]
+#[path="script_document_clone_tests.rs"]
+mod document_clone_tests;

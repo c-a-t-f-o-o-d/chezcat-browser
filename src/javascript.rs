@@ -9217,7 +9217,7 @@ impl Runtime {
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if method=="setAttributeNS"&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause")
+                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
                 || kind == "InvalidCharacterError"
                     && matches!(method, CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction")
             {
