@@ -393,7 +393,9 @@ impl Bridge<'_> {
             let Kind::Element(tag)=&inert.kind else{unreachable!()};
             (crate::html::Namespace::Html,tag.len().saturating_add(size_of::<Node>()+2*size_of::<usize>()),false)
         };
-        if let Some(value)=value.as_deref().filter(|_|!replace_name&&!(expanded&&require_existing)){if namespace==crate::html::Namespace::Svg{let tag=match self.inert_import_source(object){Some(ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,..},..},..})=>tag.as_str(),_=>return Err("Inert SVG source is unavailable.".into())};if !crate::html::svg_dom_attribute(tag,&name,value){return Err("Inert SVG attribute is outside the passive/local-reference policy.".into());}}else if namespace!=crate::html::Namespace::Html{return Err("Inert foreign-element attribute assignment is not implemented.".into());}}
+        // Inert DOM construction stores data. The native transfer/activation
+        // sink independently checks the resulting element and all attributes.
+        if value.is_some()&&namespace==crate::html::Namespace::UnknownForeign{return Err("Inert attribute namespace provenance is unavailable.".into());}
         if namespace==crate::html::Namespace::Html&&!expanded&&self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html){name.qualified.make_ascii_lowercase();}
         let attrs=self.inert_element_attributes(object).ok_or("Inert Element attributes are unavailable.")?;
         let work=attrs.iter().fold(attrs.len().saturating_add(1),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;

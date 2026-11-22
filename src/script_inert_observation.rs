@@ -245,6 +245,7 @@ impl Bridge<'_> {
             }
         }
         if !expanded
+            && self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html)
             && matches!(self.inert_get(object,"namespaceURI")?,Value::String(uri) if uri==HTML_NAMESPACE)
         {
             local.make_ascii_lowercase();

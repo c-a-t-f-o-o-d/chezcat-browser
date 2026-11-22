@@ -6306,3 +6306,7 @@ mod inert_attribute_factory_tests;
 #[cfg(test)]
 #[path="app_inert_attribute_attachment_tests.rs"]
 mod inert_attribute_attachment_tests;
+
+#[cfg(test)]
+#[path="app_inert_foreign_attribute_tests.rs"]
+mod inert_foreign_attribute_tests;
