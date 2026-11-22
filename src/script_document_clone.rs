@@ -14,15 +14,18 @@ mod storage_tests{
   let before=(b.state.retained,b.state.inert_documents.entries.len(),b.state.inert_documents.generated.len(),b.state.inert_documents.adopted.len(),b.doc.nodes.len());b.state.copy_work=0;assert!(b.clone_inert_document(xml,true,true).is_err());assert_eq!((b.state.retained,b.state.inert_documents.entries.len(),b.state.inert_documents.generated.len(),b.state.inert_documents.adopted.len(),b.doc.nodes.len()),before);b.state.copy_work=b.state.limits.copy_bytes;assert!(b.clone_inert_document(xml,true,true).is_ok());
  }
 }
+#[cfg(test)]
+#[path="script_document_template_clone_storage_tests.rs"]
+mod template_storage_tests;
 impl Bridge<'_>{
  pub(in crate::scripting) fn validate_document_clone(&self,object:u32,deep:bool)->Result<(),(&'static str,String)>{
   if !deep||!self.inert_document_children_receiver(object){return Ok(());}
   let failure=|message:&str|("NotSupportedError",message.to_owned());
   let mut pending=Vec::new();pending.try_reserve_exact(1).map_err(|_|failure("Cannot reserve document clone validation root."))?;pending.push(object);
-  let maximum=self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len());let mut visited=0usize;
+  let mut visited=0usize;
   while let Some(node)=pending.pop(){
-   visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or_else(||failure("Document clone source topology is inconsistent."))?;
-   if self.template_receiver(node){return Err(failure("Document cloning of template contents requires separate cloned template-owner records; no document was published."));}
+   let maximum=self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len());visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or_else(||failure("Document clone source topology is inconsistent."))?;
+   if let Some(&content)=self.state.inert_documents.template_contents.get(&node){pending.try_reserve(1).map_err(|_|failure("Cannot reserve document template validation."))?;pending.push(content);}
    if matches!(self.inert_import_source(node),Some(ImportSource::Parsed{node:Node{namespace:crate::html::Namespace::UnknownForeign,..},..})){return Err(failure("Document cloning requires known namespace provenance; no document was published."));}
    let children=self.inert_children(node).ok_or_else(||failure("Document clone validation node is unavailable."))?;
    pending.try_reserve(children.len()).map_err(|_|failure("Cannot reserve document clone validation traversal."))?;pending.extend(children.iter().rev().copied());
@@ -46,37 +49,67 @@ impl Bridge<'_>{
   }
   Ok(None)
  }
+ fn prepare_document_clone_sources(&mut self,object:u32)->Result<(),String>{
+  let mut pending=Vec::new();pending.try_reserve_exact(1).map_err(|_|"Cannot reserve document source preparation.")?;pending.push(object);let mut visited=0usize;
+  while let Some(source)=pending.pop(){
+   let maximum=self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len());visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Cyclic document source preparation.")?;self.state.work(1)?;
+   // Native lazy contents must exist before any clone identity is planned.
+   if self.template_receiver(source){let Value::Host(content)=self.template_content(source)?else{unreachable!()};pending.try_reserve(1).map_err(|_|"Cannot reserve document source contents.")?;pending.push(content);}
+   let count=self.inert_children(source).ok_or("Document source children unavailable.")?.len();self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Document source preparation overflow.")?)?;pending.try_reserve(count).map_err(|_|"Cannot reserve document source descendants.")?;pending.extend_from_slice(self.inert_children(source).unwrap());
+  }Ok(())
+ }
  pub(super) fn clone_inert_document(&mut self,object:u32,deep:bool,reserve_slots:bool)->Result<Value,String>{
+  if deep{self.prepare_document_clone_sources(object)?;}
+  self.validate_document_clone(object,deep).map_err(|(_,message)|message)?;
   let Value::String(base)=self.inert_node_base_uri(object)?else{return Err("Document clone base URL is unavailable.".into());};
   let(kind,xml_interface,mode,content_type,url)=match &self.state.inert_documents.node(object).ok_or("Missing source Document.")?.kind{Kind::Document(record)=>{let bytes=record.url.len();let(kind,interface,mode,mime)=(record.kind,record.xml_interface,record.mode,record.content_type);self.state.copies(bytes)?;let Kind::Document(record)=&self.state.inert_documents.node(object).unwrap().kind else{unreachable!()};(kind,interface,mode,mime,script_clone_node::copy_text(&record.url)?)},Kind::TemplateDocument{kind,..}=>{let kind=*kind;self.state.copies("about:blank".len())?;(kind,false,crate::html::DocumentMode::NoQuirks,"application/xml",script_clone_node::copy_text("about:blank")?)},_=>return Err("Document clone requires a represented Document.".into())};
   let remaining=self.inert_remaining_entries();if remaining<2{return Err("Document clone identity backing allowance exhausted.".into());}
   let first=FIRST_ENTRY.checked_add(u32::try_from(self.state.inert_documents.entries.len()).map_err(|_|"Document clone identity overflow.")?).ok_or("Document clone handle overflow.")?;
   let initial=if deep{self.inert_children(object).unwrap().len()}else{0};if initial>remaining-2{return Err("Document clone child identity allowance exhausted.".into());}
+  #[derive(Clone,Copy)]enum Step{Node{source:u32,parent:Option<u32>,source_parent:Option<u32>,owner:u32,source_owner:u32,host:Option<u32>},Owner{implementation:u32},Implementation}
+  let mut document_index=None;let mut links=Vec::new();
   let mut pending=Vec::new();pending.try_reserve_exact(initial).map_err(|_|"Cannot reserve document clone traversal.")?;
   let mut children=Vec::new();children.try_reserve_exact(initial).map_err(|_|"Cannot reserve document clone root links.")?;
   self.state.work(initial)?;self.state.copies(initial.checked_mul(2*size_of::<u32>()).ok_or("Document clone child initialization overflow.")?)?;
-  for (offset,&child) in self.inert_children(object).unwrap().iter().take(initial).enumerate(){pending.push((child,first,object));children.push(first+2+offset as u32);}
+  for (offset,&child) in self.inert_children(object).unwrap().iter().take(initial).enumerate(){pending.push(Step::Node{source:child,parent:Some(first),source_parent:Some(object),owner:first,source_owner:object,host:None});children.push(first+2+offset as u32);}
   let mut payload=url.capacity().checked_add(base.capacity()).and_then(|n|n.checked_add(children.capacity()*size_of::<u32>())).ok_or("Document clone payload overflow.")?;
   let mut staged=Vec::new();staged.try_reserve_exact(2).map_err(|_|"Cannot reserve document clone identities.")?;
   staged.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{xml_interface,kind,mode,content_type,url,base_url_override:Some(base),implementation:first+1,doctype:None,html:None,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));staged.push(Entry::Implementation);
   let mut at=0usize;
-  while let Some(&(source,parent,source_parent))=pending.get(at){
-   let node=self.state.inert_documents.node(source).filter(|node|node.owner==object&&node.parent==Some(source_parent)).ok_or("Document clone source owner or edge is inconsistent.")?;
+  while let Some(&step)=pending.get(at){
+   let handle=first+2+at as u32;staged.try_reserve(1).map_err(|_|"Cannot reserve document clone descendant record.")?;
+   let(source,parent,source_parent,owner,source_owner,host)=match step{
+    Step::Owner{implementation}=>{staged.push(Entry::Node(InertNode{kind:Kind::TemplateDocument{kind,implementation},owner:handle,parent:None,children:Vec::new()}));at+=1;continue;},
+    Step::Implementation=>{staged.push(Entry::Implementation);at+=1;continue;},
+    Step::Node{source,parent,source_parent,owner,source_owner,host}=>(source,parent,source_parent,owner,source_owner,host),
+   };
+   let node=self.state.inert_documents.node(source).filter(|node|node.owner==source_owner&&node.parent==source_parent).ok_or("Document clone source owner or edge is inconsistent.")?;
    let count=node.children.len();let copy=match &node.kind{Kind::Element(name)=>name.len(),Kind::Text(data)=>data.used_bytes(),Kind::Doctype(data)=>data.used_bytes(),Kind::ProcessingInstruction{target,data}=>target.len().checked_add(data.used_bytes()).ok_or("Document clone character size overflow.")?,_=>0};
    self.state.work(count.saturating_add(1))?;self.state.copies(copy.checked_add(count.checked_mul(2*size_of::<u32>()).ok_or("Document clone edges overflow.")?).ok_or("Document clone copy size overflow.")?)?;
-   if self.template_receiver(source){return Err("Document cloning of template contents requires separate cloned template-owner records; no document was published.".into());}
-   if count>remaining-2-pending.len(){return Err("Document clone descendant identity allowance exhausted.".into());}
-   pending.try_reserve(count).map_err(|_|"Cannot reserve document clone descendant traversal.")?;staged.try_reserve(1).map_err(|_|"Cannot reserve document clone descendant record.")?;
-   let handle=first+2+at as u32;let child_start=first+2+pending.len() as u32;
-   let node=self.state.inert_documents.node(source).unwrap();let mut children=Vec::new();children.try_reserve_exact(count).map_err(|_|"Cannot reserve cloned child links.")?;children.extend(child_start..child_start+count as u32);pending.extend(node.children.iter().map(|&child|(child,handle,source)));
+   let template=self.template_receiver(source);
+   if template&&document_index.is_none(){
+    if remaining.saturating_sub(2+pending.len())<2{return Err("Document template owner allowance exhausted.".into());}
+    pending.try_reserve(2).map_err(|_|"Cannot reserve document template owner.")?;let associated=first+2+pending.len() as u32;pending.push(Step::Owner{implementation:associated+1});pending.push(Step::Implementation);document_index=Some((first,associated));
+   }
+   let extra=count.checked_add(usize::from(template)).ok_or("Document template descendant count overflow.")?;
+   if extra>remaining.saturating_sub(2+pending.len()){return Err("Document clone descendant identity allowance exhausted.".into());}
+   pending.try_reserve(extra).map_err(|_|"Cannot reserve document clone descendant traversal.")?;
+   let child_start=first+2+pending.len() as u32;
+   let node=self.state.inert_documents.node(source).unwrap();let mut children=Vec::new();children.try_reserve_exact(count).map_err(|_|"Cannot reserve cloned child links.")?;children.extend(child_start..child_start+count as u32);pending.extend(node.children.iter().map(|&child|Step::Node{source:child,parent:Some(handle),source_parent:Some(source),owner,source_owner,host:None}));
+   if template{
+    let Value::Host(content)=self.template_content(source)?else{unreachable!()};let content_owner=self.state.inert_documents.node(content).ok_or("Document template content is missing.")?.owner;
+    let fragment=first+2+pending.len() as u32;links.try_reserve(1).map_err(|_|"Cannot reserve document template content index.")?;links.push((handle,fragment));
+    pending.push(Step::Node{source:content,parent:None,source_parent:None,owner:if owner==first{document_index.unwrap().1}else{owner},source_owner:content_owner,host:Some(handle)});
+   }
+   let node=self.state.inert_documents.node(source).unwrap();
    let kind=match &node.kind{
-    Kind::Element(name)=>Kind::Element(script_clone_node::copy_text(name)?),Kind::Text(data)=>Kind::Text(data.try_clone()?),Kind::Doctype(data)=>Kind::Doctype(data.try_clone()?),Kind::ProcessingInstruction{target,data}=>Kind::ProcessingInstruction{target:script_clone_node::copy_text(target)?,data:data.try_clone()?},Kind::Parsed{source,..}=>Kind::Parsed{source:*source,initial_template:None},_=>return Err("Unsupported node kind in Document clone source.".into()),
+    Kind::Fragment{..}=>Kind::Fragment{template:host},Kind::Element(name)=>Kind::Element(script_clone_node::copy_text(name)?),Kind::Text(data)=>Kind::Text(data.try_clone()?),Kind::Doctype(data)=>Kind::Doctype(data.try_clone()?),Kind::ProcessingInstruction{target,data}=>Kind::ProcessingInstruction{target:script_clone_node::copy_text(target)?,data:data.try_clone()?},Kind::Parsed{source,..}=>Kind::Parsed{source:*source,initial_template:None},_=>return Err("Unsupported node kind in Document clone source.".into()),
    };
    let owned=match &kind{Kind::Element(name)=>name.capacity(),Kind::Text(data)=>data.capacity(),Kind::Doctype(data)=>data.capacity(),Kind::ProcessingInstruction{target,data}=>target.capacity().checked_add(data.capacity()).ok_or("Document clone owned character size overflow.")?,_=>0};
    payload=payload.checked_add(owned).and_then(|n|n.checked_add(children.capacity()*size_of::<u32>())).ok_or("Document clone descendant payload overflow.")?;
-   if parent==first{let node_type=self.inert_node_type(source);let Entry::Node(doc)=&mut staged[0]else{unreachable!()};let Kind::Document(record)=&mut doc.kind else{unreachable!()};match node_type{Some(1)=>record.html=Some(handle),Some(10)=>record.doctype=Some(handle),_=>{}}}
-   staged.push(Entry::Node(InertNode{kind,owner:first,parent:Some(parent),children}));at+=1;
+   if parent==Some(first){let node_type=self.inert_node_type(source);let Entry::Node(doc)=&mut staged[0]else{unreachable!()};let Kind::Document(record)=&mut doc.kind else{unreachable!()};match node_type{Some(1)=>record.html=Some(handle),Some(10)=>record.doctype=Some(handle),_=>{}}}
+   staged.push(Entry::Node(InertNode{kind,owner,parent,children}));at+=1;
   }
-  self.publish_inert_clone(first,staged,None,payload,Vec::new(),reserve_slots)
+  self.publish_inert_batch_with_document(first,staged,Vec::new(),payload,links,reserve_slots,document_index)
  }
 }
