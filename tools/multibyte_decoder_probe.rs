@@ -5,4 +5,7 @@
 //! the application, Cargo acceptance check, or public TextDecoder API tests.
 
 #[path = "../src/text_encoding_multibyte.rs"]
-mod decoder;
+mod multibyte;
+
+#[path = "../src/text_encoding_iso2022jp.rs"]
+mod iso2022jp;
