@@ -288,6 +288,14 @@ impl Runtime {
     }
     /// Base-interface suffixes for genuine DOM nodes. Specialized immediate
     /// interfaces are not implied by these anchors or exposed for inspection.
+    fn define_attribute_node_interface(&mut self,window:u32,node:usize)->Result<(),Fault>{
+        let Value::Function(parent)=self.objects[node].properties["constructor"].value.as_value()?.clone()else{return Err(Fault::new("Invalid Attr parent constructor."));};
+        let method=self.allocate_host_function_with_length(window,"Attr",0).map_err(Fault::new)?;if let Some(Function::Host{constructible,illegal_interface_constructor,..})=self.functions.get_mut(method.id){*constructible=true;*illegal_interface_constructor=true;}
+        let prototype=self.new_object(None)?;self.objects[prototype].prototype=Some(Ordinary::Object(node));self.objects[self.function_properties[method.id]].prototype=Some(Ordinary::Function(parent));let constructor=Value::Function(method.id);
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;self.store_property(self.function_properties[method.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("Attr".into()),Some((false,false,true)))?;
+        for(key,getter)in[("namespaceURI","\0Attr.get.namespaceURI"),("prefix","\0Attr.get.prefix"),("localName","\0Attr.get.localName"),("name","\0Attr.get.name"),("value","\0Attr.get.value"),("ownerElement","\0Attr.get.ownerElement"),("specified","\0Attr.get.specified")]{self.define_node_attribute(prototype,window,key,getter,if key=="value"{Some("\0Attr.set.value")}else{None})?;}
+        self.put_binding(self.global_environment,"Attr".into(),Some(constructor),super::Declaration::Var,false)?;self.global_attributes.insert("Attr".into(),(false,true,true));self.native_constructor_prototypes.insert((window,"Attr"),prototype);Ok(())
+    }
     pub fn define_node_interfaces(&mut self,window:u32,constants:&[(&str,u16)],image:Option<(u32,&'static str)>)->Result<(),String> {
         let marker=self.inhibit_transient_collection();
         let result=(|| {
@@ -407,6 +415,7 @@ impl Runtime {
             self.define_canvas_2d_interface(window)?;
             // Text and Comment inherit CharacterData. Only Text includes Slottable.
             let node=self.native_constructor_prototypes[&(window,"Node")];
+            self.define_attribute_node_interface(window,node)?;
             let node_constructor=self.objects[node].properties["constructor"].value.as_value()?.clone();
             let Value::Function(node_constructor)=node_constructor else {return Err(Fault::new("Invalid CharacterData parent constructor."));};
             let allocation=self.allocate_host_function_with_length(window,"CharacterData",0).map_err(Fault::new)?;
@@ -456,6 +465,8 @@ impl Runtime {
                         ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),
                         ("importNode", DOCUMENT_IMPORT_NODE, 1),
                         ("adoptNode",DOCUMENT_ADOPT_NODE,1),
+                        ("createAttribute",super::DOCUMENT_CREATE_ATTRIBUTE,1),
+                        ("createAttributeNS",super::DOCUMENT_CREATE_ATTRIBUTE_NS,2),
                         ("getElementsByTagName",super::DOCUMENT_GET_ELEMENTS_TAG,1),
                         ("getElementsByClassName",super::DOCUMENT_GET_ELEMENTS_CLASS,1),
                     ] {

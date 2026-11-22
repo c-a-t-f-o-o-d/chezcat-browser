@@ -4,6 +4,21 @@ use super::*;
 use crate::html::{AttributeName, AttributeNamespace};
 
 pub(super) const ATTR_BASE: u32 = 0x8200_0000;
+pub(super) fn factory_operation(method:&str)->Option<bool>{match method{crate::javascript::DOCUMENT_CREATE_ATTRIBUTE=>Some(false),crate::javascript::DOCUMENT_CREATE_ATTRIBUTE_NS=>Some(true),_=>None}}
+#[cfg(test)]
+mod factory_storage_tests{
+ use super::*;
+ #[test]
+ fn inert_attribute_factory_exact_owner_name_backing_copy_refusal_and_recovery(){
+  let mut doc=crate::html::parse("<!doctype html><html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(owner)=b.create_xml_document(script_inert_documents::MAIN_IMPLEMENTATION,&[Value::Null,Value::String(String::new())]).unwrap()else{panic!("owner")};
+  let backing=|b:&Bridge<'_>|b.state.attributes.capacity()*size_of::<Attr>()+b.state.attached_attributes.capacity()*size_of::<usize>();
+  for (namespaced,args)in[(false,vec![Value::String("MiXeD".into())]),(true,vec![Value::String("urn:original".into()),Value::String("p:Case".into())])]{let before=(b.state.retained,backing(&b));let Value::Host(handle)=b.create_attribute_for_document(owner,&args,namespaced).unwrap()else{panic!("real Attr")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.owner,None);assert_eq!(b.state.retained-before.0,attr.name.owned_bytes()+attr.value.capacity()+backing(&b)-before.1);}
+  let before=(b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits);let limit=b.state.retained_limit;let copies=b.state.copy_work;
+  for storage in [true,false]{if storage{b.state.retained_limit=b.state.retained;}else{b.state.copy_work=0;}assert!(b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits),before);b.state.retained_limit=limit;b.state.copy_work=copies;}
+  let Value::Host(handle)=b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).unwrap()else{panic!("recovery")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.name.qualified,"Fresh");
+ }
+}
+pub(super) fn member_operation(method:&str)->Option<(&str,bool)>{let(name,setter)=if let Some(name)=method.strip_prefix("\0Attr.get."){(name,false)}else if method=="\0Attr.set.value"{("value",true)}else{return None;};matches!(name,"namespaceURI"|"prefix"|"localName"|"name"|"value"|"ownerElement"|"specified").then_some((name,setter))}
 const ATTR_HANDLES: usize = 0x0100_0000;
 
 pub(super) struct Attr {
@@ -67,6 +82,13 @@ fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn canonical_attr_member(&self,object:u32,property:&str)->bool{self.attr_receiver(object)&&matches!(property,"namespaceURI"|"prefix"|"localName"|"name"|"value"|"ownerElement"|"specified")}
+    pub(super) fn canonical_attribute_factory_member(&self,object:u32,property:&str)->bool{matches!(property,"createAttribute"|"createAttributeNS")&&(object==DOCUMENT||self.inert_document(object))}
+    pub(super) fn validate_attribute_factory(&self,document:u32,args:&[Value],namespaced:bool)->Result<(),(&'static str,String)>{
+        if document!=DOCUMENT&&!self.inert_document(document){return Err(("TypeError","Attribute creation requires a genuine Document.".into()));}
+        if let Some(Value::String(qualified))=args.get(usize::from(namespaced)){if namespaced{let ns=match args.first(){Some(Value::String(uri)) if !uri.is_empty()=>Some(uri.as_str()),_=>None};script_attribute_names::validate_namespace(ns,qualified)?;}else if !script_attribute_names::valid_attribute_name(qualified){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
+        Ok(())
+    }
     pub(super) fn prepare_attr_document_rebind(&mut self,mut matches_owner:impl FnMut(u32)->bool,lookup:usize,document:u32)->Result<Vec<usize>,String>{
         let length=self.state.attached_attributes.len();self.state.work(length.checked_mul(lookup.saturating_add(1)).ok_or("Attr document lookup work overflow.")?)?;
         let mut changes=Vec::new();
@@ -95,6 +117,10 @@ impl Bridge<'_> {
     }
 
     pub(super) fn create_attribute(&mut self,args:&[Value],namespaced:bool)->Result<Value,String> {
+        self.create_attribute_for_document(DOCUMENT,args,namespaced)
+    }
+    pub(super) fn create_attribute_for_document(&mut self,document:u32,args:&[Value],namespaced:bool)->Result<Value,String>{
+        self.validate_attribute_factory(document,args,namespaced).map_err(|(_,message)|message)?;
         let mut qualified=self.text(args.get(usize::from(namespaced)).ok_or("Attribute creation requires a name.")?)?;
         let name=if namespaced {
             let ns=namespace(args)?;
@@ -105,13 +131,13 @@ impl Bridge<'_> {
                 let namespace=AttributeNamespace{uri:copy_text(uri)?,prefix:prefix.map(copy_text).transpose()?,local:copy_text(local)?};
                 AttributeName{qualified,namespace:Some(namespace)}
             } else {AttributeName::unqualified(qualified)}
-        } else {qualified.make_ascii_lowercase();AttributeName::unqualified(qualified)};
+        } else {if self.inert_document_kind_for_node(document).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Html{qualified.make_ascii_lowercase();}AttributeName::unqualified(qualified)};
         let payload=owned_name_bytes(&name);
         let occupied=self.state.retained.checked_add(payload).ok_or("Attr retained storage overflow.")?;
         let reservation=self.prepare_attribute_storage(1,0,occupied)?;let added=reservation.added;
         self.commit_attribute_storage(reservation);self.state.retained=occupied+added;
         let handle=ATTR_BASE+self.state.attributes.len() as u32;
-        self.state.attributes.push(Attr{owner:None,document:DOCUMENT,name,value:DomString::new()});self.state.dom_committed();
+        self.state.attributes.push(Attr{owner:None,document,name,value:DomString::new()});self.state.dom_committed();
         Ok(Value::Host(handle))
     }
 
@@ -288,6 +314,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn attr_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
+        if name=="childNodes"{return self.create_attribute_child_list(handle);}
         let id = index(handle).ok_or("Invalid Attr handle.")?;
         let attr = self.state.attributes.get(id).ok_or("Invalid Attr handle.")?;
         if let Some(value) = dom_tree::node_constant(name) { return Ok(Value::Number(f64::from(value))); }

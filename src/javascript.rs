@@ -532,6 +532,8 @@ pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
 pub(crate) const DOCUMENT_ADOPT_NODE:&str="\0Document.adoptNode";
+pub(crate) const DOCUMENT_CREATE_ATTRIBUTE:&str="\0Document.createAttribute";
+pub(crate) const DOCUMENT_CREATE_ATTRIBUTE_NS:&str="\0Document.createAttributeNS";
 pub(crate) const DOCUMENT_GET_ELEMENTS_TAG:&str="\0Document.getElementsByTagName";
 pub(crate) const DOCUMENT_GET_ELEMENTS_CLASS:&str="\0Document.getElementsByClassName";
 pub(crate) const ELEMENT_GET_ELEMENTS_TAG:&str="\0Element.getElementsByTagName";
@@ -9218,6 +9220,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if matches!(method,DOCUMENT_CREATE_ATTRIBUTE|DOCUMENT_CREATE_ATTRIBUTE_NS)&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild")&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
@@ -9232,6 +9235,7 @@ impl Runtime {
             }
             return Err(Fault::exception(kind,message));
         }
+        if method=="\0Attr.set.value"{let value=self.copy_value(args.first().ok_or_else(||Fault::exception("TypeError","Attr value setter requires one argument."))?)?;self.host_set_native(object,"value",value,host)?;return Ok(Value::Undefined);}
         if method=="\0Element.getAttributeNames" {
             let names=host.attribute_name_snapshot(object).map_err(Fault::new)?;
             if names.len()>self.limits.heap.object_properties{return Err(Fault::new("Attribute names exceed the array/property allowance."));}
