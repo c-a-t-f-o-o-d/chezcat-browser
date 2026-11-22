@@ -16,7 +16,7 @@ impl Bridge<'_> {
         let member = match name {
             "getRootNode" => self.get_root_receiver(object),
             "normalize"=>self.normalize_receiver(object),
-            "isSameNode"|"isEqualNode"=>self.namespace_receiver(object),
+            "isSameNode"|"isEqualNode"|"compareDocumentPosition"=>self.namespace_receiver(object),
             "wholeText"|"splitText"=>self.text_node_receiver(object),
             "substringData"|"appendData"|"insertData"|"deleteData"|"replaceData"=>self.character_data_receiver(object),
             "isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"=>self.namespace_receiver(object),

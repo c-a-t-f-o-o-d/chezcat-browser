@@ -603,7 +603,7 @@
                 "F01-usvstring-replacement-distinct-from-domstring"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Canonical native compareDocumentPosition now covers actual main/inert/document/fragment/doctype/CharacterData/Attr and immutable child roots, current sibling and attribute-list order, stable reciprocal disconnected masks, detach/adopt/current owners and template dedicated-root separation. Nonnullable Node brands, both operand/captured caller origin/lifetime, iterative paid main/inert paths, child scratch admission, refusal/recovery,350-depth no-slot and original Windows App binding/pixels/editor/link provide supplementary evidence. Complete parser/custom-element/shadow/lifecycle and required unchanged browser WPT remain open; no F01 closure.",
               "closing_evidence": []
             }
           ]

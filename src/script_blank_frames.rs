@@ -213,6 +213,10 @@ impl Bridge<'_> {
         Some((|| {
             self.frame_window_access(Some(WINDOW), window(index))?;
             if !matches!(offset, 1 | 4..=6) { return Err("Invalid blank Node position handle.".into()); }
+            // The immutable child document bounds every possible path. Admit
+            // its scratch before allocating; no source/identity is published.
+            let count=self.state.blank_frames.get(index).ok_or("Unknown blank Node context.")?.document.nodes.len();
+            self.state.copies(count.checked_mul(size_of::<usize>()).ok_or("Blank Node position metadata overflow.")?)?;
             let frame = self.state.blank_frames.get(index).ok_or("Unknown blank Node context.")?;
             let mut node = if offset == 1 { 0 } else { (offset - 3) as usize };
             if node >= frame.document.nodes.len() { return Err("Invalid blank Node position index.".into()); }
