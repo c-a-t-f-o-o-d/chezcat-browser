@@ -3598,7 +3598,7 @@ impl Host for Bridge<'_> {
             ||index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
             ||matches!(self.inert_factory(object,method),Some("createTextNode"|"createComment"))
             ||self.event_target_interface(object)&&matches!(method,"Text"|"Comment"))
-            ||index==1&&(method==CREATE_PROCESSING_INSTRUCTION||method=="createProcessingInstruction"
+            ||index<2&&(method==CREATE_PROCESSING_INSTRUCTION||method=="createProcessingInstruction"
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
@@ -4120,9 +4120,8 @@ impl Host for Bridge<'_> {
         if method==DOCUMENT_IMPORT_NODE{return self.validate_import_source(args);}
         if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
         if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
-            let valid_target = matches!(args.first(), Some(Value::String(target))
-                if script_attribute_names::valid_xml_name(target));
-            let invalid_data = matches!(args.get(1), Some(Value::String(data)) if data.contains("?>"));
+            let valid_target=args.first().and_then(|target|script_attribute_names::converted_name(target).ok()).is_some_and(script_attribute_names::valid_xml_name);
+            let invalid_data=match args.get(1){Some(Value::String(data))=>data.contains("?>"),Some(Value::StringUnits(data))=>data.windows(2).any(|units|units==[0x3f,0x3e]),_=>false};
             return if valid_target && !invalid_data { Ok(()) } else {
                 Err(("InvalidCharacterError", "ProcessingInstruction requires a valid XML name and data without ?>.".into()))
             };
