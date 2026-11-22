@@ -69,8 +69,9 @@ function fails(fn,name,code){var caught=false;try{fn();}catch(e){caught=e.name==
 fails(function(){parent.replaceChild(parent,null);},'TypeError');fails(function(){parent.replaceChild(parent,other);},'HierarchyRequestError',3);fails(function(){parent.replaceChild(next,other);},'NotFoundError',8);
 fails(function(){parent.replaceChild({toString:function(){calls++;return 'fake';}},old);},'TypeError');fails(function(){parent.replaceChild(next);},'TypeError');
 fails(function(){Node.prototype.replaceChild.call(owner.createTextNode('leaf'),next,old);},'HierarchyRequestError',3);fails(function(){parent.replaceChild(owner,old);},'HierarchyRequestError',3);
-var foreign=document.implementation.createHTMLDocument('foreign').createElement('div');fails(function(){parent.replaceChild(foreign,old);},'NotSupportedError',9);fails(function(){owner.replaceChild(next,owner.documentElement);},'NotSupportedError',9);
+var foreign=document.implementation.createHTMLDocument('foreign').createElement('div');fails(function(){parent.replaceChild(foreign,old);},'NotSupportedError',9);
 if(calls||parent.childNodes.length!==1||parent.firstChild!==old||old.parentNode!==parent||next.parentNode!==null||foreign.parentNode!==null||owner.documentElement.localName!=='html')throw 'refusal changed topology';
+var previous=owner.documentElement;if(owner.replaceChild(next,previous)!==previous||owner.documentElement!==next||previous.parentNode!==null||next.parentNode!==owner||owner.head!==null||owner.body!==null)throw 'genuine now-supported document replacement';
 "#,
     );
 }
