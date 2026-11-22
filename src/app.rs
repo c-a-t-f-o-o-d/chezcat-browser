@@ -6366,3 +6366,7 @@ mod node_namespace_lookup_tests;
 #[cfg(test)]
 #[path="app_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
+
+#[cfg(test)]
+#[path="app_character_substring_tests.rs"]
+mod character_substring_tests;

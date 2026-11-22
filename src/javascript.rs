@@ -9222,6 +9222,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if method=="\0CharacterData.substringData"&&kind=="IndexSizeError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"createElement"|"createElementNS"|"\0DOMImplementation.createDocument")&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")&&matches!(kind,"InUseAttributeError"|"NotFoundError"|"WrongDocumentError"|"NotSupportedError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
