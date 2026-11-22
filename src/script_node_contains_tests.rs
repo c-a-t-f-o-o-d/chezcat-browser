@@ -103,6 +103,10 @@ fn contains_location(source: &str) -> crate::navigation::Location {
 }
 
 fn contains_fixture() -> (Document, Forms, Page) {
+    contains_fixture_with_page(Page::for_test())
+}
+
+fn contains_fixture_with_page(mut page: Page) -> (Document, Forms, Page) {
     let mut doc = crate::html::parse(concat!(
         "<!doctype html><html><head><title>Contains controls</title>",
         "<style>#menu{padding:5px;border:2px solid;width:90px;color:#123456}#inside{width:60px;height:24px}</style>",
@@ -112,7 +116,6 @@ fn contains_fixture() -> (Document, Forms, Page) {
     ));
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
     let location = contains_location("https://contains-controls.test/source");
     page.set_location(&location);
     page.set_resource_base(&location);
@@ -221,7 +224,9 @@ Node=savedNode;
 #[test]
 fn node_contains_child_realms_use_actual_documents_and_revalidate_cached_callers_after_navigation()
 {
-    let (mut doc, mut forms, mut page) = contains_fixture();
+    // This exercises real realm behavior, not the adversarial Function budget.
+    // Keep the explicit work-refusal fixtures on their existing test profile.
+    let (mut doc, mut forms, mut page) = contains_fixture_with_page(Page::new());
     contains_run(
         &mut doc,
         &mut forms,

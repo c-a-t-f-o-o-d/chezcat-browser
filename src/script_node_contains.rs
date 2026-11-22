@@ -9,6 +9,7 @@ pub(super) const CONTAINS_METHOD: &str = "\0Node.contains";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ContainsNode {
     Main(usize),
+    Inert,
     Attr,
     Child { owner: u32, node: usize },
 }
@@ -50,6 +51,11 @@ impl Bridge<'_> {
             return Ok(Value::Bool(false));
         };
         let result = match (this, that) {
+            (ContainsNode::Inert,ContainsNode::Inert)=>{
+                let(this_root,_)=self.inert_contains_ancestry(object,None)?;
+                let(other_root,found)=self.inert_contains_ancestry(other,Some(object))?;
+                this_root==other_root&&found
+            },
             (ContainsNode::Attr, ContainsNode::Attr) => object == other,
             (ContainsNode::Attr, _) | (_, ContainsNode::Attr) => false,
             (ContainsNode::Main(this), ContainsNode::Main(other)) => {
