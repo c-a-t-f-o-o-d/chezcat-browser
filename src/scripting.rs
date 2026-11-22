@@ -182,6 +182,7 @@ mod script_blank_frames;
 #[path = "script_inert_documents.rs"]
 mod script_inert_documents;
 use script_inert_documents::character_substring;
+use script_inert_documents::text_whole;
 use crate::javascript::character_data_interface;
 
 #[path = "script_mutation_child_list.rs"]
@@ -3832,7 +3833,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -4134,6 +4135,7 @@ impl Host for Bridge<'_> {
             };
         }
         if method==character_substring::METHOD{return self.validate_substring_data(object,args);}
+        if method==text_whole::GETTER{return if self.whole_text_receiver(object){Ok(())}else{Err(("TypeError","wholeText requires a genuine Text or CDATA node.".into()))};}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
@@ -4467,6 +4469,7 @@ impl Host for Bridge<'_> {
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if method==character_substring::METHOD{return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
+        if method==text_whole::GETTER{return self.event_target_interface(object)&&self.whole_text_receiver(receiver);}
         if character_data_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -6026,6 +6029,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method==text_whole::GETTER{return self.native_whole_text(object);}
         if method==character_substring::METHOD{return self.native_substring_data(object,args);}
         if object==WINDOW&&method=="Document"{return self.create_generic_document();}
         if script_attr::node_method(method){return match method{"getAttributeNode"=>self.get_attribute_node(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"removeAttributeNode"=>self.remove_attribute_node(object,args),_=>self.set_attribute_node(object,args)};}
@@ -8769,3 +8773,7 @@ mod character_substring_tests;
 #[cfg(test)]
 #[path="script_character_splice_tests.rs"]
 mod character_splice_tests;
+
+#[cfg(test)]
+#[path="script_text_whole_tests.rs"]
+mod text_whole_tests;
