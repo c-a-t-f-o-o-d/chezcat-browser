@@ -3,7 +3,7 @@
 
 use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface, aria_reflection_interface};
 
@@ -338,6 +338,12 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
+                    for(key,operation)in[("getElementsByTagName",super::ELEMENT_GET_ELEMENTS_TAG),("getElementsByClassName",super::ELEMENT_GET_ELEMENTS_CLASS)]{
+                        let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
+                        if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
+                        self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
+                        self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
+                    }
                     for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_node_attribute(prototype,window,key,get,Some(set))?;}
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;
@@ -449,6 +455,9 @@ impl Runtime {
                         ("createCDATASection", CREATE_CDATA_SECTION, 1),
                         ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),
                         ("importNode", DOCUMENT_IMPORT_NODE, 1),
+                        ("adoptNode",DOCUMENT_ADOPT_NODE,1),
+                        ("getElementsByTagName",super::DOCUMENT_GET_ELEMENTS_TAG,1),
+                        ("getElementsByClassName",super::DOCUMENT_GET_ELEMENTS_CLASS,1),
                     ] {
                         let method = self.allocate_host_function_with_length(window, operation, length)
                             .map_err(Fault::new)?;

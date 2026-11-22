@@ -15,6 +15,7 @@ impl Bridge<'_> {
         -> Result<Vec<NativeChildListChange>, String>
     {
         if method==xml_documents::CREATE{return self.xml_doctype_adoption_changes(args);}
+        if method==DOCUMENT_ADOPT_NODE{return self.adoption_changes(args);}
         if !matches!(method, "appendChild" | "insertBefore" | "removeChild" | "replaceChild") {
             return Ok(Vec::new());
         }

@@ -4,9 +4,10 @@ use super::*;
 fn location(source:&str)->crate::navigation::Location {
     crate::navigation::Location {url:Some(crate::url::parse(source).unwrap().0),path:None,root:None,fragment:String::new()}
 }
-fn fixture(markup:&str)->(Document,Forms,Page) {
+fn fixture(markup:&str)->(Document,Forms,Page) {fixture_with_page(markup,Page::for_test())}
+fn fixture_with_page(markup:&str,mut page:Page)->(Document,Forms,Page) {
     let mut doc=crate::html::parse(markup);doc.scripting_enabled=true;
-    let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    let mut forms=Forms::new(&doc);
     page.set_location(&location("https://sibling-security.test/source"));
     assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0,"{}",page.report());(doc,forms,page)
 }
@@ -18,7 +19,7 @@ fn id(doc:&Document,name:&str)->usize {(0..doc.nodes.len()).find(|&n|doc.attr(n,
 
 #[test]
 fn element_siblings_child_native_identity_and_cached_getters_revalidate_actual_origin() {
-    let(mut doc,mut forms,mut page)=fixture("<!doctype html><title>Child sibling guard</title><body><span id=a></span><span id=b></span>");
+    let(mut doc,mut forms,mut page)=fixture_with_page("<!doctype html><title>Child sibling guard</title><body><span id=a></span><span id=b></span>",Page::new());
     run(&mut doc,&mut forms,&mut page,r#"
 var a=document.getElementById('a'),b=document.getElementById('b');
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,childDoc=w.document,head=childDoc.head,body=childDoc.body;

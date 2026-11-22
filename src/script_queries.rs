@@ -102,6 +102,7 @@ impl Bridge<'_> {
 
     pub(super) fn create_inert_child_list(&mut self, object: u32) -> Result<Value, String> {
         if self.inert_children(object).is_none() { return Err("Invalid inert childNodes owner.".into()); }
+        if let Some(index)=node_index(object){self.state.work(self.state.dom.child_lists.lookup_work())?;if let Some(&saved)=self.state.dom.child_lists.get(&index){return Ok(Value::Host(saved));}}
         self.state.work(1)?;
         self.state.work(self.state.dom.inert_child_lists.lookup_work())?;
         if let Some(&handle) = self.state.dom.inert_child_lists.get(&object) {
@@ -156,6 +157,7 @@ impl Bridge<'_> {
         if let NodeList::Children(root) = list {
             let root = *root;
             if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }
+            if self.inert_children(node_handle(root)).is_some(){self.state.work(1)?;let children=self.inert_children(node_handle(root)).unwrap();return Ok(if property=="length"{Value::Number(children.len() as f64)}else{collection_index(property).and_then(|at|children.get(at)).copied().map_or(Value::Undefined,Value::Host)});}
             // A replacement may have appended a new Text since this SameObject
             // list was obtained. Publish current topology/owner metadata before
             // returning its handle, including before cross-realm native access.

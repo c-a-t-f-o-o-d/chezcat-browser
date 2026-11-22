@@ -18,7 +18,7 @@ use crate::dom_string::DomString;
 #[path="script_native_dom_string_tests.rs"]
 mod native_dom_string_tests;
 use crate::javascript::{Host, Runtime, Value,
-    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
+    CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
@@ -2584,7 +2584,6 @@ impl Bridge<'_> {
                 if let Some((position,attr)) = detached_attr {
                     self.state.attached_attributes.remove(position);
                     self.state.attributes[attr].owner = None;
-                    self.state.attributes[attr].document = DOCUMENT;
                     self.state.attributes[attr].value = removed;
                 }
             }
@@ -3208,7 +3207,9 @@ impl Host for Bridge<'_> {
         if self.message_instance(object).is_some() { return Some(WINDOW); }
         self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
+        if self.canonical_collection_member(object,property){return false;}
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
+            || matches!(self.inert_node_type(object),Some(1|9))&&matches!(property,"getElementsByTagName"|"getElementsByClassName")
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
@@ -3343,6 +3344,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.canonical_collection_member(object,property){return false;}
         if property=="baseURI" && self.form_named_control(object,property) {return true;}
         if self.node_metadata_property(object,property) {return false;}
         if self.aria_reflection_member(object,property){return false;}
@@ -3588,6 +3590,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if dom_collections::operation(method).is_some(){return &[(0,true)];}
         if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
         if method==element_names::DEFAULT_METHOD{return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
@@ -3669,8 +3672,8 @@ impl Host for Bridge<'_> {
                 _ => &[],
             };
         }
-        if (object == DOCUMENT || node_index(object).is_some()) && method=="getElementsByTagName"
-            || (object==DOCUMENT || self.attr_element_receiver(object)) && method=="getElementsByClassName"
+        if (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9))) && method=="getElementsByTagName"
+            || (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) && method=="getElementsByClassName"
             || object == DOCUMENT && method == "getElementsByName"
         {
             return &[(0, true)];
@@ -3711,6 +3714,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if dom_collections::operation(method).is_some(){return Some(1);}
         if method==xml_documents::CREATE{return Some(2);}
         if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
         if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
@@ -3742,7 +3746,7 @@ impl Host for Bridge<'_> {
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
         if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
-        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Some(1); }
+        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) { return Some(1); }
         if self.class_list_receiver(object) {
             return match method {"contains"|"item"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
@@ -3750,6 +3754,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if dom_collections::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.console_message_limit(object,method).is_some(){return Some(WINDOW);}
         if placeholder::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
@@ -3769,7 +3774,7 @@ impl Host for Bridge<'_> {
         }
         if self.event_target_interface(object)&&crate::javascript::DOCUMENT_TYPE_GETTERS.iter().any(|(_,operation)|*operation==method){return Some(object);}
         if self.event_target_interface(object)
-            && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE
+            && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE | DOCUMENT_ADOPT_NODE
                 | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
                 | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | xml_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
@@ -3861,7 +3866,7 @@ impl Host for Bridge<'_> {
         if crate::javascript::range_interface::node_argument(method) { return &[0]; }
         if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{&[0,1]}else{&[0]}; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
-        if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE) { return &[0]; }
+        if matches!(method, script_node_contains::CONTAINS_METHOD | DOCUMENT_IMPORT_NODE | DOCUMENT_ADOPT_NODE) { return &[0]; }
         if method=="initMouseEvent" && self.mouse_receiver(object) {&[3,14]}
         else if method=="initUIEvent" && self.ui_receiver(object) {&[3]}
         else {&[]}
@@ -3885,6 +3890,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if dom_collections::operation(method).is_some(){return 1;}
         if method==xml_documents::CREATE{return 2;}
         if method==element_names::DEFAULT_METHOD{return 1;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
@@ -3896,7 +3902,7 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::parser::PARSE { return 2; }
         if method=="replaceChild"&&self.inert_replace_receiver(object){return 2;}
         if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{2}else{1}; }
-        if method == DOCUMENT_IMPORT_NODE { return 1; }
+        if matches!(method,DOCUMENT_IMPORT_NODE|DOCUMENT_ADOPT_NODE) { return 1; }
         if method == CREATE_PROCESSING_INSTRUCTION { return 2; }
         if method == CREATE_CDATA_SECTION || object == WINDOW && method == "ProcessingInstruction" { return 1; }
         if self.inert_factory(object, method).is_some() {
@@ -3935,7 +3941,7 @@ impl Host for Bridge<'_> {
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") && self.namespace_receiver(object) { return 1; }
         if self.attr_element_receiver(object) && matches!(method, "getAttributeNode" | "removeAttributeNode") { return 1; }
         if collection_handle_index(object).is_some() && matches!(method, "item" | "namedItem")
-            || (object == DOCUMENT || node_index(object).is_some())
+            || (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9)))
                 && matches!(method,"getElementsByTagName"|"getElementsByClassName")
         {
             return 1;
@@ -3979,6 +3985,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if let Some((_,document))=dom_collections::operation(method){return if self.collection_interface_receiver(object)==Some(document){Ok(())}else{Err(("TypeError","Live collection method requires its genuine Document or Element receiver.".into()))};}
         if method==xml_documents::CREATE{return self.validate_xml_document_factory(args);}
         if method=="createElement"&&self.inert_document(object){if let Some(Value::String(name))=args.first(){if !script_attribute_names::valid_element_local_name(name){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
 
@@ -4077,6 +4084,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method=="Document" {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
+        if method == DOCUMENT_ADOPT_NODE{return self.validate_node_adoption(object,args);}
         if method == DOCUMENT_IMPORT_NODE { return self.validate_import_source(args); }
         if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
         if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
@@ -4145,7 +4153,7 @@ impl Host for Bridge<'_> {
             self.history_target(args)?;
             return Ok(());
         }
-        if method=="getElementsByClassName" && !(object==DOCUMENT || self.attr_element_receiver(object)) {
+        if method=="getElementsByClassName" && !(object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) {
             return Err(("TypeError","getElementsByClassName requires a Document or Element.".into()));
         }
         self.validate_created_event_call(object, method, args)?;
@@ -4338,6 +4346,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
+        if self.canonical_collection_member(object,property){return None;}
         if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
 
@@ -4360,9 +4370,10 @@ impl Host for Bridge<'_> {
         if self.node_event_method(object,property) {return None;}
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
         if self.named_map_receiver(object){return None;}
+        if property=="getElementsByTagName"&&matches!(self.inert_node_type(object),Some(1|9)){return Some("getElementsByTagName");}
         if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
-        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object))
+        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9)))
             && !self.form_named_control(object,property) { return Some("getElementsByClassName"); }
         if script_class_list::element(object).is_some() {
             return self.class_list_receiver(object).then(||script_class_list::method(property)).flatten();
@@ -4408,6 +4419,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if method==element_names::DEFAULT_METHOD{return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -4438,6 +4450,7 @@ impl Host for Bridge<'_> {
             if matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
                 return self.html_slot_receiver(receiver);
             }
+            if method==DOCUMENT_ADOPT_NODE{return receiver==DOCUMENT||self.inert_document(receiver);}
             if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | xml_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
@@ -4554,8 +4567,8 @@ impl Host for Bridge<'_> {
         if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)
             && self.namespace_receiver(object) && self.namespace_receiver(receiver);}
         if method=="getElementsByClassName" {
-            return if object==DOCUMENT {receiver==DOCUMENT}
-                else {self.attr_element_receiver(object) && self.attr_element_receiver(receiver)};
+            return if object==DOCUMENT||self.inert_node_type(object)==Some(9){receiver==DOCUMENT||self.inert_node_type(receiver)==Some(9)}
+                else {(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))&&(self.attr_element_receiver(receiver)||self.inert_node_type(receiver)==Some(1))};
         }
         if script_class_list::element(object).is_some() { return self.class_list_receiver(object) && self.class_list_receiver(receiver); }
         if method == "initMouseEvent" { return self.mouse_receiver(object) && self.mouse_receiver(receiver); }
@@ -4998,6 +5011,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canonical_collection_member(object,property){return Ok(false);}
         if self.xhr_index(object).is_some(){return Ok(self.xhr_member(object,property));}
 
         if self.range_owner(object).is_some() {self.state.work(1)?;return Ok(false);}
@@ -5020,7 +5034,8 @@ impl Host for Bridge<'_> {
         self.state.work(1)?;
         if script_named_map::element(object).is_some() { return self.named_map_has(object, property); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Ok(true);}
-        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) { return Ok(true); }
+        if property=="getElementsByTagName"&&matches!(self.inert_node_type(object),Some(1|9)){return Ok(true);}
+        if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) { return Ok(true); }
         if script_class_list::element(object).is_some() {
             if matches!(property,"length"|"value") || script_class_list::method(property).is_some() { self.class_list_get(object,"length")?; return Ok(true); }
             return if collection_index(property).is_some() { self.class_list_get(object,property).map(|value|!matches!(value,Value::Undefined)) } else { Ok(false) };
@@ -5957,6 +5972,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((name,_))=dom_collections::operation(method){let value=args.first().ok_or("A live collection operation requires one argument.")?;return if name=="getElementsByTagName"{self.create_tag_collection(object,value)}else{self.create_class_collection(object,value)};}
         if let Some((name,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return if setter{Err("ARIA setters require the native conversion transaction.".into())}else{self.aria_reflection_get(object,name)};}
         if let Some((name,setter))=crate::javascript::html_reflection_interface::operation(method){return if setter{Err("HTML reflection setters require the native conversion transaction.".into())}else{self.html_reflection_get(object,name)};}
         if method=="XMLHttpRequest"&&self.event_target_interface(object){return self.xhr_new(object);}
@@ -5980,6 +5996,7 @@ impl Host for Bridge<'_> {
             if !self.doctype_receiver(object){return Err("DocumentType getter requires a genuine accessible DocumentType.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,property);
         }
+        if method==DOCUMENT_ADOPT_NODE{return self.adopt_node(object,args);}
         if method==CREATE_CDATA_SECTION{return self.create_cdata_section(object,args);}
         if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
         if method == HTML_TEMPLATE_CONTENT_GET { return self.template_content(object); }
@@ -6145,7 +6162,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "getElementsByName" {
             return self.create_name_list(args.first().ok_or("getElementsByName requires one argument.")?);
         }
-        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object)) {
+        if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) {
             return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);
         }
         if let Some(result) = self.trusted_mouse_call(object, method, args) { return result; }
@@ -6161,7 +6178,7 @@ impl Host for Bridge<'_> {
         if collection_handle_index(object).is_some() {
             return self.tag_collection_call(object, method, args);
         }
-        if (object == DOCUMENT || node_index(object).is_some()) && method == "getElementsByTagName"
+        if (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9))) && method == "getElementsByTagName"
         {
             return self.create_tag_collection(
                 object,
@@ -8610,3 +8627,6 @@ mod document_children_tests;
 #[cfg(test)]
 #[path="script_document_clone_tests.rs"]
 mod document_clone_tests;
+#[cfg(test)]
+#[path="script_node_adoption_tests.rs"]
+mod node_adoption_tests;

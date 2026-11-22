@@ -13,6 +13,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object).is_some() {
             return self.inert_get(object, "baseURI");
         }
+        if let Some(id)=script_attr::index(object).filter(|&id|id<self.state.attributes.len()){let owner=self.state.attributes[id].document;if owner!=DOCUMENT{return self.inert_get(owner,"baseURI");}}
         self.main_node_base_uri()
     }
     pub(super) fn main_node_base_uri(&mut self) -> Result<Value, String> {

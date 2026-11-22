@@ -67,6 +67,13 @@ fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn prepare_attr_document_rebind(&mut self,mut matches_owner:impl FnMut(u32)->bool,lookup:usize,document:u32)->Result<Vec<usize>,String>{
+        let length=self.state.attached_attributes.len();self.state.work(length.checked_mul(lookup.saturating_add(1)).ok_or("Attr document lookup work overflow.")?)?;
+        let mut changes=Vec::new();
+        for at in 0..length{let id=self.state.attached_attributes[at];let attr=&self.state.attributes[id];if attr.document!=document&&attr.owner.is_some_and(&mut matches_owner){self.state.copies(size_of::<usize>()+size_of::<u32>())?;changes.try_reserve(1).map_err(|_|"Cannot reserve Attr document changes.")?;changes.push(id);}}
+        Ok(changes)
+    }
+    pub(super) fn commit_attr_document_rebind(&mut self,changes:&[usize],document:u32){for &id in changes{self.state.attributes[id].document=document;}}
     fn prepare_attribute_storage(&mut self,records:usize,index:usize,occupied:usize)->Result<Reservation,String>{
         let length=self.state.attributes.len();
         #[cfg(test)]
@@ -170,7 +177,7 @@ impl Bridge<'_> {
         self.commit_attribute_storage(reservation);
         let insert=match position{Ok(position)=>{self.state.attached_attributes.remove(position);position},Err(position)=>position};
         let result=if let Some(old_id)=old_id {
-            self.state.attributes[old_id].owner=None;self.state.attributes[old_id].document=DOCUMENT;self.state.attributes[old_id].value=old_value;
+            self.state.attributes[old_id].owner=None;self.state.attributes[old_id].value=old_value;
             Value::Host(ATTR_BASE+old_id as u32)
         } else if let Some(old_name)=old_name {
             let handle=ATTR_BASE+self.state.attributes.len() as u32;
@@ -307,7 +314,6 @@ impl Bridge<'_> {
             }
             "ownerElement" => Ok(attr.owner.map_or(Value::Null,Value::Host)),
             "ownerDocument" => {
-                if let Some(owner)=attr.owner {if self.inert_node_type(owner).is_some(){return self.inert_get(owner,"ownerDocument");}return Ok(Value::Host(DOCUMENT));}
                 Ok(Value::Host(attr.document))
             },
             "nodeType" => Ok(Value::Number(2.0)),

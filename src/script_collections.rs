@@ -7,24 +7,35 @@ use super::*;
 // Independent of adjacent Window/frame/node identities.
 const COLLECTION_BASE:u32=0x8c00_0000;
 const COLLECTION_END:u32=0x8d00_0000;
+pub(super) fn operation(method:&str)->Option<(&'static str,bool)>{use crate::javascript::*;match method{DOCUMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",true)),DOCUMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",true)),ELEMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",false)),ELEMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",false)),_=>None}}
 #[cfg(test)]
 const MAX_COLLECTIONS:usize=128;
 
 pub(super) struct TagCollection {
-    root: usize,
+    root: u32,
     filter: Filter,
 }
 
 enum Filter {
     Children(u32),
-    Tag(String),
+    Tag(String,bool),
     Classes(Vec<String>),
+}
+fn qualified_matches(tag:&str,prefix:Option<&str>,name:&str,lowercase:bool)->bool{
+    let actual=prefix.unwrap_or("").bytes().chain(prefix.map(|_|b':')).chain(tag.bytes());
+    actual.eq(name.bytes().map(|byte|if lowercase{byte.to_ascii_lowercase()}else{byte}))
+}
+fn tag_matches(node:&Node,name:&str,html:bool)->Result<bool,String>{
+    let NodeKind::Element{tag,expanded_name,..}=&node.kind else{return Ok(false);};
+    if name=="*"{return Ok(true);}
+    let prefix=crate::html::element_names::prefix(node.namespace,expanded_name)?;
+    Ok(qualified_matches(tag,prefix,name,html&&node.namespace==crate::html::Namespace::Html))
 }
 impl Filter {
     fn owned_bytes(&self) -> usize {
         match self {
             Self::Children(_) => 0,
-            Self::Tag(name) => name.capacity(),
+            Self::Tag(name,_) => name.capacity(),
             Self::Classes(names) => names.capacity()*size_of::<String>()+names.iter().map(String::capacity).sum::<usize>(),
         }
     }
@@ -37,18 +48,44 @@ pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn collection_interface_receiver(&self,object:u32)->Option<bool>{if object==DOCUMENT||self.inert_node_type(object)==Some(9){Some(true)}else if self.inert_node_type(object)==Some(1)||node_index(object).is_some_and(|index|self.dom_accessible(index)&&matches!(self.doc.nodes[index].kind,NodeKind::Element{..})){Some(false)}else{None}}
+    pub(super) fn canonical_collection_member(&self,object:u32,property:&str)->bool{matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.collection_interface_receiver(object).is_some()&&!self.form_named_control(object,property)}
+    fn tag_collection_handles(&mut self,handle:u32)->Result<Vec<u32>,String>{
+        let index=collection_handle_index(handle).ok_or("Invalid HTMLCollection handle.")?;let root=self.state.dom.collections.get(index).ok_or("Missing live collection.")?.root;let owner=root;
+        if self.inert_node_type(owner).is_none(){let nodes=self.tag_collection_nodes(handle)?;self.state.copies(nodes.len().checked_mul(size_of::<u32>()).ok_or("Collection handle conversion overflow.")?)?;let mut result=Vec::new();result.try_reserve_exact(nodes.len()).map_err(|_|"Cannot reserve live collection handles.")?;result.extend(nodes.into_iter().map(node_handle));return Ok(result);}
+        if matches!(&self.state.dom.collections[index].filter,Filter::Classes(names) if names.is_empty()){return Ok(Vec::new());}
+        let mut pending=Vec::new();let mut result=Vec::new();let count=self.inert_children(owner).ok_or("Adopted collection root is unavailable.")?.len();self.state.work(count)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Collection root traversal overflow.")?)?;pending.try_reserve_exact(count).map_err(|_|"Cannot reserve adopted collection traversal.")?;pending.extend(self.inert_children(owner).unwrap().iter().rev().copied());
+        let maximum=self.inert_node_count();let mut visited=0usize;
+        while let Some(node)=pending.pop(){
+            visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or("Cyclic adopted collection topology.")?;self.state.work(1)?;
+            let source=self.inert_import_source(node);let element=matches!(source,Some(script_inert_documents::ImportSource::Element(_)|script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{..},..},..}));
+            let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,..},..},..})=>attrs.iter().fold(tag.len()+attrs.len(),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
+            let classes=match &self.state.dom.collections[index].filter{Filter::Classes(names)=>names.len(),_=>0};
+            if classes!=0{let length=match self.inert_import_source(node){Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..})=>attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("").len(),_=>0};let scans=length.checked_mul(classes).ok_or("Adopted class scan overflow.")?;self.state.work(scans)?;self.state.copies(scans)?;}
+            let filter=&self.state.dom.collections[index].filter;let source=self.inert_import_source(node);
+            if matches!(source,Some(script_inert_documents::ImportSource::Parsed{node:Node{namespace:crate::html::Namespace::UnknownForeign,..},..})){return Err("Adopted collection requires known namespace provenance.".into());}
+            let matched=if !element{false}else{match (filter,source){
+                (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Element(tag)))=>name=="*"||qualified_matches(tag,None,name,*html),
+                (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Parsed{node,..}))=>tag_matches(node,name,*html)?,
+                (Filter::Classes(names),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..}))=>{let class=attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("");names.iter().all(|name|class.split(class_whitespace).any(|token|token==name))},
+                (Filter::Classes(_),_)=>false,_=>return Err("Unsupported adopted collection filter.".into()),
+            }};
+            if matched{self.state.copies(size_of::<u32>())?;result.try_reserve(1).map_err(|_|"Cannot reserve adopted collection result.")?;result.push(node);}
+            if self.template_receiver(node){continue;}
+            let count=self.inert_children(node).ok_or("Adopted collection child is unavailable.")?.len();self.state.work(count)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Adopted collection traversal overflow.")?)?;pending.try_reserve(count).map_err(|_|"Cannot reserve adopted collection descendants.")?;pending.extend(self.inert_children(node).unwrap().iter().rev().copied());
+        }
+        Ok(result)
+    }
     pub(super) fn create_tag_collection(
         &mut self,
         object: u32,
         value: &Value,
     ) -> Result<Value, String> {
-        let mut name = self.text(value)?;name.make_ascii_lowercase();
-        let root = if object == DOCUMENT {
-            0
-        } else {
-            self.node(object)?
-        };
-        self.store_live_collection(root, Filter::Tag(name))
+        let name = self.text(value)?;
+        if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
+        let root=object;
+        let html=self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Html;
+        self.store_live_collection(root, Filter::Tag(name,html))
     }
 
     pub(super) fn create_class_collection(
@@ -56,11 +93,8 @@ impl Bridge<'_> {
         object: u32,
         value: &Value,
     ) -> Result<Value, String> {
-        let root = if object == DOCUMENT {
-            0
-        } else {
-            self.node(object)?
-        };
+        if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
+        let root=object;
         let text = self.text(value)?;
         self.state.work(text.len())?;
         self.state.copies(text.len())?;
@@ -89,7 +123,7 @@ impl Bridge<'_> {
         self.store_live_collection(root, Filter::Classes(names))
     }
 
-    fn store_live_collection(&mut self, root: usize, filter: Filter) -> Result<Value, String> {
+    fn store_live_collection(&mut self, root: u32, filter: Filter) -> Result<Value, String> {
         let count=self.state.dom.collections.len();
         #[cfg(test)]
         if self.state.limits.test_entry_arenas&&count>=MAX_COLLECTIONS{return Err("DOM live tag-collection limit reached (128 per document).".into());}
@@ -114,17 +148,17 @@ impl Bridge<'_> {
             .collections
             .get(index)
             .ok_or("Invalid HTMLCollection handle.")?;
-        let root = collection.root;
+        let root=if collection.root==DOCUMENT{0}else{node_index(collection.root).ok_or("Native collection root is unavailable.")?};
         if matches!(collection.filter,Filter::Children(_)){return Err("Children views use stable native handles.".into());}
         if matches!(&collection.filter,Filter::Classes(names) if names.is_empty()){return Ok(Vec::new());}
         let mut candidates=self.query_candidates(root)?;
-        if matches!(&self.state.dom.collections[index].filter,Filter::Tag(name) if name=="*"){return Ok(candidates);}
+        if matches!(&self.state.dom.collections[index].filter,Filter::Tag(name,_) if name=="*"){return Ok(candidates);}
         let mut kept=0;
         for position in 0..candidates.len() {
             let node=candidates[position];self.state.work(1)?;
             match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
-                Filter::Tag(_)=>self.state.copies(tag(self.doc,node).len())?,
+                Filter::Tag(_,_)=>self.state.copies(tag(self.doc,node).len())?,
                 Filter::Classes(names)=>{
                     let count=names.len();
                     let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};
@@ -136,7 +170,7 @@ impl Bridge<'_> {
             }
             let matches=match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
-                Filter::Tag(name)=>tag(self.doc,node)==name,
+                Filter::Tag(name,html)=>tag_matches(&self.doc.nodes[node],name,*html)?,
                 Filter::Classes(names)=>{
                     let class=self.doc.attr(node,"class").unwrap_or("");
                     names.iter().all(|name|class.split(class_whitespace).any(|token|token==name))
@@ -161,8 +195,8 @@ impl Bridge<'_> {
         if name.is_empty() {
             return Ok(Value::Undefined);
         }
-        for node in self.tag_collection_nodes(handle)? {
-            if self.collection_element_named_match(node_handle(node),name)?{return Ok(Value::Host(node_handle(node)));}
+        for node in self.tag_collection_handles(handle)? {
+            if self.collection_element_named_match(node,name)?{return Ok(Value::Host(node));}
         }
         Ok(Value::Undefined)
     }
@@ -181,14 +215,14 @@ impl Bridge<'_> {
         }
         if property == "length" {
             return Ok(Value::Number(
-                self.tag_collection_nodes(handle)?.len() as f64
+                self.tag_collection_handles(handle)?.len() as f64
             ));
         }
         if let Some(index) = collection_index(property) {
             return Ok(self
-                .tag_collection_nodes(handle)?
+                .tag_collection_handles(handle)?
                 .get(index)
-                .map_or(Value::Undefined, |&node| Value::Host(node_handle(node))));
+                .map_or(Value::Undefined, |&node| Value::Host(node)));
         }
         self.tag_collection_named(handle, property)
     }
@@ -207,7 +241,7 @@ impl Bridge<'_> {
             "item" => {
                 let index = timer_integer(argument)? as u32 as usize;
                 if let Some(owner)=self.children_collection_owner(handle){self.parent_element_nodes(owner)?.get(index).copied().map_or(Value::Undefined,Value::Host)}
-                else {self.tag_collection_nodes(handle)?.get(index).map_or(Value::Undefined, |&node| Value::Host(node_handle(node)))}
+                else {self.tag_collection_handles(handle)?.get(index).map_or(Value::Undefined, |&node| Value::Host(node))}
             }
             "namedItem" => {
                 let name = self.text(argument)?;
@@ -223,7 +257,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn tag_collection_keys(&mut self, handle: u32) -> Result<Vec<String>, String> {
-        let length = if let Some(owner)=self.children_collection_owner(handle){self.parent_element_nodes(owner)?.len()}else{self.tag_collection_nodes(handle)?.len()};
+        let length = if let Some(owner)=self.children_collection_owner(handle){self.parent_element_nodes(owner)?.len()}else{self.tag_collection_handles(handle)?.len()};
         #[cfg(test)]
         if self.state.limits.test_entry_arenas&&length>4096{return Err("HTMLCollection enumeration limit reached (4096 indices).".into());}
         self.state.index_keys(length)

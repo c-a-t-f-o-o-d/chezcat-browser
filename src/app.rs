@@ -6282,3 +6282,7 @@ mod document_children_tests;
 #[cfg(test)]
 #[path="app_document_clone_tests.rs"]
 mod document_clone_tests;
+
+#[cfg(test)]
+#[path="app_node_adoption_tests.rs"]
+mod node_adoption_tests;
