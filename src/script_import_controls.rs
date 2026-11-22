@@ -102,6 +102,7 @@ impl Bridge<'_> {
             media_environment: None,
             title: String::new(),
             content_type: String::new(),
+            encoding: self.doc.encoding,
             nodes,
             scripting_enabled: false,
             nonce_unsafe_nodes: HashSet::new(),

@@ -312,6 +312,7 @@ impl Bridge<'_> {
             media_environment: None,
             title: String::new(),
             content_type: String::new(),
+            encoding: crate::text_codec::Encoding::UTF8,
             nodes,
             scripting_enabled: false,
             nonce_unsafe_nodes: HashSet::new(),

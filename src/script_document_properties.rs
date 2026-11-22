@@ -13,7 +13,7 @@ impl Bridge<'_> {
             return object == DOCUMENT || self.inert_document(object);
         }
         object==DOCUMENT && matches!(name, "createTreeWalker" | "implementation") || self.document_interface_receiver(object)
-            && (matches!(name, "documentElement" | "currentScript" | "activeElement") || script_element_properties::ordinary_interface_member(name))
+            && (matches!(name, "documentElement" | "currentScript" | "activeElement" | "characterSet" | "charset" | "inputEncoding") || script_element_properties::ordinary_interface_member(name))
     }
 
     pub(super) fn frame_document_prototype_lookup(&self, object:u32, name:&str)->bool {

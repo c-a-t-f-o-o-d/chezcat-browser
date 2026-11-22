@@ -1,8 +1,8 @@
 //! Original loaded-document charset selection and bounded HTML byte prescan.
 //! HTML source: 0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce, encoding sniffing,
 //! prescan/get-an-attribute/get-an-XML-encoding and meta charset extraction.
-//! This selects an initial decoder; parser restarts and document encoding
-//! metadata remain separate integration work. CSS/scripts keep their policies.
+//! The committed document retains its initial decoder identity. Parser restarts
+//! and CSS/script selection have separate entry paths.
 use crate::text_codec::{self, Encoding};
 
 // Reuse the original native MIME algorithm; HTML meta content has a different
@@ -20,10 +20,11 @@ pub(super) fn decode(
     html: bool,
     output_limit: usize,
     check: &dyn Fn() -> Result<(), String>,
-) -> Result<String, String> {
+) -> Result<(String, Encoding), String> {
     check()?;
     let encoding = select(bytes, content_type, html)?;
-    text_codec::decode(bytes, encoding, output_limit, check)
+    let text = text_codec::decode(bytes, encoding, output_limit, check)?;
+    Ok((text, encoding))
 }
 
 fn select(bytes: &[u8], content_type: &str, html: bool) -> Result<Encoding, String> {

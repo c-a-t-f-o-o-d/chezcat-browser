@@ -506,6 +506,16 @@ pub(crate) const SVG_STYLE_SET:&str="\0SVGElement.set.style";
 pub(crate) const MEDIA_QUERY_LIST: &str = "MediaQueryList";
 pub(crate) const MEDIA_QUERY_MATCHES: &str = "\0MediaQueryList.get.matches";
 pub(crate) const MEDIA_QUERY_MEDIA: &str = "\0MediaQueryList.get.media";
+pub(crate) const DOCUMENT_ENCODING_GETTERS: [(&str, &str); 3] = [
+    ("characterSet", "\0Document.get.characterSet"),
+    ("charset", "\0Document.get.charset"),
+    ("inputEncoding", "\0Document.get.inputEncoding"),
+];
+
+pub(crate) fn document_encoding_getter(method: &str) -> bool {
+    DOCUMENT_ENCODING_GETTERS.iter().any(|&(_, getter)| getter == method)
+}
+
 pub(crate) const DOCUMENT_CURRENT_SCRIPT_GET: &str = "\0Document.get.currentScript";
 pub(crate) const DOCUMENT_ACTIVE_ELEMENT_GET:&str="\0Document.get.activeElement";
 pub(crate) const HTML_SLOT_NAME_GET: &str = "\0HTMLSlotElement.get.name";

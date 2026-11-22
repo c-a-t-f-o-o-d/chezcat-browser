@@ -346,7 +346,7 @@ impl Bridge<'_> {
         }
         match node.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => matches!(name, "URL" | "documentURI" | "defaultView" | "contentType"
-                | "compatMode" | "characterSet" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
+                | "compatMode" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
             Kind::Doctype(_) => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "attributes" | "localName" | "tagName" | "namespaceURI" | "prefix"),
             Kind::Fragment { .. } => false,
@@ -1901,7 +1901,6 @@ impl Bridge<'_> {
             "URL" | "documentURI" if html_document => string(document.map_or("about:blank", |doc| &doc.url)),
             "contentType" if html_document => string(document.map_or("application/xml",|doc|doc.content_type)),
             "compatMode" if html_document => string(document.map_or(crate::html::DocumentMode::NoQuirks,|doc|doc.mode).compat_mode()),
-            "characterSet" if html_document => string("UTF-8"),
             "defaultView" if html_document => Value::Null,
 
             "localName" if matches!(node.kind, Kind::Element(_)) => {
