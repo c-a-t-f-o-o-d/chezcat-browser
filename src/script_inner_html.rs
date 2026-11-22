@@ -67,6 +67,7 @@ impl Bridge<'_> {
             self.state.work(1)?;
             let item = &self.doc.nodes[node];
             match &item.kind {
+                NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut out,piece)?;}},
                 NodeKind::DocumentFragment => {
                     self.state.work(item.children.len())?;
                     stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));

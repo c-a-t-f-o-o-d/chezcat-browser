@@ -25,6 +25,7 @@ impl Bridge<'_> {
                 _=>return Err(("TypeError","Inert insertBefore requires a Node or null reference.".into())),
             }
         }
+        if method!="removeChild"&&self.doctype_receiver(*child){return Err(("HierarchyRequestError","DocumentType requires a Document parent.".into()));}
         let Some(source)=arena.node(*child) else {
             if method=="appendChild" && self.template_fragment_receiver(parent){return self.validate_template_append(parent,args);}
             return Err(("NotSupportedError","Inert child mutation requires a node in the same inert owner document.".into()));

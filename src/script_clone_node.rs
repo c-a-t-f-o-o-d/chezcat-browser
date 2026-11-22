@@ -37,6 +37,7 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
         NodeKind::Comment(text)=>NodeKind::Comment(text.try_clone()?),
         NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:data.try_clone()?},
         NodeKind::DocumentFragment=>NodeKind::DocumentFragment,
+        NodeKind::DocumentType(data)=>NodeKind::DocumentType(data.try_clone()?),
     })
 }
 
@@ -142,6 +143,7 @@ impl Bridge<'_> {
                 ImportSource::Text(data) => data.used_bytes(),
                 ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
                 ImportSource::Fragment => 0,
+                ImportSource::Doctype(data)=>data.used_bytes(),
             };
             bytes = bytes.checked_add(cost).ok_or("DOM import size overflow.")?;
             if bytes > self.state.retained_limit.saturating_sub(self.state.retained) {
@@ -159,6 +161,7 @@ impl Bridge<'_> {
                     target: target.into(), data: data.try_clone()?,
                 }, crate::html::Namespace::None, false),
                 ImportSource::Fragment => (NodeKind::DocumentFragment, crate::html::Namespace::None, false),
+                ImportSource::Doctype(data)=>(NodeKind::DocumentType(data.try_clone()?),crate::html::Namespace::None,false),
             };
             let extra=copied_payload_extra(&kind);
             bytes=bytes.checked_add(extra).filter(|bytes|*bytes<=self.state.retained_limit.saturating_sub(self.state.retained)).ok_or("Imported element attribute backing exceeds allowance.")?;

@@ -26,7 +26,7 @@ impl Bridge<'_> {
         match self.doc.nodes.get(node)?.kind {
             NodeKind::Element {..}=>Some(Family::Element),
             NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => Some(Family::CharacterData),
-            NodeKind::DocumentFragment=>None,
+            NodeKind::DocumentFragment | NodeKind::DocumentType(_)=>None,
         }
     }
 
@@ -91,7 +91,7 @@ impl Bridge<'_> {
             }
             match item.kind {
                 NodeKind::Element {..}=>return Ok(Value::Host(node_handle(child))),
-                NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
+                NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
                 NodeKind::DocumentFragment=>return Err("A DocumentFragment cannot be a published sibling.".into()),
             }
         }

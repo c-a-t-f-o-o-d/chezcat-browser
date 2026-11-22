@@ -441,6 +441,9 @@ impl Bridge<'_> {
             tag(self.doc,node),self.state.dom.connected[node],self.state.dom.created.contains(&node),self.state.geometry.is_some())
     }
 
+    pub(super) fn doctype_receiver(&self,object:u32)->bool{
+        self.inert_node_type(object)==Some(10)||node_index(object).is_some_and(|node|self.dom_accessible(node)&&matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)))
+    }
     pub(super) fn namespace_receiver(&self, object: u32) -> bool {
         object == DOCUMENT
             || self.attr_receiver(object)
@@ -617,6 +620,13 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if self.doctype_receiver(object)&&matches!(method,"appendChild"|"insertBefore"|"replaceChild"|"removeChild"){
+            return Err(if method=="removeChild"{("NotFoundError","A DocumentType has no children.".into())}else{("HierarchyRequestError","A DocumentType cannot contain children.".into())});
+        }
+        if method==script_inert_documents::CREATE_DOCTYPE {
+            let invalid=match args.first(){Some(Value::String(s))=>s.encode_utf16().any(|u|matches!(u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),Some(Value::StringUnits(s))=>s.iter().any(|u|matches!(*u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),_=>false};
+            if invalid{return Err(("InvalidCharacterError","Invalid doctype name.".into()));}
+        }
         if object==DOCUMENT && method=="createAttribute" {
             if let Some(Value::String(name))=args.first() {if !super::script_attribute_names::valid_attribute_name(name) {return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
         }
@@ -683,6 +693,9 @@ impl Bridge<'_> {
                 if let Some(template) = self.checked_inert_fragment(*handle) {
                     return self.validate_inert_fragment_insertion(object, template, method, args);
                 }
+            }
+            if method!="removeChild"&&args.first().is_some_and(|value|matches!(value,Value::Host(handle) if self.doctype_receiver(*handle))) {
+                return Err(("HierarchyRequestError","DocumentType requires a Document parent.".into()));
             }
             if !matches!(args.first(), Some(Value::Host(handle)) if node_index(*handle).is_some()) {
                 return Err(("TypeError", format!("{method} requires a DOM node.")));
@@ -751,6 +764,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_has(&mut self, object: u32, property: &str) -> Result<Option<bool>, String> {
+        if self.doctype_receiver(object)&&matches!(property,"name"|"publicId"|"systemId"|"nodeValue"|"textContent"){self.state.work(1)?;return Ok(Some(true));}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {self.state.work(1)?;return Ok(Some(true));}
         if self.fragment_receiver(object) {self.state.work(1)?;return Ok(Some(common_node_property(property)||property=="childNodes"||self.dom_method(object,property).is_some()));}
         if property=="childNodes" && node_index(object).is_some() {self.dom_node(object)?;return Ok(Some(true));}
@@ -852,6 +866,11 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if let NodeKind::DocumentType(data)=&self.doc.nodes[node].kind {
+            let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
+            if let Some(text)=text{return Self::dom_string_value(self.state,text).map(Some);}
+            if matches!(property,"nodeValue"|"textContent"){return Ok(Some(Value::Null));}
+        }
         if self.anchor_url_property(node, property) { return self.anchor_url_get(node, property).map(Some); }
         if self.style_text_attribute(object, property) {
             let raw=self.doc.attr(node,property).unwrap_or("");
@@ -927,7 +946,7 @@ impl Bridge<'_> {
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
-                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else if target.is_some() { 7.0 } else { 1.0 }),
+                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else if target.is_some() { 7.0 } else if matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)){10.0}else { 1.0 }),
                 "nodeName" => {
                     if let Some(target) = target {
                         self.state.copies(target.len())?;
@@ -1049,6 +1068,7 @@ impl Bridge<'_> {
             NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
             NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             NodeKind::DocumentFragment => 0,
+            NodeKind::DocumentType(data)=>data.capacity(),
         };
         let node = self.doc.nodes.len();
         let handle = u32::try_from(node).ok().and_then(|index|NODE_BASE.checked_add(index))
@@ -1227,6 +1247,7 @@ impl Bridge<'_> {
             return Err(("HierarchyRequestError", "Text nodes cannot contain children.".into()));
         }
         let Value::Host(incoming) = args[0] else { unreachable!() };
+        if self.doctype_receiver(incoming){return Err(("HierarchyRequestError","DocumentType requires a Document parent.".into()));}
         // An inclusive ancestor is invalid before old-child membership is tested.
         let mut ancestor = Some(parent);
         while let Some(node) = ancestor {
@@ -1609,6 +1630,7 @@ impl Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<bool, String> {
+        if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(true);}
         if self.fragment_receiver(object) {
             if property=="nodeValue" {self.state.work(1)?;return Ok(true);}
             if property=="textContent" {let text=if matches!(value,Value::Null|Value::Undefined){DomString::new()}else{self.dom_text(value)?};let node=self.dom_node(object)?;self.set_text_content(node,text)?;return Ok(true);}

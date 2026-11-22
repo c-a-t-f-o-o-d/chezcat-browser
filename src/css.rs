@@ -1105,7 +1105,7 @@ fn compute_cascade(
             continue;
         }
         // Comments are real DOM leaves with no CSS box or inherited display.
-        if node.kind.is_nonrendered_character_data() {
+        if node.kind.is_nonrendered_node() {
             let mut style = Style::inherited(&parent);
             style.display = Display::None;
             computed[index] = style;

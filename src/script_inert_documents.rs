@@ -45,6 +45,7 @@ mod main_node_storage_tests;
 
 pub(super) const GET: &str = "\0Document.get.implementation";
 pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
+pub(super) const CREATE_DOCTYPE:&str="\0DOMImplementation.createDocumentType";
 pub(super) const HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
 
 #[derive(Default)]
@@ -62,6 +63,8 @@ struct TemplateIndexGrowth {
 }
 
 struct DocumentNodes {
+    kind:crate::html::DocumentKind,
+    mode:crate::html::DocumentMode,
     implementation: u32,
     doctype: Option<u32>,
     url: String,
@@ -87,7 +90,7 @@ enum Kind {
     TemplateDocument { implementation: u32 },
     Fragment { template: Option<u32> },
     Parsed { source: ParsedSource, initial_template: Option<usize> },
-    Doctype,
+    Doctype(crate::html::DocumentTypeData),
     Element(String),
     Text(DomString),
     ProcessingInstruction { target: String, data: DomString },
@@ -98,6 +101,7 @@ pub(super) enum ImportSource<'a> {
     Element(&'a str),
     Text(&'a DomString),
     Fragment,
+    Doctype(&'a crate::html::DocumentTypeData),
     ProcessingInstruction { target: &'a str, data: &'a DomString },
 }
 
@@ -246,8 +250,9 @@ impl Bridge<'_> {
                 NodeKind::Comment(_) => 8,
                 NodeKind::ProcessingInstruction { .. } => 7,
                 NodeKind::DocumentFragment => 11,
+                NodeKind::DocumentType(_)=>10,
             },
-            Kind::Doctype => 10,
+            Kind::Doctype(_) => 10,
             Kind::Element(_) => 1,
             Kind::Text(_) => 3,
             Kind::ProcessingInstruction { .. } => 7,
@@ -274,9 +279,10 @@ impl Bridge<'_> {
                     NodeKind::Comment(_) => "Comment",
                     NodeKind::ProcessingInstruction { .. } => "ProcessingInstruction",
                     NodeKind::DocumentFragment => "DocumentFragment",
+                    NodeKind::DocumentType(_)=>"DocumentType",
                 }
             }
-            Kind::Doctype => "DocumentType",
+            Kind::Doctype(_) => "DocumentType",
             Kind::Element(tag) => crate::javascript::ordinary_html_interface(tag).unwrap_or("HTMLElement"),
             Kind::Text(_) => "Text",
             Kind::ProcessingInstruction { .. } => "ProcessingInstruction",
@@ -306,7 +312,7 @@ impl Bridge<'_> {
         match node.kind {
             Kind::Document(_) | Kind::TemplateDocument { .. } => matches!(name, "URL" | "documentURI" | "defaultView" | "contentType"
                 | "compatMode" | "characterSet" | "namespaceURI" | "doctype" | "body" | "head" | "title"),
-            Kind::Doctype => matches!(name, "name" | "publicId" | "systemId"),
+            Kind::Doctype(_) => matches!(name, "name" | "publicId" | "systemId"),
             Kind::Element(_) => matches!(name, "attributes" | "localName" | "tagName" | "namespaceURI" | "prefix"),
             Kind::Fragment { .. } => false,
             Kind::Parsed { source, .. } => match self.parsed_source(source).map(|(node, _)| &node.kind) {
@@ -936,6 +942,7 @@ impl Bridge<'_> {
                     for piece in ["<?", target, " ", data.scalar()?, "?>"] { append(self.state, &mut output, piece)?; }
                 }
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
+                NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut output,piece)?;}},
                 NodeKind::Element { tag, attrs, .. } => {
                     if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
                         return Err("Template serialization of foreign elements is unavailable.".into());
@@ -1143,14 +1150,15 @@ impl Bridge<'_> {
             Kind::Text(data) => ImportSource::Text(data),
             Kind::Fragment { .. } => ImportSource::Fragment,
             Kind::ProcessingInstruction { target, data } => ImportSource::ProcessingInstruction { target, data },
-            Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype => return None,
+            Kind::Doctype(data)=>ImportSource::Doctype(data),
+            Kind::Document(_) | Kind::TemplateDocument { .. } => return None,
         })
     }
 
     pub(super) fn inert_clone_receiver(&self, object: u32) -> bool {
         self.state.inert_documents.node(object).is_some_and(|node| matches!(node.kind,
             Kind::Fragment { .. } | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
-                | Kind::ProcessingInstruction { .. }))
+                | Kind::ProcessingInstruction { .. } | Kind::Doctype(_)))
     }
 
     pub(super) fn clone_inert_tree(&mut self, object: u32, deep: bool) -> Result<Value, String> {
@@ -1259,6 +1267,7 @@ impl Bridge<'_> {
             let string_bytes = match kind {
                 Kind::Element(name) => name.len(),
                 Kind::Text(data) => data.used_bytes(),
+                Kind::Doctype(data)=>data.used_bytes(),
                 Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
                 _ => 0,
             };
@@ -1293,11 +1302,13 @@ impl Bridge<'_> {
                     Kind::Text(data) => Kind::Text(data.try_clone()?),
                     Kind::ProcessingInstruction { target, data } =>
                         Kind::ProcessingInstruction { target: target.clone(), data: data.try_clone()? },
-                    Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype =>
+                    Kind::Doctype(data)=>Kind::Doctype(data.try_clone()?),
+                    Kind::Document(_) | Kind::TemplateDocument { .. } =>
                         return Err("Cloning this inert document node is unavailable.".into()),
                 }
             };
-            payload = payload.saturating_add(string_bytes)
+            let owned=match &kind {Kind::Element(text)=>text.capacity(),Kind::Text(text)=>text.capacity(),Kind::ProcessingInstruction{target,data}=>target.capacity().saturating_add(data.capacity()),Kind::Doctype(data)=>data.capacity(),_=>0};
+            payload = payload.saturating_add(owned)
                 .saturating_add(children.capacity().saturating_mul(size_of::<u32>()));
             staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
         }
@@ -1424,6 +1435,23 @@ impl Bridge<'_> {
 
     // Entry and generated-source backing grow jointly with the admitted payload.
     // Prepare both replacements before publishing either capacity or any handle.
+    pub(super) fn create_document_type(&mut self,implementation:u32,args:&[Value])->Result<Value,String>{
+        if !self.inert_implementation(implementation){return Err("A genuine DOMImplementation is required.".into());}
+        let owner=if implementation==MAIN_IMPLEMENTATION {DOCUMENT}else{
+            let owner=implementation.checked_sub(1).ok_or("Missing implementation owner.")?;
+            let node=self.state.inert_documents.node(owner).ok_or("Missing implementation owner.")?;
+            if !matches!(&node.kind,Kind::Document(doc) if doc.implementation==implementation)
+                &&!matches!(node.kind,Kind::TemplateDocument{implementation:actual} if actual==implementation){return Err("Invalid implementation owner identity.".into());}
+            owner
+        };
+        let name=self.dom_text(args.first().ok_or("createDocumentType requires three arguments.")?)?;
+        if name.code_units().any(|u|matches!(u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)){return Err("Invalid doctype name.".into());}
+        let public_id=self.dom_text(args.get(1).ok_or("createDocumentType requires three arguments.")?)?;
+        let system_id=self.dom_text(args.get(2).ok_or("createDocumentType requires three arguments.")?)?;
+        let data=crate::html::DocumentTypeData{name,public_id,system_id};
+        if owner==DOCUMENT{self.create_dom_node(NodeKind::DocumentType(data))}else{self.append_inert_leaf(owner,Kind::Doctype(data))}
+    }
+
     fn reserve_inert_entries(&mut self, count: usize, payload: usize, generated: usize) -> Result<u32, String> {
         self.reserve_inert_storage(count, payload, generated, 0, 0)
     }
@@ -1513,10 +1541,11 @@ impl Bridge<'_> {
         entries.try_reserve_exact(count).map_err(|_| "Cannot stage inert document entries.")?;
         entries.extend([
             node(Kind::Document(DocumentNodes {
+                kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,
                 implementation, doctype: Some(doctype), url: text_copy("about:blank")?, html, head, body, title: normalized,
             }), None, links(&[doctype, html])?),
             Entry::Implementation,
-            node(Kind::Doctype, Some(document), Vec::new()),
+            node(Kind::Doctype(crate::html::DocumentTypeData::html()?), Some(document), Vec::new()),
             node(Kind::Element(text_copy("html")?), Some(document), links(&[head, body])?),
             node(Kind::Element(text_copy("head")?), Some(html), if has_title { links(&[title_element])? } else { Vec::new() }),
             node(Kind::Element(text_copy("body")?), Some(html), Vec::new()),
@@ -1533,6 +1562,7 @@ impl Bridge<'_> {
                 Kind::Document(doc) => doc.url.capacity().checked_add(doc.title.capacity()),
                 Kind::Element(text) => Some(text.capacity()),
                 Kind::Text(data) => Some(data.capacity()),
+                Kind::Doctype(data)=>Some(data.capacity()),
                 _ => Some(0),
             }.ok_or("Inert document payload overflow.")?;
             node.children.capacity().checked_mul(size_of::<u32>())
@@ -1604,6 +1634,7 @@ impl Bridge<'_> {
         let bytes = match &kind {
             Kind::Element(name) => name.capacity(),
             Kind::Text(data) => data.capacity(),
+            Kind::Doctype(data)=>data.capacity(),
             Kind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             _ => 0,
         };
@@ -1663,8 +1694,27 @@ impl Bridge<'_> {
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
+        if let Kind::Doctype(data)=&node.kind {
+            let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
+            if let Some(text)=text {
+                let bytes=text.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("DocumentType DOMString exceeds the host string allowance.".into());}
+                self.state.copies(bytes)?;
+                let Kind::Doctype(data)=&self.state.inert_documents.node(object).unwrap().kind else{unreachable!()};
+                return Self::dom_string_copy(match property {"publicId"=>&data.public_id,"systemId"=>&data.system_id,_=>&data.name});
+            }
+        }
+
         if let Kind::Parsed { source, .. } = node.kind {
             let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;
+            if let NodeKind::DocumentType(data)=&parsed.kind {
+                let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
+                if let Some(text)=text {
+                    let bytes=text.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("DocumentType DOMString exceeds the host string allowance.".into());}
+                    self.state.copies(bytes)?;
+                    let NodeKind::DocumentType(data)=&self.parsed_source(source).unwrap().0.kind else{unreachable!()};
+                    return Self::dom_string_copy(match property {"publicId"=>&data.public_id,"systemId"=>&data.system_id,_=>&data.name});
+                }
+            }
             if let Some(data) = parsed.kind.character_dom_string() {
                 match property {
                     "data" | "nodeValue" | "textContent" => {
@@ -1761,8 +1811,9 @@ impl Bridge<'_> {
                     NodeKind::Comment(_) => string("#comment"),
                     NodeKind::ProcessingInstruction { target, .. } => string(target),
                     NodeKind::DocumentFragment => string("#document-fragment"),
+                    NodeKind::DocumentType(_)=>unreachable!("doctype name handled before generic node names"),
                 },
-                Kind::Doctype => string("html"),
+                Kind::Doctype(_) => unreachable!("doctype name handled above"),
                 Kind::Element(name) => Value::String(name.to_ascii_uppercase()),
                 Kind::Text(_) => string("#text"),
                 Kind::ProcessingInstruction { .. } => unreachable!("processing instruction name was handled above"),
@@ -1790,13 +1841,10 @@ impl Bridge<'_> {
             }
             "URL" | "documentURI" if html_document => string(document.map_or("about:blank", |doc| &doc.url)),
             "contentType" if html_document => string("text/html"),
-            "compatMode" if html_document => string(if document.is_some_and(|doc| doc.doctype.is_none()) {
-                "BackCompat"
-            } else { "CSS1Compat" }),
+            "compatMode" if html_document => string(document.map_or(crate::html::DocumentMode::NoQuirks,|doc|doc.mode).compat_mode()),
             "characterSet" if html_document => string("UTF-8"),
             "defaultView" if html_document => Value::Null,
-            "name" if matches!(node.kind, Kind::Doctype) => string("html"),
-            "publicId" | "systemId" if matches!(node.kind, Kind::Doctype) => string(""),
+
             "localName" if matches!(node.kind, Kind::Element(_)) => {
                 let Kind::Element(name) = &node.kind else { unreachable!() };
                 string(name)

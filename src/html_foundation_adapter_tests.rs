@@ -59,6 +59,10 @@ fn dump(doc:&Document)->Result<String,String> {
             NodeKind::Text(text)=>{writeln!(&mut output,"| {indent}\"{text}\"").unwrap();},
             NodeKind::Comment(text)=>{writeln!(&mut output,"| {indent}<!-- {text} -->").unwrap();},
             NodeKind::ProcessingInstruction {target,data}=>{writeln!(&mut output,"| {indent}<?{target} {data}?>").unwrap();},
+            NodeKind::DocumentType(data)=>{
+                if data.public_id.is_empty()&&data.system_id.is_empty(){writeln!(&mut output,"| {indent}<!DOCTYPE {}>",data.name).unwrap();}
+                else{writeln!(&mut output,"| {indent}<!DOCTYPE {} \"{}\" \"{}\">",data.name,data.public_id,data.system_id).unwrap();}
+            },
             NodeKind::DocumentFragment=>return Err("Unexpected inner native fragment in parser output.".into()),
         }
         // The native parser's retained template children are the source used

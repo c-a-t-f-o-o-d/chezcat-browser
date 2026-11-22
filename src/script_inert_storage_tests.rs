@@ -210,9 +210,9 @@ fn browser_inert_storage_paid_spare_slots_need_no_new_retained_allowance() {
 fn browser_inert_storage_document_fixed_names_and_links_admit_exact_owned_payload() {
     let (mut doc, mut forms, mut page) = page("<html><body></body></html>");
     let before = page.state.retained;
-    // Six records, the actual about:blank/html/head/body text, and two pairs
+    // Six records, about:blank, the owned doctype name, html/head/body text, and two pairs
     // of child handles. There is no unrelated fixed 64-byte payload surcharge.
-    let bundle = 6 * size_of::<Entry>() + 11 + 4 + 4 + 4 + 4 * size_of::<u32>();
+    let bundle = 6 * size_of::<Entry>() + 11 + 4 + 4 + 4 + 4 + 4 * size_of::<u32>();
     page.state.retained_limit = before + bundle - 1;
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     assert!(bridge.create_inert_document(&[]).is_err());

@@ -35,7 +35,7 @@ impl Bridge<'_> {
         match self.doc.nodes.get(node)?.kind {
             NodeKind::Element { .. } => Some(Slottable::Element),
             NodeKind::Text(_) => Some(Slottable::Text),
-            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment => None,
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => None,
         }
     }
 

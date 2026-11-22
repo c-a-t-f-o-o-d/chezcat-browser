@@ -20,6 +20,7 @@ impl Runtime {
         let result = (|| {
             let document = self.native_constructor_prototypes[&(window, "Document")];
             self.define_readonly_node_getter(document, window, "implementation", implementation_get)?;
+            self.define_readonly_node_getter(document,window,"doctype",super::DOCUMENT_DOCTYPE_GET)?;
             for name in ["DOMImplementation", "DocumentType"] {
                 let allocation = self.allocate_host_function_with_length(window, name, 0).map_err(Fault::new)?;
                 if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
@@ -35,9 +36,10 @@ impl Runtime {
                     if let Value::Function(parent_constructor) = self.objects[parent].properties["constructor"].value.as_value()? {
                         self.objects[self.function_properties[allocation.id]].prototype = Some(Ordinary::Function(*parent_constructor));
                     }
+                    for &(name,method) in super::DOCUMENT_TYPE_GETTERS {self.define_readonly_node_getter(prototype,window,name,method)?;}
                 } else {
-                    for (name, operation) in [("createHTMLDocument", create), ("hasFeature", has_feature)] {
-                        let method = self.allocate_host_function_with_length(window, operation, 0).map_err(Fault::new)?;
+                    for (name, operation,length) in [("createHTMLDocument", create,0), ("hasFeature", has_feature,0),("createDocumentType","\0DOMImplementation.createDocumentType",3)] {
+                        let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;
                         }

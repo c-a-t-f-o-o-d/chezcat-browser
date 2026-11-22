@@ -6254,3 +6254,7 @@ mod custom_host_content_tests;
 #[cfg(test)]
 #[path="app_native_dom_string_tests.rs"]
 mod native_dom_string_tests;
+
+#[cfg(test)]
+#[path="app_native_document_records_tests.rs"]
+mod native_document_records_tests;

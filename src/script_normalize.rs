@@ -18,7 +18,7 @@ impl Bridge<'_> {
             self.dom_node(object)?
         };
         // The receiver itself is excluded from the descendant traversal.
-        if self.doc.nodes[root].kind.character_data().is_some() {
+        if self.doc.nodes[root].kind.character_data().is_some()||matches!(self.doc.nodes[root].kind,NodeKind::DocumentType(_)) {
             return Ok(Value::Undefined);
         }
         let count = self.doc.nodes.len();
