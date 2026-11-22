@@ -1,7 +1,7 @@
 //! DOM attribute name validation. Namespace strings confer no network authority.
 //! https://dom.spec.whatwg.org/#validate-and-extract
 // XML 1.0 Name, used by Document processing instructions.
-pub(super) fn valid_xml_name(name: &str) -> bool {
+pub(super) fn valid_xml_name(name: crate::dom_string::DomStringRef<'_>) -> bool {
     fn start(ch: char) -> bool {
         matches!(ch,
             ':' | 'A'..='Z' | '_' | 'a'..='z' | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}'
@@ -11,10 +11,10 @@ pub(super) fn valid_xml_name(name: &str) -> bool {
             | '\u{10000}'..='\u{EFFFF}')
     }
 
-    let mut chars = name.chars();
-    chars.next().is_some_and(start)
-        && chars.all(|ch| start(ch) || matches!(ch,
-            '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'))
+    let mut chars = std::char::decode_utf16(name.code_units());
+    chars.next().is_some_and(|ch|ch.is_ok_and(start))
+        && chars.all(|ch|ch.is_ok_and(|ch|start(ch) || matches!(ch,
+            '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')))
 }
 
 pub(super) fn valid_attribute_name(name:&str)->bool{valid_attribute_name_dom(crate::dom_string::DomStringRef::Scalar(name))}
