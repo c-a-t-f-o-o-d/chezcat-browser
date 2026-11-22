@@ -244,17 +244,7 @@ fn replacement_fetch_body_decoding_remains_utf8() {
 
 #[test]
 fn replacement_incremental_core_emits_once_per_decoder() {
-    let decoder = || Decoder {
-        encoding: Encoding::Replacement,
-        fatal: false,
-        ignore_bom: false,
-        bom_seen: false,
-        streaming: false,
-        pending: [0; 4],
-        pending_len: 0,
-        iso2022jp: iso2022jp::Decoder::new(),
-        replacement_error_returned: false,
-    };
+    let decoder = || Decoder::new(Encoding::REPLACEMENT, false, false);
     let mut engine = runtime();
     let bytes = b"\x1b$B\"<script>data</script>\xff";
     for split in 0..=bytes.len() {
