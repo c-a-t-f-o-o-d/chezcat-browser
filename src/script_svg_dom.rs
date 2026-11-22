@@ -6,7 +6,7 @@ impl Bridge<'_> {
             return Some(match source {
                 script_inert_documents::ImportSource::Parsed { node, .. } => match &node.kind {
                     NodeKind::Element { tag, .. } => (node.namespace, tag.as_str(), false),
-                    NodeKind::Text(text) => (
+                    NodeKind::Text(text) | NodeKind::Cdata(text) => (
                         crate::html::Namespace::None,
                         "",
                         text.chars()
@@ -30,7 +30,7 @@ impl Bridge<'_> {
         let node = self.doc.nodes.get(index)?;
         Some(match &node.kind {
             NodeKind::Element { tag, .. } => (node.namespace, tag.as_str(), false),
-            NodeKind::Text(text) => (
+            NodeKind::Text(text) | NodeKind::Cdata(text) => (
                 crate::html::Namespace::None,
                 "",
                 text.chars()

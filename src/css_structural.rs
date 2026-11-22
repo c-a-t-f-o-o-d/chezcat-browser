@@ -292,7 +292,7 @@ impl Predicate {
                 }
                 match context.doc.nodes.get(child).map(|n| &n.kind) {
                     Some(NodeKind::Element { .. }) => return false,
-                    Some(NodeKind::Text(t)) if !t.is_empty() => return false,
+                    Some(NodeKind::Text(t) | NodeKind::Cdata(t)) if !t.is_empty() => return false,
                     None => return false,
                     _ => {}
                 }

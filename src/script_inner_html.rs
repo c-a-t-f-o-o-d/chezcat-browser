@@ -72,7 +72,7 @@ impl Bridge<'_> {
                     self.state.work(item.children.len())?;
                     stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));
                 }
-                NodeKind::Text(text) => escaped(self.state, &mut out, text.scalar()?, false, raw)?,
+                NodeKind::Text(text) | NodeKind::Cdata(text) => escaped(self.state, &mut out, text.scalar()?, false, raw)?,
                 NodeKind::Comment(data) => {
                     self.state.work(data.len())?;
                     append(self.state, &mut out, "<!--")?;

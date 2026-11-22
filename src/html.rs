@@ -116,7 +116,7 @@ impl Document {
                 .iter()
                 .find(|attr| attr.name.html_is(name.as_ref()))
                 .map(|attr| &attr.value),
-            NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
+            NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
             | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => None,
         }
     }
@@ -212,6 +212,7 @@ pub enum NodeKind {
         attrs: Vec<Attribute>,
     },
     Text(DomString),
+    Cdata(DomString),
     // Non-rendering DOM Comment data retained with its real parent and order.
     Comment(DomString),
     ProcessingInstruction { target: String, data: DomString },
@@ -222,18 +223,18 @@ pub enum NodeKind {
 
 impl NodeKind {
     pub(crate) fn character_dom_string(&self)->Option<&DomString>{
-        match self {Self::Text(data)|Self::Comment(data)|Self::ProcessingInstruction {data,..}=>Some(data),_=>None}
+        match self {Self::Text(data)|Self::Cdata(data)|Self::Comment(data)|Self::ProcessingInstruction {data,..}=>Some(data),_=>None}
     }
     pub(crate) fn character_data(&self) -> Option<&str> {
         match self {
-            Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data),
+            Self::Text(data) | Self::Cdata(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data),
             Self::Element { .. } | Self::DocumentFragment | Self::DocumentType(_) => None,
         }
     }
 
     pub(crate) fn character_data_capacity(&self) -> Option<usize> {
         match self {
-            Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data.capacity()),
+            Self::Text(data) | Self::Cdata(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data.capacity()),
             Self::Element { .. } | Self::DocumentFragment | Self::DocumentType(_) => None,
         }
     }

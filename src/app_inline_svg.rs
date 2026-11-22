@@ -120,7 +120,7 @@ fn source(doc: &Document, root: usize, computed:&css::ComputedProperties) -> Res
                 stack.push((id, true));
                 stack.extend(node.children.iter().rev().map(|&child| (child, false)));
             }
-            NodeKind::Text(text)
+            NodeKind::Text(text) | NodeKind::Cdata(text)
                 if text
                     .chars()
                     .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}')) =>

@@ -34,6 +34,7 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
             NodeKind::Element{expanded_name:crate::html::element_names::copy(expanded_name)?,tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },
         NodeKind::Text(text)=>NodeKind::Text(text.try_clone()?),
+        NodeKind::Cdata(text)=>NodeKind::Cdata(text.try_clone()?),
         NodeKind::Comment(text)=>NodeKind::Comment(text.try_clone()?),
         NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:data.try_clone()?},
         NodeKind::DocumentFragment=>NodeKind::DocumentFragment,
@@ -125,7 +126,7 @@ impl Bridge<'_> {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
-                        if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|self.inert_node_type(child)!=Some(3)){return Err("Imported STYLE requires plain direct text children.".into());}
+                        if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|!matches!(self.inert_node_type(child),Some(3|4))){return Err("Imported STYLE requires plain direct text children.".into());}
                         if !svg&&attrs.iter().any(|attr| attr.name.namespace.is_some()
                             || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
@@ -223,7 +224,7 @@ impl Bridge<'_> {
             if image{self.validate_plain_image(source)?;}
             let item = &self.doc.nodes[source];
             let children = if deep { item.children.as_slice() } else { &[] };
-            if style&&children.iter().any(|&child|!matches!(self.doc.nodes[child].kind,NodeKind::Text(_))){return Err("Cloned STYLE requires plain direct text children.".into());}
+            if style&&children.iter().any(|&child|!matches!(self.doc.nodes[child].kind,NodeKind::Text(_) | NodeKind::Cdata(_))){return Err("Cloned STYLE requires plain direct text children.".into());}
             self.state.work(1 + children.len())?;
             if children.len() > remaining - plan.len() {
                 return Err("DOM appended-node limit reached during cloning.".into());

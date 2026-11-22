@@ -27,14 +27,14 @@ impl Bridge<'_> {
     }
 
     pub(super) fn slottable(&self, object: u32) -> Option<Slottable> {
-        if let Some(kind)=self.inert_node_type(object){return match kind{1=>Some(Slottable::Element),3=>Some(Slottable::Text),_=>None};}
+        if let Some(kind)=self.inert_node_type(object){return match kind{1=>Some(Slottable::Element),3|4=>Some(Slottable::Text),_=>None};}
         if self.frame_element_sibling_receiver(object) {
             return Some(Slottable::Element);
         }
         let node = node_index(object).filter(|&node| self.dom_accessible(node))?;
         match self.doc.nodes.get(node)?.kind {
             NodeKind::Element { .. } => Some(Slottable::Element),
-            NodeKind::Text(_) => Some(Slottable::Text),
+            NodeKind::Text(_) | NodeKind::Cdata(_) => Some(Slottable::Text),
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => None,
         }
     }

@@ -2287,7 +2287,7 @@ fn build_snapshot(app: &App) -> Snapshot {
                     html::NodeKind::ProcessingInstruction { target, data } => {
                         text = format!("<?{} {}?>", truncate(target, 128), truncate(data, 240));
                     }
-                    html::NodeKind::Text(value) => {
+                    html::NodeKind::Text(value) | html::NodeKind::Cdata(value) => {
                         let value = value
                             .split_whitespace()
                             .take(60)
@@ -2476,7 +2476,7 @@ fn selected_details(app: &App) -> Vec<String> {
             lines.extend(data.lines().take(128).map(|line| truncate(line, 4096)));
             return lines;
         }
-        html::NodeKind::Text(text) => {
+        html::NodeKind::Text(text) | html::NodeKind::Cdata(text) => {
             lines.push("Text content:".into());
             lines.extend(text.lines().take(128).map(|line| truncate(line, 4096)));
             return lines;

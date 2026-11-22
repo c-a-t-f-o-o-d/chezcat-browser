@@ -39,7 +39,7 @@ impl Bridge<'_> {
         if method=="removeChild" {
             if source.parent!=Some(parent){return Err(("NotFoundError","The Node is not a child of this inert parent.".into()));}
         }else{
-            if !matches!(self.inert_node_type(*child),Some(1|3|7|8|11)) {
+            if !matches!(self.inert_node_type(*child),Some(1|3|4|7|8|11)) {
                 return Err(("HierarchyRequestError","This inert Node cannot be inserted as a child.".into()));
             }
             if source.owner!=arena.node(parent).ok_or(("TypeError","Missing inert parent.".into()))?.owner {

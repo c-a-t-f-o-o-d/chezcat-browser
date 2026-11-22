@@ -143,7 +143,7 @@ impl Engine<'_> {
     pub(super) fn grid_intrinsic_cost(&mut self, node: usize) -> bool {
         let children = self.doc.nodes[node].children.len();
         let bytes = match &self.doc.nodes[node].kind {
-            NodeKind::Text(text) => text.len(),
+            NodeKind::Text(text) | NodeKind::Cdata(text) => text.len(),
             _ => 0,
         };
         let work = children.saturating_add(bytes).saturating_add(1);
@@ -262,7 +262,7 @@ impl Engine<'_> {
             .iter()
             .try_fold(0usize, |bytes, &node| {
                 bytes.checked_add(match &self.doc.nodes[node].kind {
-                    NodeKind::Text(text) => text.len(),
+                    NodeKind::Text(text) | NodeKind::Cdata(text) => text.len(),
                     _ => 0,
                 })
             })
@@ -273,7 +273,7 @@ impl Engine<'_> {
         let mut text = String::new();
         text.try_reserve_exact(bytes).map_err(|_| ())?;
         for &node in nodes {
-            if let NodeKind::Text(value) = &self.doc.nodes[node].kind {
+            if let NodeKind::Text(value) | NodeKind::Cdata(value) = &self.doc.nodes[node].kind {
                 text.push_str(value);
             }
         }
@@ -537,7 +537,7 @@ impl Engine<'_> {
                 while cursor < children.len() {
                     let child = children[cursor];
                     match &self.doc.nodes[child].kind {
-                        NodeKind::Text(text) => {
+                        NodeKind::Text(text) | NodeKind::Cdata(text) => {
                             if !self.grid_work(text.len().saturating_add(1)) {
                                 group.complete = false;
                                 break;
