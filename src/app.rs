@@ -6364,6 +6364,10 @@ mod template_document_children_tests;
 mod node_namespace_lookup_tests;
 
 #[cfg(test)]
+#[path="app_node_equality_tests.rs"]
+mod node_equality_tests;
+
+#[cfg(test)]
 #[path="app_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
 

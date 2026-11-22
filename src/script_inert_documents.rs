@@ -1959,3 +1959,9 @@ pub(super) mod text_split;
 
 #[path="script_shared_normalize.rs"]
 pub(super) mod shared_normalize;
+
+#[path="script_node_equality.rs"]
+pub(super) mod node_equality;
+
+#[path="script_inert_contains.rs"]
+mod inert_contains;

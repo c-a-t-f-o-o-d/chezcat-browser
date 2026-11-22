@@ -203,6 +203,7 @@ impl Bridge<'_> {
         }
         if handle == DOCUMENT { return Ok(ContainsNode::Main(0)); }
         if self.attr_receiver(handle) { return Ok(ContainsNode::Attr); }
+        if self.inert_node_type(handle).is_some(){return Ok(ContainsNode::Inert);}
         node_index(handle).filter(|&node| self.dom_accessible(node)).map(ContainsNode::Main)
             .ok_or_else(|| ("TypeError", "Node.contains requires a genuine accessible Node.".into()))
     }
