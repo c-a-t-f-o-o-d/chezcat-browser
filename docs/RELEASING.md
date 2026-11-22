@@ -48,6 +48,15 @@ A completed PR is a checkpoint, not a requirement to stop development or issue a
 release. Source integration, green CI, development-runtime delivery and publication
 are different states. Report only the state actually reached.
 
+## Current release candidate
+
+`0.82.0-alpha.2` consolidates merged source through `1de1f24`, with matching Cargo
+and Windows resource versions and a new [change summary](../CHANGELOG.md#0820-alpha2).
+Its immutable tag, normal Windows gates, exact packages and downloaded-byte
+verification remain pending. The published baseline below retains its original
+source and measured delivery; update current download pointers only after the
+new release is verified.
+
 ## Published baseline
 
 | Snapshot | Recorded outcome |

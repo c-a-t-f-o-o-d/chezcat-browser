@@ -34,7 +34,13 @@ that a past candidate awaited validation is not a claim that its integration is
 still pending today. Likewise, a past pass is not proof of a later implementation.
 Use current source-linked evidence for status; preserve the lasting requirements.
 
-At the `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
+At the historical `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
+
+Release candidate `0.82.0-alpha.2` includes integrated source through
+[`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c)
+and awaits exact tagged checks, publication and downloaded-asset verification.
+It changes no acceptance requirement or historical measurement; the verified
+downloadable baseline remains `0.82.0-alpha.1` until delivery is established.
 
 ## Contract directory
 
