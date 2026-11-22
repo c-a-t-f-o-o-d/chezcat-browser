@@ -60,10 +60,12 @@ impl Bridge<'_> {
             if let Kind::Fragment { template } = &mut node.kind {
                 *template=template.map(&project).transpose()?;
             }
-            if handles[offset] >= FIRST_ENTRY { continue; }
+            // Loaded slots can become active and mutable again. Even a clone
+            // without a reserved main slot needs an immutable owned snapshot.
+            if handles[offset] >= FIRST_ENTRY&&!matches!(node.kind,Kind::Parsed{source:ParsedSource::Loaded(_),..}) { continue; }
             if let Kind::Parsed {source:ParsedSource::Loaded(index),initial_template}=node.kind {
                 // A loaded source can only own its original native slot.
-                // A cloned slot needs an independent immutable generated
+                // Every clone needs an independent immutable generated
                 // snapshot, including nonce provenance and owned capacity.
                 let raw=&self.doc.nodes[index];
                 let mut cost=copied_node_bytes(raw);
@@ -82,6 +84,7 @@ impl Bridge<'_> {
                 node.kind=Kind::Parsed {source:ParsedSource::Generated(source_base+sources.len()),initial_template};
                 sources.push(GeneratedNode {node:Rc::new(snapshot),unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)});
             }
+            if handles[offset] >= FIRST_ENTRY { continue; }
             if !matches!(node.kind,Kind::Parsed { .. }) {
                 let kind = match std::mem::replace(&mut node.kind,Kind::Fragment{template:None}) {
                     Kind::Text(text)=>NodeKind::Text(text),

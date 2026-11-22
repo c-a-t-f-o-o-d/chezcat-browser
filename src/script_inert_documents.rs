@@ -47,6 +47,10 @@ mod attribute_tests;
 mod element_name_storage_tests;
 
 #[cfg(test)]
+#[path="script_loaded_clone_snapshot_tests.rs"]
+mod loaded_clone_snapshot_tests;
+
+#[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
 #[cfg(test)]
