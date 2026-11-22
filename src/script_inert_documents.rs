@@ -1964,5 +1964,8 @@ pub(super) mod shared_normalize;
 #[path="script_node_equality.rs"]
 pub(super) mod node_equality;
 
+#[path="script_identifier_lookup.rs"]
+pub(super) mod identifier_lookup;
+
 #[path="script_inert_contains.rs"]
 mod inert_contains;
