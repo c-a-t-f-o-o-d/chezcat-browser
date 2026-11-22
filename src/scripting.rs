@@ -3845,7 +3845,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -4551,7 +4551,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.event_target_interface(object) && operation.accepts(self, receiver);
         }
-        if matches!(method, "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET)
+        if (matches!(method, "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET) || crate::javascript::document_encoding_getter(method))
             && self.event_target_interface(object)
         {
             return self.document_interface_receiver(receiver);
@@ -6193,6 +6193,19 @@ impl Host for Bridge<'_> {
         if method=="\0Document.get.documentElement" {
             if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
+        }
+        if crate::javascript::document_encoding_getter(method) {
+            self.native_node_access(object).map_err(|(_, message)| message)?;
+            let encoding = if object == DOCUMENT {
+                self.doc.encoding
+            } else if self.inert_document(object) {
+                crate::text_codec::Encoding::UTF8
+            } else if let Some((owner, 0)) = self.frame_contains_node(object) {
+                self.contains_child_document(owner)?.encoding
+            } else {
+                return Err("Encoding getter requires a Document.".into());
+            };
+            return self.string(encoding.document_name());
         }
         if method==DOCUMENT_ACTIVE_ELEMENT_GET {return self.document_active_element(object);}
         if method == DOCUMENT_CURRENT_SCRIPT_GET {

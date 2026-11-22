@@ -300,7 +300,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Factory XML documents carry actual no-quirks kind/mode/MIME/URL and no Window. Head/body/title read current native children after mutations and title normalization preserves units; original App binding and storage negatives pass. Broader origin/encoding/readiness and loader/resource integration remain separately required.",
+              "supplementary_evidence": "Factory XML documents carry actual no-quirks kind/mode/MIME/URL and no Window. Head/body/title read current native children after mutations and title normalization preserves units; original App binding and storage negatives pass. The selected network/local HTML and plain-text decoder is retained through document commit and read by the three Document encoding getters. Original App cases cover legacy transport/meta, BOM precedence, factory defaults, receiver checks and refused navigation. Confidence/restart, inheritance, broader origin/readiness and loader/resource integration remain required.",
               "closing_evidence": []
             },
             {
@@ -864,7 +864,7 @@
           "requirement": "HTML transport/meta confidence, sniff and restart",
           "status": "partial",
           "verification": [
-            "Network and local HTML documents select a Unicode BOM, then a recognized transport charset, then an original bounded 1,024-byte prescan, then the retained UTF-8-if-valid/windows-1252 fallback. Prescan byte attributes, first duplicates, pragma/content extraction, unknown-label continuation, HTML XML-declaration compatibility and meta-only UTF-16/x-user-defined remaps follow pinned HTML 0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce. Six original document-selection/admission functions fix the supplementary selection before native execution. This is initial byte decoding only: confidence, parser-triggered changes/restarts, actual document encoding metadata and inherited/environment policy remain open."
+            "Network and local HTML documents select a Unicode BOM, then a recognized transport charset, then an original bounded 1,024-byte prescan, then the retained UTF-8-if-valid/windows-1252 fallback. Prescan byte attributes, first duplicates, pragma/content extraction, unknown-label continuation, HTML XML-declaration compatibility and meta-only UTF-16/x-user-defined remaps follow pinned HTML 0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce. Six original document-selection/admission functions fix the supplementary selection before native execution. The initial decoder is retained on committed documents. Confidence, parser-triggered changes/restarts and inherited/environment policy remain open."
           ],
           "dependency_details": []
         },

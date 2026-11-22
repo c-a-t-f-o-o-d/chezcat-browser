@@ -26,11 +26,13 @@ fn codec_all_pinned_labels_preserve_canonical_names_and_exact_normalization() {
             assert!(value.is_ascii() && !value.contains('\\'));
             labels.push(value);
         } else if let Some(name) = line.strip_prefix("\"name\": \"") {
-            let name = name.strip_suffix('"').unwrap().to_ascii_lowercase();
+            let document_name = name.strip_suffix('"').unwrap();
+            let name = document_name.to_ascii_lowercase();
             assert!(!labels.is_empty());
             for label in labels.drain(..) {
                 let encoding = Encoding::label(label).unwrap();
                 assert_eq!(encoding.name(), name, "{label}");
+                assert_eq!(encoding.document_name(), document_name, "{label}");
                 assert_eq!(Encoding::label(&format!(" \t\n\u{c}\r{}\r\n\t ", label.to_ascii_uppercase())), Some(encoding));
                 label_count += 1;
             }

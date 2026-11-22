@@ -236,6 +236,37 @@ fn exercise_editor_and_link(app: &mut App) {
 }
 
 #[test]
+fn document_encoding_app_aliases_read_the_committed_decoder_and_factory_defaults() {
+    let source = r#"<!doctype html><title>waiting</title><body><script>
+var names = ['characterSet', 'charset', 'inputEncoding'];
+var inert = document.implementation.createHTMLDocument('');
+var xml = document.implementation.createDocument(null, 'root');
+var frame = document.createElement('iframe');
+frame.hidden = true;
+document.body.appendChild(frame);
+for (var i = 0; i < names.length; i++) {
+    var key = names[i];
+    var d = Object.getOwnPropertyDescriptor(Document.prototype, key);
+    if (!d || !d.enumerable || !d.configurable || d.set !== undefined) throw 'descriptor ' + key;
+    if (Object.prototype.hasOwnProperty.call(document, key)) throw 'own ' + key;
+    if (document[key] !== 'Shift_JIS' || d.get.call(document) !== 'Shift_JIS') throw 'loaded ' + key;
+    if (inert[key] !== 'UTF-8' || xml[key] !== 'UTF-8' || d.get.call(frame.contentDocument) !== 'UTF-8') throw 'factory ' + key;
+    var rejected = false;
+    try { d.get.call(document.body); } catch (error) { rejected = error instanceof TypeError; }
+    if (!rejected) throw 'receiver ' + key;
+}
+document.title = document.characterSet;
+</script></body>"#;
+    let site = Site::new(vec![Response {
+        path: "/document", content_type: "text/html; charset=ms_kanji",
+        headers: "", body: source.as_bytes().to_vec(),
+    }]);
+    let app = open(&site, "/document");
+    assert_eq!(app.document.title, "Shift_JIS", "{}", app.activity_report());
+    assert_eq!(site.requests(), ["/document"]);
+}
+
+#[test]
 fn document_encoding_app_transport_meta_and_utf8_bom_preserve_real_controls() {
     let transport = document("<meta charset=windows-1252>", "_ENCODED_", true);
     let meta = document("<meta http-equiv=content-type content='text/html; charset=Shift_JIS'>", "_ENCODED_", true);
@@ -257,6 +288,8 @@ fn document_encoding_app_transport_meta_and_utf8_bom_preserve_real_controls() {
         ("/bom", bom),
     ] {
         let mut app = open(&site, path);
+        let encoding = if path == "/bom" { "UTF-8" } else { "Shift_JIS" };
+        assert_eq!(app.document.encoding.document_name(), encoding);
         assert_eq!(app.document_source(), expected);
         assert_eq!(app.document.title, "あ", "{}", app.activity_report());
         assert_painted_document(&app, "あ");
@@ -269,6 +302,7 @@ fn document_encoding_app_transport_meta_and_utf8_bom_preserve_real_controls() {
             assert!(app.failed, "Expanded source exceeded the decoded document allowance");
             assert!(app.status.contains("Decoded text exceeds the remaining 2097152 byte allowance"), "{}", app.activity_report());
             assert_eq!(app.document_source(), expected, "No truncated source was committed");
+            assert_eq!(app.document.encoding.document_name(), encoding);
             assert_eq!(app.document.title, "あ");
             assert_painted_document(&app, "あ");
             assert_eq!(copy_field(&mut app), "edited Ω", "Refused navigation retained the actual editor value");
@@ -280,6 +314,7 @@ fn document_encoding_app_transport_meta_and_utf8_bom_preserve_real_controls() {
             wait(&mut app);
             assert!(!app.failed, "{}", app.activity_report());
             assert_eq!(app.document_source(), recovered);
+            assert_eq!(app.document.encoding.document_name(), "UTF-8");
             assert_eq!(app.document.title, "Recovered", "{}", app.activity_report());
             assert_painted_document(&app, "Recovered");
             assert_eq!(copy_field(&mut app), "seed", "The subsequent document committed fresh controls");
@@ -297,6 +332,7 @@ fn document_encoding_app_utf16_network_local_and_plain_keep_source_and_paint() {
     }]);
     let mut network = open(&site, "/utf16");
     assert_eq!(network.document_source(), source);
+    assert_eq!(network.document.encoding.document_name(), "UTF-16LE");
     assert_eq!(network.document.title, "ΩЖ中", "{}", network.activity_report());
     assert_painted_document(&network, "ΩЖ中");
     exercise_editor_and_link(&mut network);
@@ -309,6 +345,7 @@ fn document_encoding_app_utf16_network_local_and_plain_keep_source_and_paint() {
     wait(&mut local);
     assert!(!local.failed, "{}", local.activity_report());
     assert_eq!(local.document_source(), source);
+    assert_eq!(local.document.encoding.document_name(), "UTF-16BE");
     assert_eq!(local.document.title, "ΩЖ中", "{}", local.activity_report());
     assert_painted_document(&local, "ΩЖ中");
     exercise_editor_and_link(&mut local);
@@ -320,6 +357,7 @@ fn document_encoding_app_utf16_network_local_and_plain_keep_source_and_paint() {
     assert!(!local.failed, "{}", local.activity_report());
     assert_eq!(local.document_source(), plain, "Only the encoding signature was consumed");
     assert_eq!(local.document.content_type, "text/plain");
+    assert_eq!(local.document.encoding.document_name(), "UTF-16LE");
     assert_eq!(local.document.title, "Plain text");
     let pre = local.document.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "pre")).unwrap();
     assert_eq!(native_text(&local, pre), plain);
@@ -386,6 +424,7 @@ fn document_encoding_app_plain_text_and_refused_documents_never_activate_markup(
     wait(&mut app);
     assert!(!app.failed, "{}", app.activity_report());
     assert_eq!(app.document_source(), fallback_expected, "Plain text did not sniff its literal meta element");
+    assert_eq!(app.document.encoding.document_name(), "windows-1252");
     assert_eq!(app.document.title, "Plain text");
     assert_eq!(site.requests(), ["/plain", "/xml", "/recovered"]);
 }

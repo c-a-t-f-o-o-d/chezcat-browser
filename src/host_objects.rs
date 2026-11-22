@@ -466,6 +466,9 @@ impl Runtime {
                 }
                 if name=="Document" {
                     self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
+                    for (property, getter) in super::DOCUMENT_ENCODING_GETTERS {
+                        self.define_readonly_node_getter(prototype, window, property, getter)?;
+                    }
                     self.define_readonly_node_getter(prototype, window, "currentScript", DOCUMENT_CURRENT_SCRIPT_GET)?;
                     self.define_readonly_node_getter(prototype, window, "activeElement", DOCUMENT_ACTIVE_ELEMENT_GET)?;
                     for (name, operation, length) in [

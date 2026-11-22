@@ -75,6 +75,7 @@ pub struct Document {
     /// The committed resource's MIME essence. Synthetic text/image viewers
     /// retain the source type; plain parser callers create HTML documents.
     pub content_type: String,
+    pub(crate) encoding: crate::text_codec::Encoding,
     pub nodes: Vec<Node>,
     /// Set at commit after resource policy is known. The current tokenizer still
     /// parses noscript markup; consumers hide/inactivate that subtree when true.
@@ -343,6 +344,7 @@ fn parse_internal(
         media_environment: None,
         title: String::new(),
         content_type: "text/html".into(),
+        encoding: crate::text_codec::Encoding::UTF8,
         scripting_enabled: false,
         nonce_unsafe_nodes: HashSet::new(),
         withheld_inline_styles: HashSet::new(),

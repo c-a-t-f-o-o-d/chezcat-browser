@@ -2,7 +2,7 @@
 use super::*;
 
 fn decoded(bytes: &[u8], content_type: &str, html: bool) -> String {
-    decode(bytes, content_type, html, 64 * 1024, &|| Ok(())).unwrap()
+    decode(bytes, content_type, html, 64 * 1024, &|| Ok(())).unwrap().0
 }
 
 #[test]
@@ -164,12 +164,12 @@ fn document_encoding_output_admission_and_cancellation_do_not_publish_partial_te
         (b"secret".as_slice(), "text/html;charset=replacement", "�"),
         (b"\xef\xbb\xbfA\xff".as_slice(), "text/html", "A�"),
     ] {
-        assert_eq!(decode(bytes, content_type, true, expected.len(), &|| Ok(())).unwrap(), expected);
+        assert_eq!(decode(bytes, content_type, true, expected.len(), &|| Ok(())).unwrap().0, expected);
         assert!(decode(bytes, content_type, true, expected.len() - 1, &|| Ok(())).is_err());
         assert_eq!(decoded(b"recovered", "", true), "recovered");
     }
-    assert_eq!(decode(b"", "text/html", true, 0, &|| Ok(())).unwrap(), "");
-    assert_eq!(decode(b"\xef\xbb\xbf", "", true, 0, &|| Ok(())).unwrap(), "");
+    assert_eq!(decode(b"", "text/html", true, 0, &|| Ok(())).unwrap().0, "");
+    assert_eq!(decode(b"\xef\xbb\xbf", "", true, 0, &|| Ok(())).unwrap().0, "");
     assert!(decode(b"valid", "", true, 99, &|| Err("navigation cancelled".into()))
         .unwrap_err().contains("navigation cancelled"));
     let calls = std::cell::Cell::new(0usize);

@@ -816,6 +816,7 @@ fn load_request_progressively(
     let mut document_audio = None;
     let mut document_timing=None;
     let mut image_document = false;
+    let mut document_encoding = crate::text_codec::Encoding::UTF8;
     let mut document_type = "text/html".to_owned();
     let mut scripting_blocked =
         (!options.javascript).then(|| "JavaScript disabled by user.".to_owned());
@@ -895,8 +896,10 @@ fn load_request_progressively(
                 document_image.as_ref().map(|asset| asset.bitmap.as_ref()),
             )
         } else {
-            document_encoding::decode(&response.body, content_type, !plain,
-                MAX_NETWORK_TEXT_BYTES, &|| check_cancel(cancel))?
+            let (text, encoding) = document_encoding::decode(&response.body, content_type, !plain,
+                MAX_NETWORK_TEXT_BYTES, &|| check_cancel(cancel))?;
+            document_encoding = encoding;
+            text
         };
         notice = if let Some(protocol) = response.protocol {
             format!(
@@ -974,9 +977,11 @@ fn load_request_progressively(
                 document_image.as_ref().map(|asset| asset.bitmap.as_ref()),
             )
         } else {
-            document_encoding::decode(&bytes, "", !plain,
+            let (text, encoding) = document_encoding::decode(&bytes, "", !plain,
                 if plain { MAX_LOCAL_PLAIN_TEXT_BYTES } else { MAX_LOCAL_HTML_BYTES },
-                &|| check_cancel(cancel))?
+                &|| check_cancel(cancel))?;
+            document_encoding = encoding;
+            text
         }
     } else {
         include_str!("../pages/start.html").to_owned()
@@ -997,6 +1002,7 @@ fn load_request_progressively(
     let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
         (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
     document.content_type = document_type;
+    document.encoding = document_encoding;
     let mut csp = csp::PolicySet::new(&location);
     for value in csp_headers {
         csp.add_header(&value);
