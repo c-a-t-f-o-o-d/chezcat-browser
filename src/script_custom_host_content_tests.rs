@@ -118,6 +118,14 @@ fn inert_clone_identity_nested_content_and_late_handler_refusal_keep_sources() {
     assert_eq!((doc.nodes.len(),page.state.dom_commits),before);
     run(&mut doc,&mut forms,&mut page,"if(content.firstChild!==root||root.firstChild!==leaf||root.ownerDocument!==owner||source.content.firstChild===root||source.content.textContent!=='inner')throw 'failed clone activation';root.removeAttribute('onclick');document.body.appendChild(content);if(root.firstChild!==leaf||leaf.ownerDocument!==document||cloned.content!==content||content.firstChild!==null||source.content.textContent!=='inner')throw 'nested clone recovery';");
 }
+
+#[test]
+fn template_import_identity_outer_slots_content_aliases_and_cross_owner_are_real() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var other=document.implementation.createHTMLDocument('other'),source=other.createElement('template');source.innerHTML='<import-card id="imported"><span>source</span><!--comment--><svg width="8" height="8"><rect width="8" height="8" fill="red"/></svg></import-card>';var oldOwner=source.content.ownerDocument,original=source.content.firstChild,copy=document.importNode(source,true),content=copy.content,root=content.firstChild,span=root.firstChild,text=span.firstChild,comment=span.nextSibling,svg=comment.nextSibling,rect=svg.firstChild,list=root.childNodes,owner=content.ownerDocument,attr=rect.getAttributeNode('fill');if(copy.ownerDocument!==document||owner===oldOwner||root.ownerDocument!==owner||text.ownerDocument!==owner||rect.ownerDocument!==owner||root===original)throw 'appropriate imported owner';root.authorState={node:root};var obs=new MutationObserver(function(){});obs.observe(root,{subtree:true,characterData:true,characterDataOldValue:true});document.getElementById('ordinary').appendChild(copy);document.getElementById('ordinary').appendChild(content);if(copy.content!==content||copy.firstChild!==null||content.firstChild!==null||document.getElementById('imported')!==root||root.firstChild!==span||span.firstChild!==text||list[1]!==comment||list[2]!==svg||svg.firstChild!==rect||rect.getAttributeNode('fill')!==attr||root.authorState.node!==root||root.ownerDocument!==document||text.ownerDocument!==document||comment.ownerDocument!==document||rect.ownerDocument!==document||!rect.isConnected||original.ownerDocument!==oldOwner||original.textContent!=='source')throw 'reserved import identities collided';text.data='active';var records=obs.takeRecords();if(records.length!==1||records[0].target!==text||records[0].oldValue!=='source')throw 'imported observer';var repeat=source.cloneNode(true);if(repeat.ownerDocument!==other||repeat.content.firstChild===original)throw 'inert source clone changed owner';
+"#);
+}
 #[test]
 fn custom_host_content_protected_controls_and_resources_refuse_without_publication() {
     let (mut doc, mut forms, mut page) = fixture();
