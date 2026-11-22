@@ -56,3 +56,7 @@ impl Bridge<'_>{
   self.state.ranges_splice_data(target,plan.offset,plan.removed,0);self.state.dom_committed();self.state.dirty=true;if matches!(plan.parent,Some(Parent::Main{connected:true,..})){self.state.layout_changed();}Ok(plan.new_node)
  }
 }
+
+#[cfg(test)]
+#[path="script_text_split_storage_tests.rs"]
+mod storage_tests;

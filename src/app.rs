@@ -6378,3 +6378,7 @@ mod character_splice_tests;
 #[cfg(test)]
 #[path="app_text_whole_tests.rs"]
 mod text_whole_tests;
+
+#[cfg(test)]
+#[path="app_text_split_tests.rs"]
+mod text_split_tests;
