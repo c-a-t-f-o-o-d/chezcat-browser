@@ -76,6 +76,30 @@ fn inert_leaf_identity_native_quota_fallback_and_retained_refusal_are_atomic() {
     assert_eq!((doc.nodes.len(), page.state.dom_commits),before);
     run(&mut doc,&mut forms,&mut page,"if(root.firstChild!==saved||saved.ownerDocument!==owner||saved.data!=='staged'||obs.takeRecords().length)throw 'fallback promotion remapped';root.textContent='recovered';var fresh=root.firstChild;document.body.appendChild(t.content);if(root.firstChild!==fresh||fresh.ownerDocument!==document||fresh.data!=='recovered'||saved.parentNode!==null||saved.ownerDocument!==owner)throw 'fresh job recovery';");
 }
+
+#[test]
+fn inert_element_identity_created_html_svg_style_and_text_keep_saved_handles() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var t=document.createElement('template'),content=t.content,owner=content.ownerDocument,root=owner.createElement('made-card'),span=owner.createElement('span'),text=owner.createTextNode('real'),svg=owner.createElementNS('http://www.w3.org/2000/svg','svg'),rect=owner.createElementNS('http://www.w3.org/2000/svg','rect'),style=owner.createElement('style');root.setAttribute('id','made-root');span.setAttribute('class','label');style.textContent='#made-root{color:#123456}';span.appendChild(text);root.appendChild(span);svg.setAttribute('width','8');svg.setAttribute('height','8');rect.setAttribute('width','8');rect.setAttribute('height','8');rect.setAttribute('fill','#123456');svg.appendChild(rect);root.appendChild(svg);content.appendChild(style);content.appendChild(root);var list=root.childNodes,attr=rect.getAttributeNode('fill');root.authorState={node:root};var obs=new MutationObserver(function(){});obs.observe(root,{childList:true,subtree:true,attributes:true});document.getElementById('ordinary').appendChild(content);if(document.getElementById('made-root')!==root||root.authorState.node!==root||root.ownerDocument!==document||span.ownerDocument!==document||text.ownerDocument!==document||svg.ownerDocument!==document||rect.ownerDocument!==document||style.ownerDocument!==document||root.firstChild!==span||span.firstChild!==text||list[1]!==svg||svg.firstChild!==rect||rect.getAttributeNode('fill')!==attr||attr.ownerElement!==rect||!text.isConnected)throw 'created inert native identities';rect.setAttribute('fill','#654321');var records=obs.takeRecords();if(records.length!==1||records[0].target!==rect||records[0].attributeName!=='fill')throw 'saved created observer';
+"#);
+    assert!(page.take_dynamic_scripts().is_empty());
+}
+
+#[test]
+fn inert_element_identity_late_handlers_and_native_controls_refuse_then_recover() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,"var t=document.createElement('template'),content=t.content,owner=content.ownerDocument,root=owner.createElement('made-card');root.textContent='safe';root.setAttribute('onclick','blocked()');content.appendChild(root);var saved=root.firstChild;var observer=new MutationObserver(function(){});observer.observe(document.body,{childList:true});");
+    let before = (doc.nodes.len(), page.state.dom_commits);
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"document.body.appendChild(content);").errors,1);
+    assert_eq!((doc.nodes.len(), page.state.dom_commits),before);
+    run(&mut doc,&mut forms,&mut page,"if(content.firstChild!==root||root.ownerDocument!==owner||root.firstChild!==saved||observer.takeRecords().length)throw 'late handler activation';root.removeAttribute('onclick');document.body.appendChild(content);if(root.ownerDocument!==document||root.firstChild!==saved||saved.ownerDocument!==document)throw 'late handler removal recovery';var input=owner.createElement('input');content.appendChild(input);observer.takeRecords();");
+    let before = (doc.nodes.len(), page.state.dom_commits, forms.controls.len());
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"document.body.appendChild(content);").errors,1);
+    assert_eq!((doc.nodes.len(), page.state.dom_commits, forms.controls.len()),before);
+    run(&mut doc,&mut forms,&mut page,"if(content.firstChild!==input||input.ownerDocument!==owner||observer.takeRecords().length)throw 'native control prefix';");
+    assert!(page.take_dynamic_scripts().is_empty());
+}
 #[test]
 fn custom_host_content_protected_controls_and_resources_refuse_without_publication() {
     let (mut doc, mut forms, mut page) = fixture();

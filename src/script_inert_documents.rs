@@ -1562,15 +1562,23 @@ impl Bridge<'_> {
     }
 
     fn create_inert_svg(&mut self,owner:u32,name:String)->Result<Value,String>{
-        let payload=name.capacity().checked_add(size_of::<Node>()+2*size_of::<usize>()).ok_or("Inert SVG source size overflow.")?;self.state.copies(name.len())?;
-        let first=self.reserve_inert_entries(1,payload,1)?;let arena=&mut self.state.inert_documents;let source=arena.generated.len();
-        arena.generated.push(GeneratedNode{node:Rc::new(Node{kind:NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()}),unsafe_nonce:false});
-        arena.entries.push(Entry::Node(InertNode{kind:Kind::Parsed{source:ParsedSource::Generated(source),initial_template:None},owner,parent:None,children:Vec::new()}));Ok(Value::Host(first))
+        self.state.copies(name.len())?;
+        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()},0).map(Value::Host)
     }
 
     fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
         if let Kind::Text(text) = kind {
             return self.append_inert_text(owner, None, text, 0).map(Value::Host);
+        }
+        if let Kind::Element(name) = &kind {
+            if name == "style" || script_clone_node::ordinary_clone_element(name)
+                || crate::html::valid_custom_element_name(name) {
+                let Kind::Element(name) = kind else { unreachable!() };
+                return self.append_inert_source_leaf(owner,None,Node {
+                    kind:NodeKind::Element { tag:name,id:None,href:None,attrs:Vec::new() },
+                    namespace:crate::html::Namespace::Html,children:Vec::new(),
+                },0).map(Value::Host);
+            }
         }
         let bytes = match &kind {
             Kind::Element(name) | Kind::Text(name) => name.capacity(),
