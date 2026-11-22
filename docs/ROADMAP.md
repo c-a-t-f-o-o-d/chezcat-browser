@@ -22,6 +22,7 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
+| **Release candidate** | `0.82.0-alpha.2` includes integrated changes through [`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c). See the [change summary](../CHANGELOG.md). | Owner-requested preparation; exact tagged checks, publication and downloaded-asset verification remain pending |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
 | **Public `main`** | Integrated development source beyond alpha.1; see [recent commits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commits/main/) and the [current capability boundaries](CAPABILITIES.md). A source change does not update a published binary or establish a new site result. | Coherent PRs after applicable development checks |
@@ -58,17 +59,22 @@ wait for complete framework or video support.
 **Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
-The active P1 package completes known template preparation, import and activation
-contracts before another site milestone check. Nested content, ordinary metadata,
-live ParentNode views and finite child moves/import are integrated. Inert selector
-queries and passive HTML clone/import are integrated. Supported native control
-default import and connection is integrated. Plain image clone/import and guarded
-loader activation is integrated. Inline style clone/import and cumulative mixed
-stamping is integrated. Main-document template import/clone with appropriate
-inert content owners is the current increment. Remaining native families and
-resources, broader same-identity adoption,
-namespace-aware SVG and remaining mutation/lifecycle scheduling stay open.
-The last actual clean `fff35f8` run at November 21, 04:13 UTC completed all 43
+The P1 package has integrated nested template content, live ParentNode views,
+inert queries, passive HTML and supported native-control import, plain image
+activation, inline style batches and main-document template import/clone.
+Finite namespace-aware SVG, mutation observation, selected component focus,
+author properties and Node base URI behavior are also integrated. Remaining
+native families/resources, broader same-identity adoption and lifecycle behavior
+retain the limits in [capabilities](CAPABILITIES.md).
+
+The latest reported signed-out homepage check used
+[`cad5f7c`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cad5f7c14a8fe8ebe2637e4c5269e84eed9697da),
+after PR #429. The page still showed the skeleton and the DOM walker reached its
+30-second deadline. PR #430 subsequently integrated at `1de1f24`; no post-PR #430
+live acceptance result is recorded. A usable header, guide and search field
+remain unproved.
+
+An earlier clean `fff35f8` run at November 21, 04:13 UTC completed all 43
 script executions and 61 callbacks without escaped errors but still rendered the
 skeleton and logged an opaque error object. No usable shell is demonstrated.
 These implementation checks do not prove a usable shell. The
@@ -105,7 +111,7 @@ audible output, pause/resume/seek, player-script timing and sustained decode cos
 The original-code policy already applies to software decoding; the separate
 hardware-delegation decision below does not block that work.
 
-Parked framework work includes the raw `onfocusin` attribute write in legacy jQuery and the `contentEditable` read before ReactDOM mounts. Single-column grid rows are integrated. Per-item inline alignment remains a layout follow-up. [Current source-bound scorecard](COMPATIBILITY.md)
+The parked framework records retain the raw `onfocusin` failure in legacy jQuery and the `contentEditable` read before ReactDOM mounted on their measured sources. ContentEditable reflection and finite grid item inline alignment have since merged; those implementation changes do not establish a new framework workflow result. [Source-bound scorecard](COMPATIBILITY.md)
 
 Earlier snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 DOM-06 includes measurements on `3456e67`, `5c89eea` and `5c22afd`. These changes
@@ -125,7 +131,7 @@ unchanged dropdown's trusted open, Amber selection and close at both widths,
 with paired DOM/pixels, responsive cards and zero script errors. A separate
 original native App probe on this source reaches missing `WeakMap` at 11:92.
 PR pages carry changing review and CI status. Branch-only results are not results
-for `main` or for the published alpha.2 binary.
+for `main` or for the published 0.81.0-alpha.2 binary.
 
 ### DOM — Shared page behavior
 
@@ -261,12 +267,12 @@ not establish browser compatibility.
 
 | Delivery | Area | Finite scope |
 | :--- | :--- | :--- |
-| **alpha.2** | `B2` navigation | Native tabs/windows, guarded link gestures and context actions, independent page state |
-| **alpha.2** | `A1` identity | About/build identity and offline license access; explicit acceptance remains its own contract |
-| **alpha.2** | `CP1–CP5` prerequisites | Collection/Node, Comment/RegExp, responsive CSS, conventional select, and literal-prototype foundations |
-| **alpha.2** | `T1 / B1` foundations | Scoped TLS/trust, dual-stack transport, stylesheet/resource and viewport behavior; broader coverage remains partial |
-| **alpha.2** | Selected media/interfaces | Existing finite VP8/PCM/Matroska, Media/Video and event slices within their documented limits |
-| **Post-alpha.2 source** | `DOM-01 / DOM-02 / DOM-03` | PR #29 string/hidden-input/Node-root work, PR #30 anchor URL reflection, and PR #32 native text INPUT fragments; not retroactively part of alpha.2 |
+| **0.81.0-alpha.2** | `B2` navigation | Native tabs/windows, guarded link gestures and context actions, independent page state |
+| **0.81.0-alpha.2** | `A1` identity | About/build identity and offline license access; explicit acceptance remains its own contract |
+| **0.81.0-alpha.2** | `CP1–CP5` prerequisites | Collection/Node, Comment/RegExp, responsive CSS, conventional select, and literal-prototype foundations |
+| **0.81.0-alpha.2** | `T1 / B1` foundations | Scoped TLS/trust, dual-stack transport, stylesheet/resource and viewport behavior; broader coverage remains partial |
+| **0.81.0-alpha.2** | Selected media/interfaces | Existing finite VP8/PCM/Matroska, Media/Video and event slices within their documented limits |
+| **Post-0.81.0-alpha.2 source** | `DOM-01 / DOM-02 / DOM-03` | PR #29 string/hidden-input/Node-root work, PR #30 anchor URL reflection, and PR #32 native text INPUT fragments; not retroactively part of 0.81.0-alpha.2 |
 
 Published assets remain immutable. Read the [capability matrix](CAPABILITIES.md)
 for exclusions and the [changelog](../CHANGELOG.md) for source history.

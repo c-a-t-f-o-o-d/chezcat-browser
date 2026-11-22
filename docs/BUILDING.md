@@ -159,6 +159,10 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
+The source package version is `0.82.0-alpha.2`. During release preparation, a
+local build remains a development build unless the normal tagged workflow binds
+the matching immutable tag. The candidate's publication is not yet verified.
+
 Published `0.82.0-alpha.1` identifies tagged source
 `f2e1823266a7c08c89bce7293572d801da62053c`. Its downloaded package, PE, HTTP User-Agent,
 CLI and About identities passed the [release checks](RELEASING.md#published-baseline).

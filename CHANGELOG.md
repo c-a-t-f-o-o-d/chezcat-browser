@@ -15,6 +15,67 @@
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
+## 0.82.0-alpha.2
+
+Consolidated JavaScript, DOM, rendering, resource and capacity improvements since
+`v0.82.0-alpha.1`, integrated through
+[`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c).
+The final tag and `publication.json` identify the exact packaged source.
+
+- Expand supported async/await expressions and control flow, generator functions
+  and delegation, async iteration, computed class methods and tagged templates.
+  Add BigInt primitives and width conversion, UTF-16 surrogate string handling,
+  and Unicode/supplementary RegExp ranges. These remain implemented language
+  subsets with the boundaries recorded in the capability matrix.
+- Add real inert HTML documents and template content, attributes and selectors,
+  nested clone/import/stamping, namespace-aware SVG preparation and checked
+  promotion. Native mutations retain actual node identities, owner boundaries,
+  edited controls and resource policies. MutationObserver records cover admitted
+  child, attribute, character and content changes with deferred delivery.
+- Extend genuine DOM interfaces, Range boundaries, native event families,
+  session History/storage and document messaging. Supported author descriptors
+  and prototype overlays coexist with canonical native Node operations.
+  `Node.baseURI` reads the admitted owner/document base and preserves origin,
+  native branding and URL limits; it performs no fetch or navigation.
+- Add a finite asynchronous main-document HTTP(S) text XMLHttpRequest adapter,
+  including real buffered completion and progress. Original Headers/Response
+  body primitives support their documented admitted paths. Global Fetch,
+  preflight, streaming, broader response types and persistent storage remain
+  outside these completed slices.
+- Improve shared CSS sizing variables/math and viewport units, inline-flex,
+  supported structural/interaction selectors, focus/hover, visibility and hit
+  state, stacking/opacity, and computed presentation. Inline SVG uses supported
+  CSS geometry, shared cascade and paint, including the finite local-use path.
+  General CSS/SVG conformance remains incomplete.
+- Add selected Canvas 2D rectangle drawing, solid colors and RGBA readback, and
+  responsive-image viewport behavior. Expand the home page's test sites and
+  original scenarios for exercising implemented browser features.
+- Replace many independent compiler, evaluator, DOM, callback and resource count
+  ceilings with checked byte storage and explicit work accounting. Iterative
+  array flattening removes the former 64-level refusal. Source-backed admission
+  now also covers additional compression, HTTP, image, font and media records;
+  cmap12 lookup avoids a copied group array. Existing format, output, work,
+  allocation and security guards remain, and the capacity inventory is unfinished.
+- Add `build_dev.cmd` for incremental local iteration with scoped development
+  optimization settings. Normal `Build.cmd` and the release workflow retain
+  full release optimization and exact-source verification.
+
+The selected component fixture at
+[`cd0b372` / PR #416](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416)
+exercises real import, mutation, deferred jobs, focus, icons and native controls;
+it does not establish full native Custom Elements or Shadow DOM. Audited native
+Node getters reduce redundant runtime bookkeeping in PR #430. One identical
+depth-16 fixture measured 24.583 seconds before and 22.595 seconds after that
+change; this single comparison is preliminary and is not a live-site result.
+
+The last recorded signed-out YouTube run on
+[`cad5f7c`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cad5f7c14a8fe8ebe2637e4c5269e84eed9697da)
+still renders a skeleton and reaches a 30-second script deadline during DOM
+traversal. A usable homepage/search journey and video playback remain unproved.
+Later merged source and offline fixtures do not establish site acceptance.
+See [capabilities](docs/CAPABILITIES.md), [compatibility](docs/COMPATIBILITY.md)
+and the [release procedure](docs/RELEASING.md) for exact scope and delivery checks.
+
 ## 0.82.0-alpha.1
 
 Shared JavaScript, DOM, native-control and rendering improvements since
