@@ -1944,3 +1944,6 @@ mod replacement;
 #[cfg(test)]
 #[path="script_generic_document_storage_tests.rs"]
 mod generic_document_storage_tests;
+
+#[path="script_character_data_substring.rs"]
+pub(super) mod character_substring;

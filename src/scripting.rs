@@ -181,6 +181,7 @@ use script_resources::DynamicState;
 mod script_blank_frames;
 #[path = "script_inert_documents.rs"]
 mod script_inert_documents;
+use script_inert_documents::character_substring;
 
 #[path = "script_mutation_child_list.rs"]
 mod script_mutation_child_list;
@@ -3608,6 +3609,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==character_substring::METHOD{return &[(0,false),(1,false)];}
         if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{&[(0,true),(1,true)]}else{&[(0,true)]};}
         if dom_collections::operation(method).is_some(){return &[(0,true)];}
@@ -3827,7 +3829,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -3923,6 +3925,7 @@ impl Host for Bridge<'_> {
         if dom_collections::operation(method).is_some(){return 1;}
         if method==xml_documents::CREATE{return 2;}
         if element_names::namespace_method(method){return 1;}
+        if method==character_substring::METHOD{return 2;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
         if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
@@ -4126,6 +4129,7 @@ impl Host for Bridge<'_> {
                 Err(("InvalidCharacterError", "ProcessingInstruction requires a valid XML name and data without ?>.".into()))
             };
         }
+        if method==character_substring::METHOD{return self.validate_substring_data(object,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
         if method == script_node_contains::CONTAINS_METHOD { return self.validate_node_contains(object, args); }
@@ -4457,6 +4461,7 @@ impl Host for Bridge<'_> {
         if script_attr::factory_operation(method).is_some(){return self.event_target_interface(object)&&(receiver==DOCUMENT||self.inert_document(receiver));}
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
+        if method==character_substring::METHOD{return self.event_target_interface(object)&&self.substring_data_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
             let Some((_,upload))=self.xhr_index(receiver) else{return false};
@@ -6013,6 +6018,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method==character_substring::METHOD{return self.native_substring_data(object,args);}
         if object==WINDOW&&method=="Document"{return self.create_generic_document();}
         if script_attr::node_method(method){return match method{"getAttributeNode"=>self.get_attribute_node(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"removeAttributeNode"=>self.remove_attribute_node(object,args),_=>self.set_attribute_node(object,args)};}
         if let Some((name,setter))=script_attr::member_operation(method){return if setter{Err("Attr setters require the native conversion transaction.".into())}else{self.attr_get(object,name)};}
@@ -8747,3 +8753,7 @@ mod node_namespace_lookup_tests;
 #[cfg(test)]
 #[path="script_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
+
+#[cfg(test)]
+#[path="script_character_substring_tests.rs"]
+mod character_substring_tests;

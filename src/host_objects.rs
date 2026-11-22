@@ -428,6 +428,10 @@ impl Runtime {
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(character),Some((false,false,false)))?;
             self.store_symbol_property(character,self.symbol_to_string_tag.unwrap(),Value::String("CharacterData".into()),Some((false,false,true)))?;
             self.define_element_sibling_getters(character,window,"CharacterData")?;
+            let substring=self.allocate_host_function_with_length(window,"\0CharacterData.substringData",2).map_err(Fault::new)?;
+            if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(substring.id){*receiver_required=true;}
+            self.store_property(self.function_properties[substring.id],"name".into(),Value::String("substringData".into()),Some((false,false,true)))?;
+            self.store_property(character,"substringData".into(),Value::Function(substring.id),Some((true,true,true)))?;
             self.put_binding(self.global_environment,"CharacterData".into(),Some(constructor),super::Declaration::Var,false)?;
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
