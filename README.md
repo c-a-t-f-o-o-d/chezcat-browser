@@ -135,14 +135,13 @@ traversal fixture; a usable YouTube homepage or playback has not been demonstrat
 
 | Now | Product work retained | Wider programs |
 | :--- | :--- | :--- |
-| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Resume the saved YouTube shell → search/results → watch/Back → playback sequence after foundation acceptance. | Complete CSS/JavaScript coverage can be planned next; media, isolation and GPU work retain their explicit contracts. |
+| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Verify the YouTube shell → search/results → watch/Back → playback sequence after foundation acceptance. | Complete CSS/JavaScript coverage can be planned next; media, isolation and GPU work retain their explicit contracts. |
 
 The [coverage register](docs/HTML_FOUNDATION_COVERAGE.json) inventories requirements,
-not a conformance score. Implement known missing families in dependency order,
-use focused checks during development and connected App checks at package gates.
-Required dependencies stay open until verified; site errors do not choose the
-next task. Completing this baseline will not imply that all HTML platform APIs,
-all websites or YouTube playback work.
+not a conformance score. The foundation follows dependency order, with focused
+development checks and connected App checks at package gates. Required
+dependencies stay open until verified. Completing this baseline will not imply
+that all HTML platform APIs, all websites or YouTube playback work.
 
 **[Explore the full roadmap →](docs/ROADMAP.md)** for milestone IDs, dependencies,
 completion evidence, and deferred work. Isolation and GPU acceleration are planned,
@@ -299,8 +298,7 @@ python tools/verify_offline.py
 ```
 
 Routine hosted checks inspect snapshot privacy, package configuration and public
-summary handling. The development agent investigates failures and fixes the
-affected work. Physical desktop, audio-device, and public-site
+summary handling. Physical desktop, audio-device, and public-site
 observations are separate evidence. See [building and testing](docs/BUILDING.md)
 and the [release procedure](docs/RELEASING.md).
 

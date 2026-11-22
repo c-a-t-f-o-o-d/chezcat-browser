@@ -13,7 +13,7 @@ import capture_tests
 ROOT=Path(__file__).resolve().parents[1]
 
 def main():
-    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-local-video-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-local-video-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     script=folder/'video.tsv'
     script.write_text('snapshot\tposter\nmedia\tPlay\nwait\t450\nmedia\tPause\nsnapshot\tpaused\nwait\t600\nsnapshot\tfrozen\nmedia\tSeek:2200\nsnapshot\tseeked\nmedia\tPlay\nwait\t1200\nsnapshot\tended\nmedia\tPlay\nsnapshot\treplay\nmedia\tStop\nsnapshot\tstopped\naddress\t'+str(ROOT/'pages/second.html')+'\nkey\tEnter\nsnapshot\tnavigated\n',encoding='utf-8')
     before=capture_tests.source_identity(ROOT);out=folder/'journey'

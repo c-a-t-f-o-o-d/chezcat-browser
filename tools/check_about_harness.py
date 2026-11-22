@@ -195,7 +195,7 @@ def main():
         and versions[0]['strings'].get('FileVersion') == version, 'Embedded PE and Cargo full product versions differ')
     legal = {'License': (repo/'LICENSE').read_bytes(), 'Scope': (repo/'LICENSE_SCOPE.md').read_bytes(),
              'Notices': (repo/'THIRD_PARTY_NOTICES.md').read_bytes()}
-    folder = capture.verification_root(repo) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-about-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder = capture.verification_root(repo) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-about-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     before_source = capture.source_identity(repo);exe_hash = capture.sha256(exe)
     checks = {};record = {'schema_version': 1, 'scope': __doc__, 'source_before': before_source,
         'executable_sha256': exe_hash, 'runner_sha256': capture.sha256(Path(__file__)),

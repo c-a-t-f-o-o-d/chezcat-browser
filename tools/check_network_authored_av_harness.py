@@ -37,7 +37,7 @@ def main(argv=None):
     import check_authored_av_harness as authored
     import check_network_media_harness as network
     require(network.ROOT.resolve() == repo, 'Fixture server must belong to the selected product repository.')
-    folder = capture_tests.verification_root(repo) / 'autonomy' / (
+    folder = capture_tests.verification_root(repo) / 'runs' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-network-authored-av-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)

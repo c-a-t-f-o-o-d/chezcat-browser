@@ -90,7 +90,7 @@ def main(*, source=None, trust_file=None, argv=None):
     sys.path.insert(0, str(repo / 'tools'))
     import accept_license
     import capture_tests
-    folder = capture_tests.verification_root(repo) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-av-' + uuid.uuid4().hex[:8])
+    folder = capture_tests.verification_root(repo) / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-authored-av-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before = capture_tests.source_identity(repo)
     exe_sha = capture_tests.sha256(exe)

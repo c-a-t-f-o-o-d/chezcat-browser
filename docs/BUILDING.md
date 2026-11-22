@@ -94,8 +94,8 @@ python tools/verify_offline.py
 The complete gate uses bounded child-process cleanup and records source-input maps
 and executable hashes. A serial diagnostic retry does not erase a normal failure.
 Results/build outputs are ignored files. Loopback HTTP fixtures are local tests,
-not probes of public services. The agent retains responsibility for investigating
-failed checks and fixing the affected work; the CI handoff redesign is deferred.
+not probes of public services. Failed required checks retain their evidence and
+block the corresponding qualification until the failure is resolved.
 
 <details>
 <summary><strong>🧪 What the local journeys exercise</strong></summary>

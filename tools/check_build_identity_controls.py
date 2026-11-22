@@ -49,7 +49,7 @@ def main():
     parser.add_argument('--toolchain',default='1.99.1-x86_64-pc-windows-msvc')
     args=parser.parse_args();root=args.repo.resolve(strict=True)
     sys.path.insert(0,str(root/'tools'));import capture_tests
-    out=(args.output or capture_tests.verification_root(root)/'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-build-identity-controls-'+uuid.uuid4().hex[:8])).resolve()
+    out=(args.output or capture_tests.verification_root(root)/'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-build-identity-controls-'+uuid.uuid4().hex[:8])).resolve()
     results=(root/'results').resolve()
     selected=capture_tests.verification_root(root)
     out=capture_tests.checked_output_path(out)

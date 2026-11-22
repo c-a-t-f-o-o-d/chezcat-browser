@@ -121,7 +121,7 @@ def app_case(exe,folder,source,clip,reference):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--exe',type=Path);args=parser.parse_args()
-    exe=(args.exe or ROOT/'ChezCat.exe').resolve();folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-controls-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    exe=(args.exe or ROOT/'ChezCat.exe').resolve();folder=capture_tests.verification_root(ROOT) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-controls-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     checks={'complete_journey':False};record={'scope':__doc__,'checks':checks,'passed':False,'license_accepted_by_driver':False}
     try:
         accept_license.terms();require(accept_license.check(accept_license.directory()),'Existing explicit acceptance required; driver never accepts.')

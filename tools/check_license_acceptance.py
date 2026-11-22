@@ -12,7 +12,7 @@ DIGEST=accept_license.DIGEST
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--exe',type=Path,default=ROOT/'ChezCat.exe');args=parser.parse_args()
     exe=args.exe.resolve();before=capture_tests.source_identity(ROOT)
-    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-license-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-license-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     checks={};runs=[];seen=[];ui_records=[]
     class Fixture(http.server.BaseHTTPRequestHandler):
         def do_GET(self):

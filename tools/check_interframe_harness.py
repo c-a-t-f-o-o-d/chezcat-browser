@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--device', action='store_true', help='explicit opt-in existing WinMM sample-clock journey; no physical-audibility claim')
     args = parser.parse_args()
     fixture_dir = args.fixture_dir.resolve()
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-interframe-journey-' + uuid.uuid4().hex[:8])
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-interframe-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before = capture_tests.source_identity(ROOT)
     exe = capture_tests.sha256(ROOT / 'ChezCat.exe')

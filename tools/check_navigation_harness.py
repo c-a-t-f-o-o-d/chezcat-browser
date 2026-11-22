@@ -298,7 +298,7 @@ def main():
     args = parser.parse_args()
     exe = args.exe.resolve()
     selected = CASES if args.case == 'all' else (args.case,)
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-navigation-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)

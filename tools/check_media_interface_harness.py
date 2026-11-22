@@ -81,7 +81,7 @@ def main():
     import check_network_media_harness as network
     require(authored.ROOT.resolve()==root and network.ROOT.resolve()==root,'Checker imports must belong to the selected repository.')
     executable=(args.exe or root/'ChezCat.exe').resolve()
-    folder=capture_tests.verification_root(root) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-interface-journey-'+uuid.uuid4().hex[:8])
+    folder=capture_tests.verification_root(root) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-interface-journey-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     before=capture_tests.source_identity(root)
     exe_before=capture_tests.sha256(executable) if executable.is_file() else None

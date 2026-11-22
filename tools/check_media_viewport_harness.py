@@ -197,7 +197,7 @@ def main():
     for name, expected in provenance['files'].items():
         body = (FIXTURES / name).read_bytes()
         require(len(body) == expected['bytes'] and helper.digest(body) == expected['sha256'], 'Original fixture identity differs: ' + name)
-    folder = capture.verification_root(repo) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-viewport-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder = capture.verification_root(repo) / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-media-viewport-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     before = capture.source_identity(repo);exesha = capture.sha256(exe)
     record = {'schema_version': 1, 'scope': __doc__, 'source_before': before, 'executable_sha256': exesha,
               'runner_sha256': capture.sha256(Path(__file__)), 'fixture_files': {p.name: capture.sha256(p) for p in FIXTURES.iterdir() if p.is_file()},

@@ -24,12 +24,10 @@ actual notices below; source visibility alone does not establish exclusive title
 | WHATWG Encoding indexes, ranges and labels | Generated data in src/text_encoding_single_byte.rs and src/text_encoding_multibyte_data.rs derives from WHATWG Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c, © WHATWG (Apple, Google, Mozilla, Microsoft). Retain notices/WHATWG-Encoding-LICENSE.txt in source and binary distributions and tools/reference/text-encodings/ and tools/reference/multibyte-encodings/ provenance in source. The upstream license applies CC BY 4.0 to the work and BSD 3-Clause to portions incorporated into source code; the decoder and generator logic are original. Multibyte data includes GB18030/EUC-KR, Big5 (including supplementary mappings), JIS0208 and JIS0212 indexes; decoding algorithms and state machines are independently written. |
 | Windows APIs/static CRT | APIs/toolchain are dependencies; verify applicable current Microsoft redistribution terms before binary release |
 | Mozilla NSS certificate data and generated trust subset | Retain trust/mozilla/certdata.txt notices, LICENSE-MPL-2.0.txt, PROVENANCE.json, policy.json and selection.json; upstream MPL-2.0 terms remain separate. The original verifier and conservative data subset do not reproduce the complete Firefox trust policy |
-| Original local fixtures and generated artwork | Retain generator/provenance records. Generated output does not prove exclusive copyright; individual asset and reference provenance still requires confirmation |
+| Local fixtures and artwork | Retain applicable provenance, ownership and credit records. Individual asset and reference rights require confirmation; inclusion does not establish exclusive title |
 | Original VP8 I/P and PCM fixtures | tools/make_interframe_fixture.py authors scene/sample inputs; FFmpeg/libvpx are development encoding/reference tools only and are not redistributed. Preserve tools/fixtures/scene-inter-PROVENANCE.md and static payload/reference identities |
 
-The original icon source retains C2PA/service provenance metadata, including an
-embedded service badge; normalized runtime icon files do not carry that metadata.
-Its provenance is not a blanket license to third-party marks or content. Runtime
+Project artwork does not grant a blanket license to third-party marks or content. Runtime
 bundles must include approved notices for every redistributed component. Optional
 development tools are not production Cargo dependencies and are not bundled as
 browser runtimes. No third-party engine/player/OS decoding service is included.

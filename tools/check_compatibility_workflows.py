@@ -357,7 +357,7 @@ def main():
     require(acceptance.check(acceptance.directory()), 'Existing caller-provided exact-term receipt required; this driver never accepts.')
     before = fixture_identity()
     payloads, provenance = inputs(cache)
-    folder = args.output or (ROOT / 'results/verification/autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-compatibility-workflows-' + uuid.uuid4().hex[:8]))
+    folder = args.output or (ROOT / 'results/verification/runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-compatibility-workflows-' + uuid.uuid4().hex[:8]))
     folder = folder.resolve()
     require(folder.is_relative_to((ROOT / 'results/verification').resolve()) and not folder.exists(), 'Choose a fresh output below this repository results/verification directory.')
     folder.mkdir(parents=True)

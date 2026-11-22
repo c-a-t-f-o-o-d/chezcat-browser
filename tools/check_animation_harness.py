@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def main():
-    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(
+    folder=capture_tests.verification_root(ROOT) / 'runs'/(
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-animation-journey-'+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     destination=folder/'destination.html'
