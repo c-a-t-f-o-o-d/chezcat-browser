@@ -408,6 +408,130 @@ fn xhr_actual_app_mime_override_before_open_decodes_native_bytes() {
 }
 
 #[test]
+fn xhr_actual_app_charset_selection_fallback_replacement_and_bom_use_network_bytes() {
+    let site = Site::new();
+    // These requests explicitly use responseType text; default XML sniffing is separate.
+    let cases: &[(&str, Option<&str>, &[u8], &str)] = &[
+        ("text/plain;charset=windows-1252", None, &[65, 0x80], r#"'A\u20ac'"#),
+        ("text/plain;charset=windows-1252", Some("text/plain"), &[65, 0x80], r#"'A\u20ac'"#),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=unknown"), &[0xc3, 0xa9], r#"'\u00e9'"#),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=\"\""), &[0xc3, 0xa9], r#"'\u00e9'"#),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=replacement"), b"no source text", r#"'\ufffd'"#),
+        ("text/plain;charset=unknown", None, &[0x80, 65], r#"'\ufffdA'"#),
+        ("text/plain;charset=replacement", None, b"no source text", r#"'\ufffd'"#),
+        ("text/plain;charset=iso-2022-cn", None, &[0xef, 0xbb, 0xbf, 0xc3, 0xa9], r#"'\u00e9'"#),
+        ("text/plain;charset=iso-2022-kr", None, &[0xff, 0xfe, 65, 0], "'A'"),
+        ("text/plain;charset=hz-gb-2312", None, &[0xfe, 0xff, 0, 65], "'A'"),
+        ("text/plain;charset=replacement", None, b"", "''"),
+        ("text/plain;charset=utf-8", Some("text/plain;charset=\" \tSHIFT_JIS \""), &[0x82, 0xa0], r#"'\u3042'"#),
+        ("application/xml;charset=unknown", None, &[0xc3, 0xa9], r#"'\u00e9'"#),
+    ];
+    let mut app = App::new();
+    app.set_javascript_enabled(true);
+    for (index, &(content_type, override_mime, bytes, expected_source)) in cases.iter().enumerate() {
+        let path = format!("/charset-{index}");
+        let home = format!("/charset-home-{index}");
+        let title = format!("Native charset matrix {index}");
+        let override_source = override_mime
+            .map(|mime| format!("r.overrideMimeType({mime:?});"))
+            .unwrap_or_default();
+        let states = if bytes.is_empty() { "1;2;4;" } else { "1;2;3;4;" };
+        let script = format!(r#"
+var r=new XMLHttpRequest(),states='',loads=0,errors=0;
+r.onreadystatechange=function(e){{if(!e.isTrusted||e.target!==r)throw 'real charset state';states+=r.readyState+';';}};
+r.onload=function(e){{if(!e.isTrusted||!(e instanceof ProgressEvent)||e.target!==r||r.readyState!==4||r.status!==200||r.statusText!=='Native'||r.responseText!=={expected_source}||r.response!==r.responseText||r.responseURL.indexOf({path:?})<0)throw 'real charset text';if(r.getResponseHeader('Content-Type')!=={content_type:?}||e.loaded!=={length}||e.total!=={length}||e.lengthComputable!=={computable})throw 'real charset headers and bytes';loads++;document.getElementById('out').textContent=r.responseText;}};
+r.onerror=function(){{errors++;}};
+r.onloadend=function(e){{if(!e.isTrusted||loads!==1||errors!==0||states!=={states:?}||e.loaded!=={length})throw 'real charset terminal events';document.title={title:?};}};
+r.open('GET',{path:?});r.responseType='text';{override_source}r.send();
+"#, length=bytes.len(), computable=!bytes.is_empty());
+        site.put(&path, 200, &format!("Content-Type: {content_type}\r\n"), bytes);
+        site.page(&home, &script, "Content-Security-Policy: connect-src 'self'\r\n");
+        site.open(&mut app, &home);
+        until(&mut app, |app| app.document.title == title || app.scripting.as_ref().is_some_and(|page| page.error_count() != 0));
+        clean(&app);
+        assert_eq!(app.document.title, title, "{content_type}, {override_mime:?}");
+        let page = app.scripting.as_mut().unwrap();
+        assert_eq!(page.console_eval(&mut app.document, &mut app.forms, &format!(
+            "if(document.getElementById('out').textContent!=={expected_source}||loads!==1||errors!==0)throw 'charset actual document consumer';"
+        )).errors, 0, "{}", page.report());
+        assert_eq!(page.native_request_pending_count(), 0);
+        assert_eq!(site.count(&path), 1);
+    }
+}
+
+#[test]
+fn xhr_actual_app_charset_replacement_response_paints_and_preserves_editor_and_link_targets() {
+    let site = Site::new();
+    let bytes = b"<script>source must not appear</script>";
+    let html = r#"<!doctype html><html><head><style>
+html,body{margin:0;background:white}#neighbor{position:absolute;left:20px;top:20px;width:200px;height:32px}#go{position:absolute;left:260px;top:20px;width:120px;height:32px}#out{position:absolute;left:20px;top:100px;width:300px;height:40px;margin:0;color:#123456;background:white;font-size:24px}#stable{display:block;position:absolute;left:20px;top:180px;width:100px;height:24px;background:#336699;color:white}
+</style></head><body><input id=neighbor value=seed><button id=go>Request</button><p id=out>Fallback</p><a id=stable href=#destination>Go</a><div id=destination></div><script>
+var xhr,states='',loads=0,errors=0,loaded=-1,total=-1;
+document.getElementById('go').onclick=function(e){if(!e.isTrusted)throw 'real charset activation';xhr=new XMLHttpRequest();xhr.onreadystatechange=function(e){if(!e.isTrusted||e.target!==xhr)throw 'real replacement state';states+=xhr.readyState+';';};xhr.onload=function(e){if(!e.isTrusted||!(e instanceof ProgressEvent)||xhr.status!==200||xhr.statusText!=='Native'||xhr.responseText!=='\ufffd'||xhr.response!==xhr.responseText)throw 'real replacement result';loads++;loaded=e.loaded;total=e.total;document.getElementById('out').textContent='Decoded '+xhr.responseText;};xhr.onerror=function(){errors++;};xhr.onloadend=function(e){if(!e.isTrusted||loads!==1||errors!==0||states!=='1;2;3;4;')throw 'real replacement completion';document.title='Native replacement painted';};xhr.open('GET','/replacement');xhr.responseType='text';xhr.send();};
+</script></body></html>"#;
+    site.put(
+        "/replacement-home",
+        200,
+        "Content-Type: text/html;charset=utf-8\r\nContent-Security-Policy: connect-src 'self'\r\n",
+        html.as_bytes(),
+    );
+    site.put(
+        "/replacement",
+        200,
+        "Content-Type: text/plain;charset=iso-2022-cn-ext\r\n",
+        bytes,
+    );
+    let mut app = App::new();
+    app.resize(640, 480);
+    app.set_javascript_enabled(true);
+    site.open(&mut app, "/replacement-home");
+    clean(&app);
+    let neighbor = node(&app, "neighbor");
+    app.forms.script_set_value(neighbor, "edited neighbor").unwrap();
+    {
+        let editor = &mut app.forms.controls.get_mut(&neighbor).unwrap().value;
+        editor.cursor = 5;
+        editor.anchor = 2;
+        editor.offset = 1;
+    }
+    let before = app.draw().pixels;
+    let go = node(&app, "go");
+    let rect = app.page.controls.iter().find(|rect| rect.node == go).unwrap();
+    let (x, y) = (
+        rect.x + rect.width / 2,
+        app.content_top() + rect.y + rect.height / 2 - app.scroll,
+    );
+    app.pointer_down(x, y, false);
+    app.pointer_up(x, y);
+    until(&mut app, |app| app.document.title == "Native replacement painted" || app.scripting.as_ref().is_some_and(|page| page.error_count() != 0));
+    clean(&app);
+    assert_eq!(app.document.title, "Native replacement painted");
+    let page = app.scripting.as_mut().unwrap();
+    assert_eq!(page.console_eval(&mut app.document, &mut app.forms, &format!(
+        "if(document.getElementById('out').textContent!=='Decoded \\ufffd'||loads!==1||errors!==0||loaded!=={length}||total!=={length})throw 'replacement painted actual bytes';",
+        length=bytes.len(),
+    )).errors, 0, "{}", page.report());
+    let text: String = app.page.runs.iter()
+        .filter(|run| run.x >= 20 && run.x < 320 && run.y >= 100 && run.y < 140)
+        .map(|run| run.text.as_str())
+        .collect();
+    assert_eq!(text, "Decoded\u{fffd}");
+    let after = app.draw();
+    assert_ne!(before, after.pixels);
+    let top = (app.content_top() + 100 - app.scroll) as usize;
+    assert!((top..top + 40)
+        .any(|y| after.pixels[y * after.width + 20..y * after.width + 320].contains(&0x123456)));
+    let editor = &app.forms.controls[&neighbor].value;
+    assert_eq!(
+        (editor.text(), editor.cursor, editor.anchor, editor.offset),
+        ("edited neighbor".into(), 5, 2, 1)
+    );
+    assert_eq!(app.page.link_node_at(70, 192), Some(node(&app, "stable")));
+    assert_eq!(app.page.link_at(70, 192), Some("#destination"));
+    assert_eq!(site.count("/replacement"), 1);
+}
+
+#[test]
 fn xhr_actual_app_done_callback_resend_keeps_new_upload_and_terminal_events() {
     let site = Site::new();
     site.page("/home",r#"
