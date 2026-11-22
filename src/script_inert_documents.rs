@@ -43,6 +43,10 @@ const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 #[path = "script_inert_attributes_tests.rs"]
 mod attribute_tests;
 #[cfg(test)]
+#[path="script_element_name_storage_tests.rs"]
+mod element_name_storage_tests;
+
+#[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
 #[cfg(test)]

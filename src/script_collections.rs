@@ -53,7 +53,7 @@ impl Bridge<'_> {
         while let Some(node)=pending.pop(){
             visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or("Cyclic adopted collection topology.")?;self.state.work(1)?;
             let source=self.inert_import_source(node);let element=matches!(source,Some(script_inert_documents::ImportSource::Element(_)|script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{..},..},..}));
-            let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,expanded_name,..},..},..})=>attrs.iter().fold(tag.len()+attrs.len()+crate::html::element_names::copied_bytes(expanded_name),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
+            let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,expanded_name,..},..},..})=>attrs.iter().fold(attrs.len()+crate::html::element_names::qualified_work(tag,expanded_name),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
             let classes=match &self.state.dom.collections[index].filter{Filter::Classes(names)=>names.len(),_=>0};
             if classes!=0{let length=match self.inert_import_source(node){Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..})=>attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("").len(),_=>0};let scans=length.checked_mul(classes).ok_or("Adopted class scan overflow.")?;self.state.work(scans)?;self.state.copies(scans)?;}
             let filter=&self.state.dom.collections[index].filter;let source=self.inert_import_source(node);
@@ -152,7 +152,7 @@ impl Bridge<'_> {
             let node=candidates[position];self.state.work(1)?;
             match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
-                Filter::Tag(_,_)=>{let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{unreachable!()};self.state.copies(tag.len().saturating_add(crate::html::element_names::copied_bytes(expanded_name)))?;},
+                Filter::Tag(_,_)=>{let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{unreachable!()};self.state.copies(crate::html::element_names::qualified_work(tag,expanded_name))?;},
                 Filter::Classes(names)=>{
                     let count=names.len();
                     let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};

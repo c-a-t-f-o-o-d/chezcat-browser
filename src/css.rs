@@ -2967,7 +2967,7 @@ fn matches_selector(
         if compound
             .tag
             .as_ref()
-            .is_some_and(|expected| !context.text_work(tag.len().saturating_add(crate::html::element_names::copied_bytes(expanded_name)),budget)||!crate::html::element_names::local_matches(tag,expanded_name,expected,*namespace==crate::html::Namespace::Html&&context.doc.kind==crate::html::DocumentKind::Html))
+            .is_some_and(|expected| !context.text_work(expanded_name.first().and_then(|n|n.local.as_ref()).map_or_else(||if tag.len()==expected.len(){tag.len()}else{1},|local|local.used_bytes().saturating_add(expected.len())),budget)||!crate::html::element_names::local_matches(tag,expanded_name,expected,*namespace==crate::html::Namespace::Html&&context.doc.kind==crate::html::DocumentKind::Html))
         {
             return false;
         }

@@ -6322,3 +6322,7 @@ mod attribute_name_tests;
 #[cfg(test)]
 #[path="app_attribute_clone_tests.rs"]
 mod attribute_clone_tests;
+
+#[cfg(test)]
+#[path="app_element_name_units_tests.rs"]
+mod element_name_units_tests;

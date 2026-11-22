@@ -25,6 +25,8 @@ pub(crate) fn namespace(class:Namespace,names:&[ExpandedElementName])->Result<Na
 pub(crate) fn prefix(class:Namespace,names:&[ExpandedElementName])->Result<Option<&DomString>,String>{namespace(class,names)?;Ok(names.first().and_then(|name|name.prefix.as_ref()))}
 pub(crate) fn local<'a>(class:Namespace,tag:&'a str,names:&'a [ExpandedElementName])->Result<DomStringRef<'a>,String>{namespace(class,names)?;Ok(names.first().and_then(|name|name.local.as_ref()).map_or(DomStringRef::Scalar(tag),DomString::view))}
 pub(crate) fn local_matches(tag:&str,names:&[ExpandedElementName],query:&str,fold:bool)->bool{let actual=names.first().and_then(|name|name.local.as_ref()).map_or(DomStringRef::Scalar(tag),DomString::view);let lower=|u:u16|if fold&&(0x41..=0x5a).contains(&u){u+0x20}else{u};actual.code_units().map(lower).eq(query.encode_utf16().map(lower))}
+pub(crate) fn qualified_work(tag:&str,names:&[ExpandedElementName])->usize{let name=names.first();name.and_then(|n|n.prefix.as_ref()).map_or(0,|p|p.used_bytes()+1)+name.and_then(|n|n.local.as_ref()).map_or(tag.len(),DomString::used_bytes)}
+pub(crate) fn prepare_html_local(local:DomString)->Result<(String,Vec<ExpandedElementName>,Namespace),String>{prepare_parts(ElementNamespaceValue::Html,None,local)}
 pub(crate) fn raw_name(names:&[ExpandedElementName])->bool{names.first().is_some_and(|name|name.local.as_ref().is_some_and(|s|s.raw_units().is_some())||name.prefix.as_ref().is_some_and(|s|s.raw_units().is_some()))}
 impl ElementNamespaceValue {
     pub(crate) fn classification(&self)->Namespace{match self{Self::Html=>Namespace::Html,Self::Svg=>Namespace::Svg,Self::Null|Self::Other(_)=>Namespace::Other}}
@@ -54,7 +56,6 @@ pub(crate) fn prepare_dom(namespace:Option<DomString>,qualified:DomString)->Resu
         Some(value) if value=="http://www.w3.org/2000/svg"=>ElementNamespaceValue::Svg,
         Some(value)=>ElementNamespaceValue::Other(value),
     };
-    let class=namespace.classification();
     let(prefix,local)=qualified.view().split_colon();prepare_parts(namespace,prefix.map(DomStringRef::try_owned).transpose()?,local.try_owned()?)
 }
 pub(crate) fn prepare_local(namespace:Option<DomString>,local:DomString)->Result<(String,Vec<ExpandedElementName>,Namespace),String>{let namespace=match namespace{None=>ElementNamespaceValue::Null,Some(s) if s.logical_bytes()==0=>ElementNamespaceValue::Null,Some(s) if s=="http://www.w3.org/1999/xhtml"=>ElementNamespaceValue::Html,Some(s) if s=="http://www.w3.org/2000/svg"=>ElementNamespaceValue::Svg,Some(s)=>ElementNamespaceValue::Other(s)};prepare_parts(namespace,None,local)}
