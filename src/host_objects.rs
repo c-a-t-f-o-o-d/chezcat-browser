@@ -309,7 +309,7 @@ impl Runtime {
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
                     let readers = [("getRootNode", "\0Node.getRootNode", 0),
-                        ("contains", "\0Node.contains", 1), ("cloneNode", "\0Node.cloneNode", 0)];
+                        ("contains", "\0Node.contains", 1), ("cloneNode", "\0Node.cloneNode", 0),("isDefaultNamespace","\0Node.isDefaultNamespace",1)];
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
                     ) {

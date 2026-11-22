@@ -3,6 +3,9 @@
 use super::*;
 use std::rc::Rc;
 
+#[path="script_element_names.rs"]
+pub(super) mod element_names;
+
 #[path="script_inert_content.rs"]
 mod content;
 #[path="script_inert_observation.rs"]
@@ -390,7 +393,7 @@ impl Bridge<'_> {
         self.state.copies(minimum.saturating_add(added))?;
         let mut kind=if let Some(source)=source{script_clone_node::copy_node_kind(&self.parsed_source(source).unwrap().0.kind)?}else{
             let Kind::Element(tag)=&self.state.inert_documents.node(object).unwrap().kind else{unreachable!()};
-            NodeKind::Element{tag:script_clone_node::copy_text(tag)?,id:None,href:None,attrs:Vec::new()}
+            NodeKind::Element{expanded_name:Vec::new(),tag:script_clone_node::copy_text(tag)?,id:None,href:None,attrs:Vec::new()}
         };
         let NodeKind::Element{attrs,id,href,..}=&mut kind else{unreachable!()};
         let actual_name=slot.map_or(&name,|slot|&attrs[slot].name);let changes_id=actual_name.html_is("id");let changes_href=actual_name.html_is("href");
@@ -537,7 +540,7 @@ impl Bridge<'_> {
                 },
             };
             let mut bytes = copied_node_bytes(&raw);
-            if let NodeKind::Element { tag, href, attrs, id } = &raw.kind {
+            if let NodeKind::Element { tag, href, attrs, id ,..} = &raw.kind {
                 if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
                     self.state.work(self.forms.controls.len())?;
                     if self.forms.controls.keys().any(|&control| self.doc.attr(control, "form") == Some(id)) {
@@ -1576,6 +1579,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="createElementNS"{return self.create_expanded_element(owner,args);}
         let kind = if method == "createDocumentFragment" {
             Kind::Fragment { template: None }
         } else if method == "createTextNode" {
@@ -1614,7 +1618,7 @@ impl Bridge<'_> {
 
     fn create_inert_svg(&mut self,owner:u32,name:String)->Result<Value,String>{
         self.state.copies(name.len())?;
-        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()},0).map(Value::Host)
+        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()},0).map(Value::Host)
     }
 
     fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
@@ -1626,7 +1630,7 @@ impl Bridge<'_> {
                 || crate::html::valid_custom_element_name(name) {
                 let Kind::Element(name) = kind else { unreachable!() };
                 return self.append_inert_source_leaf(owner,None,Node {
-                    kind:NodeKind::Element { tag:name,id:None,href:None,attrs:Vec::new() },
+                    kind:NodeKind::Element {expanded_name:Vec::new(), tag:name,id:None,href:None,attrs:Vec::new() },
                     namespace:crate::html::Namespace::Html,children:Vec::new(),
                 },0).map(Value::Host);
             }
@@ -1693,6 +1697,7 @@ impl Bridge<'_> {
         if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
+        if element_names::property(property)&&self.inert_node_type(object)==Some(1){return self.inert_element_name_get(object,property);}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Doctype(data)=&node.kind {
             let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};

@@ -39,6 +39,7 @@ pub enum Kind {
 }
 
 pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
+    if doc.nodes.get(node)?.namespace!=crate::html::Namespace::Html{return None;}
     let tag = tag(doc, node);
     Some(match tag {
         "input" => match doc

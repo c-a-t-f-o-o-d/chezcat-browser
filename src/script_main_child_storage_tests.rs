@@ -22,7 +22,7 @@ fn call(bridge: &mut Bridge<'_>, node: usize, method: &str, args: &[Value]) -> R
 }
 fn native(value: Value) -> u32 { let Value::Host(handle) = value else { panic!("native Node") }; handle }
 fn fresh(bridge: &mut Bridge<'_>, name: &str) -> usize {
-    node_index(native(bridge.create_dom_node(NodeKind::Element { tag: name.into(), id: None, href: None, attrs: Vec::new() }).unwrap())).unwrap()
+    node_index(native(bridge.create_dom_node(NodeKind::Element {expanded_name:Vec::new(), tag: name.into(), id: None, href: None, attrs: Vec::new() }).unwrap())).unwrap()
 }
 
 #[test]

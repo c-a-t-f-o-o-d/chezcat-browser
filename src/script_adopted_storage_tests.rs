@@ -18,7 +18,7 @@ fn browser_adopted_storage_append_joint_exact_backing_and_copy_refusal_keep_owne
     let (mut doc, mut forms, mut page, templates, _) = page("<html><body><template></template></body></html>");
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let Value::Host(fragment) = bridge.template_content(templates[0]).unwrap() else { panic!("content") };
-    let Value::Host(child) = bridge.create_dom_node(NodeKind::Element { tag: "b".into(), id: None, href: None, attrs: Vec::new() }).unwrap() else { panic!("author node") };
+    let Value::Host(child) = bridge.create_dom_node(NodeKind::Element {expanded_name:Vec::new(), tag: "b".into(), id: None, href: None, attrs: Vec::new() }).unwrap() else { panic!("author node") };
     let before = bridge.state.retained;
     let bundle = size_of::<(u32, InertNode)>() + size_of::<u32>();
     bridge.state.retained_limit = before + bundle - 1;

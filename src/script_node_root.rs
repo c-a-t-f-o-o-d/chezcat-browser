@@ -15,6 +15,7 @@ impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
             "getRootNode" => self.get_root_receiver(object),
+            "isDefaultNamespace"=>self.namespace_receiver(object),
             "cloneNode" => self.root_node_receiver(object),
             // Prototype selection depends on the genuine Node interface. The
             // VM guards property access from its current realm, and the call
@@ -127,16 +128,18 @@ impl Bridge<'_> {
 mod tests {
     use super::*;
 
-    fn fixture(source: &str) -> (Document, Forms, Page) {
+    fn fixture_with_profile(source: &str,browser:bool) -> (Document, Forms, Page) {
         let mut doc = crate::html::parse("<html><body><div id=outer><p id=a>text<span id=child>child</span></p></div></body></html>");
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::for_test();
+        let mut page = if browser {Page::new()}else{Page::for_test()};
         page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://example.test/root").unwrap().0), path: None, root: None, fragment: String::new() });
         let outcome = page.start(&mut doc, &mut forms, &[Script { node: 0, label: "Original Node root fixture".into(), source: source.into() }]);
         assert_eq!(outcome.errors, 0, "{}", page.report());
         (doc, forms, page)
     }
+
+    fn fixture(source:&str)->(Document,Forms,Page){fixture_with_profile(source,false)}
 
     fn element(doc: &Document, id: &str) -> usize {
         doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { id: Some(value), .. } if value == id)).unwrap()
@@ -290,14 +293,14 @@ if(method.call(a,good,ignored)!==document||hits!==3||coercions)throw 'only compo
 
     #[test]
     fn node_root_vm_child_owners_are_real_and_cross_origin_refusal_precedes_options_get() {
-        let (mut doc, mut forms, mut page) = fixture(r#"
+        let (mut doc, mut forms, mut page) = fixture_with_profile(r#"
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,ChildFunction=w.Function,childDoc=frame.contentDocument,childBody=childDoc.body;
 var root=Node.prototype.getRootNode,childRoot=ChildFunction('return Node.prototype.getRootNode;')(),hits=0;
 if(childRoot===root||Object.getPrototypeOf(childRoot)!==ChildFunction.prototype||childRoot.length!==0||childRoot.name!=='getRootNode')throw 'actual child function owner';
 if(childDoc.getRootNode!==childRoot)throw 'actual inherited child method';
 if(childDoc.getRootNode()!==childDoc)throw 'child Document is its own root';
 if(childRoot.call(document)!==document||root.call(childDoc)!==childDoc||root.call(childBody,{composed:true})!==childDoc)throw 'same-origin borrowed roots do not cross frame';
-"#);
+"#,true);
         let commits = page.state.dom_commits;
         page.set_location(&crate::navigation::Location { url: Some(crate::url::parse("https://other.test/").unwrap().0), path: None, root: None, fragment: String::new() });
         for source in [

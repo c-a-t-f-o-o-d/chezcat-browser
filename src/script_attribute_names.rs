@@ -26,6 +26,19 @@ pub(super) fn valid_attribute_name(name: &str) -> bool {
 // are checked separately, after the real name/namespace exceptions.
 pub(super) fn validate_element_namespace(namespace:Option<&str>,qualified:&str)->Result<(),(&'static str,String)> {
     let namespace=namespace.filter(|s|!s.is_empty());
+    validate_element_namespace_flags(namespace.is_some(),namespace==Some("http://www.w3.org/XML/1998/namespace"),namespace==Some("http://www.w3.org/2000/xmlns/"),qualified)
+}
+pub(super) fn validate_element_namespace_value(namespace:&crate::javascript::Value,qualified:&str)->Result<(),(&'static str,String)> {
+    use crate::javascript::Value;
+    let(present,xml,xmlns)=match namespace {
+        Value::String(uri)=>(!uri.is_empty(),uri=="http://www.w3.org/XML/1998/namespace",uri=="http://www.w3.org/2000/xmlns/"),
+        Value::StringUnits(uri)=>(!uri.is_empty(),uri.iter().copied().eq("http://www.w3.org/XML/1998/namespace".encode_utf16()),uri.iter().copied().eq("http://www.w3.org/2000/xmlns/".encode_utf16())),
+        Value::Null|Value::Undefined=>(false,false,false),
+        _=>return Err(("TypeError","Namespace must be an already converted nullable DOMString.".into())),
+    };
+    validate_element_namespace_flags(present,xml,xmlns,qualified)
+}
+fn validate_element_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&str)->Result<(),(&'static str,String)> {
     let forbidden=|c:char|matches!(c,'\0'|'\t'|'\n'|'\u{c}'|'\r'|' '|'/'|'>');
     let (prefix,local)=qualified.split_once(':').map_or((None,qualified),|(p,l)|(Some(p),l));
     let mut chars=local.chars();
@@ -35,11 +48,9 @@ pub(super) fn validate_element_namespace(namespace:Option<&str>,qualified:&str)-
         _=>false,
     };
     if !valid||prefix.is_some_and(|p|p.is_empty()||p.chars().any(forbidden)) {return Err(("InvalidCharacterError","Invalid element local name or namespace prefix.".into()));}
-    const XML:&str="http://www.w3.org/XML/1998/namespace";
-    const XMLNS:&str="http://www.w3.org/2000/xmlns/";
     let declaration=qualified=="xmlns"||prefix==Some("xmlns");
-    if prefix.is_some()&&namespace.is_none()||prefix==Some("xml")&&namespace!=Some(XML)
-        ||declaration&&namespace!=Some(XMLNS)||namespace==Some(XMLNS)&&!declaration {
+    if prefix.is_some()&&!present||prefix==Some("xml")&&!xml
+        ||declaration&&!xmlns||xmlns&&!declaration {
         return Err(("NamespaceError","Element prefix and namespace are inconsistent.".into()));
     }
     Ok(())

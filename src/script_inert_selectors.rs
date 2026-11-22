@@ -111,7 +111,7 @@ impl Bridge<'_> {
                 )
             }
             Some(ImportSource::Element(name)) => (
-                NodeKind::Element {
+                NodeKind::Element {expanded_name:Vec::new(),
                     tag: script_clone_node::copy_text(name)?,
                     id: None,
                     href: None,
@@ -135,7 +135,7 @@ impl Bridge<'_> {
                 (NodeKind::DocumentFragment, crate::html::Namespace::None)
             }
             None if self.inert_node_type(handle) == Some(9) => (
-                NodeKind::Element {
+                NodeKind::Element {expanded_name:Vec::new(),
                     tag: "#document".into(),
                     id: None,
                     href: None,

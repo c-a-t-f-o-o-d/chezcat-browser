@@ -63,7 +63,7 @@ fn dynamic_svg_resource_namespace_and_hierarchy_refusals_are_atomic() {
         "document.createElementNS(ns,'foreignObject');",
         "document.createElementNS(ns,'image');",
         "document.createElementNS(ns,'animate');",
-        "document.createElementNS(ns,'svg:svg');",
+        "document.createElementNS('urn:unrelated','xml:svg');",
         "path.setAttribute('onclick','forbidden()');",
         "use.setAttribute('href','https://unrequested.test/icon.svg#x');",
         "use.setAttributeNS('http://www.w3.org/1999/xlink','xlink:href','javascript:forbidden()');",
@@ -78,6 +78,7 @@ fn dynamic_svg_resource_namespace_and_hierarchy_refusals_are_atomic() {
         }
     }
     run(&mut doc,&mut forms,&mut page,"if(path.parentNode!==null||path.getAttribute('onclick')!==null||use.getAttribute('href')!=='#safe'||svg.childNodes.length)throw 'refusal changed actual data';svg.appendChild(path);document.getElementById('target').appendChild(svg);if(!path.isConnected||path.namespaceURI!==ns)throw 'recovery';");
+    run(&mut doc,&mut forms,&mut page,"var prefixed=document.createElementNS(ns,'svg:svg');if(prefixed.namespaceURI!==ns||prefixed.prefix!=='svg'||prefixed.localName!=='svg'||prefixed.tagName!=='svg:svg'||prefixed.cloneNode().prefix!=='svg')throw 'real prefixed SVG';");
     assert!(page.take_image_changes().2.is_empty());
     assert!(page.take_dynamic_scripts().is_empty());
     assert!(page.take_dynamic_stylesheets().is_empty());
@@ -97,7 +98,7 @@ fn dynamic_svg_native_allocation_and_copy_refusal_do_not_publish_nodes() {
         state: &mut page.state
     }
     .create_dom_node_ns(
-        NodeKind::Element {
+        NodeKind::Element {expanded_name:Vec::new(),
             tag: "svg".into(),
             id: None,
             href: None,
@@ -116,7 +117,7 @@ fn dynamic_svg_native_allocation_and_copy_refusal_do_not_publish_nodes() {
         state: &mut page.state
     }
     .create_dom_node_ns(
-        NodeKind::Element {
+        NodeKind::Element {expanded_name:Vec::new(),
             tag: "path".into(),
             id: None,
             href: None,

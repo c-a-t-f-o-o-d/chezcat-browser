@@ -95,7 +95,7 @@ fn browser_template_indexes_append_charges_real_link_backing_and_clear_refunds_i
     let (mut doc, mut forms, mut page, templates) = page("<html><body><template></template></body></html>");
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let Value::Host(fragment) = bridge.template_content(templates[0]).unwrap() else { panic!("content") };
-    let element = || NodeKind::Element { tag: "b".into(), id: None, href: None, attrs: Vec::new() };
+    let element = || NodeKind::Element {expanded_name:Vec::new(), tag: "b".into(), id: None, href: None, attrs: Vec::new() };
     let Value::Host(child) = bridge.create_dom_node(element()).unwrap() else { panic!("author-created element") };
     let before = bridge.state.retained;
     let index_before = bridge.state.inert_documents.adopted.storage_bytes();

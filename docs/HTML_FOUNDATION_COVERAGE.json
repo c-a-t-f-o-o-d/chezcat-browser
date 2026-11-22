@@ -377,8 +377,10 @@
         {
           "id": "F01.02",
           "requirement": "Arbitrary namespace URI/prefix/local name and XML node kinds",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "Owned expanded-name increment: ten original focused checks including connected prefixed HTML/SVG App clone/paint/mutation/removal/restoration/editor/link and exact payload/backing accounting pass. 461 affected checks pass. The fixed arbitrary-element-namespace/prefix/clone witness passes; XML factory remains a fixed failure. No unchanged browser WPT or package closure."
+          ],
           "dependency_details": [],
           "detail_requirements": [
             {
@@ -395,13 +397,17 @@
                 "HTML/XML parser sinks",
                 "clone/import/adopt"
               ],
-              "status": "absent",
+              "status": "partial",
               "source_anchors": [
                 "src/html.rs",
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/html_element_names.rs",
+                "src/script_element_names.rs",
+                "src/script_native_expanded_names_tests.rs",
+                "src/app_native_expanded_names_tests.rs"
               ],
               "integration_dependencies": [
                 "F05",
@@ -412,7 +418,7 @@
                 "F01-arbitrary-element-namespace-prefix-and-clone"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Real arbitrary/null URI and prefix/local records, exact URI DOMString units, qualified names, supported clone/owner behavior and canonical default-namespace lookup have original native and connected App evidence. Fixed arbitrary-namespace/prefix/clone witness now passes. Foreign activation/import/adoption, general attribute and namespace-aware query/serialization consumers, scalar QName restriction and F05/F06/F08 integration remain open. Unknown parser provenance is not fabricated as a null URI.",
               "closing_evidence": []
             },
             {
@@ -533,7 +539,7 @@
                 "F01-attribute-domstring-unpaired-utf16"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Native CharacterData and passive null-namespace HTML data-* Attr records preserve exact units through supported setters/aliases/old values/copy/promotion. Original focused/native App/storage/refusal/selector checks pass. Frozen Text and Attr witnesses pass; USV and saved-template-owner regressions pass. Broader attributes, dataset writes, HTML string reflections, arbitrary names/namespaces and serialization/consumer integration remain required. No unchanged browser-file closure; F06/F07/F08/F09 dependencies remain open.",
+              "supplementary_evidence": "Native CharacterData and passive null-namespace HTML data-* Attr records preserve exact units through supported setters/aliases/old values/copy/promotion. Original focused/native App/storage/refusal/selector checks pass. Frozen Text and Attr witnesses pass; USV and saved-template-owner regressions pass. Broader attributes, dataset writes, HTML string reflections, arbitrary names/namespaces and serialization/consumer integration remain required. No unchanged browser-file closure; F06/F07/F08/F09 dependencies remain open. Element namespace URI records also retain raw UTF-16 and compare actual units in default-namespace lookup; QName inputs remain scalar-only.",
               "closing_evidence": []
             },
             {
