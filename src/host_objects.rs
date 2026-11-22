@@ -441,6 +441,7 @@ impl Runtime {
             self.define_character_data_interface(window, character, "Comment")?;
             self.define_character_data_interface(window, character, "ProcessingInstruction")?;
             let text = self.native_constructor_prototypes[&(window, "Text")];
+            self.define_readonly_node_getter(text,window,"wholeText","\0Text.get.wholeText")?;
             self.define_character_data_interface(window, text, "CDATASection")?;
             for name in ["DocumentFragment","Document"] {
                 let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;

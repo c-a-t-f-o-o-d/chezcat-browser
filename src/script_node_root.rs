@@ -15,6 +15,7 @@ impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
             "getRootNode" => self.get_root_receiver(object),
+            "wholeText"=>self.whole_text_receiver(object),
             "substringData"|"appendData"|"insertData"|"deleteData"|"replaceData"=>self.character_data_receiver(object),
             "isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"=>self.namespace_receiver(object),
             "cloneNode" => self.root_node_receiver(object),

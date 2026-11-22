@@ -1950,3 +1950,6 @@ pub(super) mod character_substring;
 
 #[path="script_character_data_edit.rs"]
 pub(super) mod character_edit;
+
+#[path="script_text_whole.rs"]
+pub(super) mod text_whole;
