@@ -2,6 +2,49 @@
 use super::*;
 pub(in crate::scripting) const CREATE:&str="\0DOMImplementation.createDocument";
 impl Bridge<'_>{
+    fn document_element_named(&self,element:u32,namespace:crate::html::Namespace,name:&str)->bool{
+        match self.inert_import_source(element){Some(ImportSource::Element(tag))=>namespace==crate::html::Namespace::Html&&tag==name,Some(ImportSource::Parsed{node,..})=>node.namespace==namespace&&matches!(&node.kind,NodeKind::Element{tag,..} if tag==name),_=>false}
+    }
+    pub(in crate::scripting) fn inert_document_structure_get(&mut self,document:u32,property:&str)->Result<Value,String>{
+        let Kind::Document(record)=&self.state.inert_documents.node(document).ok_or("Missing document record.")?.kind else{return Ok(Value::Null);};
+        let Some(root)=record.html else{return Ok(Value::Null);};
+        if !self.document_element_named(root,crate::html::Namespace::Html,"html"){return Ok(Value::Null);}
+        let children=self.inert_children(root).ok_or("Missing document root children.")?;self.state.work(children.len())?;
+        let children=self.inert_children(root).unwrap();
+        Ok(children.iter().copied().find(|&child|if property=="head"{self.document_element_named(child,crate::html::Namespace::Html,"head")}else{self.document_element_named(child,crate::html::Namespace::Html,"body")||self.document_element_named(child,crate::html::Namespace::Html,"frameset")}).map_or(Value::Null,Value::Host))
+    }
+    pub(in crate::scripting) fn inert_document_title_get(&mut self,document:u32)->Result<Value,String>{
+        let Kind::Document(record)=&self.state.inert_documents.node(document).ok_or("Missing document record.")?.kind else{return Ok(Value::String(String::new()));};
+        let Some(root)=record.html else{return Ok(Value::String(String::new()));};
+        let mut title=None;
+        if self.document_element_named(root,crate::html::Namespace::Svg,"svg"){
+            let children=self.inert_children(root).ok_or("Missing SVG document children.")?;self.state.work(children.len())?;
+            title=self.inert_children(root).unwrap().iter().copied().find(|&child|self.document_element_named(child,crate::html::Namespace::Svg,"title"));
+        }else{
+            let mut pending=vec![root];let mut visited=0usize;
+            let maximum=self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len());
+            while let Some(node)=pending.pop(){
+                self.state.work(1)?;visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Cyclic document title topology.")?;
+                if self.document_element_named(node,crate::html::Namespace::Html,"title"){title=Some(node);break;}
+                let children=self.inert_children(node).ok_or("Missing title traversal node.")?;let count=children.len();
+                self.state.work(count)?;let children=self.inert_children(node).unwrap();pending.try_reserve(count).map_err(|_|"Cannot reserve document title traversal.")?;pending.extend(children.iter().rev().copied());
+            }
+        }
+        let Some(title)=title else{return Ok(Value::String(String::new()));};
+        let children=self.inert_children(title).ok_or("Missing title child nodes.")?;let mut handles=Vec::new();handles.try_reserve_exact(children.len()).map_err(|_|"Cannot reserve title text references.")?;
+        handles.extend(children.iter().copied().filter(|&node|self.inert_node_type(node)==Some(3)));
+        let (bytes,count)={let parts=self.inert_dom_text_parts(&handles)?;(parts.iter().try_fold(0usize,|n,p|n.checked_add(p.used_bytes()).ok_or("Title input size overflow."))?,parts.iter().try_fold(0usize,|n,p|n.checked_add(p.utf16_len()).ok_or("Title unit count overflow."))?)};
+        self.state.work(bytes)?;self.state.copies(count.checked_mul(2).ok_or("Title temporary size overflow.")?)?;
+        let parts=self.inert_dom_text_parts(&handles)?;let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve title code units.")?;let mut whitespace=false;
+        for unit in parts.iter().flat_map(|part|part.code_units()){
+            if matches!(unit,0x09|0x0a|0x0c|0x0d|0x20){whitespace=!units.is_empty();continue;}
+            if whitespace{units.push(0x20);whitespace=false;}units.push(unit);
+        }
+        let(projection,unpaired)=DomString::projected_size(&units)?;let logical=if unpaired{units.len().checked_mul(2).ok_or("Title result size overflow.")?}else{projection};
+        if logical>self.state.limits.host.string_bytes{return Err("Document title exceeds the host string allowance.".into());}
+        self.state.copies(projection.checked_add(if unpaired{logical}else{0}).ok_or("Title copy size overflow.")?)?;
+        DomString::from_units(&units,DomString::storage_bound(self.state.limits.host.string_bytes)?).map(Self::dom_string_owned)
+    }
     pub(in crate::scripting) fn create_xml_element(&mut self,owner:u32,args:&[Value])->Result<Value,String>{
         let name=self.text(args.first().ok_or("createElement requires a local name.")?)?;
         if !script_attribute_names::valid_element_local_name(&name){return Err("Invalid XML document element local name.".into());}
@@ -53,5 +96,30 @@ impl Bridge<'_>{
         let admitted=self.reserve_inert_entries(count,payload,usize::from(generated.is_some()))?;debug_assert_eq!(admitted,first);
         if let Some(source)=generated{self.state.inert_documents.generated.push(source);}
         self.state.inert_documents.entries.extend(entries);Ok(Value::Host(first))
+    }
+}
+
+#[cfg(test)]
+mod storage_tests{
+    use super::*;
+    #[test]
+    fn native_xml_document_exact_owned_payload_and_entry_source_backing_are_admitted(){
+        let mut doc=crate::html::parse("<!doctype html><html><head></head><body></body></html>");doc.scripting_enabled=true;
+        let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
+        let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+        let backing=|arena:&Arena|arena.entries.capacity()*size_of::<Entry>()+arena.generated.capacity()*size_of::<GeneratedNode>();
+        for (namespace,name) in [(Value::Null,""),(Value::String("urn:original".into()),"p:Mixed"),(Value::String("http://www.w3.org/1999/xhtml".into()),"h:html")]{
+            let before=bridge.state.retained;let previous=backing(&bridge.state.inert_documents);
+            let Value::Host(owner)=bridge.create_xml_document(MAIN_IMPLEMENTATION,&[namespace,Value::String(name.into()),Value::Null]).unwrap()else{panic!("real XML document")};
+            let arena=&bridge.state.inert_documents;let Kind::Document(record)=&arena.node(owner).unwrap().kind else{panic!("owned document record")};
+            let mut payload=record.url.capacity()+record.title.capacity()+arena.node(owner).unwrap().children.capacity()*size_of::<u32>();
+            if let Some(root)=record.html{
+                let Kind::Parsed{source,..}=arena.node(root).unwrap().kind else{panic!("owned root source")};let node=bridge.parsed_source(source).unwrap().0;
+                let NodeKind::Element{tag,href,..}=&node.kind else{panic!("actual root")};
+                payload+=node_bytes(node)+tag.capacity()+href.as_ref().map_or(0,String::capacity)+size_of::<Node>()+2*size_of::<usize>();
+                assert_eq!(arena.node(root).unwrap().owner,owner);
+            }
+            assert_eq!(bridge.state.retained-before,payload+backing(arena)-previous,"{name}");
+        }
     }
 }

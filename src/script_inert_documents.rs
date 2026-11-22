@@ -1705,6 +1705,8 @@ impl Bridge<'_> {
         if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
+        if self.inert_document(object)&&matches!(property,"head"|"body"){return self.inert_document_structure_get(object,property);}
+        if self.inert_document(object)&&property=="title"{return self.inert_document_title_get(object);}
         if element_names::property(property)&&self.inert_node_type(object)==Some(1){return self.inert_element_name_get(object,property);}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Doctype(data)=&node.kind {

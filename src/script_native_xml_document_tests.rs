@@ -41,3 +41,14 @@ fn native_xml_document_factory_retained_refusal_has_no_published_identity_and_re
     assert_eq!(page.console_eval(&mut doc,&mut forms,"document.implementation.createDocument('urn:original','p:Mixed');").errors,1);assert_eq!((doc.nodes.len(),page.state.retained,page.state.dom_commits),before);page.state.retained_limit=limit;
     run(&mut doc,&mut forms,&mut page,"var made=document.implementation.createDocument('urn:original','p:Mixed');if(!(made instanceof XMLDocument)||made.documentElement.ownerDocument!==made||made.documentElement.namespaceURI!=='urn:original'||made.documentElement.localName!=='Mixed'||made.body!==null)throw 'fresh job XML recovery';");no_effects(&mut page);
 }
+
+#[test]
+fn native_xml_document_head_body_and_title_read_current_owned_nodes_after_mutation(){
+    let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var ns='http://www.w3.org/1999/xhtml',d=document.implementation.createDocument(ns,'html'),root=d.documentElement,head=d.createElementNS(ns,'head'),body=d.createElementNS(ns,'body'),title=d.createElementNS(ns,'title'),text=d.createTextNode(' \t\ud800  label\n ');
+if(d.head!==null||d.body!==null||d.title!=='')throw 'actual initially absent nodes';root.appendChild(head);root.appendChild(body);head.appendChild(title);title.appendChild(text);if(d.head!==head||d.body!==body||d.title.length!==7||d.title.charCodeAt(0)!==0xd800||d.title.charAt(1)!==' '||d.title.charAt(6)!=='l')throw 'current XML HTML metadata';
+text.data=' updated   title ';if(d.title!=='updated title')throw 'current changed title';var ignored=d.createElementNS(ns,'span');ignored.appendChild(d.createTextNode('not direct'));title.appendChild(ignored);if(d.title!=='updated title')throw 'title uses child Text rather than nested text';
+root.removeChild(head);root.removeChild(body);if(d.head!==null||d.body!==null||d.title!==''||head.parentNode!==null||title.ownerDocument!==d)throw 'current removal and retained owners';
+var factory=document.implementation.createHTMLDocument('initial'),saved=factory.head.firstChild.firstChild;saved.data=' actual   changed ';if(factory.title!=='actual changed')throw 'HTML factory uses same native title source';
+"#);no_effects(&mut page);
+}
