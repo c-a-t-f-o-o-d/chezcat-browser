@@ -63,3 +63,7 @@ impl Bridge<'_>{
   for _ in 0..plan.events{self.state.dom_committed();}self.state.dirty=true;if plan.connected{self.state.layout_changed();}Ok(())
  }
 }
+
+#[cfg(test)]
+#[path="script_shared_normalize_storage_tests.rs"]
+mod storage_tests;

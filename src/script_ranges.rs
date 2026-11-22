@@ -98,37 +98,7 @@ impl State {
             }
         }
     }
-    pub(super) fn ranges_merge_text(
-        &mut self,
-        parent: usize,
-        index: usize,
-        node: usize,
-        keeper: usize,
-        offset: usize,
-    ) {
-        let parent = if parent == 0 {
-            DOCUMENT
-        } else {
-            node_handle(parent)
-        };
-        for range in &mut self.ranges {
-            for point in [&mut range.start, &mut range.end] {
-                if point.node == node_handle(node) {
-                    point.node = node_handle(keeper);
-                    point.offset += offset;
-                } else if point.node == parent {
-                    if point.offset == index {
-                        *point = Point {
-                            node: node_handle(keeper),
-                            offset,
-                        };
-                    } else if point.offset > index {
-                        point.offset -= 1;
-                    }
-                }
-            }
-        }
-    }
+
 }
 
 impl Bridge<'_> {
