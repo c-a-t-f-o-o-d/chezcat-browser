@@ -68,7 +68,7 @@ impl Bridge<'_>{
     }
     pub(in crate::scripting) fn inert_element_name_get(&mut self,object:u32,property:&str)->Result<Value,String>{
         let owner=self.state.inert_documents.node(object).ok_or("Missing element owner.")?.owner;
-        let kind=if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(doc))=>doc.kind,_=>DocumentKind::Html}};
+        let kind=if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(doc))=>doc.kind,Some(Kind::TemplateDocument{kind,..})=>*kind,_=>DocumentKind::Html}};
         let(class,tag,names)=self.inert_name_parts(object)?;let bytes=result_bytes(class,tag,names,property)?;
         if bytes>self.state.limits.host.string_bytes{return Err("Native element name exceeds the host string allowance.".into());}
         self.state.work(bytes)?;self.state.copies(bytes)?;

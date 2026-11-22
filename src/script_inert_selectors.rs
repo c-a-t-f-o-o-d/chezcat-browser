@@ -305,7 +305,7 @@ impl Bridge<'_> {
             }
         }
         let owner=self.state.inert_documents.node(object).ok_or("Inert query owner is unavailable.")?.owner;
-        let (kind,mode)=match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(doc))=>(doc.kind,doc.mode),_=>(crate::html::DocumentKind::Html,crate::html::DocumentMode::NoQuirks)};
+        let (kind,mode)=match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(doc))=>(doc.kind,doc.mode),Some(Kind::TemplateDocument{kind,..})=>(*kind,crate::html::DocumentMode::NoQuirks),_=>(crate::html::DocumentKind::Html,crate::html::DocumentMode::NoQuirks)};
         let document = Document {
             kind,mode,
             stylesheet_limits: crate::css::StylesheetLimits::default(),

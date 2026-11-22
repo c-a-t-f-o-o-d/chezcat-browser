@@ -2,7 +2,8 @@
 use super::*;
 impl Bridge<'_>{
     pub(in crate::scripting) fn validate_cdata_factory(&self,owner:u32,args:&[Value])->Result<(),(&'static str,String)>{
-        let xml=if owner==DOCUMENT{self.doc.kind==crate::html::DocumentKind::Xml}else{self.state.inert_documents.node(owner).is_some_and(|node|matches!(&node.kind,Kind::Document(doc) if doc.kind==crate::html::DocumentKind::Xml))};
+        if owner!=DOCUMENT&&!self.inert_document(owner){return Err(("TypeError","CDATA factory requires a genuine Document.".into()));}
+        let xml=if owner==DOCUMENT{self.doc.kind==crate::html::DocumentKind::Xml}else{self.inert_document_kind_for_node(owner)==Some(crate::html::DocumentKind::Xml)};
         if !xml{return Err(("NotSupportedError","HTML documents cannot create CDATA sections.".into()));}
         let invalid=match args.first(){Some(Value::String(text))=>text.contains("]]>"),Some(Value::StringUnits(units))=>units.windows(3).any(|s|s==[0x5d,0x5d,0x3e]),_=>false};
         if invalid{return Err(("InvalidCharacterError","CDATA factory data contains its closing delimiter.".into()));}Ok(())

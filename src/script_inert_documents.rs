@@ -54,6 +54,10 @@ mod element_name_storage_tests;
 mod loaded_clone_snapshot_tests;
 
 #[cfg(test)]
+#[path="script_template_document_owner_storage_tests.rs"]
+mod template_document_owner_storage_tests;
+
+#[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
 #[cfg(test)]
@@ -115,7 +119,7 @@ struct GeneratedNode {
 
 enum Kind {
     Document(DocumentNodes),
-    TemplateDocument { implementation: u32 },
+    TemplateDocument { implementation: u32, kind:crate::html::DocumentKind },
     Fragment { template: Option<u32> },
     Parsed { source: ParsedSource, initial_template: Option<usize> },
     Doctype(crate::html::DocumentTypeData),
@@ -187,7 +191,7 @@ impl Arena {
 
 impl Bridge<'_> {
     pub(in crate::scripting) fn inert_node_count(&self)->usize{self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len())}
-    pub(in crate::scripting) fn inert_document_kind_for_node(&self,object:u32)->Option<crate::html::DocumentKind>{let owner=self.state.inert_documents.node(object)?.owner;Some(if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner)?.kind{Kind::Document(ref doc)=>doc.kind,_=>crate::html::DocumentKind::Html}})}
+    pub(in crate::scripting) fn inert_document_kind_for_node(&self,object:u32)->Option<crate::html::DocumentKind>{let owner=self.state.inert_documents.node(object)?.owner;Some(if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner)?.kind{Kind::Document(ref doc)=>doc.kind,Kind::TemplateDocument{kind,..}=>kind,_=>crate::html::DocumentKind::Html}})}
     fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
         let owner = self
             .state
@@ -886,6 +890,7 @@ impl Bridge<'_> {
             self.state.work(1)?;
             return Ok(Value::Host(handle));
         }
+        let document_kind=if document==DOCUMENT{self.doc.kind}else{self.inert_document_kind_for_node(document).ok_or("Template document kind is unavailable.")?};
         let arena = &self.state.inert_documents;
         let existing_owner = if matches!(arena.node(document).map(|node| &node.kind), Some(Kind::TemplateDocument { .. })) {
             Some(document)
@@ -906,7 +911,7 @@ impl Bridge<'_> {
         let mut payload = 0usize;
         if existing_owner.is_none() {
             staged.push(Entry::Node(InertNode {
-                kind: Kind::TemplateDocument { implementation: first + 1 },
+                kind: Kind::TemplateDocument { implementation: first + 1,kind:document_kind },
                 owner, parent: None, children: Vec::new(),
             }));
             staged.push(Entry::Implementation);
@@ -954,6 +959,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn template_html(&mut self, object: u32) -> Result<Value, String> {
+        if self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Xml{return Err("XML template fragment parsing/serialization requires the XML backend; no HTML substitute is used.".into());}
         use script_inner_html::{append, escaped, raw_text, write_open_tag};
 
         let Value::Host(root) = self.template_content(object)? else { unreachable!() };
@@ -1013,6 +1019,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn set_template_html(&mut self, object: u32, markup: &str) -> Result<(), String> {
+        if self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Xml{return Err("XML template fragment parsing/serialization requires the XML backend; no HTML substitute is used.".into());}
         let (document, _) = self.template_source(object).ok_or("Invalid HTML template receiver.")?;
         if markup.len() > self.state.limits.host.string_bytes {
             return Err("HTML fragment source exceeds the host string limit.".into());
@@ -1486,7 +1493,7 @@ impl Bridge<'_> {
             let owner=implementation.checked_sub(1).ok_or("Missing implementation owner.")?;
             let node=self.state.inert_documents.node(owner).ok_or("Missing implementation owner.")?;
             if !matches!(&node.kind,Kind::Document(doc) if doc.implementation==implementation)
-                &&!matches!(node.kind,Kind::TemplateDocument{implementation:actual} if actual==implementation){return Err("Invalid implementation owner identity.".into());}
+                &&!matches!(node.kind,Kind::TemplateDocument{implementation:actual,..} if actual==implementation){return Err("Invalid implementation owner identity.".into());}
             owner
         };
         let name=self.dom_text(args.first().ok_or("createDocumentType requires three arguments.")?)?;
@@ -1623,7 +1630,7 @@ impl Bridge<'_> {
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
         if method=="createElement"&&matches!(args.first(),Some(Value::StringUnits(_))){return self.create_raw_local_element(owner,args);}
         if method=="createComment"{let data=self.dom_text(args.first().ok_or("createComment requires one argument.")?)?;return self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Comment(data),namespace:crate::html::Namespace::None,children:Vec::new()},0).map(Value::Host);}
-        if method=="createElement"&&self.state.inert_documents.node(owner).is_some_and(|node|matches!(&node.kind,Kind::Document(doc) if doc.kind==crate::html::DocumentKind::Xml)){return self.create_xml_element(owner,args);}
+        if method=="createElement"&&self.inert_document_kind_for_node(owner)==Some(crate::html::DocumentKind::Xml){return self.create_xml_element(owner,args);}
 
         if method=="createElementNS"{return self.create_expanded_element(owner,args);}
         let kind = if method == "createDocumentFragment" {
@@ -1832,7 +1839,7 @@ impl Bridge<'_> {
         let string = |value: &str| Value::String(value.into());
         let document = match &node.kind { Kind::Document(nodes) => Some(nodes), _ => None };
         let template_implementation = match node.kind {
-            Kind::TemplateDocument { implementation } => Some(implementation),
+            Kind::TemplateDocument { implementation,.. } => Some(implementation),
             _ => None,
         };
         let html_document = document.is_some() || template_implementation.is_some();
@@ -1895,7 +1902,7 @@ impl Bridge<'_> {
                 string(&document.title)
             }
             "URL" | "documentURI" if html_document => string(document.map_or("about:blank", |doc| &doc.url)),
-            "contentType" if html_document => string(document.map_or("text/html",|doc|doc.content_type)),
+            "contentType" if html_document => string(document.map_or("application/xml",|doc|doc.content_type)),
             "compatMode" if html_document => string(document.map_or(crate::html::DocumentMode::NoQuirks,|doc|doc.mode).compat_mode()),
             "characterSet" if html_document => string("UTF-8"),
             "defaultView" if html_document => Value::Null,
