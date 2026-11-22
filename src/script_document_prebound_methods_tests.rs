@@ -46,15 +46,22 @@ fn document_own_properties_prebound_native_methods_keep_identity_and_refuse_ordi
     page.set_resource_base(&location);
     assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0, "{}", page.report());
     run(&mut doc, &mut forms, &mut page, r#"
-var names=['getElementById','getElementsByTagName','querySelector','querySelectorAll','createElement','createElementNS','createTextNode','createComment','createDocumentFragment'],saved={};
+var names=['getElementById','querySelector','querySelectorAll','createElement','createElementNS','createTextNode','createComment','createDocumentFragment'],saved={};
 for(var name of names){if(typeof document[name]!=='function')throw 'missing prebound native method';saved[name]=document[name];}
 var body=document.body,form=document.getElementById('known'),neighbor=document.getElementById('neighbor'),content=document.getElementById('content');
 if(document.preboundForm!==form||document.title!=='Prebound Document seed'||body.nodeName!=='BODY')throw 'native read prefix';
-if(saved.getElementById.call(document,'content')!==content||saved.getElementsByTagName.call(document,'p').item(0)!==content||saved.querySelector.call(document,'#content')!==content||saved.querySelectorAll.call(document,'p').item(0)!==content)throw 'genuine prebound query operations';
+if(saved.getElementById.call(document,'content')!==content||Document.prototype.getElementsByTagName.call(document,'p').item(0)!==content||saved.querySelector.call(document,'#content')!==content||saved.querySelectorAll.call(document,'p').item(0)!==content)throw 'genuine prebound query operations';
 var element=saved.createElement.call(document,'div'),namespaced=saved.createElementNS.call(document,'http://www.w3.org/1999/xhtml','span'),text=saved.createTextNode.call(document,'literal'),comment=saved.createComment.call(document,'original comment'),fragment=saved.createDocumentFragment.call(document);
 if(element.nodeName!=='DIV'||namespaced.nodeName!=='SPAN'||namespaced.namespaceURI!=='http://www.w3.org/1999/xhtml'||text.nodeType!==3||text.nodeValue!=='literal'||comment.nodeType!==8||comment.nodeValue!=='original comment'||fragment.nodeType!==11||fragment.ownerDocument!==document||fragment.childNodes.length!==0)throw 'genuine prebound creation operations';
 document.ordinaryMethodState={kept:41};
 var replacementCalls=0,replacement=function(){replacementCalls++;throw 'replacement callback must not run';},replacementDescriptor={value:replacement,writable:true,enumerable:true,configurable:true};
+for(var collectionName of ['getElementsByTagName','getElementsByClassName']){
+ var canonical=Document.prototype[collectionName];if(document[collectionName]!==canonical)throw 'canonical inherited collection method';
+ document[collectionName]=replacement;if(document[collectionName]!==replacement)throw 'ordinary collection method override';
+ if(!delete document[collectionName]||document[collectionName]!==canonical)throw 'collection deletion restores prototype method';
+ Object.defineProperty(document,collectionName,replacementDescriptor);if(document[collectionName]!==replacement)throw 'ordinary collection descriptor';
+ if(!delete document[collectionName]||document[collectionName]!==canonical)throw 'collection descriptor deletion restores prototype';
+}
 // These existing Node/EventTarget methods remain ordinary inherited methods.
 for(var eventName of ['addEventListener','removeEventListener','dispatchEvent']){
  var canonical=document[eventName];document[eventName]=replacement;
@@ -65,7 +72,7 @@ if(replacementCalls||neighbor.value!=='edited neighbor'||neighbor.defaultValue!=
 "#);
     let nodes = format!("{:?}", doc.nodes);
     assert_eq!(editor(&forms, neighbor), preserved);
-    for name in ["getElementById", "getElementsByTagName", "querySelector", "querySelectorAll", "createElement", "createElementNS", "createTextNode", "createComment", "createDocumentFragment"] {
+    for name in ["getElementById", "querySelector", "querySelectorAll", "createElement", "createElementNS", "createTextNode", "createComment", "createDocumentFragment"] {
         for source in [
             format!("document.{name}=replacement;"),
             format!("Object.defineProperty(document,'{name}',replacementDescriptor);"),

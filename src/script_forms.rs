@@ -96,11 +96,11 @@ impl Bridge<'_> {
 mod tests {
     use super::*;
 
-    fn run(html: &str, source: &str, policy: &str) -> Page {
+    fn run(html:&str,source:&str,policy:&str)->Page{run_with_page(html,source,policy,Page::for_test())}
+    fn run_with_page(html: &str, source: &str, policy: &str,mut page:Page) -> Page {
         let mut doc = crate::html::parse(html);
         doc.scripting_enabled = true;
         let mut forms = Forms::new(&doc);
-        let mut page = Page::for_test();
         let location = crate::navigation::address(
             "https://example.test/home",
             &crate::navigation::Location::home(),
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn form_interface_real_prototype_submit_named_controls_and_saved_roots() {
-        let page=run("<body><form name=f><input name=constructor value=constructor-field><input name=submit value=submit-field><input name=inheritedProbe value=probe-field><input name=getAttribute value=method-field><input name=children value=children-field></form><form name=other></form></body>",r#"
+        let page=run_with_page("<body><form name=f><input name=constructor value=constructor-field><input name=submit value=submit-field><input name=inheritedProbe value=probe-field><input name=getAttribute value=method-field><input name=children value=children-field></form><form name=other></form></body>",r#"
 var f=document.f,other=document.other,C=HTMLFormElement,P=C.prototype;
 if(!(f instanceof C)||!(f instanceof HTMLElement)||Object.getPrototypeOf(f)!==P||Object.getPrototypeOf(P)!==HTMLElement.prototype||Object.getPrototypeOf(C)!==HTMLElement||other.constructor!==C||Object.prototype.toString.call(f)!=='[object HTMLFormElement]')throw 'genuine form interface';
 if(f.getAttribute.value!=='method-field'||typeof f.children.length!=='number'||Element.prototype.getAttribute.call(f,'name')!=='f'||String(other)!=='[object HTMLFormElement]')throw 'named native member precedence';
@@ -142,7 +142,7 @@ var inert=document.implementation.createHTMLDocument('inert').createElement('for
 try{method.value.call(inert);throw 'inert fake submission';}catch(e){if(!(e instanceof DOMException)||e.name!=='NotSupportedError')throw e;}
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);if(frame.contentWindow.HTMLFormElement===C||f instanceof frame.contentWindow.HTMLFormElement)throw 'owner interface identity';
 delete window.HTMLFormElement;if(!(other instanceof C)||P.constructor!==C||f.constructor.value!=='constructor-field')throw 'saved canonical roots';
-"#, "");
+"#, "",Page::new());
         assert_eq!(page.error_count(),0,"{}",page.report());assert!(page.state.navigation.is_none());
     }
 
