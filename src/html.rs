@@ -74,7 +74,9 @@ impl Document {
         }))
     }
 
-    pub fn attr(&self, node: usize, name: &str) -> Option<&str> {
+    pub fn attr(&self,node:usize,name:&str)->Option<&str>{self.dom_attr(node,name).map(DomString::render_projection)}
+
+    pub(crate) fn dom_attr(&self, node: usize, name: &str) -> Option<&DomString> {
         // HTML consumers accept a case-insensitive query, but only the exact
         // lower-case null-namespace attribute drives native HTML behavior.
         let name = if name.bytes().any(|c| c.is_ascii_uppercase()) {
@@ -84,7 +86,7 @@ impl Document {
             NodeKind::Element { attrs, .. } => attrs
                 .iter()
                 .find(|attr| attr.name.html_is(name.as_ref()))
-                .map(|attr| attr.value.as_str()),
+                .map(|attr| &attr.value),
             NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
             | NodeKind::DocumentFragment => None,
         }
@@ -160,12 +162,12 @@ impl AttributeName {
 #[derive(Debug)]
 pub struct Attribute {
     pub name: AttributeName,
-    pub value: String,
+    pub value: DomString,
 }
 
 impl Attribute {
-    pub fn unqualified(name: String, value: String) -> Self { Self { name: AttributeName::unqualified(name), value } }
-    pub fn bytes(&self) -> usize { self.name.bytes() + self.value.len() }
+    pub fn unqualified(name: String, value: String) -> Self { Self { name: AttributeName::unqualified(name), value:value.into() } }
+    pub fn bytes(&self) -> usize { self.name.bytes() + self.value.used_bytes() }
     pub(crate) fn owned_bytes(&self)->usize{self.name.owned_bytes()+self.value.capacity()}
 }
 

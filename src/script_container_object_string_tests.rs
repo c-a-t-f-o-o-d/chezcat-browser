@@ -314,7 +314,7 @@ fn container_object_string_assignment_tail_keeps_location_and_attr_write_boundar
     let mut doc = crate::html::parse("<!doctype html><body><div id=container>Original</div>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
+    let mut page = Page::new();
     let source = crate::navigation::address(
         "https://container-string.test/setters",
         &crate::navigation::Location::home(),

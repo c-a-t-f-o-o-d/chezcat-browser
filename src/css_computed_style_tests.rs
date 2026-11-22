@@ -93,7 +93,7 @@ fn computed_custom_readback_has_no_detached_or_inert_style_and_reports_blocked_m
     if let NodeKind::Element { attrs, .. } = &mut doc.nodes[blocked].kind {
         attrs.push(crate::html::Attribute {
             name: crate::html::AttributeName::unqualified("style".into()),
-            value: (0..257).map(|n| format!("--x{n}:value;")).collect(),
+            value: (0..257).map(|n| format!("--x{n}:value;")).collect::<String>().into(),
         });
     }
     let result = compute_with_environment_and_properties(&doc, &HashMap::new(), None, None);

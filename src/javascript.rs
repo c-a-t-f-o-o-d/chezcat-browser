@@ -564,7 +564,7 @@ pub struct NativeChildListChange {
 pub struct NativeAttributeChange {
     pub local_name: String,
     pub namespace: Option<String>,
-    pub old_value: Option<String>,
+    pub old_value: Option<Value>,
 }
 
 pub trait Host {

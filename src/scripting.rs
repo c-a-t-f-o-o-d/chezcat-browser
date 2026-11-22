@@ -2477,6 +2477,10 @@ impl Bridge<'_> {
         self.attribute_named_prepared(node,name,value,script_attr::InputPreparation::Pending)
     }
     fn attribute_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<String>,input:script_attr::InputPreparation)->Result<(),String>{
+        self.attribute_dom_named_prepared(node,name,value.map(DomString::from),input)
+    }
+    fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -2545,7 +2549,7 @@ impl Bridge<'_> {
         } else { None };
         let retained_value = if detached_attr.is_some() { slot.map_or(0, |slot| attrs[slot].value.capacity()) } else { 0 };
         let copied_id=if name.html_is("id") {
-            self.state.copies(value.as_ref().map_or(0,String::len))?;
+            self.state.copies(value.as_ref().map_or(0,DomString::used_bytes))?;
             value.as_deref().map(script_clone_node::copy_text).transpose()?
         } else {None};
         let native_bytes = input.as_ref().map_or(0, forms::InputPlan::retained_bytes);
@@ -2557,8 +2561,8 @@ impl Bridge<'_> {
         if replacement.is_some(){self.state.copies(attrs.len()*size_of::<crate::html::Attribute>())?;}
         // Spare capacity is retained memory, not copied text. Keep payload
         // work and newly initialized records separate from allocation bytes.
-        let payload_work=value.as_ref().map_or(0,|value|value.len()+slot.map_or_else(||name.bytes(),|slot|attrs[slot].name.bytes()));
-        let detached_work=if detached_attr.is_some(){slot.map_or(0,|slot|attrs[slot].value.len())}else{0};
+        let payload_work=value.as_ref().map_or(0,|value|value.used_bytes()+slot.map_or_else(||name.bytes(),|slot|attrs[slot].name.bytes()));
+        let detached_work=if detached_attr.is_some(){slot.map_or(0,|slot|attrs[slot].value.used_bytes())}else{0};
         let record_work=if slot.is_none()&&value.is_some(){size_of::<crate::html::Attribute>()}else{0};
         let work=payload_work.checked_add(copied_id.as_ref().map_or(0,String::len)).and_then(|bytes|bytes.checked_add(detached_work)).and_then(|bytes|bytes.checked_add(native_bytes)).and_then(|bytes|bytes.checked_add(record_work)).ok_or("Attribute payload work overflow.")?;
         self.state.replace_storage(old,new_bytes.checked_add(backing).ok_or("Attribute retained backing overflow.")?,work)?;
@@ -3558,14 +3562,17 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
+        index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
+            ||index==2&&method=="setAttributeNS"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
+            ||index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
             ||self.inert_factory(object,method)==Some("createTextNode")
             ||self.event_target_interface(object)&&matches!(method,"Text"|"Comment"))
             ||index==1&&(method==CREATE_PROCESSING_INSTRUCTION||method=="createProcessingInstruction"
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
-        matches!(property,"data"|"nodeValue")&&self.mutation_observation_target(object)==Some(true)
+        self.attr_receiver(object)&&matches!(property,"value"|"nodeValue"|"textContent")
+            ||matches!(property,"data"|"nodeValue")&&self.mutation_observation_target(object)==Some(true)
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
@@ -6342,14 +6349,14 @@ impl Host for Bridge<'_> {
                 let Some(slot) = slot else { return Ok(Value::Null); };
                 let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { unreachable!() };
                 let value = &attrs[slot].value;
-                if value.len() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
-                self.state.copies(value.len())?;
-                return Ok(Value::String(value.to_owned()));
+                if value.logical_bytes() > self.state.limits.host.string_bytes { return Err("Attribute value exceeds the host string bound.".into()); }
+                self.state.copies(value.logical_bytes())?;
+                return Self::dom_string_copy(value);
             }
             let name = if let Some(slot) = slot { self.copy_attribute_name(node, slot)? }
                 else { crate::html::AttributeName::unqualified(qualified) };
-            let value = if method == "setAttribute" { Some(self.text(&args[1])?) } else { None };
-            self.public_attribute(node, name, value)?;
+            let value = if method == "setAttribute" { Some(self.dom_text(&args[1])?) } else { None };
+            self.public_dom_attribute(node,name,value,script_attr::InputPreparation::Pending)?;
             return Ok(Value::Undefined);
         }
         Err(format!("DOM method {method:?} is not supported."))
