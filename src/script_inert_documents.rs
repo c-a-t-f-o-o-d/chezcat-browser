@@ -1149,6 +1149,13 @@ impl Bridge<'_> {
     }
 
     pub(super) fn clone_inert_tree(&mut self, object: u32, deep: bool) -> Result<Value, String> {
+        if let Some(data) = self.inert_text_value(object) {
+            let size = data.len();
+            self.state.copies(size)?;
+            let text = script_clone_node::copy_text(self.inert_text_value(object).unwrap())?;
+            let owner = self.state.inert_documents.node(object).unwrap().owner;
+            return self.append_inert_text(owner, None, text, 0).map(Value::Host);
+        }
         #[derive(Clone, Copy)]
         struct Step {
             source: u32,
@@ -1562,6 +1569,9 @@ impl Bridge<'_> {
     }
 
     fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
+        if let Kind::Text(text) = kind {
+            return self.append_inert_text(owner, None, text, 0).map(Value::Host);
+        }
         let bytes = match &kind {
             Kind::Element(name) | Kind::Text(name) => name.capacity(),
             Kind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
