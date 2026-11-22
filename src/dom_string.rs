@@ -13,12 +13,22 @@ pub(crate) enum Units<'a> {
     Scalar(std::str::EncodeUtf16<'a>),
     Raw(std::iter::Copied<std::slice::Iter<'a,u16>>),
 }
+/// A borrowed DOMString boundary, including unpaired Web IDL code units.
+#[derive(Clone,Copy)]
+pub(crate) enum DomStringRef<'a>{Scalar(&'a str),Raw(&'a [u16])}
+impl<'a> DomStringRef<'a>{
+    pub(crate) fn code_units(self)->Units<'a>{match self{Self::Scalar(s)=>Units::Scalar(s.encode_utf16()),Self::Raw(u)=>Units::Raw(u.iter().copied())}}
+    pub(crate) fn logical_bytes(self)->usize{match self{Self::Scalar(s)=>s.len(),Self::Raw(u)=>u.len()*2}}
+    pub(crate) fn copy_bytes(self)->Result<usize,String>{match self{Self::Scalar(s)=>Ok(s.len()),Self::Raw(u)=>{let(p,raw)=DomString::projected_size(u)?;p.checked_add(if raw{u.len().checked_mul(2).ok_or("DOMString view copy overflow.")?}else{0}).ok_or("DOMString view copy overflow.".into())}}}
+    pub(crate) fn try_owned(self)->Result<DomString,String>{match self{Self::Scalar(s)=>{let mut text=String::new();text.try_reserve_exact(s.len()).map_err(|_|"Cannot reserve copied DOMString view.")?;text.push_str(s);Ok(text.into())},Self::Raw(u)=>DomString::from_units(u,usize::MAX)}}
+}
 impl Iterator for Units<'_> {
     type Item=u16;
     fn next(&mut self)->Option<u16>{match self {Self::Scalar(i)=>i.next(),Self::Raw(i)=>i.next()}}
     fn size_hint(&self)->(usize,Option<usize>){match self {Self::Scalar(i)=>i.size_hint(),Self::Raw(i)=>i.size_hint()}}
 }
 impl DomString {
+    pub(crate) fn view(&self)->DomStringRef<'_>{match self.raw_units(){Some(u)=>DomStringRef::Raw(u),None=>DomStringRef::Scalar(&self.projection)}}
     pub(crate) fn new()->Self{Self::default()}
     pub(crate) fn into_parts(self)->(String,Option<Vec<u16>>){(self.projection,self.units)}
     pub(crate) fn storage_bound(logical_bytes:usize)->Result<usize,String>{
@@ -118,6 +128,8 @@ impl Deref for DomString {type Target=str;fn deref(&self)->&str{self.render_proj
 impl fmt::Display for DomString {fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{self.render_projection().fmt(f)}}
 impl PartialEq for DomString {fn eq(&self,other:&Self)->bool{self.code_units().eq(other.code_units())}}
 impl Eq for DomString {}
+impl Ord for DomString{fn cmp(&self,other:&Self)->std::cmp::Ordering{self.code_units().cmp(other.code_units())}}
+impl PartialOrd for DomString{fn partial_cmp(&self,other:&Self)->Option<std::cmp::Ordering>{Some(self.cmp(other))}}
 impl PartialEq<str> for DomString {fn eq(&self,other:&str)->bool{self.code_units().eq(other.encode_utf16())}}
 impl PartialEq<&str> for DomString {fn eq(&self,other:&&str)->bool{self==*other}}
 impl PartialEq<String> for DomString {fn eq(&self,other:&String)->bool{self==other.as_str()}}

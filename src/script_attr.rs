@@ -2,6 +2,7 @@
 //! names select the first entry for the ordinary HTML attribute APIs.
 use super::*;
 use crate::html::{AttributeName, AttributeNamespace};
+use crate::dom_string::DomStringRef;
 
 pub(super) const ATTR_BASE: u32 = 0x8200_0000;
 pub(super) fn node_method(method:&str)->bool{matches!(method,"getAttributeNode"|"getAttributeNodeNS"|"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")}
@@ -13,9 +14,9 @@ mod factory_storage_tests{
  fn inert_attribute_factory_exact_owner_name_backing_copy_refusal_and_recovery(){
   let mut doc=crate::html::parse("<!doctype html><html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(owner)=b.create_xml_document(script_inert_documents::MAIN_IMPLEMENTATION,&[Value::Null,Value::String(String::new())]).unwrap()else{panic!("owner")};
   let backing=|b:&Bridge<'_>|b.state.attributes.capacity()*size_of::<Attr>()+b.state.attached_attributes.capacity()*size_of::<usize>();
-  for (namespaced,args)in[(false,vec![Value::String("MiXeD".into())]),(true,vec![Value::String("urn:original".into()),Value::String("p:Case".into())])]{let before=(b.state.retained,backing(&b));let Value::Host(handle)=b.create_attribute_for_document(owner,&args,namespaced).unwrap()else{panic!("real Attr")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.owner,None);assert_eq!(b.state.retained-before.0,attr.name.owned_bytes()+attr.value.capacity()+backing(&b)-before.1);}
+  for (namespaced,args)in[(false,vec![Value::String("MiXeD".into())]),(true,vec![Value::String("urn:original".into()),Value::String("p:Case".into())]),(true,vec![Value::StringUnits(vec![0xd800,0x41,0xdfff]),Value::String("p:Units".into())])]{let before=(b.state.retained,backing(&b));let Value::Host(handle)=b.create_attribute_for_document(owner,&args,namespaced).unwrap()else{panic!("real Attr")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.owner,None);assert_eq!(b.state.retained-before.0,attr.name.owned_bytes()+attr.value.capacity()+backing(&b)-before.1);}
   let before=(b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits);let limit=b.state.retained_limit;let copies=b.state.copy_work;
-  for storage in [true,false]{if storage{b.state.retained_limit=b.state.retained;}else{b.state.copy_work=0;}assert!(b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits),before);b.state.retained_limit=limit;b.state.copy_work=copies;}
+  for storage in [true,false]{if storage{b.state.retained_limit=b.state.retained;}else{b.state.copy_work=0;}assert!(b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).is_err());assert!(b.create_attribute_for_document(owner,&[Value::StringUnits(vec![0xd800,0x41,0xdfff]),Value::String("p:Refused".into())],true).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits),before);b.state.retained_limit=limit;b.state.copy_work=copies;}
   let Value::Host(handle)=b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).unwrap()else{panic!("recovery")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.name.qualified,"Fresh");
  }
 }
@@ -42,7 +43,7 @@ fn copy_text(text:&str)->Result<String,String>{
     copied.push_str(text);Ok(copied)
 }
 pub(super) fn copy_name(name:&AttributeName)->Result<AttributeName,String>{
-    Ok(AttributeName{qualified:copy_text(&name.qualified)?,namespace:name.namespace.as_ref().map(|ns|Ok::<_,String>(AttributeNamespace{uri:copy_text(&ns.uri)?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?})).transpose()?})
+    Ok(AttributeName{qualified:copy_text(&name.qualified)?,namespace:name.namespace.as_ref().map(|ns|Ok::<_,String>(AttributeNamespace{uri:ns.uri.try_clone()?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?})).transpose()?})
 }
 struct Reservation {records:Option<Vec<Attr>>,index:Option<Vec<usize>>,added:usize}
 pub(super) enum InputPreparation {Pending,Ready(Option<forms::InputPlan>)}
@@ -65,18 +66,14 @@ fn property(name: &str) -> bool {
         | "nextSibling" | "previousSibling" | "isConnected" | "isDefaultNamespace" | "compareDocumentPosition")
 }
 
-fn namespace(args: &[Value]) -> Result<Option<&str>, String> {
-    match args.first() {
-        Some(Value::Null | Value::Undefined) => Ok(None),
-        Some(Value::String(text)) => Ok((!text.is_empty()).then_some(text.as_str())),
-        _ => Err("Attribute operation requires a converted nullable namespace.".into()),
-    }
+pub(super) fn namespace(args:&[Value])->Result<Option<DomStringRef<'_>>,String>{
+    match args.first(){Some(Value::Null|Value::Undefined)=>Ok(None),Some(Value::String(s))=>Ok((!s.is_empty()).then_some(DomStringRef::Scalar(s))),Some(Value::StringUnits(u))=>Ok((!u.is_empty()).then_some(DomStringRef::Raw(u))),_=>Err("Attribute operation requires a converted nullable DOMString namespace.".into())}
 }
 
 fn name_text<'a>(name: &'a AttributeName, property: &str) -> Option<&'a str> {
     match property {
         "localName" => Some(name.local()),
-        "namespaceURI" => name.namespace_uri(),
+        "namespaceURI" => None,
         "prefix" => name.prefix(),
         _ => Some(name.qualified.as_str()),
     }
@@ -103,7 +100,7 @@ impl Bridge<'_> {
     pub(super) fn canonical_attribute_factory_member(&self,object:u32,property:&str)->bool{matches!(property,"createAttribute"|"createAttributeNS")&&(object==DOCUMENT||self.inert_document(object))}
     pub(super) fn validate_attribute_factory(&self,document:u32,args:&[Value],namespaced:bool)->Result<(),(&'static str,String)>{
         if document!=DOCUMENT&&!self.inert_document(document){return Err(("TypeError","Attribute creation requires a genuine Document.".into()));}
-        if let Some(Value::String(qualified))=args.get(usize::from(namespaced)){if namespaced{let ns=match args.first(){Some(Value::String(uri)) if !uri.is_empty()=>Some(uri.as_str()),_=>None};script_attribute_names::validate_namespace(ns,qualified)?;}else if !script_attribute_names::valid_attribute_name(qualified){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
+        if let Some(Value::String(qualified))=args.get(usize::from(namespaced)){if namespaced{script_attribute_names::validate_namespace_value(args.first().unwrap(),qualified)?;}else if !script_attribute_names::valid_attribute_name(qualified){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
         Ok(())
     }
     pub(super) fn prepare_attr_document_rebind(&mut self,mut matches_owner:impl FnMut(u32)->bool,lookup:usize,document:u32)->Result<Vec<usize>,String>{
@@ -141,11 +138,11 @@ impl Bridge<'_> {
         let mut qualified=self.text(args.get(usize::from(namespaced)).ok_or("Attribute creation requires a name.")?)?;
         let name=if namespaced {
             let ns=namespace(args)?;
-            super::script_attribute_names::validate_namespace(ns,&qualified).map_err(|(_,message)|message)?;
+            super::script_attribute_names::validate_namespace_value(args.first().unwrap(),&qualified).map_err(|(_,message)|message)?;
             if let Some(uri)=ns {
                 let (prefix,local)=qualified.split_once(':').map_or((None,qualified.as_str()),|(prefix,local)|(Some(prefix),local));
-                self.state.copies(uri.len().checked_add(qualified.len()).ok_or("Attribute name accounting overflow.")?)?;
-                let namespace=AttributeNamespace{uri:copy_text(uri)?,prefix:prefix.map(copy_text).transpose()?,local:copy_text(local)?};
+                self.state.copies(uri.copy_bytes()?.checked_add(qualified.len()).ok_or("Attribute name accounting overflow.")?)?;
+                let namespace=AttributeNamespace{uri:uri.try_owned()?,prefix:prefix.map(copy_text).transpose()?,local:copy_text(local)?};
                 AttributeName{qualified,namespace:Some(namespace)}
             } else {AttributeName::unqualified(qualified)}
         } else {if self.inert_document_kind_for_node(document).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Html{qualified.make_ascii_lowercase();}AttributeName::unqualified(qualified)};
@@ -182,7 +179,7 @@ impl Bridge<'_> {
         let name_bytes=attr.name.bytes();let value_bytes=attr.value.used_bytes();let value_storage=attr.value.capacity();
         self.state.copies(name_bytes.checked_mul(2).and_then(|n|n.checked_add(value_bytes)).ok_or("Attribute copy accounting overflow.")?)?;
         let element_name=copy_name(&self.state.attributes[incoming].name)?;let write_name=copy_name(&element_name)?;let value=self.state.attributes[incoming].value.try_clone()?;
-        let slot=self.attribute_slot(node,element_name.namespace_uri(),element_name.local())?;
+        let slot=self.attribute_slot(node,element_name.namespace_uri().map(DomString::view),element_name.local())?;
         self.state.attribute_lookup_work()?;
         let position=self.state.attribute_position(node,&element_name);
         let old_id=position.ok().map(|position|self.state.attached_attributes[position]);
@@ -248,11 +245,11 @@ impl Bridge<'_> {
         Ok(property(name) || self.method(handle, name).is_some())
     }
 
-    fn attribute_slot(&mut self, node: usize, namespace: Option<&str>, local: &str) -> Result<Option<usize>, String> {
+    fn attribute_slot(&mut self, node: usize, namespace: Option<DomStringRef<'_>>, local: &str) -> Result<Option<usize>, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("Not an Element.".into()); };
         self.state.work(attrs.len())?;
         self.state.copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
-        Ok(attrs.iter().position(|attr| attr.name.matches(namespace, local)))
+        Ok(attrs.iter().position(|attr| attr.name.matches_dom(namespace, local)))
     }
 
     pub(super) fn raw_attribute_slot(&mut self, node: usize, qualified: &str) -> Result<Option<usize>, String> {
@@ -314,12 +311,12 @@ impl Bridge<'_> {
         };
         let prior = slot.and_then(|index| attrs.get(index));
         let local = prior.map_or(local.as_str(), |attr| attr.name.local());
-        let uri = prior.map_or(uri, |attr| attr.name.namespace_uri());
+        let uri = prior.map_or(uri, |attr| attr.name.namespace_uri().map(DomString::view));
         let old = prior.map(|attr| &attr.value);
-        self.state.copies(local.len().saturating_add(uri.map_or(0, str::len)).saturating_add(old.map_or(0,DomString::logical_bytes)))?;
+        self.state.copies(local.len().saturating_add(uri.map(DomStringRef::copy_bytes).transpose()?.unwrap_or(0)).saturating_add(old.map_or(0,DomString::logical_bytes)))?;
         Ok(Some(crate::javascript::NativeAttributeChange {
             local_name: local.into(),
-            namespace: uri.map(str::to_owned),
+            namespace: uri.map(DomStringRef::try_owned).transpose()?,
             old_value: old.map(Self::dom_string_copy).transpose()?,
         }))
     }
@@ -328,7 +325,7 @@ impl Bridge<'_> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("Not an Element.".into()); };
         let name = &attrs.get(slot).ok_or("Attribute slot is unavailable.")?.name;
         self.state.copies(name.bytes())?;
-        Ok(name.copy())
+        name.copy()
     }
 
     pub(super) fn attr_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
@@ -336,6 +333,7 @@ impl Bridge<'_> {
         let id = index(handle).ok_or("Invalid Attr handle.")?;
         let attr = self.state.attributes.get(id).ok_or("Invalid Attr handle.")?;
         if let Some(value) = dom_tree::node_constant(name) { return Ok(Value::Number(f64::from(value))); }
+        if name=="namespaceURI"{let Some(uri)=attr.name.namespace_uri()else{return Ok(Value::Null);};let bytes=uri.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("Attr namespace exceeds the host allowance.".into());}self.state.copies(bytes)?;return Self::dom_string_copy(self.state.attributes[id].name.namespace_uri().unwrap());}
         match name {
             "name" | "localName" | "nodeName" | "namespaceURI" | "prefix" => {
                 let Some(text) = name_text(&attr.name, name) else { return Ok(Value::Null); };
@@ -441,7 +439,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object)==Some(1){
             let namespace=namespace(args)?;let local=self.text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
             let attrs=self.inert_element_attributes(object).ok_or("Inert attributes are unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;
-            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches(namespace,&local));let Some(slot)=slot else{return Ok(Value::Null);};
+            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches_dom(namespace,&local));let Some(slot)=slot else{return Ok(Value::Null);};
             let length=self.inert_element_attributes(object).unwrap()[slot].value.logical_bytes();if length>self.state.limits.host.string_bytes{return Err("Inert attribute value exceeds the host allowance.".into());}self.state.copies(length)?;
             return Self::dom_string_copy(&self.inert_element_attributes(object).unwrap()[slot].value);
         }
@@ -461,7 +459,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object)==Some(1){
             let uri=namespace(args)?;let local=self.text(args.get(1).ok_or("getAttributeNodeNS requires a local name.")?)?;
             let attrs=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?;
-            let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;let slot=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?.iter().position(|attr|attr.name.matches(uri,&local));
+            let work=attrs.iter().fold(attrs.len(),|work,attr|work.saturating_add(attr.name.bytes()));self.state.work(work)?;let slot=self.element_attribute_source(object).ok_or("Inert Element attributes are unavailable.")?.iter().position(|attr|attr.name.matches_dom(uri,&local));
             return self.lookup_owner_attribute_node_at(object,slot);
         }
 
@@ -475,11 +473,11 @@ impl Bridge<'_> {
         let ns = namespace(args)?;
         let qualified = self.text(args.get(1).ok_or("setAttributeNS requires three arguments.")?)?;
         let value = self.dom_text(args.get(2).ok_or("setAttributeNS requires three arguments.")?)?;
-        super::script_attribute_names::validate_namespace(ns, &qualified).map_err(|(_, message)| message)?;
+        super::script_attribute_names::validate_namespace_value(args.first().unwrap(), &qualified).map_err(|(_, message)| message)?;
         let name = if let Some(uri) = ns {
             let (prefix, local) = qualified.split_once(':').map_or((None, qualified.as_str()), |(p, l)| (Some(p), l));
-            self.state.copies(uri.len() + local.len() + prefix.map_or(0, str::len))?;
-            let namespace = AttributeNamespace { uri: uri.into(), prefix: prefix.map(str::to_owned), local: local.into() };
+            self.state.copies(uri.copy_bytes()?.checked_add(local.len()+prefix.map_or(0,str::len)).ok_or("Attribute namespace copy overflow.")?)?;
+            let namespace = AttributeNamespace { uri: uri.try_owned()?, prefix: prefix.map(str::to_owned), local: local.into() };
             AttributeName { qualified, namespace: Some(namespace) }
         } else { AttributeName::unqualified(qualified) };
         if self.inert_node_type(object)==Some(1){self.write_inert_dom_attribute_ns(object,name,Some(value))?;return Ok(Value::Undefined);}
@@ -492,7 +490,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object)==Some(1){
             let namespace=namespace(args)?;let local=self.text(args.get(1).ok_or("removeAttributeNS requires two arguments.")?)?;
             let attrs=self.inert_element_attributes(object).ok_or("Inert attributes are unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;
-            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches(namespace,&local));let Some(slot)=slot else{return Ok(Value::Undefined);};
+            let slot=self.inert_element_attributes(object).unwrap().iter().position(|a|a.name.matches_dom(namespace,&local));let Some(slot)=slot else{return Ok(Value::Undefined);};
             let bytes=self.inert_element_attributes(object).unwrap()[slot].name.bytes();self.state.copies(bytes)?;let name=copy_name(&self.inert_element_attributes(object).unwrap()[slot].name)?;
             self.write_inert_attribute_ns(object,name,None)?;return Ok(Value::Undefined);
         }
@@ -528,7 +526,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object)==Some(1){self.state.copies(self.state.attributes[id].name.bytes())?;let name=copy_name(&self.state.attributes[id].name)?;self.write_inert_dom_attribute_ns(object,name,None)?;return Ok(Value::Host(handle));}
         self.state.copies(self.state.attributes[id].name.bytes())?;
         let attr = &self.state.attributes[id];
-        let name = attr.name.copy();
+        let name = attr.name.copy()?;
         let owner=node_index(attr.owner.unwrap()).filter(|_|self.inert_node_type(attr.owner.unwrap()).is_none()).ok_or("Inert Attr removal requires its inert owner path.")?;
         self.public_attribute(owner, name, None)?;
         Ok(Value::Host(handle))

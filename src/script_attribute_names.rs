@@ -56,8 +56,16 @@ fn validate_element_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&
     Ok(())
 }
 
+pub(super) fn validate_namespace_value(namespace:&crate::javascript::Value,qualified:&str)->Result<(),(&'static str,String)>{
+    use crate::javascript::Value;
+    let(present,xml,xmlns)=match namespace{Value::String(s)=>(!s.is_empty(),s=="http://www.w3.org/XML/1998/namespace",s=="http://www.w3.org/2000/xmlns/"),Value::StringUnits(u)=>(!u.is_empty(),u.iter().copied().eq("http://www.w3.org/XML/1998/namespace".encode_utf16()),u.iter().copied().eq("http://www.w3.org/2000/xmlns/".encode_utf16())),Value::Null|Value::Undefined=>(false,false,false),_=>return Err(("TypeError","Attribute namespace requires a converted nullable DOMString.".into()))};
+    validate_namespace_flags(present,xml,xmlns,qualified)
+}
 pub(super) fn validate_namespace(namespace: Option<&str>, qualified: &str)
     -> Result<(), (&'static str, String)> {
+    validate_namespace_flags(namespace.is_some(),namespace==Some("http://www.w3.org/XML/1998/namespace"),namespace==Some("http://www.w3.org/2000/xmlns/"),qualified)
+}
+fn validate_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&str)->Result<(),(&'static str,String)>{
     // All Web IDL conversions precede this validation. The current DOM rules
     // split at the first colon; local names can themselves contain colons.
     let (prefix, local) = qualified.split_once(':').map_or((None, qualified), |(p, l)| (Some(p), l));
@@ -66,13 +74,11 @@ pub(super) fn validate_namespace(namespace: Option<&str>, qualified: &str)
     if !valid_attribute_name(local) || prefix.is_some_and(|p| !valid_prefix(p)) {
         return Err(("InvalidCharacterError", "Invalid attribute local name or namespace prefix.".into()));
     }
-    const XML: &str = "http://www.w3.org/XML/1998/namespace";
-    const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
     let declaration = qualified == "xmlns" || prefix == Some("xmlns");
-    if prefix.is_some() && namespace.is_none()
-        || prefix == Some("xml") && namespace != Some(XML)
-        || declaration && namespace != Some(XMLNS)
-        || namespace == Some(XMLNS) && !declaration {
+    if prefix.is_some() && !present
+        || prefix == Some("xml") && !xml
+        || declaration && !xmlns
+        || xmlns && !declaration {
         return Err(("NamespaceError", "Attribute prefix and namespace are inconsistent.".into()));
     }
     Ok(())

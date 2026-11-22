@@ -96,7 +96,7 @@ fn checkbox_move_existing_subtree_replacement_retirement_and_reset_keep_default_
 struct Snapshot {
     tree:String, parents:Vec<Option<usize>>, connected:Vec<bool>, created:HashSet<usize>, detached:HashSet<usize>,
     native:Vec<(usize,Kind,String,String,String,bool,bool,Option<usize>,bool,(usize,usize,usize))>,
-    defaults:Vec<(usize,String)>, attributes:Vec<(Option<usize>,String,Option<String>,String)>,
+    defaults:Vec<(usize,String)>, attributes:Vec<(Option<usize>,String,Option<Vec<u16>>,String)>,
     retained:usize, commits:Option<u64>,
 }
 impl Snapshot {
@@ -105,7 +105,7 @@ impl Snapshot {
             created:page.state.dom.created.iter().collect(),detached:page.state.detached_nodes.iter().collect(),
             native:forms.controls.iter().map(|(&node,c)|(node,c.kind,c.name.clone(),c.value.text(),c.caption.clone(),c.checked,c.dirty_value,c.owner,c.disabled,(c.value.cursor,c.value.anchor,c.value.offset))).collect(),
             defaults:forms.controls.iter().filter(|(_,c)|c.kind==Kind::Text).map(|(&node,_)|(node,forms.text_default_value(node).unwrap().to_owned())).collect(),
-            attributes:page.state.attributes.iter().map(|attr|(attr.owner.and_then(node_index),attr.name.qualified.clone(),attr.name.namespace_uri().map(str::to_owned),attr.value.scalar().unwrap().to_owned())).collect(),
+            attributes:page.state.attributes.iter().map(|attr|(attr.owner.and_then(node_index),attr.name.qualified.clone(),attr.name.namespace_uri().map(|uri|uri.code_units().collect()),attr.value.scalar().unwrap().to_owned())).collect(),
             retained:page.state.retained,commits:page.state.dom_commits}
     }
 }

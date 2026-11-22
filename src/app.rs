@@ -6310,3 +6310,7 @@ mod inert_attribute_attachment_tests;
 #[cfg(test)]
 #[path="app_inert_foreign_attribute_tests.rs"]
 mod inert_foreign_attribute_tests;
+
+#[cfg(test)]
+#[path="app_attribute_namespace_tests.rs"]
+mod attribute_namespace_tests;

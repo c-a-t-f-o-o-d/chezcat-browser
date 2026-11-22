@@ -32,7 +32,7 @@ pub(super) fn write_open_tag(state: &mut State, out: &mut String, tag: &str, att
     state.work(attrs.len())?;
     for attr in attrs {
         append(state, out, " ")?;
-        let prefix = match attr.name.namespace_uri() {
+        let prefix = match attr.name.namespace_uri().and_then(|uri|uri.scalar().ok()) {
             Some("http://www.w3.org/XML/1998/namespace") => Some("xml:"),
             Some("http://www.w3.org/2000/xmlns/") if attr.name.local() != "xmlns" => Some("xmlns:"),
             Some("http://www.w3.org/2000/xmlns/") => Some(""),

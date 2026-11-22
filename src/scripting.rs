@@ -3577,7 +3577,8 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==0&&method==CREATE_CDATA_SECTION
+        index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
+            ||index==0&&method==CREATE_CDATA_SECTION
             ||index==0&&method==xml_documents::CREATE
             ||index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
             ||index==0&&method=="createElementNS"&&(object==DOCUMENT||self.inert_document(object))
@@ -8683,3 +8684,7 @@ mod inert_attribute_attachment_tests;
 #[cfg(test)]
 #[path="script_inert_foreign_attribute_tests.rs"]
 mod inert_foreign_attribute_tests;
+
+#[cfg(test)]
+#[path="script_attribute_namespace_tests.rs"]
+mod attribute_namespace_tests;

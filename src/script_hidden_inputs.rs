@@ -62,7 +62,7 @@ impl Bridge<'_> {
         // Native form payload has its own finite control/value limits. The
         // existing attribute transaction owns DOM retained-byte accounting.
         self.state.copies(plan.copy_bytes)?;
-        self.attribute_named(node,name.copy(),value.clone())?;
+        self.attribute_named(node,name.copy()?,value.clone())?;
         plan.commit(self.forms);
         self.state.dirty = true;
         Ok(true)
