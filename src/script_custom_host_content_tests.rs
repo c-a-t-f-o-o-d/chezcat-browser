@@ -100,6 +100,24 @@ fn inert_element_identity_late_handlers_and_native_controls_refuse_then_recover(
     run(&mut doc,&mut forms,&mut page,"if(content.firstChild!==input||input.ownerDocument!==owner||observer.takeRecords().length)throw 'native control prefix';");
     assert!(page.take_dynamic_scripts().is_empty());
 }
+
+#[test]
+fn inert_clone_identity_deep_shallow_fragment_and_saved_descendants_promote() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var t=document.createElement('template');t.innerHTML='<clone-card id="cloned"><span>original</span><!--comment--><svg width="8" height="8"><rect width="8" height="8" fill="red"/></svg></clone-card>';var original=t.content.firstChild,owner=original.ownerDocument;original.authorState=17;var clone=t.content.cloneNode(true),root=clone.firstChild,span=root.firstChild,text=span.firstChild,comment=span.nextSibling,svg=comment.nextSibling,rect=svg.firstChild,list=root.childNodes,attr=rect.getAttributeNode('fill');if(root===original||root.authorState!==undefined||text===original.firstChild.firstChild||root.ownerDocument!==owner)throw 'real independent clone';text.data='changed';var shallow=root.cloneNode(false);if(shallow.firstChild!==null||shallow.getAttribute('id')!=='cloned'||shallow.ownerDocument!==owner)throw 'shallow native clone';clone.appendChild(shallow);root.bindingState={node:root};var observer=new MutationObserver(function(){});observer.observe(root,{subtree:true,characterData:true,characterDataOldValue:true});document.getElementById('ordinary').appendChild(clone);if(root.firstChild!==span||span.firstChild!==text||list[1]!==comment||list[2]!==svg||svg.firstChild!==rect||rect.getAttributeNode('fill')!==attr||root.bindingState.node!==root||root.ownerDocument!==document||text.ownerDocument!==document||comment.ownerDocument!==document||rect.ownerDocument!==document||shallow.ownerDocument!==document||!comment.isConnected||original.ownerDocument!==owner||original.textContent!=='original')throw 'saved clone identities';text.data='active';var records=observer.takeRecords();if(records.length!==1||records[0].target!==text||records[0].oldValue!=='changed')throw 'cloned observer target';
+"#);
+}
+
+#[test]
+fn inert_clone_identity_nested_content_and_late_handler_refusal_keep_sources() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,"var t=document.createElement('template');t.innerHTML='<template><nested-clone>inner</nested-clone></template>';var source=t.content.firstChild,cloned=source.cloneNode(true),content=cloned.content,root=content.firstChild,leaf=root.firstChild,owner=root.ownerDocument;root.setAttribute('onclick','blocked()');");
+    let before = (doc.nodes.len(),page.state.dom_commits);
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"document.body.appendChild(content);").errors,1);
+    assert_eq!((doc.nodes.len(),page.state.dom_commits),before);
+    run(&mut doc,&mut forms,&mut page,"if(content.firstChild!==root||root.firstChild!==leaf||root.ownerDocument!==owner||source.content.firstChild===root||source.content.textContent!=='inner')throw 'failed clone activation';root.removeAttribute('onclick');document.body.appendChild(content);if(root.firstChild!==leaf||leaf.ownerDocument!==document||cloned.content!==content||content.firstChild!==null||source.content.textContent!=='inner')throw 'nested clone recovery';");
+}
 #[test]
 fn custom_host_content_protected_controls_and_resources_refuse_without_publication() {
     let (mut doc, mut forms, mut page) = fixture();

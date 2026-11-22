@@ -41,7 +41,7 @@ impl Bridge<'_> {
         }
         let first = FIRST_ENTRY + self.state.inert_documents.entries.len() as u32;
         let (committed, indexes) =
-            self.prepare_template_indexes(2, 0, 0, Some((DOCUMENT, first)), &[])?;
+            self.prepare_template_indexes(2, 0, 0, Some((DOCUMENT, first)), &[], 0)?;
         debug_assert_eq!(first, committed);
         let arena = &mut self.state.inert_documents;
         arena.entries.push(Entry::Node(InertNode {
@@ -92,7 +92,10 @@ impl Bridge<'_> {
                 unreachable!()
             };
             let start = self.state.inert_documents.entries.len();
-            let Value::Host(cloned) = self.clone_inert_tree(fragment, deep)? else {
+            // The outer main import has already planned its destination slots.
+            // Keep this internal clone in the inert domain so it cannot occupy
+            // those unpublished slots or escape the existing import rollback.
+            let Value::Host(cloned) = self.clone_inert_tree_with_slots(fragment, deep, false)? else {
                 unreachable!()
             };
             let end = self.state.inert_documents.entries.len();

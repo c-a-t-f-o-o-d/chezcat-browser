@@ -13,6 +13,8 @@ mod mutation;
 mod selectors;
 #[path="script_template_imports.rs"]
 mod template_imports;
+#[path="script_inert_clone_publication.rs"]
+mod clone_publication;
 
 #[path = "script_dom_parser.rs"]
 pub(super) mod parser;
@@ -888,7 +890,7 @@ impl Bridge<'_> {
         }
         let document_link = existing_owner.is_none().then_some((document, owner));
         let content_link = [(object, fragment)];
-        let (committed, indexes) = self.prepare_template_indexes(staged.len(), payload, 0, document_link, &content_link)?;
+        let (committed, indexes) = self.prepare_template_indexes(staged.len(), payload, 0, document_link, &content_link, 0)?;
         debug_assert_eq!(committed, first);
         let arena = &mut self.state.inert_documents;
         arena.entries.extend(staged);
@@ -1149,7 +1151,11 @@ impl Bridge<'_> {
     }
 
     pub(super) fn clone_inert_tree(&mut self, object: u32, deep: bool) -> Result<Value, String> {
-        if let Some(data) = self.inert_text_value(object) {
+        self.clone_inert_tree_with_slots(object, deep, true)
+    }
+
+    fn clone_inert_tree_with_slots(&mut self, object: u32, deep: bool, reserve_slots: bool) -> Result<Value, String> {
+        if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots) {
             let size = data.len();
             self.state.copies(size)?;
             let text = script_clone_node::copy_text(self.inert_text_value(object).unwrap())?;
@@ -1273,16 +1279,7 @@ impl Bridge<'_> {
                 .saturating_add(children.capacity().saturating_mul(size_of::<u32>()));
             staged.push(Entry::Node(InertNode { kind, owner, parent, children }));
         }
-        let (committed, indexes) = self.prepare_template_indexes(staged.len(), payload,
-            usize::from(generated.is_some()), None, &template_links)?;
-        debug_assert_eq!(committed, first);
-        let arena = &mut self.state.inert_documents;
-        if let Some(source) = generated { arena.generated.push(source); }
-        arena.entries.extend(staged);
-        arena.template_documents.commit(indexes.documents);
-        arena.template_contents.commit(indexes.contents);
-        for (key, value) in template_links { arena.template_contents.insert(key, value); }
-        Ok(Value::Host(first))
+        self.publish_inert_clone(first, staged, generated, payload, template_links, reserve_slots)
     }
 
     fn inert_remaining_entries(&self) -> usize {
@@ -1290,7 +1287,7 @@ impl Bridge<'_> {
     }
 
     fn prepare_template_indexes(&mut self, count: usize, payload: usize, generated: usize,
-        document: Option<(u32, u32)>, contents: &[(u32, u32)]) -> Result<(u32, TemplateIndexGrowth), String>
+        document: Option<(u32, u32)>, contents: &[(u32, u32)], extra_metadata: usize) -> Result<(u32, TemplateIndexGrowth), String>
     {
         let mut checks = 0usize;
         for (map, added) in [
@@ -1312,6 +1309,7 @@ impl Bridge<'_> {
             .ok_or("Template source storage overflow.")?;
         let available = self.state.retained_limit.saturating_sub(self.state.retained)
             .checked_sub(payload).and_then(|bytes| bytes.checked_sub(entry_minimum))
+            .and_then(|bytes| bytes.checked_sub(extra_metadata))
             .and_then(|bytes| bytes.checked_sub(source_minimum)).ok_or("Template identity bundle allowance exhausted.")?;
         let content_minimum = arena.template_contents.minimum_growth(contents.len())?;
         let (documents, document_bytes) = arena.template_documents.prepare(usize::from(document.is_some()),
@@ -1344,7 +1342,7 @@ impl Bridge<'_> {
         }
         self.state.work(movement)?;
         self.state.copies(copies)?;
-        let metadata = document_bytes.checked_add(content_bytes).ok_or("Template index storage overflow.")?;
+        let metadata = document_bytes.checked_add(content_bytes).and_then(|bytes| bytes.checked_add(extra_metadata)).ok_or("Template index storage overflow.")?;
         let handle = self.reserve_inert_storage(count, payload, generated, 0, metadata)?;
         Ok((handle, TemplateIndexGrowth { documents, contents: content_growth }))
     }
