@@ -480,7 +480,8 @@
           "requirement": "DOMString versus USVString and UTF-16 boundary preservation",
           "status": "partial",
           "verification": [
-            "Native CharacterData DOMString: eight original focused checks pass, including actual App jobs/Range/pixels/editor/link and exact inert-import owned storage. Frozen original Text witness now passes; Attr witness still fails. See src/script_native_dom_string_tests.rs and src/app_native_dom_string_tests.rs. Required browser subtests remain unrun."
+            "Native CharacterData DOMString: eight original focused checks pass, including actual App jobs/Range/pixels/editor/link and exact inert-import owned storage. Frozen original Text witness now passes; Attr witness still fails. See src/script_native_dom_string_tests.rs and src/app_native_dom_string_tests.rs. Required browser subtests remain unrun.",
+            "Native Attr DOMString metadata increment: 12 combined focused checks including two connected App checks pass; 417 affected checks covered by 414 unchanged passes, two corrected child-realm fixtures and the added raw-unit repeated-prefix check. Actual native Attr aliases/oldValue/copy/promotion and storage/active-consumer refusals are checked. Frozen Attr/Text/USV/owner witnesses are a selected subset, not browser WPT closure."
           ],
           "dependency_details": [],
           "detail_requirements": [
@@ -509,7 +510,10 @@
                 "src/dom_string.rs",
                 "src/script_dom_tree.rs",
                 "src/script_native_dom_string_tests.rs",
-                "src/app_native_dom_string_tests.rs"
+                "src/app_native_dom_string_tests.rs",
+                "src/script_attr.rs",
+                "src/script_attribute_notifications.rs",
+                "src/css_attribute_substrings.rs"
               ],
               "integration_dependencies": [
                 "F06",
@@ -520,7 +524,7 @@
                 "F01-attribute-domstring-unpaired-utf16"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Native Text/Comment/PI.data raw UTF-16 storage and aliases, clone/import/promotion, normalize/Range and observer old values have original focused and connected App evidence. Frozen F01 Text DOMString witness passes; Attr/reflections remain scalar-only and the required Attr witness still fails. No unchanged browser-file closure. F06/F07/F08/F09 consumers remain separately required.",
+              "supplementary_evidence": "Native CharacterData and passive null-namespace HTML data-* Attr records preserve exact units through supported setters/aliases/old values/copy/promotion. Original focused/native App/storage/refusal/selector checks pass. Frozen Text and Attr witnesses pass; USV and saved-template-owner regressions pass. Broader attributes, dataset writes, HTML string reflections, arbitrary names/namespaces and serialization/consumer integration remain required. No unchanged browser-file closure; F06/F07/F08/F09 dependencies remain open.",
               "closing_evidence": []
             },
             {

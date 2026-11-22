@@ -10,7 +10,7 @@ pub(super) struct Attr {
     pub(super) owner: Option<u32>,
     pub(super) document: u32,
     pub(super) name: AttributeName,
-    // Attached values stay in the element. Removal moves the actual String here.
+    // Attached values stay in the element. Removal moves the actual DOMString here.
     pub(super) value: DomString,
 }
 

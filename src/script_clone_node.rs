@@ -108,7 +108,7 @@ impl Bridge<'_> {
                 return Err("DOM depth limit reached during import.".into());
             }
             let attributes = match self.template_import_source(handle) {
-                Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()).saturating_add(a.value.len())),
+                Some(ImportSource::Parsed { node: Node { kind: NodeKind::Element { attrs, .. }, .. }, .. }) => attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()).saturating_add(a.value.used_bytes())),
                 _ => 0,
             };
             self.state.work(count.saturating_add(attributes).saturating_add(1))?;

@@ -86,3 +86,9 @@ fn native_dom_string_attribute_storage_refusal_and_active_consumer_refusal_are_a
     assert_eq!(page.console_eval(&mut doc,&mut forms,"root.setAttribute('style','\\udfff');").errors,1);
     run(&mut doc,&mut forms,&mut page,"if(root.getAttribute('style')!==null||observer.takeRecords().length||attr.value.charCodeAt(0)!==0xd800)throw 'active guard kept native values';");
 }
+
+#[test]
+fn native_dom_string_attribute_raw_search_repeated_prefix_unicode_and_ascii_case_are_exact(){
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"var n=document.createElement('span'),repeated='a';for(var i=0;i<17;i++)repeated+=repeated;n.setAttribute('data-search','\ud800'+repeated+'B😀');if(!n.matches('[data-search]')||!n.matches('[data-search*="aaaaB😀"]')||!n.matches('[data-search$="b😀" i]')||n.matches('[data-search^="�"]')||n.matches('[data-search*="aaaaC😀"]'))throw 'raw linear predicate';document.title='foundation-ok';"#);
+}

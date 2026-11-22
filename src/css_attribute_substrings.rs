@@ -86,10 +86,11 @@ pub(super) fn matches(
 
 // Native unpaired units must never compare as their display replacements.
 // The existing scalar fast paths remain unchanged. Raw comparisons precharge
-// their full comparison bound and allocate no input-sized scratch storage.
+// their linear comparison bound; substring scratch is bounded by the parsed
+// selector operand, never by the native attribute length.
 pub(super) fn matches_units(selector:&AttributeSelector,actual:&[u16],expected:&str,context:&MatchContext<'_>,budget:&mut usize)->bool{
     let count=expected.encode_utf16().count();
-    let cost=actual.len().saturating_add(1).saturating_mul(expected.len().saturating_add(1));
+    let cost=actual.len().saturating_mul(2).saturating_add(expected.len().saturating_mul(4)).saturating_add(1);
     if !context.text_work(cost,budget){return false;}
     let fold=|u:u16|if selector.ascii_insensitive&&(65..=90).contains(&u){u+32}else{u};
     let equal=|units:&[u16]|units.iter().copied().map(fold).eq(expected.encode_utf16().map(fold));
@@ -100,6 +101,23 @@ pub(super) fn matches_units(selector:&AttributeSelector,actual:&[u16],expected:&
         AttributeOperator::Dash=>actual.len()>=count&&(actual.len()==count||actual[count]==0x2d)&&equal(&actual[..count]),
         AttributeOperator::Prefix=>count!=0&&actual.len()>=count&&equal(&actual[..count]),
         AttributeOperator::Suffix=>count!=0&&actual.len()>=count&&equal(&actual[actual.len()-count..]),
-        AttributeOperator::Substring=>count!=0&&actual.len()>=count&&actual.windows(count).any(equal),
+        AttributeOperator::Substring=>{
+            if count==0||actual.len()<count{return false;}
+            let mut pattern=Vec::new();if pattern.try_reserve_exact(count).is_err(){return false;}
+            pattern.extend(expected.encode_utf16().map(fold));
+            let mut prefix=Vec::new();if prefix.try_reserve_exact(count).is_err(){return false;}prefix.resize(count,0);
+            for i in 1..count {
+                let mut matched=prefix[i-1];
+                while matched>0&&pattern[i]!=pattern[matched]{matched=prefix[matched-1];}
+                if pattern[i]==pattern[matched]{matched+=1;}prefix[i]=matched;
+            }
+            let mut matched=0;
+            for unit in actual.iter().copied().map(fold) {
+                while matched>0&&unit!=pattern[matched]{matched=prefix[matched-1];}
+                if unit==pattern[matched]{matched+=1;}
+                if matched==count{return true;}
+            }
+            false
+        },
     }
 }

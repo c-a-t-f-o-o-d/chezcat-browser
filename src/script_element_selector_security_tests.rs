@@ -4,13 +4,14 @@ use super::*;
 fn location(source:&str)->crate::navigation::Location {
     crate::navigation::Location {url:Some(crate::url::parse(source).unwrap().0),path:None,root:None,fragment:String::new()}
 }
-fn fixture()->(Document,Forms,Page) {
+fn fixture_with_profile(browser:bool)->(Document,Forms,Page) {
     let mut doc=crate::html::parse("<!doctype html><title>Selector security</title><body><div id=root><span id=a class=item>A</span><span id=b class=item>B</span></div><form id=f><input id=neighbor name=keep value=original></form>");
-    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=if browser {Page::new()}else{Page::for_test()};
     page.set_location(&location("https://element-selector.test/security"));
     assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0,"{}",page.report());
     (doc,forms,page)
 }
+fn fixture()->(Document,Forms,Page){fixture_with_profile(false)}
 fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str) {
     let out=page.console_eval(doc,forms,source);assert_eq!(out.errors,0,"{source}\n{}",page.report());
     assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty());assert!(page.take_dynamic_stylesheets().is_empty());
@@ -19,7 +20,7 @@ fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str) {
 
 #[test]
 fn element_selector_prototype_child_owner_borrowing_keeps_explicit_query_boundary_before_conversion() {
-    let(mut doc,mut forms,mut page)=fixture();
+    let(mut doc,mut forms,mut page)=fixture_with_profile(true);
     run(&mut doc,&mut forms,&mut page,r#"
 var root=document.getElementById('root'),a=document.getElementById('a'),one=Element.prototype.querySelector,all=Element.prototype.querySelectorAll;
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
