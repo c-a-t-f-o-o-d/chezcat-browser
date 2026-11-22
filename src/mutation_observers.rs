@@ -2,6 +2,7 @@
 //! https://dom.spec.whatwg.org/#mutation-observers
 use super::function_reachability::Edge;
 use super::*;
+use crate::dom_string::DomString;
 use std::collections::HashMap;
 
 #[path="mutation_transient.rs"]
@@ -63,14 +64,14 @@ struct Registration {
     subtree: bool,
     old_value: bool,
     attribute_old_value: bool,
-    attribute_filter: Option<Vec<String>>,
+    attribute_filter: Option<Vec<DomString>>,
 }
 
 impl Registration {
     fn retained_bytes(&self) -> usize {
         self.attribute_filter.as_ref().map_or(0, |filter| {
-            filter.capacity().saturating_mul(std::mem::size_of::<String>())
-                .saturating_add(filter.iter().map(String::capacity).sum::<usize>())
+            filter.capacity().saturating_mul(std::mem::size_of::<DomString>())
+                .saturating_add(filter.iter().map(DomString::capacity).sum::<usize>())
         })
     }
 }
@@ -277,6 +278,13 @@ impl Runtime {
             observer: id, character_data: character, child_list: children, attributes, subtree,
             old_value: old.truthy(), attribute_old_value: attribute_old.truthy(), attribute_filter,
         };
+        self.install_mutation_registration(id,target,requested)
+    }
+
+    // Dictionary/sequence conversion has finished. Commit subscription state
+    // only after the actual owned filter and any replacement credit fit.
+    fn install_mutation_registration(&mut self,id:usize,target:&u32,requested:Registration)->Result<(),Fault>{
+        let children=requested.child_list;let attributes=requested.attributes;let subtree=requested.subtree;
         let bytes = requested.retained_bytes();
         self.work(self.mutations.transients.len())?;
         if let Some(registration) = self.mutations.targets.get_mut(target)
@@ -334,7 +342,7 @@ impl Runtime {
         else { self.read_property(options, name, host) }
     }
 
-    fn attribute_filter_strings(&mut self, input: Value, host: &mut dyn Host) -> Result<Vec<String>, Fault> {
+    fn attribute_filter_strings(&mut self, input: Value, host: &mut dyn Host) -> Result<Vec<DomString>, Fault> {
         if !matches!(input, Value::Object(_) | Value::Function(_) | Value::Host(_)) {
             return Err(Fault::exception("TypeError", "MutationObserver attributeFilter requires an iterable object."));
         }
@@ -351,13 +359,17 @@ impl Runtime {
                 }
                 let value = self.primitive_with_hint(value, true, host)?;
                 self.work(value.bytes())?;
-                let text = value.script_text()?;
-                bytes = bytes.saturating_add(text.capacity()).saturating_add(std::mem::size_of::<String>());
-                if bytes > self.limits.heap.retained_values {
-                    return Err(Fault::new("MutationObserver attribute-filter retained limit reached."));
-                }
-                strings.try_reserve(1).map_err(|_| Fault::new("Cannot reserve MutationObserver attribute filter."))?;
-                Ok(text)
+                let text=match value{
+                    Value::String(text)=>DomString::from(text),
+                    Value::StringUnits(units)=>{let(projection,unpaired)=DomString::projected_size(&units).map_err(Fault::new)?;let copied=projection.checked_add(if unpaired{units.len().checked_mul(2).ok_or_else(||Fault::new("Attribute-filter unit storage overflow."))?}else{0}).ok_or_else(||Fault::new("Attribute-filter copy overflow."))?;self.work(copied)?;DomString::from_units(&units,self.limits.heap.retained_values).map_err(Fault::new)?},
+                    other=>DomString::from(other.script_text()?),
+                };
+                let payload=bytes.checked_add(text.capacity()).ok_or_else(||Fault::new("Attribute-filter payload overflow."))?;
+                let occupied=payload.checked_add(strings.capacity()*std::mem::size_of::<DomString>()).ok_or_else(||Fault::new("Attribute-filter backing overflow."))?;
+                let available=self.limits.heap.retained_values.checked_sub(occupied).ok_or_else(||Fault::new("MutationObserver attribute-filter retained limit reached."))?;
+                let growth=super::limits::prepare_retained_growth(&strings,1,available)?;
+                if growth.added!=0{self.work(strings.len().checked_mul(std::mem::size_of::<DomString>()).ok_or_else(||Fault::new("Attribute-filter movement overflow."))?)?;}
+                growth.commit(&mut strings);bytes=payload;Ok(text)
             })();
             match converted {
                 Ok(text) => strings.push(text),
@@ -657,3 +669,7 @@ impl Runtime {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path="mutation_attribute_filter_storage_tests.rs"]
+mod attribute_filter_storage_tests;
