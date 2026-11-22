@@ -252,7 +252,7 @@ if (fresh.offsetParent !== outer) throw 'same fresh element attached to actual c
 
 #[test]
 fn offset_parent_protocol_canonical_getter_readonly_overrides_brands_and_child_scope() {
-    let (mut doc, mut forms, mut page) = fixture();
+    let (mut doc, mut forms, mut page) = fixture_page(Page::with_limits(crate::javascript::limits::BROWSER));
     run(
         &mut doc,
         &mut forms,

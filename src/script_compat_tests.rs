@@ -2262,13 +2262,21 @@ fn attr_namespace_foreign_context_and_failed_new_record_keep_existing_boundaries
         assert!(!bridge.accepts_receiver(node_handle(p), "getAttributeNodeNS", handle));
         assert!(bridge.method(handle, "getAttributeNodeNS").is_none());
     }
+    let value=bridge.call(node_handle(foreign),"getAttributeNodeNS",&[Value::Null,Value::String("title".into())]).unwrap();
+    let Value::Host(saved)=value else {panic!("known SVG has real null-namespace Attr data")};
+    let attr=script_attr::index(saved).unwrap();
+    assert_eq!(bridge.state.attributes[attr].owner,Some(node_handle(foreign)));
+    assert!(matches!(bridge.call(node_handle(foreign),"getAttributeNodeNS",&[Value::String("urn:x".into()),Value::String("title".into())]).unwrap(),Value::Null));
+    bridge.doc.nodes[foreign].namespace=crate::html::Namespace::UnknownForeign;
     for namespace in [Value::Null, Value::String("urn:x".into())] {
-        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).unwrap_err().contains("foreign"));
+        assert!(bridge.call(node_handle(foreign), "getAttributeNodeNS", &[namespace, Value::String("title".into())]).is_err());
     }
+    bridge.doc.nodes[foreign].namespace=crate::html::Namespace::Svg;
+    let count=bridge.state.attributes.len();
     let before = bridge.state.retained;
     bridge.state.retained_limit = before;
     assert!(bridge.call(node_handle(p), "getAttributeNodeNS", &[Value::Null, Value::String("title".into())]).is_err());
-    assert!(bridge.state.attributes.is_empty());
+    assert_eq!(bridge.state.attributes.len(),count);
     assert_eq!(bridge.state.retained, before);
 }
 
@@ -2622,15 +2630,16 @@ var caught=false;try{(function(){'use strict';detached.offsetTop=7;})();}catch(e
     for handle in invalid {
         for property in ["tabIndex", "offsetLeft", "offsetTop"] {
             assert!(bridge.get(handle, property).is_err());
-            assert!(bridge.has(handle, property).is_err());
+            let has=bridge.has(handle, property);
+            assert!(has.is_err(),"invalid handle={handle}, property={property}, result={has:?}");
             assert!(!bridge.readonly_property(handle, property));
         }
     }
     let diagnostic = bridge.get(node_handle(connected), "offsetLeft").unwrap_err();
     assert!(diagnostic.contains("class=span; connected=true; created=false; geometry-attached=false"), "{diagnostic}");
     assert!(diagnostic.len() < 300);
-    assert!(bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).is_err());
-    assert_eq!(bridge.doc.attr(connected, "tabindex"), None);
+    bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).unwrap();
+    assert_eq!(bridge.doc.attr(connected, "tabindex"), Some("3"));
     bridge.state.copy_work = 0;
     assert!(bridge.get(node_handle(connected), "tabIndex").is_err());
     bridge.state.host_work = 0;

@@ -62,6 +62,40 @@ fn tab_index_html_prefix_values_drive_actual_app_keyboard_order() {
 }
 
 #[test]
+fn tab_index_reflection_mutation_drives_real_app_keyboard_order_without_editor_reset() {
+    let (_fixture,mut app)=Fixture::new(r#"<html><head><style>body{margin:0}#first{position:absolute;left:10px;top:10px;width:120px;height:30px}#second{position:absolute;left:10px;top:60px;width:120px;height:30px}#change{position:absolute;left:150px;top:10px;width:80px;height:30px}#go{position:absolute;left:260px;top:10px;width:100px;height:30px;display:block;background:#2040e0}</style></head><body><input id=first value=seed tabindex=1><input id=second value=second tabindex=2><button id=change type=button tabindex=-1>Change</button><a id=go href=#end>Continue</a><div id=end></div><script>document.getElementById('change').onclick=function(e){if(!e.isTrusted)throw 'actual native event';Promise.resolve().then(function(){document.getElementById('first').tabIndex=-1;document.getElementById('second').setAttribute('tabindex','1');document.getElementById('change').tabIndex=2;document.title='Tab order changed';});};</script></body></html>"#);
+    app.resize(480,320);
+    let first=node(&app,"first");let second=node(&app,"second");let change=node(&app,"change");let go=node(&app,"go");
+    app.focus=Focus::Page;
+    app.key_event(input(true,"Tab","Tab",0x09));
+    assert!(app.focus==Focus::Control(first));
+    app.paste("edited");
+    let value=&app.forms.controls[&first].value;let editor=(value.text(),value.cursor,value.anchor,value.offset);
+    let rect=app.page.controls.iter().find(|rect|rect.node==change).unwrap();
+    let (x,y)=(rect.x+10,app.content_top()+rect.y+10-app.scroll);
+    app.pointer_down(x,y,false);app.pointer_up(x,y);
+    assert_eq!(app.document.title,"Tab order changed","{}",app.scripting.as_ref().unwrap().report());
+    assert_eq!(app.forms.controls[&first].tab_index,-1);
+    assert_eq!(app.forms.controls[&second].tab_index,1);
+    assert_eq!(app.forms.controls[&change].tab_index,2);
+    let mut previous=input(true,"Tab","Tab",0x09);previous.shift=true;
+    app.key_event(previous);assert!(app.focus==Focus::Control(second));
+    app.key_event(input(true,"Tab","Tab",0x09));assert!(app.focus==Focus::Control(change));
+    let mut previous=input(true,"Tab","Tab",0x09);previous.shift=true;
+    app.key_event(previous);assert!(app.focus==Focus::Control(second));
+    let mut previous=input(true,"Tab","Tab",0x09);previous.shift=true;
+    app.key_event(previous);assert!(app.focus==Focus::Address);
+    let value=&app.forms.controls[&first].value;assert_eq!((value.text(),value.cursor,value.anchor,value.offset),editor);
+    let canvas=app.draw();assert_eq!(canvas.pixels[(app.content_top()+35-app.scroll) as usize*canvas.width+350]&0xffffff,0x2040e0);
+    assert_eq!(app.page.link_node_at(280,20),Some(go));
+    let y=app.content_top()+20-app.scroll;let (_,hit)=app.primary_anchor_down(280,y,false);
+    let (_,default)=app.release_anchor_pointer(hit,280,y,false,crate::scripting::AnchorMouseInput::default());
+    let Some(crate::app::anchor::AnchorDefault::Link(target,_))=default else {panic!("real native link")};
+    app.open_link_target(target);assert_eq!(app.location.fragment,"end");
+    assert_eq!(app.scripting.as_ref().unwrap().error_count(),0,"{}",app.scripting.as_ref().unwrap().report());
+}
+
+#[test]
 fn prevented_page_arrows_change_live_dom_without_scrolling_and_still_receive_keyup() {
     let (_fixture, mut app) = Fixture::new("<body><div id=box style='position:relative;left:0px;width:20px;height:20px;background:red'></div><div style='height:1800px'></div><script>var x=0; document.addEventListener('keydown',function(e){ if(e.key === 'ArrowRight'){e.preventDefault(); x+=10; document.getElementById('box').style.left=x+'px';} if(e.key === 'ArrowDown'){e.preventDefault(); document.getElementById('box').setAttribute('data-down','yes');}}); document.addEventListener('keyup',function(e){document.getElementById('box').setAttribute('data-up', e.key);});</script></body>");
     let (_, canceled) = app.key_event(input(true, "ArrowRight", "ArrowRight", 0x27));
