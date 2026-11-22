@@ -8790,3 +8790,7 @@ mod text_whole_tests;
 #[cfg(test)]
 #[path="script_text_split_tests.rs"]
 mod text_split_tests;
+
+#[cfg(test)]
+#[path="script_shared_normalize_tests.rs"]
+mod shared_normalize_tests;
