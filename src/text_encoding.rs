@@ -1,5 +1,5 @@
 //! Original bounded text/binary conversion. Unicode, legacy single-byte,
-//! x-user-defined, GBK/gb18030 and EUC-KR decoding includes streaming, BOM handling
+//! x-user-defined and legacy multibyte decoding includes streaming, BOM handling
 //! and fatal errors. No platform codec, network, filesystem or device capability
 //! is used here.
 
@@ -10,6 +10,11 @@ mod single_byte;
 mod single_byte_tests;
 #[path = "text_encoding_multibyte.rs"]
 mod multibyte;
+#[path = "text_encoding_iso2022jp.rs"]
+mod iso2022jp;
+#[cfg(test)]
+#[path = "text_encoding_east_asian_tests.rs"]
+mod east_asian_tests;
 #[cfg(test)]
 #[path = "text_encoding_multibyte_tests.rs"]
 mod multibyte_tests;
@@ -62,6 +67,7 @@ pub(super) struct Decoder {
     streaming: bool,
     pending: [u8; 4],
     pending_len: usize,
+    iso2022jp: iso2022jp::Decoder,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Data {
@@ -114,6 +120,8 @@ impl Roots {
 
 enum Scalar {
     Character(char, usize),
+    Pair(char, char, usize),
+    Continue(usize),
     Invalid(usize),
     Incomplete,
 }
@@ -342,6 +350,7 @@ impl Runtime {
                     streaming: false,
                     pending: [0; 4],
                     pending_len: 0,
+                    iso2022jp: iso2022jp::Decoder::new(),
                 })
             };
             let id = self.new_object(None)?;
@@ -460,6 +469,7 @@ impl Runtime {
                 if !decoder.streaming {
                     decoder.pending_len = 0;
                     decoder.bom_seen = false;
+                    decoder.iso2022jp = iso2022jp::Decoder::new();
                 }
                 decoder.streaming = stream;
                 let length = range.map_or(0, |(_, _, length)| length);
@@ -474,6 +484,13 @@ impl Runtime {
                 }
                 decoder.pending_len = 0;
                 let result = self.decode_text_bytes(&mut decoder, &bytes, stream);
+                if result.is_err() {
+                    // No output is returned and the unread local input is
+                    // discarded. A later job must start a fresh decoder even
+                    // when this refusal came from output/work admission.
+                    decoder.streaming = false;
+                    decoder.pending_len = 0;
+                }
                 self.objects[id].text = Some(Data::Decoder(decoder));
                 result.map(Value::String)
             }
@@ -497,10 +514,19 @@ impl Runtime {
                     Some(character) => Scalar::Character(character, 1),
                     None => Scalar::Invalid(1),
                 },
+                Encoding::Multibyte(multibyte::Encoding::Iso2022Jp) => {
+                    match decoder.iso2022jp.step(&bytes[at..], stream) {
+                        iso2022jp::Step::Character(character, consumed) => Scalar::Character(character, consumed),
+                        iso2022jp::Step::Continue(consumed) => Scalar::Continue(consumed),
+                        iso2022jp::Step::Invalid(consumed) => Scalar::Invalid(consumed),
+                        iso2022jp::Step::Incomplete => Scalar::Incomplete,
+                    }
+                }
                 Encoding::Multibyte(encoding) => match encoding.step(&bytes[at..], stream) {
                     multibyte::Step::Character(character, consumed) => {
                         Scalar::Character(character, consumed)
                     }
+                    multibyte::Step::Pair(first, second, consumed) => Scalar::Pair(first, second, consumed),
                     multibyte::Step::Invalid(consumed) => Scalar::Invalid(consumed),
                     multibyte::Step::Incomplete => Scalar::Incomplete,
                 },
@@ -514,7 +540,7 @@ impl Runtime {
                     Scalar::Character(char::from_u32(value).unwrap(), 1)
                 }
             };
-            let (character, consumed) = match scalar {
+            let (character, second, consumed) = match scalar {
                 Scalar::Incomplete => {
                     let remaining = &bytes[at..];
                     if remaining.len() > decoder.pending.len() {
@@ -526,7 +552,12 @@ impl Runtime {
                     decoder.pending_len = remaining.len();
                     break;
                 }
-                Scalar::Character(character, consumed) => (character, consumed),
+                Scalar::Continue(consumed) => {
+                    at += consumed;
+                    continue;
+                }
+                Scalar::Character(character, consumed) => (character, None, consumed),
+                Scalar::Pair(first, second, consumed) => (first, Some(second), consumed),
                 Scalar::Invalid(consumed) => {
                     if decoder.fatal {
                         decoder.pending_len = 0;
@@ -536,7 +567,7 @@ impl Runtime {
                             "The encoded input is not valid for this TextDecoder.",
                         ));
                     }
-                    ('\u{fffd}', consumed)
+                    ('\u{fffd}', None, consumed)
                 }
             };
             at += consumed;
@@ -551,8 +582,15 @@ impl Runtime {
                     continue;
                 }
             }
-            let mut encoded = [0; 4];
-            self.append_string(&mut output, character.encode_utf8(&mut encoded))?;
+            // A Big5 pointer can emit two scalars. Admit them together into
+            // the unpublished result, including both UTF-8/output costs.
+            let mut encoded = [0; 8];
+            let mut length = character.encode_utf8(&mut encoded).len();
+            if let Some(second) = second {
+                length += second.encode_utf8(&mut encoded[length..]).len();
+            }
+            let text = std::str::from_utf8(&encoded[..length]).unwrap();
+            self.append_string(&mut output, text)?;
         }
         Ok(output)
     }
@@ -567,7 +605,7 @@ impl Runtime {
         let label = label.trim_matches(|c| matches!(c, '\t' | '\n' | '\x0c' | '\r' | ' '));
         let encoding=if bytes.starts_with(&[0xef,0xbb,0xbf]) {Encoding::Utf8}else if bytes.starts_with(&[0xff,0xfe]) {Encoding::Utf16Le}else if bytes.starts_with(&[0xfe,0xff]) {Encoding::Utf16Be}else{Encoding::label(label).ok_or_else(||format!("Request text encoding {label} is not implemented."))?};
         self.work(bytes.len()).map_err(Fault::display)?;
-        let mut decoder=Decoder{encoding,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0};
+        let mut decoder=Decoder{encoding,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0,iso2022jp:iso2022jp::Decoder::new()};
         self.decode_text_bytes(&mut decoder,bytes,false).map_err(Fault::display)
     }
 }
@@ -576,7 +614,7 @@ impl Runtime {
     /// Fetch Body always decodes UTF-8 (with its BOM), never XHR MIME sniffing.
     pub(super) fn decode_body_utf8(&mut self,bytes:&[u8])->Result<String,Fault> {
         self.work(bytes.len())?;
-        let mut decoder=Decoder{encoding:Encoding::Utf8,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0};
+        let mut decoder=Decoder{encoding:Encoding::Utf8,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0,iso2022jp:iso2022jp::Decoder::new()};
         self.decode_text_bytes(&mut decoder,bytes,false)
     }
 }
