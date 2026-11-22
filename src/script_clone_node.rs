@@ -48,6 +48,8 @@ struct DetachedCopy {
     unsafe_nonce: bool,
 }
 
+pub(super) fn import_subtree(args:&[Value],fields:Option<&[(&str,Value)]>)->bool{if let Some(fields)=fields{!fields.iter().find(|(key,_)|*key=="selfOnly").is_some_and(|(_,value)|value.truthy())}else{args.get(1).is_some_and(|value|matches!(value,Value::Null)||value.truthy())}}
+
 impl Bridge<'_> {
     pub(super) fn clone_node_receiver(&self, object: u32) -> bool {
         self.attr_receiver(object) || self.root_node_receiver(object) || self.inert_clone_receiver(object)
@@ -82,11 +84,7 @@ impl Bridge<'_> {
     fn template_import_children(&self,object:u32)->Option<&[u32]>{if self.template_receiver(object){Some(&[])}else{self.inert_children(object)}}
     pub(super) fn import_node(&mut self, args: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
         let Some(Value::Host(source)) = args.first() else { return Err("importNode requires a Node.".into()); };
-        let deep = if let Some(fields) = fields {
-            !fields.iter().find(|(key, _)| *key == "selfOnly").is_some_and(|(_, value)| value.truthy())
-        } else {
-            args.get(1).is_some_and(|value| matches!(value, Value::Null) || value.truthy())
-        };
+        let deep=import_subtree(args,fields);
         if self.attr_receiver(*source){return self.clone_attribute_node(*source,Some(DOCUMENT));}
         if !self.inert_clone_receiver(*source)&&!self.template_receiver(*source) {
             return self.clone_node(*source, deep);

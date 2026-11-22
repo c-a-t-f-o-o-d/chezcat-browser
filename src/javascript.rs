@@ -863,6 +863,8 @@ pub trait Host {
     fn dictionary_member_conversion(&self,_object:u32,_method:&str,_member:&str)->Option<bool>{None}
     fn validate_dictionary_member(&self,_object:u32,_method:&str,_member:&str,_value:&Value)
         ->Result<(),(&'static str,String)>{Ok(())}
+    /// Final native validation after dictionary getters have completed.
+    fn validate_dictionary_call(&self,_object:u32,_method:&str,_args:&[Value],_fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -9331,6 +9333,9 @@ impl Runtime {
         if method == canvas_readback::METHOD {
             return self.canvas_image_data(object, args, fields.as_deref(), host);
         }
+        host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+        if method==DOCUMENT_IMPORT_NODE{self.validate_native_access(object,host)?;for &index in host.native_reference_arguments(object,method){if let Some(Value::Host(source))=args.get(index){self.validate_native_access(*source,host)?;}}}
+        if let Err((kind,message))=host.validate_dictionary_call(object,method,args,fields.as_deref()){if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}return Err(Fault::exception(kind,message));}
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
         host.native_operation_caller(self.native_access_caller
