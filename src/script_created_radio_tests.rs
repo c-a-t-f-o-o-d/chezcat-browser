@@ -154,7 +154,7 @@ struct Snapshot {
     parents: Vec<Option<usize>>,
     connected: Vec<bool>,
     controls: Vec<String>,
-    attributes: Vec<(Option<usize>, String, String)>,
+    attributes: Vec<(Option<usize>, Vec<u16>, String)>,
     retained: usize,
     commits: Option<u64>,
 }
@@ -169,7 +169,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
             c.value.text(), c.dirty_value, (c.value.cursor, c.value.anchor, c.value.offset),
         ))).collect(),
         attributes: page.state.attributes.iter()
-            .map(|a| (a.owner.and_then(node_index), a.name.qualified.clone(), a.value.scalar().unwrap().to_owned())).collect(),
+            .map(|a| (a.owner.and_then(node_index), a.name.qualified.code_units().collect::<Vec<u16>>(), a.value.scalar().unwrap().to_owned())).collect(),
         retained: page.state.retained,
         commits: page.state.dom_commits,
     }

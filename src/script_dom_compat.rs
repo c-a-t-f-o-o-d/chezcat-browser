@@ -180,6 +180,7 @@ impl Bridge<'_> {
         let(mut count,mut payload)=(0usize,0usize);
         for attr in attrs.iter().filter(|attr|attr.name.namespace.is_none()){
             let Some(raw)=attr.name.qualified.strip_prefix("data-")else{continue};
+            attr.name.qualified.scalar()?;
             self.state.work(raw.len().checked_mul(2).ok_or("Dataset key validation work overflow.")?)?;
             let Some(suffix)=dataset_suffix(&attr.name.qualified)else{continue};
             // Both validation walks are prepaid even for excluded names.

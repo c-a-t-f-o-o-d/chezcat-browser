@@ -263,13 +263,13 @@ if(button.name!=='via-alias'||button.value!=='raw\r\nvalue'||button.form!==docum
         "typeAlias.value='invalid';","button.removeAttributeNode(typeAlias);","button.setAttributeNode(incoming);","button.setAttributeNodeNS(incoming);"] {
         let model=controls(&forms);let parents=page.state.tree.parents.clone();let connected=page.state.dom.connected.clone();
         let children=doc.nodes.iter().map(|entry|entry.children.clone()).collect::<Vec<_>>();
-        let identities=page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.clone(),attr.value.scalar().unwrap().to_owned())).collect::<Vec<_>>();
+        let identities=page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.code_units().collect::<Vec<u16>>(),attr.value.scalar().unwrap().to_owned())).collect::<Vec<_>>();
         let retained=page.state.retained;let commits=page.state.dom_commits;
         let result=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(result.errors,1,"{source}\n{}",page.report());
         assert_eq!(controls(&forms),model,"{source}");assert_eq!(page.state.tree.parents,parents);assert_eq!(page.state.dom.connected,connected);
         assert_eq!(doc.nodes.iter().map(|entry|entry.children.clone()).collect::<Vec<_>>(),children);
-        assert_eq!(page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.clone(),attr.value.scalar().unwrap().to_owned())).collect::<Vec<_>>(),identities);
+        assert_eq!(page.state.attributes.iter().map(|attr|(attr.owner,attr.name.qualified.code_units().collect::<Vec<u16>>(),attr.value.scalar().unwrap().to_owned())).collect::<Vec<_>>(),identities);
         assert_eq!(doc.attr(node,"type"),Some("button"));assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);
         run(&mut doc,&mut forms,&mut page,"if(button.type!=='button'||button.getAttributeNode('type')!==typeAlias||typeAlias.ownerElement!==button||typeAlias.value!=='button'||incoming.ownerElement!==null||incoming.value!=='invalid')throw 'failed type transaction published state';");
     }

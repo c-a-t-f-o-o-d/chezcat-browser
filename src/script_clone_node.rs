@@ -27,9 +27,9 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
             let mut copied=Vec::new();copied.try_reserve_exact(attrs.len()).map_err(|_|"Cannot reserve copied element attributes.")?;
             for attr in attrs {
                 let namespace=attr.name.namespace.as_ref().map(|ns|Ok::<_,String>(crate::html::AttributeNamespace{
-                    uri:ns.uri.try_clone()?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?
+                    uri:ns.uri.try_clone()?,prefix:ns.prefix.as_ref().map(DomString::try_clone).transpose()?,local:ns.local.try_clone()?
                 })).transpose()?;
-                copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:copy_text(&attr.name.qualified)?,namespace},value:attr.value.try_clone()?});
+                copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:attr.name.qualified.try_clone()?,namespace},value:attr.value.try_clone()?});
             }
             NodeKind::Element{expanded_name:crate::html::element_names::copy(expanded_name)?,tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },

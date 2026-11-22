@@ -169,7 +169,7 @@ struct Snapshot {
     connected: Vec<bool>,
     detached: HashSet<usize>,
     created: HashSet<usize>,
-    attrs: Vec<(Option<usize>, String, String)>,
+    attrs: Vec<(Option<usize>, Vec<u16>, String)>,
     controls: Vec<String>,
     retained: usize,
     commits: Option<u64>,
@@ -187,7 +187,7 @@ fn snapshot(doc: &Document, forms: &Forms, page: &Page) -> Snapshot {
             .state
             .attributes
             .iter()
-            .map(|attr| (attr.owner.and_then(node_index), attr.name.qualified.clone(), attr.value.scalar().unwrap().to_owned()))
+            .map(|attr| (attr.owner.and_then(node_index), attr.name.qualified.code_units().collect::<Vec<u16>>(), attr.value.scalar().unwrap().to_owned()))
             .collect(),
         controls: forms
             .controls

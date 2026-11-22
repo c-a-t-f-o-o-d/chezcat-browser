@@ -6314,3 +6314,7 @@ mod inert_foreign_attribute_tests;
 #[cfg(test)]
 #[path="app_attribute_namespace_tests.rs"]
 mod attribute_namespace_tests;
+
+#[cfg(test)]
+#[path="app_attribute_name_tests.rs"]
+mod attribute_name_tests;

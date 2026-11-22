@@ -229,13 +229,10 @@ impl Bridge<'_> {
         let Some(value) = args.get(usize::from(expanded)) else {
             return Ok(None);
         };
-        let mut local = self.text(value)?;
+        let mut local = self.dom_text(value)?;
         let namespace=if expanded{script_attr::namespace(args)?}else{None};
         if expanded && method == "setAttributeNS" && namespace.is_some() {
-            if let Some((_, name)) = local.split_once(':') {
-                self.state.copies(name.len())?;
-                local = name.to_owned();
-            }
+            if let(Some(_),name)=local.view().split_colon(){self.state.copies(name.copy_bytes()?)?;local=name.try_owned()?;}
         }
         if !expanded
             && self.inert_document_kind_for_node(object)==Some(crate::html::DocumentKind::Html)
@@ -256,7 +253,7 @@ impl Bridge<'_> {
             .iter()
             .position(|attr| {
                 if expanded {
-                    attr.name.matches_dom(namespace, &local)
+                    attr.name.matches_names(namespace,local.view())
                 } else {
                     attr.name.qualified == local
                 }
@@ -265,20 +262,20 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let prior = slot.map(|slot| &self.inert_element_attributes(object).unwrap()[slot]);
-        let name = prior.map_or(local.as_str(), |attr| attr.name.local());
+        let name=prior.map_or(local.view(),|attr|attr.name.local().view());
         let uri = prior.map_or(namespace, |attr| attr.name.namespace_uri().map(DomString::view));
         let old = prior.map(|attr| &attr.value);
         self.state.copies(
-            name.len()
+            name.copy_bytes()?
                 .saturating_add(uri.map(crate::dom_string::DomStringRef::copy_bytes).transpose()?.unwrap_or(0))
                 .saturating_add(old.map_or(0,DomString::logical_bytes)),
         )?;
         let prior = slot.map(|slot| &self.inert_element_attributes(object).unwrap()[slot]);
-        let name = prior.map_or(local.as_str(), |attr| attr.name.local());
+        let name=prior.map_or(local.view(),|attr|attr.name.local().view());
         let uri = prior.map_or(namespace, |attr| attr.name.namespace_uri().map(DomString::view));
         let old = prior.map(|attr| &attr.value);
         Ok(Some(NativeAttributeChange {
-            local_name: name.into(),
+            local_name: name.try_owned()?,
             namespace: uri.map(crate::dom_string::DomStringRef::try_owned).transpose()?,
             old_value: old.map(Self::dom_string_copy).transpose()?,
         }))

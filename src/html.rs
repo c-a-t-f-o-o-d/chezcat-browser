@@ -156,41 +156,42 @@ impl Namespace {
 
 #[derive(Debug)]
 pub struct AttributeName {
-    pub qualified: String,
+    pub qualified: DomString,
     pub namespace: Option<AttributeNamespace>,
 }
 
 #[derive(Debug)]
 pub struct AttributeNamespace {
     pub uri: DomString,
-    pub prefix: Option<String>,
-    pub local: String,
+    pub prefix: Option<DomString>,
+    pub local: DomString,
 }
 
 impl AttributeName {
-    pub fn unqualified(qualified: String) -> Self { Self { qualified, namespace: None } }
+    pub fn unqualified(qualified: String) -> Self { Self { qualified:qualified.into(), namespace: None } }
+    pub(crate) fn unqualified_dom(qualified:DomString)->Self{Self{qualified,namespace:None}}
     pub fn namespace_uri(&self) -> Option<&DomString> { self.namespace.as_ref().map(|ns| &ns.uri) }
-    pub fn prefix(&self) -> Option<&str> { self.namespace.as_ref().and_then(|ns| ns.prefix.as_deref()) }
-    pub fn local(&self) -> &str { self.namespace.as_ref().map_or(&self.qualified, |ns| &ns.local) }
+    pub fn prefix(&self) -> Option<&DomString> { self.namespace.as_ref().and_then(|ns| ns.prefix.as_ref()) }
+    pub fn local(&self) -> &DomString { self.namespace.as_ref().map_or(&self.qualified, |ns| &ns.local) }
     pub fn html_is(&self, name: &str) -> bool { self.namespace.is_none() && self.qualified == name }
     pub fn matches(&self, namespace: Option<&str>, local: &str) -> bool {
         self.matches_dom(namespace.map(crate::dom_string::DomStringRef::Scalar),local)
     }
-    pub(crate) fn matches_dom(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:&str)->bool{
-        let equal=match(self.namespace_uri(),namespace){(None,None)=>true,(Some(a),Some(b))=>a.code_units().eq(b.code_units()),_=>false};equal&&self.local()==local
+    pub(crate) fn matches_dom(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:&str)->bool{self.matches_names(namespace,crate::dom_string::DomStringRef::Scalar(local))}
+    pub(crate) fn matches_names(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:crate::dom_string::DomStringRef<'_>)->bool{
+        let equal=match(self.namespace_uri(),namespace){(None,None)=>true,(Some(a),Some(b))=>a.code_units().eq(b.code_units()),_=>false};equal&&self.local().code_units().eq(local.code_units())
     }
-    pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches_dom(other.namespace_uri().map(DomString::view), other.local()) }
+    pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches_names(other.namespace_uri().map(DomString::view), other.local().view()) }
     pub fn bytes(&self) -> usize {
-        self.qualified.len() + self.namespace.as_ref().map_or(0, |ns| ns.uri.used_bytes() + ns.local.len() + ns.prefix.as_ref().map_or(0, String::len))
+        self.qualified.used_bytes() + self.namespace.as_ref().map_or(0, |ns| ns.uri.used_bytes() + ns.local.used_bytes() + ns.prefix.as_ref().map_or(0, DomString::used_bytes))
     }
     pub(crate) fn owned_bytes(&self)->usize {
-        self.qualified.capacity()+self.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,String::capacity))
+        self.qualified.capacity()+self.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,DomString::capacity))
     }
     // Callers charge bytes before cloning retained native metadata.
     pub fn copy(&self) -> Result<Self,String> {
-        fn copy(text:&str)->Result<String,String>{let mut result=String::new();result.try_reserve_exact(text.len()).map_err(|_|"Cannot reserve copied attribute name.")?;result.push_str(text);Ok(result)}
-        Ok(Self { qualified: copy(&self.qualified)?, namespace: self.namespace.as_ref().map(|ns|
-            Ok::<_,String>(AttributeNamespace { uri: ns.uri.try_clone()?, prefix: ns.prefix.as_deref().map(copy).transpose()?, local: copy(&ns.local)? })).transpose()? })
+        Ok(Self { qualified: self.qualified.try_clone()?, namespace: self.namespace.as_ref().map(|ns|
+            Ok::<_,String>(AttributeNamespace { uri: ns.uri.try_clone()?, prefix: ns.prefix.as_ref().map(DomString::try_clone).transpose()?, local: ns.local.try_clone()? })).transpose()? })
     }
 }
 

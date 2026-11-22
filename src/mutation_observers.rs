@@ -384,7 +384,7 @@ impl Runtime {
             for registration in self.mutations.registrations_at(node){
                 if node!=target&&!registration.subtree{continue;}
                 let (matches,old)=if let Some(change)=attribute{
-                    let passes=registration.attribute_filter.as_ref().is_none_or(|filter|change.namespace.is_none()&&filter.iter().any(|name|name==&change.local_name));
+                    let passes=registration.attribute_filter.as_ref().is_none_or(|filter|change.namespace.is_none()&&filter.iter().any(|name|change.local_name==*name));
                     (registration.attributes&&passes,registration.attribute_old_value)
                 }else if child_list{(registration.child_list,false)}else{(registration.character_data,registration.old_value)};
                 if matches{*interested.entry(registration.observer).or_insert(false)|=old;}
@@ -610,7 +610,7 @@ impl Runtime {
             "type" => Ok(Value::String(if record.child_list.is_some() { "childList" }
                 else if record.attribute.is_some() { "attributes" } else { "characterData" }.into())),
             "attributeName" | "attributeNamespace" => {
-                let value=if let Some(change)=record.attribute.as_ref(){if field=="attributeName"{Value::String(change.local_name.clone())}else{match change.namespace.as_ref(){None=>Value::Null,Some(uri)=>match uri.raw_units(){Some(u)=>Value::StringUnits(u.to_vec()),None=>Value::String(uri.scalar().map_err(Fault::new)?.into())}}}}else{Value::Null};
+                let value=if let Some(change)=record.attribute.as_ref(){if field=="attributeName"{match change.local_name.raw_units(){Some(u)=>Value::StringUnits(u.to_vec()),None=>Value::String(change.local_name.scalar().map_err(Fault::new)?.into())}}else{match change.namespace.as_ref(){None=>Value::Null,Some(uri)=>match uri.raw_units(){Some(u)=>Value::StringUnits(u.to_vec()),None=>Value::String(uri.scalar().map_err(Fault::new)?.into())}}}}else{Value::Null};
                 self.work(value.bytes())?;Ok(value)
             }
             "previousSibling" => Ok(record.child_list.as_ref().and_then(|change| change.previous).map_or(Value::Null, Value::Host)),

@@ -365,11 +365,11 @@ impl Bridge<'_> {
     // Writes replace one immutable element source. Clones retain their prior
     // source; node, owner, child and live-map identities do not change.
     pub(super) fn remove_inert_attribute(&mut self,object:u32,argument:&Value)->Result<Value,String>{
-        let name=crate::html::AttributeName::unqualified(self.text(argument)?);
+        let name=crate::html::AttributeName::unqualified_dom(self.dom_text(argument)?);
         self.write_inert_attribute(object,name,None,false)?;Ok(Value::Undefined)
     }
     pub(super) fn set_inert_attribute(&mut self,object:u32,args:&[Value])->Result<Value,String>{
-        let name=crate::html::AttributeName::unqualified(self.text(args.first().ok_or("setAttribute requires a name.")?)?);
+        let name=crate::html::AttributeName::unqualified_dom(self.dom_text(args.first().ok_or("setAttribute requires a name.")?)?);
         let value=self.dom_text(args.get(1).ok_or("setAttribute requires a value.")?)?;
         self.write_inert_dom_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
     }
@@ -443,7 +443,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_element_attribute(&mut self, object: u32, argument: &Value) -> Result<Value, String> {
-        let name = self.text(argument)?;
+        let mut name = self.dom_text(argument)?;
         let node = self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let source = match node.kind {
             Kind::Element(_) => return Ok(Value::Null),
@@ -459,12 +459,7 @@ impl Bridge<'_> {
         let work = attrs.iter().map(|attr| attr.name.qualified.len()).sum::<usize>();
         self.state.work(count)?;
         self.state.copies(work)?;
-        let name = if html {
-            self.state.copies(name.len())?;
-            name.to_ascii_lowercase()
-        } else {
-            name
-        };
+        if html{name.make_ascii_lowercase();}
         let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
         let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
         let Some(index) = attrs.iter().position(|attr| attr.name.qualified == name) else {
