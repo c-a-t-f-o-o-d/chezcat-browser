@@ -333,6 +333,7 @@ impl Bridge<'_> {
         let serialized_origin = format!("{}://{}", if url.secure { "https" } else { "http" }, url.host_header());
         Ok(owners.into_iter().map(|owner| {
             let mut document = crate::html::parse("<html><head></head><body></body></html>");
+            document.mode=crate::html::DocumentMode::NoQuirks;
             document.scripting_enabled = self.doc.scripting_enabled;
             BlankFrame { clock_origin:Instant::now(),owner, connected: true, last_activation: None, document, origin: origin.clone(), serialized_origin: serialized_origin.clone(), base: base.clone(),
                 policy: self.state.dynamic.policy.clone() }

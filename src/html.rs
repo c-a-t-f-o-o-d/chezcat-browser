@@ -18,6 +18,10 @@ mod foundation_adapter;
 
 #[path = "html_svg_namespace.rs"]
 mod svg_namespace;
+#[path="html_doctype.rs"]
+mod doctype;
+#[path="html_document_mode.rs"]
+mod document_mode;
 
 const MAX_NODES: usize = 20_000;
 pub(crate) const MAX_LOADED_DOCUMENT_NODES: usize = 262_144;
@@ -47,7 +51,7 @@ pub(crate) struct DocumentTypeData {
     pub(crate) system_id:DomString,
 }
 impl DocumentTypeData {
-    pub(crate) fn html()->Self{Self{name:"html".into(),public_id:DomString::new(),system_id:DomString::new()}}
+    pub(crate) fn html()->Result<Self,String>{let mut name=String::new();name.try_reserve_exact(4).map_err(|_|"Cannot reserve HTML doctype name.")?;name.push_str("html");Ok(Self{name:name.into(),public_id:DomString::new(),system_id:DomString::new()})}
     pub(crate) fn capacity(&self)->usize{self.name.capacity()+self.public_id.capacity()+self.system_id.capacity()}
     pub(crate) fn used_bytes(&self)->usize{self.name.used_bytes()+self.public_id.used_bytes()+self.system_id.used_bytes()}
     pub(crate) fn try_clone(&self)->Result<Self,String>{Ok(Self{name:self.name.try_clone()?,public_id:self.public_id.try_clone()?,system_id:self.system_id.try_clone()?})}
@@ -299,7 +303,7 @@ fn parse_internal(
 ) -> Result<Document, String> {
     let checked = context.is_some();
     let template_svg = context == Some("template");
-    let mut saw_inert_doctype = false;
+    let mut initial=context.is_none();
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
     let fail_on_capacity = checked || loaded.is_some();
@@ -320,7 +324,7 @@ fn parse_internal(
         return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
     }
     let mut document = Document {
-        kind:DocumentKind::Html,mode:DocumentMode::NoQuirks,
+        kind:DocumentKind::Html,mode:if context.is_none(){DocumentMode::Quirks}else{DocumentMode::NoQuirks},
         stylesheet_limits: crate::css::StylesheetLimits::default(),
         media_environment: None,
         title: String::new(),
@@ -366,6 +370,13 @@ fn parse_internal(
         let rest = &input[position..];
         if !rest.starts_with('<') {
             let end = position + rest.find('<').unwrap_or(rest.len());
+            let before_root=context.is_none()&&parent==0&&!document.nodes[0].children.iter().any(|&node|matches!(document.nodes[node].kind,NodeKind::Element{..}));
+            if before_root {
+                let source=&input[position..end];let trimmed=source.trim_start_matches(|ch:char|ch.is_ascii()&&tag_space(ch as u8,true));
+                position+=source.len()-trimmed.len();if position==end{continue;}
+            }
+            if initial {initial=false;}
+
             if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
                 if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
                 svg.root = None;
@@ -399,35 +410,25 @@ fn parse_internal(
             document.nodes[parent].children.push(node);
             position+=4+consumed;continue;
         }
-        if rest.starts_with("<!") || rest.starts_with("<?") {
-            svg.root = None;
-            if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
-            let end = rest.find('>');
-            if let Some(doctype) = inert_doctype.as_deref_mut() {
-                if rest.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("<!doctype")) {
-                    let before_root = !saw_inert_doctype && parent == 0 && document.nodes[0].children.iter().all(|&node| {
-                        match &document.nodes[node].kind {
-                            NodeKind::Comment(_) => true,
-                            NodeKind::Text(text) => text.bytes().all(|byte| tag_space(byte, true)),
-                            _ => false,
-                        }
-                    });
-                    saw_inert_doctype = true;
-                    if before_root {
-                        let source = end.and_then(|end| rest.get(9..end)).unwrap_or_default();
-                        if !source.as_bytes().first().is_some_and(|&byte| tag_space(byte, true))
-                            || !source.trim_matches(|ch: char| ch.is_ascii() && tag_space(ch as u8, true)).eq_ignore_ascii_case("html")
-                        {
-                            return Err("Only an ordinary HTML doctype is supported in DOMParser.".into());
-                        }
-                        *doctype = Some(document.nodes.len());
-                    }
-                } else {
-                    return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());
-                }
+        if !checked&&rest.get(..9).is_some_and(|prefix|prefix.eq_ignore_ascii_case("<!doctype")) {
+            let token=doctype::read(&rest[9..],loaded.map(|loaded|loaded.check_cancel))?;
+            if initial {
+                if document.nodes.len()==node_limit {if fail_on_capacity{return Err(node_limit_error());}break;}
+                document.nodes.try_reserve(1).map_err(|_|"Cannot reserve native doctype node.")?;
+                document.nodes[0].children.try_reserve(1).map_err(|_|"Cannot reserve native doctype child link.")?;
+                let node=document.nodes.len();document.mode=token.mode;
+                document.nodes.push(Node{kind:NodeKind::DocumentType(token.data),namespace:Namespace::None,children:Vec::new()});
+                document.nodes[0].children.push(node);
+                if let Some(doctype)=inert_doctype.as_deref_mut(){*doctype=Some(node);}
+                initial=false;
             }
-            position += end.map_or(rest.len(), |end| end + 1);
-            continue;
+            position+=9+token.consumed;continue;
+        }
+        if rest.starts_with("<!") || rest.starts_with("<?") {
+            svg.root=None;
+            if checked{return Err("HTML fragment declaration/comment tokens are not implemented.".into());}
+            if inert_doctype.is_some(){return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());}
+            position+=rest.find('>').map_or(rest.len(),|end|end+1);continue;
         }
 
         let tag = match read_tag_mode(input, position, checked) {
@@ -448,6 +449,7 @@ fn parse_internal(
                 continue;
             }
         };
+        if initial {initial=false;}
         position = tag.end;
 
         let empty_table = checked && tag.name == "table";

@@ -3219,7 +3219,7 @@ impl Host for Bridge<'_> {
             || self.node_list_receiver(object) || self.collection_receiver(object) || self.named_map_receiver(object) || self.concrete_html_interface(object).is_some()
             || self.slottable(object) == Some(Slottable::Text)
             || self.comment_receiver(object)
-            || self.processing_instruction_receiver(object)
+            || self.processing_instruction_receiver(object) || self.doctype_receiver(object)
     }
     fn mutable_native_wrapper_prototype(&self, object: u32) -> bool {
         self.fragment_receiver(object) || self.inert_node_type(object)==Some(11)
@@ -3302,6 +3302,7 @@ impl Host for Bridge<'_> {
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"Comment")}
             else if matches!(self.doc.nodes[node].kind, NodeKind::ProcessingInstruction { .. }) {(WINDOW,"ProcessingInstruction")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)){(WINDOW,"DocumentType")}
             else {(WINDOW,"Node")})
         } else if object==DOCUMENT {Some((WINDOW,"Document"))}
         else if self.attr_receiver(object) {Some((WINDOW,"Node"))} else {None};
@@ -3451,6 +3452,7 @@ impl Host for Bridge<'_> {
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
+        if self.doctype_receiver(object)&&matches!(property,"name"|"publicId"|"systemId"){return true;}
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return true;}
         if self.named_map_receiver(object)&&script_named_map::prototype_member(property){return false;}
         if self.collection_receiver(object)&&self.collection_prototype_member(property){return false;}
@@ -3500,6 +3502,7 @@ impl Host for Bridge<'_> {
         if matches!(property, "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
+        if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){return true;}
         if self.hidden_input_property(object,property) {return true;}
         if self.text_input_default_property(object,property) {return true;}
         if self.media_interface_receiver(object)&&property=="src" {return true;}
@@ -3563,7 +3566,8 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
+        index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
+            ||index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==2&&method=="setAttributeNS"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
             ||self.inert_factory(object,method)==Some("createTextNode")
@@ -3572,11 +3576,13 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
-        self.attr_receiver(object)&&matches!(property,"value"|"nodeValue"|"textContent")
+        self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent")
+            ||self.attr_receiver(object)&&matches!(property,"value"|"nodeValue"|"textContent")
             ||matches!(property,"data"|"nodeValue")&&self.mutation_observation_target(object)==Some(true)
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
         if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END) { return &[(1,false)]; }
@@ -3697,6 +3703,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
         if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
         if self.inert_factory(object, method).is_some() {
             return Some(if method == "createDocumentFragment" { 0 } else if method == "createElementNS" { 2 } else { 1 });
@@ -3751,10 +3758,11 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && crate::javascript::abort_interface::operation(method) {
             return Some(object);
         }
+        if self.event_target_interface(object)&&crate::javascript::DOCUMENT_TYPE_GETTERS.iter().any(|(_,operation)|*operation==method){return Some(object);}
         if self.event_target_interface(object)
             && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE
                 | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
-                | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE)
+                | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | script_inert_documents::HAS_FEATURE)
         {
             return Some(object);
         }
@@ -3779,7 +3787,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -3866,6 +3874,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
         if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
 
         if crate::javascript::range_interface::operation(method) { return crate::javascript::range_interface::arity(method); }
@@ -4405,7 +4414,8 @@ impl Host for Bridge<'_> {
             if matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | script_inert_documents::GET) {
                 return receiver == DOCUMENT || self.inert_document(receiver);
             }
-            if method == PROCESSING_INSTRUCTION_TARGET_GET {
+            if crate::javascript::DOCUMENT_TYPE_GETTERS.iter().any(|(_,operation)|*operation==method){return self.event_target_interface(object)&&self.doctype_receiver(receiver);}
+        if method == PROCESSING_INSTRUCTION_TARGET_GET {
                 return self.processing_instruction_receiver(receiver);
             }
             if method == HTML_TEMPLATE_CONTENT_GET { return self.template_receiver(receiver); }
@@ -4413,7 +4423,7 @@ impl Host for Bridge<'_> {
                 return self.html_slot_receiver(receiver);
             }
             if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
-            if matches!(method, script_inert_documents::CREATE | script_inert_documents::HAS_FEATURE) {
+            if matches!(method, script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
         }
@@ -4437,7 +4447,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.event_target_interface(object) && operation.accepts(self, receiver);
         }
-        if matches!(method, "\0Document.get.documentElement" | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET)
+        if matches!(method, "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET)
             && self.event_target_interface(object)
         {
             return self.document_interface_receiver(receiver);
@@ -5169,6 +5179,7 @@ impl Host for Bridge<'_> {
                     | "referrer"
                     | "defaultView"
                     | "compatMode"
+                    | "doctype"
                     | "prerendering"
                     | "getElementById"
                     | "getElementsByName"
@@ -5486,7 +5497,8 @@ impl Host for Bridge<'_> {
                 // ChezCat currently has one standards layout mode and never
                 // prerenders a hidden speculative document. Report that actual
                 // behavior; quirks-mode layout is not implemented.
-                "compatMode" => Ok(Value::String("CSS1Compat".into())),
+                "compatMode" => Ok(Value::String(self.doc.mode.compat_mode().into())),
+                "doctype"=>{self.state.work(self.doc.nodes[0].children.len())?;Ok(self.doc.nodes[0].children.iter().copied().find(|&node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_))).map_or(Value::Null,|node|Value::Host(node_handle(node))))},
                 "prerendering" => Ok(Value::Bool(false)),
                 "images" => Ok(Value::Host(DOCUMENT_IMAGES)),
                 "childNodes" => self.create_child_list(DOCUMENT),
@@ -5645,6 +5657,7 @@ impl Host for Bridge<'_> {
     }
 
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(());}
         if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
         if crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return self.html_reflection_set(object,property,&value);}
         if property=="style"&&self.html_element_receiver(object){let node=self.node(object)?;let source=self.text(&value)?;return self.set_css_text(node,&source);}
@@ -5948,6 +5961,10 @@ impl Host for Bridge<'_> {
         if crate::javascript::abort_interface::operation(method) {
             return self.abort_call(object, method, args);
         }
+        if let Some(&(property,_))=crate::javascript::DOCUMENT_TYPE_GETTERS.iter().find(|(_,operation)|*operation==method){
+            if !self.doctype_receiver(object){return Err("DocumentType getter requires a genuine accessible DocumentType.".into());}
+            return self.get_with_caller(self.state.navigation_incumbent,object,property);
+        }
         if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
         if method == HTML_TEMPLATE_CONTENT_GET { return self.template_content(object); }
         if method == CREATE_PROCESSING_INSTRUCTION {
@@ -5959,6 +5976,7 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
         if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
         if method == script_inert_documents::parser::PARSE && self.inert_parser(object) { return self.parse_inert_document(args); }
+        if method==script_inert_documents::CREATE_DOCTYPE{return self.create_document_type(object,args);}
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if matches!(placeholder::operation(method),Some((_,false))){return self.placeholder_get(object);}
         if method == script_inert_documents::HAS_FEATURE { return Ok(Value::Bool(true)); }
@@ -6038,6 +6056,10 @@ impl Host for Bridge<'_> {
             return self.create_dom_node(kind);
         }
         if object==WINDOW && method=="DocumentFragment" {return self.create_dom_node(NodeKind::DocumentFragment);}
+        if method==crate::javascript::DOCUMENT_DOCTYPE_GET {
+            if !self.document_interface_receiver(object){return Err("Document getter requires a genuine accessible Document.".into());}
+            return self.get_with_caller(self.state.navigation_incumbent,object,"doctype");
+        }
         if method=="\0Document.get.documentElement" {
             if !self.document_interface_receiver(object) {return Err("Document getter requires a genuine accessible Document.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,"documentElement");
@@ -8577,3 +8599,7 @@ mod node_base_uri;
 #[cfg(test)]
 #[path="script_custom_host_content_tests.rs"]
 mod custom_host_content_tests;
+
+#[cfg(test)]
+#[path="script_native_document_records_tests.rs"]
+mod native_document_records_tests;

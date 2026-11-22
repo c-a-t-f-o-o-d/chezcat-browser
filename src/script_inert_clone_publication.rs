@@ -75,7 +75,7 @@ impl Bridge<'_> {
                 sources.push(GeneratedNode {node:Rc::new(snapshot),unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)});
             }
             if !matches!(node.kind,Kind::Parsed { .. }) {
-                let kind = match std::mem::replace(&mut node.kind,Kind::Doctype) {
+                let kind = match std::mem::replace(&mut node.kind,Kind::Fragment{template:None}) {
                     Kind::Text(text)=>NodeKind::Text(text),
                     Kind::Element(tag)=>NodeKind::Element { tag,id:None,href:None,attrs:Vec::new() },
                     _=>unreachable!(),

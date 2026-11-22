@@ -76,6 +76,7 @@ impl Bridge<'_> {
             Some(ImportSource::Text(text)) => text.used_bytes(),
             Some(ImportSource::ProcessingInstruction { target, data }) => target.len() + data.used_bytes(),
             Some(ImportSource::Fragment) => 0,
+            Some(ImportSource::Doctype(data))=>data.used_bytes(),
             None => {
                 if self.inert_node_type(handle) == Some(9) {
                     9
@@ -129,6 +130,7 @@ impl Bridge<'_> {
                 },
                 crate::html::Namespace::None,
             ),
+            Some(ImportSource::Doctype(data))=>(NodeKind::DocumentType(data.try_clone()?),crate::html::Namespace::None),
             Some(ImportSource::Fragment) => {
                 (NodeKind::DocumentFragment, crate::html::Namespace::None)
             }
@@ -307,8 +309,10 @@ impl Bridge<'_> {
                 }
             }
         }
+        let owner=self.state.inert_documents.node(object).ok_or("Inert query owner is unavailable.")?.owner;
+        let (kind,mode)=match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(doc))=>(doc.kind,doc.mode),_=>(crate::html::DocumentKind::Html,crate::html::DocumentMode::NoQuirks)};
         let document = Document {
-            kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,
+            kind,mode,
             stylesheet_limits: crate::css::StylesheetLimits::default(),
             media_environment: None,
             title: String::new(),

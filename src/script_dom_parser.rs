@@ -44,7 +44,7 @@ fn document_elements(nodes: &mut Vec<Node>) -> Result<(usize, usize, usize), Str
     if let Some(index) = explicit_html {
         html = index;
         if roots.iter().any(|&id| {
-            id != html && !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_))
+            id != html && !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_))
         }) {
             return Err("HTML recovery outside the document element is unsupported.".into());
         }
@@ -55,11 +55,11 @@ fn document_elements(nodes: &mut Vec<Node>) -> Result<(usize, usize, usize), Str
         let first = roots
             .iter()
             .position(|&id| {
-                !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_))
+                !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_))
             })
             .unwrap_or(roots.len());
         siblings = roots.split_off(first);
-        roots.retain(|&id| matches!(nodes[id].kind, NodeKind::Comment(_)));
+        roots.retain(|&id| matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_)));
         roots.push(html);
     }
     let explicit_head = siblings
@@ -92,7 +92,7 @@ fn document_elements(nodes: &mut Vec<Node>) -> Result<(usize, usize, usize), Str
             in_body = true;
         } else if element_named(nodes, id, &["html", "head", "body", "frameset"]) {
             return Err("Duplicate HTML document elements are unsupported.".into());
-        } else if !in_body && matches!(nodes[id].kind, NodeKind::Comment(_)) {
+        } else if !in_body && matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_)) {
             html_children.push(id);
         } else if !in_body && blank_text(&nodes[id]) {
             // Whitespace before the ordinary body token has no visible node here.
@@ -153,8 +153,7 @@ impl Bridge<'_> {
         let count = parsed
             .nodes
             .len()
-            .saturating_add(1)
-            .saturating_add(usize::from(doctype_position.is_some()));
+            .saturating_add(1);
         if count > available {
             return Err("Inert DOM identity limit reached.".into());
         }
@@ -180,8 +179,7 @@ impl Bridge<'_> {
         let arena = &self.state.inert_documents;
         let document = FIRST_ENTRY + arena.entries.len() as u32;
         let implementation = document + 1;
-        let doctype = doctype_position.map(|_| document + 2);
-        let first = document + 2 + u32::from(doctype.is_some());
+        let first = document + 2;
         let handle = |local: usize| {
             if local == 0 {
                 document
@@ -189,6 +187,7 @@ impl Bridge<'_> {
                 first + local as u32 - 1
             }
         };
+        let doctype=doctype_position.map(handle);
         let (html, head, body) = roots;
         let generated_base = arena.generated.len();
         let mut entries = Vec::new();
@@ -228,16 +227,7 @@ impl Bridge<'_> {
             result.extend(children.iter().copied().map(handle));
             Ok(result)
         };
-        let mut document_children =
-            children_for(&parsed.nodes[0].children, usize::from(doctype.is_some()))?;
-        if let (Some(position), Some(handle)) = (doctype_position, doctype) {
-            let offset = parsed.nodes[0]
-                .children
-                .iter()
-                .position(|&local| local >= position)
-                .unwrap_or(document_children.len());
-            document_children.insert(offset, handle);
-        }
+        let document_children=children_for(&parsed.nodes[0].children,0)?;
         let node = |kind, parent, children| {
             Entry::Node(InertNode {
                 kind,
@@ -249,6 +239,7 @@ impl Bridge<'_> {
         payload = payload.saturating_add(document_children.capacity() * size_of::<u32>());
         entries.push(node(
             Kind::Document(DocumentNodes {
+                kind:parsed.kind,mode:parsed.mode,
                 implementation,
                 doctype,
                 url,
@@ -261,9 +252,6 @@ impl Bridge<'_> {
             document_children,
         ));
         entries.push(Entry::Implementation);
-        if doctype.is_some() {
-            entries.push(node(Kind::Doctype, Some(document), Vec::new()));
-        }
         for (offset, mut source) in parsed.nodes.drain(1..).enumerate() {
             let local = offset + 1;
             let children = children_for(&source.children, 0)?;
