@@ -9,7 +9,7 @@ pub(in crate::scripting) struct Plan{target:u32,parents:Vec<Parent>,updates:Vec<
 impl Bridge<'_>{
  pub(in crate::scripting) fn normalize_receiver(&self,object:u32)->bool{!self.is_frame_handle(object)&&self.namespace_receiver(object)}
  fn normalize_text(&self,object:u32)->bool{if let Some(kind)=self.inert_node_type(object){return kind==3;}node_index(object).is_some_and(|node|self.dom_accessible(node)&&matches!(self.doc.nodes[node].kind,NodeKind::Text(_)))}
- fn normalize_children(&mut self,object:u32)->Result<Vec<u32>,String>{
+ pub(super) fn normalize_children(&mut self,object:u32)->Result<Vec<u32>,String>{
   if self.attr_receiver(object)||self.character_data_receiver(object)||self.doctype_receiver(object){return Ok(Vec::new());}
   if self.template_receiver(object)&&self.inert_node_type(object).is_none()&&self.template_source(object).is_some_and(|(_,initial)|initial.is_some()){return Ok(Vec::new());}
   let count=self.whole_text_child_count(object)?;self.state.work(count.checked_mul(self.state.inert_documents.adopted.lookup_work()+2).ok_or("Normalization traversal work overflow.")?)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Normalization traversal storage overflow.")?)?;
