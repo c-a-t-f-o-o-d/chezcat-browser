@@ -52,7 +52,7 @@ impl Bridge<'_>{
         if !script_attribute_names::valid_element_local_name(&name){return Err("Invalid XML document element local name.".into());}
         if args.get(1).is_some_and(|value|!matches!(value,Value::Null|Value::Undefined)){return Err("Element creation options are not implemented; no node was created.".into());}
         let mut expanded_name=Vec::new();expanded_name.try_reserve_exact(1).map_err(|_|"Cannot reserve null element namespace record.")?;
-        expanded_name.push(crate::html::ExpandedElementName{namespace:crate::html::ElementNamespaceValue::Null,prefix:None});
+        expanded_name.push(crate::html::ExpandedElementName{namespace:crate::html::ElementNamespaceValue::Null,prefix:None,local:None});
         self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{tag:name,expanded_name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Other,children:Vec::new()},0).map(Value::Host)
     }
 
@@ -60,21 +60,19 @@ impl Bridge<'_>{
         if let Some(doctype)=args.get(2).filter(|v|!matches!(v,Value::Null|Value::Undefined)){
             if !matches!(doctype,Value::Host(handle) if self.doctype_receiver(*handle)){return Err(("TypeError","createDocument requires a DocumentType or null.".into()));}
         }
-        if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)){
-            if !name.is_empty(){script_attribute_names::validate_element_namespace_value(namespace,name)?;}
-        }
+        if let(Some(namespace),Some(name))=(args.first(),args.get(1)){let name=script_attribute_names::converted_name(name)?;if !name.is_empty(){script_attribute_names::validate_element_namespace_dom(namespace,name)?;}}
         Ok(())
     }
     pub(in crate::scripting) fn create_xml_document(&mut self,implementation:u32,args:&[Value])->Result<Value,String>{
         if !self.inert_implementation(implementation){return Err("createDocument requires a genuine DOMImplementation.".into());}
         self.validate_xml_document_factory(args).map_err(|(_,message)|message)?;
         let namespace=args.first().ok_or("createDocument requires two arguments.")?;
-        let qualified=self.text(args.get(1).ok_or("createDocument requires two arguments.")?)?;
+        let qualified=self.dom_text(args.get(1).ok_or("createDocument requires two arguments.")?)?;
         let namespace=if matches!(namespace,Value::Null|Value::Undefined){None}else{Some(self.dom_text(namespace)?)};
         let class=match &namespace{Some(uri) if uri=="http://www.w3.org/1999/xhtml"=>crate::html::Namespace::Html,Some(uri) if uri=="http://www.w3.org/2000/svg"=>crate::html::Namespace::Svg,_=>crate::html::Namespace::Other};
         let content_type=match class{crate::html::Namespace::Html=>"application/xhtml+xml",crate::html::Namespace::Svg=>"image/svg+xml",_=>"application/xml"};
         let root=if qualified.is_empty(){None}else{
-            let(tag,expanded_name,namespace)=crate::html::element_names::prepare(namespace,qualified)?;
+            let(tag,expanded_name,namespace)=crate::html::element_names::prepare_dom(namespace,qualified)?;
             Some(Node{kind:NodeKind::Element{tag,expanded_name,id:None,href:None,attrs:Vec::new()},namespace,children:Vec::new()})
         };
         let doctype=args.get(2).and_then(|value|if let Value::Host(handle)=value{Some(*handle)}else{None});

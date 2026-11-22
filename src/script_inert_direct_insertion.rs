@@ -20,14 +20,16 @@ impl Bridge<'_>{
   if self.doc.nodes[parent].namespace!=crate::html::Namespace::Html&&!self.fragment_receiver(receiver)||matches!(tag(self.doc,parent),"script"|"link"){return Err(("NotSupportedError","Direct inert insertion requires an ordinary HTML or native fragment destination.".into()));}
   if method=="insertBefore"{match args.get(1){Some(Value::Null|Value::Undefined)=>{},Some(Value::Host(reference)) if self.get_root_receiver(*reference)=>{if !node_index(*reference).is_some_and(|node|self.dom_accessible(node)&&self.state.tree.parents[node]==Some(parent)){return Err(("NotFoundError","The reference Node is not a child of this destination.".into()));}},_=>return Err(("TypeError","insertBefore requires a Node or null reference.".into()))}}
   let owner=self.state.inert_documents.node(source).ok_or(("TypeError","Missing inert insertion source.".into()))?.owner;
-  let mut pending=Vec::new();pending.try_reserve_exact(1).map_err(|_|("NotSupportedError","Cannot reserve direct insertion validation.".into()))?;pending.push(source);let mut visited=0usize;let maximum=self.inert_node_count();
-  while let Some(handle)=pending.pop(){
+  let mut pending=Vec::new();pending.try_reserve_exact(1).map_err(|_|("NotSupportedError","Cannot reserve direct insertion validation.".into()))?;pending.push((source,receiver));let mut visited=0usize;let maximum=self.inert_node_count();
+  while let Some((handle,parent))=pending.pop(){
    visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or(("NotSupportedError","Direct insertion topology is inconsistent.".into()))?;
    let(node,raw,_)=self.parked_template_source(handle).ok_or(("NotSupportedError","Direct insertion requires an existing reserved native identity; this producer is not materialized.".into()))?;
+   if handle!=source&&node.parent!=Some(parent){return Err(("NotSupportedError","Direct insertion source parent link is inconsistent.".into()));}
+   self.validate_svg_activation_edge(parent,handle).map_err(|message|("NotSupportedError",message))?;
    if node.owner!=owner{return Err(("NotSupportedError","Direct insertion source owners are inconsistent.".into()));}
    let raw=self.parsed_source(raw).ok_or(("NotSupportedError","Direct insertion source payload is unavailable.".into()))?.0;
    if !template_node_can_park(raw){return Err(("NotSupportedError","Direct insertion requires unsupported activation capabilities or namespace provenance.".into()));}
-   pending.try_reserve(node.children.len()).map_err(|_|("NotSupportedError","Cannot reserve direct insertion descendants.".into()))?;pending.extend(node.children.iter().rev().copied());
+   pending.try_reserve(node.children.len()).map_err(|_|("NotSupportedError","Cannot reserve direct insertion descendants.".into()))?;pending.extend(node.children.iter().rev().map(|&child|(child,handle)));
   }
   Ok(())
  }

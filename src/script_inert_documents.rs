@@ -43,6 +43,10 @@ const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 #[path = "script_inert_attributes_tests.rs"]
 mod attribute_tests;
 #[cfg(test)]
+#[path="script_element_name_storage_tests.rs"]
+mod element_name_storage_tests;
+
+#[cfg(test)]
 #[path = "script_inert_storage_tests.rs"]
 mod storage_tests;
 #[cfg(test)]
@@ -539,6 +543,7 @@ impl Bridge<'_> {
         let mut released = 0usize;
         while let Some((handle, parent, depth)) = pending.pop() {
             if depth > dom_tree::MAX_DOM_DEPTH { return Err("Inert fragment insertion exceeds DOM depth.".into()); }
+            self.validate_svg_edge(node_handle(parent),handle)?;
             self.state.work(1)?;
             let (inert, source, index) = self.parked_template_source(handle)
                 .ok_or("Inert fragment contains unsupported active markup.")?;
@@ -974,7 +979,8 @@ impl Bridge<'_> {
                 }
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
                 NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut output,piece)?;}},
-                NodeKind::Element { tag, attrs, .. } => {
+                NodeKind::Element { tag, attrs, expanded_name, .. } => {
+                    if crate::html::element_names::raw_name(expanded_name){return Err("Scalar HTML serialization of raw Element names remains unsupported.".into());}
                     if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
                         return Err("Template serialization of foreign elements is unavailable.".into());
                     }
@@ -1608,6 +1614,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="createElement"&&matches!(args.first(),Some(Value::StringUnits(_))){return self.create_raw_local_element(owner,args);}
         if method=="createComment"{let data=self.dom_text(args.first().ok_or("createComment requires one argument.")?)?;return self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Comment(data),namespace:crate::html::Namespace::None,children:Vec::new()},0).map(Value::Host);}
         if method=="createElement"&&self.state.inert_documents.node(owner).is_some_and(|node|matches!(&node.kind,Kind::Document(doc) if doc.kind==crate::html::DocumentKind::Xml)){return self.create_xml_element(owner,args);}
 

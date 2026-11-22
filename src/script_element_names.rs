@@ -9,22 +9,23 @@ fn result_bytes(class:Namespace,tag:&str,names:&[ExpandedElementName],property:&
     let namespace=element_names::namespace(class,names)?;
     Ok(match property {
         "namespaceURI"=>match namespace{NamespaceRef::Null=>0,NamespaceRef::Static(uri)=>uri.len(),NamespaceRef::Owned(uri)=>uri.logical_bytes()},
-        "prefix"=>element_names::prefix(class,names)?.map_or(0,str::len),
-        "localName"=>tag.len(),
-        _=>tag.len().checked_add(element_names::prefix(class,names)?.map_or(0,|p|p.len()+1)).ok_or("Qualified element name size overflow.")?,
+        "prefix"=>element_names::prefix(class,names)?.map_or(0,DomString::logical_bytes),
+        "localName"=>element_names::local(class,tag,names)?.logical_bytes(),
+        _=>{let prefix=element_names::prefix(class,names)?;let local=element_names::local(class,tag,names)?;if element_names::raw_name(names){prefix.map_or(0,DomString::utf16_len).checked_add(usize::from(prefix.is_some())).and_then(|n|n.checked_add(local.code_units().count())).and_then(|n|n.checked_mul(2)).ok_or("Qualified raw element name size overflow.")?}else{tag.len().checked_add(prefix.map_or(0,|p|p.len()+1)).ok_or("Qualified element name size overflow.")?}},
     })
 }
 fn copy_value(class:Namespace,tag:&str,names:&[ExpandedElementName],property:&str,kind:DocumentKind)->Result<Value,String>{
     match property {
         "namespaceURI"=>return match element_names::namespace(class,names)?{NamespaceRef::Null=>Ok(Value::Null),NamespaceRef::Static(uri)=>Ok(Value::String(script_clone_node::copy_text(uri)?)),NamespaceRef::Owned(uri)=>Bridge::dom_string_copy(uri)},
-        "prefix"=>return element_names::prefix(class,names)?.map_or(Ok(Value::Null),|prefix|script_clone_node::copy_text(prefix).map(Value::String)),
-        "localName"=>return script_clone_node::copy_text(tag).map(Value::String),
+        "prefix"=>return element_names::prefix(class,names)?.map_or(Ok(Value::Null),|prefix|Bridge::dom_string_copy(prefix)),
+        "localName"=>return match element_names::local(class,tag,names)?{crate::dom_string::DomStringRef::Scalar(s)=>script_clone_node::copy_text(s).map(Value::String),crate::dom_string::DomStringRef::Raw(u)=>{let mut units=Vec::new();units.try_reserve_exact(u.len()).map_err(|_|"Cannot reserve local element name units.")?;units.extend_from_slice(u);Ok(Value::StringUnits(units))}},
         _=>{},
     }
     let prefix=element_names::prefix(class,names)?;
     let bytes=result_bytes(class,tag,names,property)?;
-    let mut value=String::new();value.try_reserve_exact(bytes).map_err(|_|"Cannot reserve qualified element name.")?;
     let uppercase=class==Namespace::Html&&kind==DocumentKind::Html;
+    if element_names::raw_name(names){let local=element_names::local(class,tag,names)?;let mut units=Vec::new();units.try_reserve_exact(bytes/2).map_err(|_|"Cannot reserve qualified element name units.")?;let upper=|u:u16|if uppercase&&(0x61..=0x7a).contains(&u){u-0x20}else{u};if let Some(prefix)=prefix{units.extend(prefix.code_units().map(upper));units.push(0x3a);}units.extend(local.code_units().map(upper));return Ok(Value::StringUnits(units));}
+    let mut value=String::new();value.try_reserve_exact(bytes).map_err(|_|"Cannot reserve qualified element name.")?;
     if let Some(prefix)=prefix{if uppercase{value.extend(prefix.chars().map(|ch|ch.to_ascii_uppercase()));}else{value.push_str(prefix);}value.push(':');}
     if uppercase{value.extend(tag.chars().map(|ch|ch.to_ascii_uppercase()));}else{value.push_str(tag);}
     Ok(Value::String(value))
@@ -32,18 +33,19 @@ fn copy_value(class:Namespace,tag:&str,names:&[ExpandedElementName],property:&st
 impl Bridge<'_>{
     pub(in crate::scripting) fn create_expanded_element(&mut self,owner:u32,args:&[Value])->Result<Value,String>{
         let namespace=args.first().ok_or("createElementNS requires two arguments.")?;
-        let qualified=self.text(args.get(1).ok_or("createElementNS requires two arguments.")?)?;
-        script_attribute_names::validate_element_namespace_value(namespace,&qualified).map_err(|(_,message)|message)?;
+        let qualified=self.dom_text(args.get(1).ok_or("createElementNS requires two arguments.")?)?;
+        script_attribute_names::validate_element_namespace_dom(namespace,qualified.view()).map_err(|(_,message)|message)?;
         if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("Element creation options/custom registries are not implemented; no node was created.".into());}
         let namespace=if matches!(namespace,Value::Null|Value::Undefined){None}else{Some(self.dom_text(namespace)?)};
-        let(tag,expanded_name,class)=element_names::prepare(namespace,qualified)?;
-        if class==Namespace::Svg&&!crate::html::svg_dom_name(&tag){return Err("SVG creation requires a supported passive shape/container; no node was created.".into());}
+        let(tag,expanded_name,class)=element_names::prepare_dom(namespace,qualified)?;
         if owner==DOCUMENT&&class==Namespace::Html&&tag=="img"{return self.create_image_named(&[],expanded_name);}
+        let native=owner==DOCUMENT&&(class==Namespace::Html||class==Namespace::Svg&&crate::html::svg_dom_name(&tag));
         let node=Node{kind:NodeKind::Element{tag,expanded_name,id:None,href:None,attrs:Vec::new()},namespace:class,children:Vec::new()};
-        if owner==DOCUMENT&&class!=Namespace::Other{return self.create_dom_node_ns(node.kind,class);}
+        if native{return self.create_dom_node_ns(node.kind,class);}
         self.append_inert_source_leaf(owner,None,node,0).map(Value::Host)
     }
 
+    pub(in crate::scripting) fn create_raw_local_element(&mut self,owner:u32,args:&[Value])->Result<Value,String>{let value=args.first().ok_or("createElement requires a local name.")?;if !script_attribute_names::valid_element_local_name_dom(script_attribute_names::converted_name(value).map_err(|(_,s)|s)?){return Err("Invalid element local name.".into());}if args.get(1).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("Element creation options are not implemented; no node was created.".into());}let mut local=self.dom_text(value)?;let html=self.inert_document_kind_for_node(owner).unwrap_or(self.doc.kind)==DocumentKind::Html;if html{local.make_ascii_lowercase();}if owner==DOCUMENT&&html&&local=="img"{return self.create_image(&[]);}let(tag,expanded_name,class)=if html{element_names::prepare_html_local(local)?}else{element_names::prepare_local(None,local)?};let kind=NodeKind::Element{tag,expanded_name,id:None,href:None,attrs:Vec::new()};if owner==DOCUMENT&&class==Namespace::Html{return self.create_dom_node_ns(kind,class);}self.append_inert_source_leaf(owner,None,Node{kind,namespace:class,children:Vec::new()},0).map(Value::Host)}
     pub(in crate::scripting) fn element_name_get(&mut self,node:usize,property:&str)->Result<Value,String>{
         if self.doc.nodes[node].namespace==Namespace::UnknownForeign{return Err(self.element_naming_error(node));}
         let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{return Err("Native element names require an Element.".into());};

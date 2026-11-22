@@ -609,6 +609,7 @@ impl Bridge<'_> {
             let invalid=match args.first(){Some(Value::String(s))=>s.encode_utf16().any(|u|matches!(u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),Some(Value::StringUnits(s))=>s.iter().any(|u|matches!(*u,0|0x09|0x0a|0x0c|0x0d|0x20|0x3e)),_=>false};
             if invalid{return Err(("InvalidCharacterError","Invalid doctype name.".into()));}
         }
+        if object==DOCUMENT&&method=="createElement"{if let Some(name)=args.first(){if !super::script_attribute_names::valid_element_local_name_dom(super::script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
         if object==DOCUMENT && method=="createAttribute" {
             if let Some(Value::String(name))=args.first() {if !super::script_attribute_names::valid_attribute_name(name) {return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}
         }
@@ -618,9 +619,7 @@ impl Bridge<'_> {
             }
         }
         if (object == DOCUMENT || self.inert_document(object)) && method=="createElementNS" {
-            if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
-                super::script_attribute_names::validate_element_namespace_value(namespace,name)?;
-            }
+            if let(Some(namespace),Some(name))=(args.first(),args.get(1)){super::script_attribute_names::validate_element_namespace_dom(namespace,super::script_attribute_names::converted_name(name)?)?;}
         }
         if matches!(method,"setAttributeNode"|"setAttributeNodeNS") && node_index(object).is_some() {return self.validate_attr_attachment(object,args);}
         if method == "replaceChild" && node_index(object).is_some() {
@@ -637,25 +636,6 @@ impl Bridge<'_> {
         }
         if method == "removeAttributeNode" && node_index(object).is_some() {
             return self.validate_attr_removal(object, args);
-        }
-        if (object == DOCUMENT || self.inert_document(object)) && method == "createElement" {
-            if let Some(Value::String(name)) = args.first() {
-                // This HTML subset accepts bounded ASCII element names. Other
-                // namespaces and customized built-in element options are absent.
-                if name.is_empty()
-                    || name.len() > 128
-                    || !name.as_bytes()[0].is_ascii_alphabetic()
-                    || !name.bytes().all(|byte| {
-                        byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.')
-                    })
-                {
-                    return Err((
-                        "InvalidCharacterError",
-                        "Element name is outside the supported ASCII name syntax (128 bytes)."
-                            .into(),
-                    ));
-                }
-            }
         }
         if node_index(object).is_some()
             && matches!(method, "appendChild" | "insertBefore" | "removeChild")
@@ -1722,6 +1702,7 @@ impl Bridge<'_> {
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return self.create_attribute(args,method=="createAttributeNS").map(Some);}
         if object==DOCUMENT&&method=="createElementNS"{return self.create_expanded_element(object,args).map(Some);}
+        if object==DOCUMENT&&method=="createElement"&&(matches!(args.first(),Some(Value::StringUnits(_)))||matches!(args.first(),Some(Value::String(s)) if !s.is_ascii())){return self.create_raw_local_element(object,args).map(Some);}
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
             let value=args.first().ok_or("DOM creation requires one argument.")?;
             let text = if method=="createElement"{DomString::from(self.text(value)?)}else{self.dom_text(value)?};
@@ -1973,11 +1954,13 @@ document.title='conversions-ok';
     fn namespaced_creation_unsupported_slices_do_not_allocate_or_queue_resources() {
         let(mut doc,mut forms,mut page,result)=start("var ns='http://www.w3.org/1999/xhtml';");assert_eq!(result.errors,0);
         let nodes=doc.nodes.len();let created=page.state.dom.created.clone();
-        for operation in ["document.createElementNS(null,'p:div');","document.createElementNS('','p:div');","document.createElementNS('http://www.w3.org/2000/svg','script');","document.createElementNS('urn:original','xml:img');","document.createElementNS(ns,'xmlns:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});"] {
+        for operation in ["document.createElementNS(null,'p:div');","document.createElementNS('','p:div');","document.createElementNS('urn:original','xml:img');","document.createElementNS(ns,'xmlns:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});"] {
             let result=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(result.errors,1,"{operation}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
         }
+        let out=page.console_eval(&mut doc,&mut forms,"var inertScript=document.createElementNS('http://www.w3.org/2000/svg','script');if(!(inertScript instanceof SVGElement)||inertScript.localName!=='script'||inertScript.namespaceURI!=='http://www.w3.org/2000/svg'||inertScript.parentNode!==null||inertScript.isConnected)throw 'actual inert SVG data';var refused=false;try{document.body.appendChild(inertScript);}catch(e){refused=e instanceof DOMException&&e.name==='NotSupportedError';}if(!refused||inertScript.parentNode!==null||inertScript.ownerDocument!==document)throw 'SVG script data cannot activate';");
+        assert_eq!(out.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
         // Names valid under the current element rule now have real native data.
-        // Namespace/registry/resource refusals above still publish no nodes.
+        // Namespace/registry/activation refusals above still publish no native nodes.
         let out=page.console_eval(&mut doc,&mut forms,"var first=document.createElementNS(ns,'div=valid'),second=document.createElementNS(ns,'élement');if(first.localName!=='div=valid'||second.localName!=='élement'||first.namespaceURI!==ns||second.cloneNode().localName!=='élement')throw 'actual valid names';");
         assert_eq!(out.errors,0,"{}",page.report());
         assert!(super::super::script_attribute_names::validate_element_namespace(Some("urn:original"),"div=valid").is_ok());
