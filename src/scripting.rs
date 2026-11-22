@@ -2638,12 +2638,17 @@ impl Bridge<'_> {
         Ok(result)
     }
 
+    fn text_content_container(&self, node: usize) -> bool {
+        text_container(tag(self.doc,node))
+            || self.doc.nodes.get(node).is_some_and(|item| item.namespace==crate::html::Namespace::Html
+                && matches!(item.kind,NodeKind::Element{..}) && script_clone_node::ordinary_clone_element(tag(self.doc,node)))
+    }
+
     fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
-        let name = tag(self.doc, node);
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
-        if !text_container(name) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
+        if !self.text_content_container(node) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
             return Err(
                 "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
@@ -2657,7 +2662,7 @@ impl Bridge<'_> {
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
-                if (!text_container(tag) || tag == "button")&&!self.movable_template_host(child) {
+                if (!self.text_content_container(child) || tag == "button")&&!self.movable_template_host(child) {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
@@ -8501,3 +8506,7 @@ mod node_base_uri_tests;
 
 #[path="script_node_base_uri.rs"]
 mod node_base_uri;
+
+#[cfg(test)]
+#[path="script_custom_host_content_tests.rs"]
+mod custom_host_content_tests;
