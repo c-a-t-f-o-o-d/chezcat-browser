@@ -4,7 +4,7 @@
   "prepared_owner_date": "2026-11-21",
   "reviewed_source_revision": "250705b6c46ad472f7dc8fd6a1442503a85e7dfd",
   "plan": "HTML_FOUNDATION_PLAN.md",
-  "kind": "initial requirements and source-review inventory; not executed test results",
+  "kind": "Requirements and source-review inventory with an explicitly scoped native baseline; not whole-browser conformance",
   "completion_policy": {
     "all_required_contracts_verified": true,
     "blocked_or_unrun_required_cases_block_closure": true,
