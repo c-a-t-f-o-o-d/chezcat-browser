@@ -4119,7 +4119,7 @@ impl Host for Bridge<'_> {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
         if method == DOCUMENT_ADOPT_NODE{return self.validate_node_adoption(object,args);}
-        if method==DOCUMENT_IMPORT_NODE{self.validate_import_source(args)?;if object!=DOCUMENT&&!matches!(args.first(),Some(Value::Host(source)) if self.attr_receiver(*source)){return Err(("NotSupportedError","Inert Document tree import remains unsupported; no node was created.".into()));}return Ok(());}
+        if method==DOCUMENT_IMPORT_NODE{return self.validate_import_source(args);}
         if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
         if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
             let valid_target = matches!(args.first(), Some(Value::String(target))
@@ -4937,6 +4937,7 @@ impl Host for Bridge<'_> {
         }
         Ok(())
     }
+    fn validate_dictionary_call(&self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields));}Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -4947,7 +4948,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, fields);
         }
-        if method==DOCUMENT_IMPORT_NODE{if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Attr source.".into());};if !self.inert_document(object)||!self.attr_receiver(*source){return Err("Inert Document import requires a genuine Attr source.".into());}return self.clone_attribute_node(*source,Some(object));}return self.import_node(args,fields);}
+        if method==DOCUMENT_IMPORT_NODE{if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Node source.".into());};return self.import_into_inert_document(object,*source,script_clone_node::import_subtree(args,fields));}return self.import_node(args,fields);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
@@ -8715,3 +8716,7 @@ mod element_name_units_tests;
 #[cfg(test)]
 #[path="script_attribute_filter_units_tests.rs"]
 mod attribute_filter_units_tests;
+
+#[cfg(test)]
+#[path="script_inert_document_import_tests.rs"]
+mod inert_document_import_tests;

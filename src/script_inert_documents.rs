@@ -18,6 +18,9 @@ mod node_adoption;
 #[path="script_inert_direct_insertion.rs"]
 mod direct_insertion;
 
+#[path="script_inert_document_import.rs"]
+mod document_import;
+
 #[path="script_inert_content.rs"]
 mod content;
 #[path="script_inert_observation.rs"]

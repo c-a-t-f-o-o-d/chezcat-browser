@@ -6334,3 +6334,7 @@ mod attribute_filter_units_tests;
 #[cfg(test)]
 #[path="app_loaded_clone_snapshot_tests.rs"]
 mod loaded_clone_snapshot_tests;
+
+#[cfg(test)]
+#[path="app_inert_document_import_tests.rs"]
+mod inert_document_import_tests;
