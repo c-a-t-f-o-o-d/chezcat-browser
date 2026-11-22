@@ -179,10 +179,11 @@ if(read(notice)!==C||w.HTMLElement===C||notice instanceof w.HTMLElement||
     for source in [
         "Object.getPrototypeOf(document.createElementNS('http://www.w3.org/1999/xhtml','notice-Line'));",
         "Object.setPrototypeOf(notice,{});",
-        "Object.defineProperty(notice,'ownerDocument',{value:null});",
+
     ] {
         assert_eq!(page.console_eval(&mut doc, &mut forms, source).errors, 1, "{source}");
     }
+    run(&mut doc,&mut forms,&mut page,"var nativeOwner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;Object.defineProperty(notice,'ownerDocument',{configurable:true,value:null});if(notice.ownerDocument!==null||nativeOwner.call(notice)!==document)throw 'author override and actual native owner';delete notice.ownerDocument;if(notice.ownerDocument!==document)throw 'restored actual owner';");
     page.set_location(&location("https://other-dom-string.test/changed"));
     assert_eq!(page.console_eval(&mut doc, &mut forms, "read(notice);").errors, 1);
     assert!(page.report().contains("same-origin"), "{}", page.report());

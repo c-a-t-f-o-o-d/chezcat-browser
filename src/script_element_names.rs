@@ -45,6 +45,7 @@ impl Bridge<'_>{
     }
 
     pub(in crate::scripting) fn element_name_get(&mut self,node:usize,property:&str)->Result<Value,String>{
+        if self.doc.nodes[node].namespace==Namespace::UnknownForeign{return Err(self.element_naming_error(node));}
         let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{return Err("Native element names require an Element.".into());};
         let class=self.doc.nodes[node].namespace;let bytes=result_bytes(class,tag,expanded_name,property)?;
         if bytes>self.state.limits.host.string_bytes{return Err("Native element name exceeds the host string allowance.".into());}
@@ -99,7 +100,7 @@ impl Bridge<'_>{
         if self.state.inert_documents.node(object).is_some(){
             let(class,_,names)=self.inert_name_parts(object)?;let attrs=self.inert_element_attributes(object).ok_or("Missing namespace attribute source.")?;return Ok((class,names,attrs));
         }
-        let node=node_index(object).filter(|&node|self.dom_accessible(node)).ok_or("Missing namespace Element.")?;
+        let node=node_index(object).filter(|&node|node<self.doc.nodes.len()).ok_or("Missing namespace Element.")?;
         let NodeKind::Element{expanded_name,attrs,..}=&self.doc.nodes[node].kind else{return Err("Namespace ancestry requires an Element.".into());};
         Ok((self.doc.nodes[node].namespace,expanded_name,attrs))
     }

@@ -9,7 +9,10 @@ mod import_controls;
 pub(super) const CLONE_METHOD: &str = "\0Node.cloneNode";
 
 pub(super) fn ordinary_clone_element(name:&str)->bool{
-    crate::html::valid_custom_element_name(name)
+    // Built-in HTML local names are lowercase ASCII alphanumerics. Other
+    // valid spellings retain pure element data rather than built-in state.
+    name.bytes().any(|byte|!byte.is_ascii_lowercase()&&!byte.is_ascii_digit())
+        ||crate::html::valid_custom_element_name(name)
         ||TEXT_CONTAINERS.iter().any(|tag|!matches!(*tag,"button"|"legend")&&tag.eq_ignore_ascii_case(name))
         ||["nav","main","section","article","aside","header","footer","address","figure","figcaption","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
 }

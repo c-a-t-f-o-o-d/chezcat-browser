@@ -45,6 +45,8 @@ for(var name of ['script','img','input','iframe','video','a','style','link','can
  var node=document.createElementNS('urn:unrelated',name);if(node.namespaceURI!=='urn:unrelated'||node.localName!==name||node.tagName!==name||node.ownerDocument!==document||node instanceof HTMLElement||node instanceof SVGElement||Object.getPrototypeOf(node)!==Element.prototype||node.src!==undefined||node.href!==undefined||node.value!==undefined||node.contentWindow!==undefined)throw 'foreign names do not grant HTML interfaces';
  var caught=false;try{document.getElementById('mount').appendChild(node);}catch(e){caught=true;}if(!caught||node.parentNode!==null||document.getElementById('mount').childNodes.length)throw 'unsupported activation is atomic';
 }
+for(var name of ['SCRIPT','IMG','INPUT','IFRAME','VIDEO']){var unknown=document.createElementNS('http://www.w3.org/1999/xhtml',name),copy=unknown.cloneNode();if(copy.localName!==name||copy.src!==undefined||copy.value!==undefined||copy.contentWindow!==undefined||copy.parentNode!==null)throw 'case preserved unknown data has no built-in state';}
+
 "#);no_effects(&mut page);
 }
 #[test]
@@ -52,4 +54,30 @@ fn native_expanded_names_admission_refusal_has_no_record_prefix_and_recovers(){
     let(mut doc,mut forms,mut page)=fixture();let before=(doc.nodes.len(),page.state.retained,page.state.dom_commits);let limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
     assert_eq!(page.console_eval(&mut doc,&mut forms,"document.createElementNS('urn:original','p:Mixed');").errors,1);assert_eq!((doc.nodes.len(),page.state.retained,page.state.dom_commits),before);page.state.retained_limit=limit;
     run(&mut doc,&mut forms,&mut page,"var recovered=document.createElementNS('urn:original','p:Mixed');if(recovered.namespaceURI!=='urn:original'||recovered.prefix!=='p'||recovered.localName!=='Mixed'||recovered.parentNode!==null)throw 'fresh job namespace recovery';");no_effects(&mut page);
+}
+
+#[test]
+fn native_expanded_names_native_payload_and_backing_are_charged_for_prefixed_factories(){
+    let(mut doc,mut forms,mut page)=fixture();
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let backing=|bridge:&Bridge<'_>|bridge.doc.nodes.capacity()*size_of::<Node>()+bridge.state.node_state_bytes()+bridge.state.node_sets_storage_bytes();
+    for (namespace,name) in [("http://www.w3.org/1999/xhtml","h:div"),("http://www.w3.org/1999/xhtml","h:img"),("http://www.w3.org/2000/svg","s:circle")]{
+        let before=bridge.state.retained;let previous=backing(&bridge);
+        let Value::Host(handle)=bridge.create_expanded_element(DOCUMENT,&[Value::String(namespace.into()),Value::String(name.into())]).unwrap()else{panic!("real named node")};
+        let node=&bridge.doc.nodes[node_index(handle).unwrap()];let NodeKind::Element{tag,href,expanded_name,..}=&node.kind else{panic!("actual Element")};
+        assert_eq!(expanded_name.len(),1);assert_eq!(expanded_name[0].prefix.as_deref(),Some(&name[..1]));
+        let payload=node_bytes(node)+tag.capacity()+href.as_ref().map_or(0,String::capacity);
+        assert_eq!(bridge.state.retained-before,payload+backing(&bridge)-previous,"{name}");
+    }
+}
+
+#[test]
+fn native_expanded_names_canonical_namespace_method_brands_nulls_and_attributes_stay_native(){
+    let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var query=Node.prototype.isDefaultNamespace,node=document.createElementNS('urn:original','Mixed'),calls=0;
+if(typeof query!=='function'||query.length!==1||query.name!=='isDefaultNamespace'||!query.call(node,'urn:original')||query.call(node,null)||query.call(node,''))throw 'canonical namespace method';
+for(var wrong of [{},window,node.style,undefined]){var caught=false;try{query.call(wrong,{toString:function(){calls++;return 'urn:original';}});}catch(e){caught=e instanceof TypeError;}if(!caught||calls)throw 'brand before conversion';}
+var parent=document.createElementNS('http://www.w3.org/1999/xhtml','h:div');parent.setAttributeNS('http://www.w3.org/2000/xmlns/','xmlns','urn:default');var attr=parent.getAttributeNodeNS('http://www.w3.org/2000/xmlns/','xmlns');if(!query.call(attr,'urn:default')||attr.ownerElement!==parent||parent.namespaceURI!=='http://www.w3.org/1999/xhtml')throw 'actual attached attribute namespace context';
+if(!query.call(document.createDocumentFragment(),null)||!query.call(document.doctype,null))throw 'non-element namespace context';
+"#);no_effects(&mut page);
 }

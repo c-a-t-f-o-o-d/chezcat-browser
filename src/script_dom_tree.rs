@@ -383,7 +383,7 @@ impl Bridge<'_> {
             && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }))
     }
 
-    fn element_naming_error(&self, node: usize) -> String {
+    pub(in crate::scripting) fn element_naming_error(&self, node: usize) -> String {
         let parent = self.state.tree.parents[node];
         let grandparent = parent.and_then(|index| self.state.tree.parents[index]);
         let name = |index: Option<usize>| index.filter(|&index| index != 0)
@@ -1973,12 +1973,13 @@ document.title='conversions-ok';
     fn namespaced_creation_unsupported_slices_do_not_allocate_or_queue_resources() {
         let(mut doc,mut forms,mut page,result)=start("var ns='http://www.w3.org/1999/xhtml';");assert_eq!(result.errors,0);
         let nodes=doc.nodes.len();let created=page.state.dom.created.clone();
-        for operation in ["document.createElementNS(null,'div');","document.createElementNS('','div');","document.createElementNS('http://www.w3.org/2000/svg','script');","document.createElementNS('urn:original','img');","document.createElementNS(ns,'p:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});","document.createElementNS(ns,'div=valid');","document.createElementNS(ns,'élement');"] {
+        for operation in ["document.createElementNS(null,'p:div');","document.createElementNS('','p:div');","document.createElementNS('http://www.w3.org/2000/svg','script');","document.createElementNS('urn:original','xml:img');","document.createElementNS(ns,'xmlns:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});"] {
             let result=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(result.errors,1,"{operation}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
         }
-        // '=' is a valid element local-name character after ASCII alpha, even
-        // though this factory's spelling slice declines it. Attribute rules
-        // cannot replace the actual element-context name/namespace validation.
+        // Names valid under the current element rule now have real native data.
+        // Namespace/registry/resource refusals above still publish no nodes.
+        let out=page.console_eval(&mut doc,&mut forms,"var first=document.createElementNS(ns,'div=valid'),second=document.createElementNS(ns,'élement');if(first.localName!=='div=valid'||second.localName!=='élement'||first.namespaceURI!==ns||second.cloneNode().localName!=='élement')throw 'actual valid names';");
+        assert_eq!(out.errors,0,"{}",page.report());
         assert!(super::super::script_attribute_names::validate_element_namespace(Some("urn:original"),"div=valid").is_ok());
         let err=super::super::script_attribute_names::validate_element_namespace(None,"xml:div=valid").unwrap_err();assert_eq!(err.0,"NamespaceError");
     }

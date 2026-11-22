@@ -17,7 +17,7 @@ pub(crate) fn namespace(class:Namespace,names:&[ExpandedElementName])->Result<Na
         if name.namespace.classification()!=class{return Err("Element namespace classification differs from its owned record.".into());}
         return Ok(match &name.namespace{ElementNamespaceValue::Html=>NamespaceRef::Static("http://www.w3.org/1999/xhtml"),ElementNamespaceValue::Svg=>NamespaceRef::Static("http://www.w3.org/2000/svg"),ElementNamespaceValue::Null=>NamespaceRef::Null,ElementNamespaceValue::Other(uri)=>NamespaceRef::Owned(uri)});
     }
-    class.element_uri().map(NamespaceRef::Static).ok_or_else(||"Element namespace provenance has no native URI record.".into())
+    class.element_uri().map(NamespaceRef::Static).ok_or_else(||"Namespace lookup for unsupported foreign parser context has no native URI record.".into())
 }
 pub(crate) fn prefix(class:Namespace,names:&[ExpandedElementName])->Result<Option<&str>,String>{namespace(class,names)?;Ok(names.first().and_then(|name|name.prefix.as_deref()))}
 impl ElementNamespaceValue {
