@@ -11,6 +11,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+#[path = "document_encoding.rs"]
+mod document_encoding;
+#[cfg(test)]
+#[path = "loader_document_encoding_app_tests.rs"]
+mod document_encoding_app_tests;
+
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) fn read_local_media(path: &std::path::Path, limit: usize, cancel: &AtomicBool) -> Result<Vec<u8>, String> {
@@ -87,6 +93,9 @@ impl Default for LoadOptions {
 
 const MAX_LOCAL_HTML_BYTES: usize = 32 * 1024 * 1024;
 const MAX_LOCAL_PLAIN_TEXT_BYTES: usize = 1024 * 1024;
+// HTTP applies this document-body cap after distinguishing attachments. Text
+// decoding retains the same bound for its resulting UTF-8 source.
+const MAX_NETWORK_TEXT_BYTES: usize = 2 * 1024 * 1024;
 // Decoded backing and optional reuse metadata each have a byte allowance.
 pub(crate) const MAX_DECODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -886,7 +895,8 @@ fn load_request_progressively(
                 document_image.as_ref().map(|asset| asset.bitmap.as_ref()),
             )
         } else {
-            decode_text(&response.body, content_type, !plain)?
+            document_encoding::decode(&response.body, content_type, !plain,
+                MAX_NETWORK_TEXT_BYTES, &|| check_cancel(cancel))?
         };
         notice = if let Some(protocol) = response.protocol {
             format!(
@@ -964,13 +974,9 @@ fn load_request_progressively(
                 document_image.as_ref().map(|asset| asset.bitmap.as_ref()),
             )
         } else {
-            let mut source = String::from_utf8(bytes)
-                .map_err(|_| "Local HTML/plain-text documents must contain UTF-8 text.".to_owned())?;
-            let bom_bytes = source.len() - source.trim_start_matches('\u{feff}').len();
-            if bom_bytes != 0 {
-                source.drain(..bom_bytes);
-            }
-            source
+            document_encoding::decode(&bytes, "", !plain,
+                if plain { MAX_LOCAL_PLAIN_TEXT_BYTES } else { MAX_LOCAL_HTML_BYTES },
+                &|| check_cancel(cancel))?
         }
     } else {
         include_str!("../pages/start.html").to_owned()
@@ -2677,7 +2683,8 @@ mod tests {
         assert!(markup.len() > 1024 * 1024);
         let page = folder.page(&format!("\u{feff}\u{feff}{markup}"));
         let loaded = local(&page).unwrap();
-        assert!(loaded.raw == markup);
+        // Decoding consumes one signature; a second U+FEFF is document text.
+        assert_eq!(loaded.raw, format!("\u{feff}{markup}"));
         assert_eq!(loaded.document.title, "Full local source");
         assert!((0..loaded.document.nodes.len()).any(|node| loaded.document.attr(node, "id") == Some("tail")));
     }

@@ -65,6 +65,7 @@ mod script_request_core;
 mod search;
 mod svg_reference;
 mod text;
+mod text_codec;
 mod tls;
 mod tls_crypto;
 mod trust;
