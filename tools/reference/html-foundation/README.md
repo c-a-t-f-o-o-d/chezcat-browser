@@ -39,7 +39,12 @@ Run original classifier/fixture controls with:
 
 After explicit exact-byte preparation and a clean committed test build:
 
+    python tools/fetch_foundation_inputs.py --cache <external-cache>
     python tools/foundation_corpus.py run --cache <external-cache> --exe <test-executable>
+
+Preparation validates both Git-blob and SHA-256 identities. Its --offline mode
+verifies an already prepared cache without network access. Neither preparation
+nor execution changes the frozen denominator.
 
 The test adapter is ignored during ordinary Cargo tests. Results are confined to
 the existing verification root and bind source/dirty state, binary/adapter/input/

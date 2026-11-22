@@ -3975,7 +3975,8 @@
       "primary_summary_sha256": "a6b302ce2826dd93d2687bf46bfbd92cdee7a54eef0988d4e64f28e8e13c280d",
       "closure_blocked": true
     },
-    "note": "Three verified F00 rows establish inventory/input/adapter/baseline methodology only. Required product failures and blocked browser/token/diagnostic/script/namespace evidence remain open; no foundation or whole-browser percentage is justified."
+    "note": "Three verified F00 rows establish inventory/input/adapter/baseline methodology only. Required product failures and blocked browser/token/diagnostic/script/namespace evidence remain open; no foundation or whole-browser percentage is justified.",
+    "executed_in_f00": true
   },
   "reconciled_public_main": "c07c6123cd7cc610c9757922b18ad68b5143cff3",
   "milestone_states": [
