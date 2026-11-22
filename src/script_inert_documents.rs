@@ -13,6 +13,8 @@ mod cdata;
 mod document_children;
 #[path="script_document_clone.rs"]
 mod document_clone;
+#[path="script_node_adoption.rs"]
+mod node_adoption;
 
 #[path="script_inert_content.rs"]
 mod content;
@@ -171,6 +173,8 @@ impl Arena {
 }
 
 impl Bridge<'_> {
+    pub(in crate::scripting) fn inert_node_count(&self)->usize{self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len())}
+    pub(in crate::scripting) fn inert_document_kind_for_node(&self,object:u32)->Option<crate::html::DocumentKind>{let owner=self.state.inert_documents.node(object)?.owner;Some(if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner)?.kind{Kind::Document(ref doc)=>doc.kind,_=>crate::html::DocumentKind::Html}})}
     fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
         let owner = self
             .state
@@ -374,7 +378,6 @@ impl Bridge<'_> {
     fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool)->Result<(),String>{
         if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (name.namespace.is_some()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
-        let owner_document=inert.owner;
         let (source,initial_template)=match inert.kind{
             Kind::Parsed{source,initial_template}=>(Some(source),initial_template),
             Kind::Element(_)=>(None,None),_=>return Err("Attribute writes require an Element.".into()),
@@ -425,7 +428,7 @@ impl Bridge<'_> {
         let generated=GeneratedNode{node:Rc::new(node),unsafe_nonce};let index=self.state.inert_documents.generated.len();self.reserve_inert_entries(0,payload,1)?;
         let arena=&mut self.state.inert_documents;arena.generated.push(generated);
         arena.node_mut(object).expect("checked inert Element").kind=Kind::Parsed{source:ParsedSource::Generated(index),initial_template};
-        if let Some((position,id))=attached{self.state.attached_attributes.remove(position);let attr=&mut self.state.attributes[id];attr.owner=None;attr.document=owner_document;attr.value=removed.unwrap().value;}
+        if let Some((position,id))=attached{self.state.attached_attributes.remove(position);let attr=&mut self.state.attributes[id];attr.owner=None;attr.value=removed.unwrap().value;}
         self.state.dom_committed();Ok(())
     }
 
@@ -677,12 +680,13 @@ impl Bridge<'_> {
                 self.state.work(shifted)?;
                 self.state.copies(self.state.dom.inert_child_lists.movement_bytes(shifted))?;
             }
+            let attr_changes=if self.state.inert_documents.node(fragment).unwrap().owner!=DOCUMENT{let lookup=(usize::BITS-indices.len().leading_zeros()) as usize+1;self.prepare_attr_document_rebind(|owner|node_index(owner).is_some_and(|index|indices.binary_search(&index).is_ok()),lookup,DOCUMENT)?}else{Vec::new()};
             self.state.prepare_range_changes(1,0)?;
             self.state.replace_storage(released, retained, retained)?;
-            Ok::<_, String>(inline)
+            Ok::<_, String>((inline,attr_changes))
         })();
-        let inline = match checked {
-            Ok(inline) => inline,
+        let (inline,attr_changes) = match checked {
+            Ok(result) => result,
             Err(error) => {
                 for item in &mut plan {
                     std::mem::swap(&mut self.doc.nodes[item.index], &mut item.node);
@@ -717,6 +721,7 @@ impl Bridge<'_> {
             if !connected { self.state.detached_nodes.insert(item.index); }
         }
         self.commit_inline_sheet_batch(inline);
+        self.commit_attr_document_rebind(&attr_changes,DOCUMENT);
         self.state.dom_committed();
         self.state.dirty = true;
         if connected { self.state.layout_changed(); }
@@ -826,6 +831,7 @@ impl Bridge<'_> {
         self.state.work(moved.saturating_add(1))?;
         let copies = (moved + 1).checked_mul(size_of::<u32>()).ok_or("Template child-link copy work overflow.")?;
         let (index_growth, index_bytes) = self.prepare_adopted_index(std::iter::once(child), available - added)?;
+        let attr_changes=if owner!=DOCUMENT{self.prepare_attr_document_rebind(|candidate|candidate==child,1,owner)?}else{Vec::new()};
         self.state.replace_storage(0, added + index_bytes, copies)?;
         let arena = &mut self.state.inert_documents;
         arena.adopted.commit(index_growth);
@@ -839,6 +845,7 @@ impl Bridge<'_> {
             owner, parent: Some(fragment), children: Vec::new(),
         });
         arena.node_mut(fragment).unwrap().children.push(child);
+        self.commit_attr_document_rebind(&attr_changes,owner);
         Ok(Value::Host(child))
     }
 

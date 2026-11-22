@@ -531,6 +531,7 @@ pub(crate) const PARENT_NODE_GETTERS: [(&str, &str); 4] = [
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
+pub(crate) const DOCUMENT_ADOPT_NODE:&str="\0Document.adoptNode";
 pub(crate) const HTML_TEMPLATE_CONTENT_GET: &str = "\0HTMLTemplateElement.get.content";
 pub(crate) const CREATE_CDATA_SECTION: &str = "\0Document.createCDATASection";
 pub(crate) const CREATE_PROCESSING_INSTRUCTION: &str = "\0Document.createProcessingInstruction";
@@ -9213,6 +9214,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method=="replaceChild"&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if method=="setAttributeNS"&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
