@@ -24,3 +24,7 @@ impl Bridge<'_>{
   Ok(Self::dom_string_owned(DomString::from_units(&units,DomString::storage_bound(self.state.limits.host.string_bytes)?)?))
  }
 }
+
+#[cfg(test)]
+#[path="script_character_substring_storage_tests.rs"]
+mod storage_tests;
