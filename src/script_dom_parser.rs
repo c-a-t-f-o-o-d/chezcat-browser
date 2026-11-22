@@ -257,8 +257,8 @@ impl Bridge<'_> {
             let children = children_for(&source.children, 0)?;
             let metadata = match &source.kind {
                 NodeKind::Element { tag, href, .. } => tag
-                    .len()
-                    .saturating_add(href.as_ref().map_or(0, String::len)),
+                    .capacity()
+                    .saturating_add(href.as_ref().map_or(0, String::capacity)),
                 _ => 0,
             };
             payload = payload
@@ -281,17 +281,29 @@ impl Bridge<'_> {
             ));
         }
         self.state.copies(payload)?;
-        let admitted = self.reserve_inert_entries(entries.len(), payload, generated.len())?;
-        debug_assert_eq!(admitted, document);
-        self.state.inert_documents.generated.extend(generated);
-        self.state.inert_documents.entries.extend(entries);
-        Ok(Value::Host(document))
+        self.publish_inert_batch(document,entries,generated,payload,Vec::new(),true)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn identity_fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+    fn identity_source()->(Document,Option<usize>,(usize,usize,usize)){
+        let(mut parsed,dtype)=crate::html::parse_inert_html("<!doctype html><html><head><title>owned</title></head><body><a href=\"#target\">data</a><!--marker--></body></html>",100,&||Ok(())).unwrap();let roots=document_elements(&mut parsed.nodes).unwrap();for node in &mut parsed.nodes{if let NodeKind::Element{tag,href,..}=&mut node.kind{if tag=="a"{tag.reserve(128);href.as_mut().unwrap().reserve(256);}}}(parsed,dtype,roots)
+    }
+    #[test]
+    fn domparser_node_identity_exact_owned_capacities_joint_backing_and_projected_parent_records(){
+        let(mut doc,mut forms,mut page)=identity_fixture();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let(parsed,dtype,roots)=identity_source();let count=parsed.nodes.len()+1;let before=(b.state.retained,b.template_import_backing(),b.state.inert_documents.generated.len());let Value::Host(owner)=b.publish_parsed_document(parsed,"https://parsed-storage.test/source".into(),roots,dtype,count).unwrap()else{panic!("real parsed document")};
+        let mut payload=0usize;let mut pending=vec![owner];let mut native=false;while let Some(handle)=pending.pop(){let node=b.state.inert_documents.node(handle).unwrap();assert_eq!(node.owner,owner);payload+=node.children.capacity()*size_of::<u32>();if let Kind::Document(record)=&node.kind{payload+=record.url.capacity()+record.title.capacity();assert_eq!(record.implementation,owner+1);assert!(record.html.is_some()&&record.doctype.is_some());}for &child in &node.children{assert_eq!(b.state.inert_documents.node(child).unwrap().parent,Some(handle));pending.push(child);}native|=node_index(handle).is_some();}
+        let mut widened=false;for source in b.state.inert_documents.generated.iter().skip(before.2){payload+=node_bytes(&source.node)+size_of::<Node>()+2*size_of::<usize>();if let NodeKind::Element{tag,href,..}=&source.node.kind{payload+=tag.capacity()+href.as_ref().map_or(0,String::capacity);if tag=="a"{assert!(tag.capacity()>tag.len()&&href.as_ref().unwrap().capacity()>href.as_ref().unwrap().len());widened=true;}}}assert!(native&&widened);assert_eq!(b.state.retained-before.0,payload+b.template_import_backing()-before.1);
+    }
+    #[test]
+    fn domparser_node_identity_storage_and_late_copy_refusal_publish_no_batch_and_recover(){
+        let(mut doc,mut forms,mut page)=identity_fixture();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let snapshot=|b:&Bridge<'_>|(b.state.retained,b.template_import_backing(),b.doc.nodes.len(),b.state.inert_documents.entries.len(),b.state.inert_documents.generated.len(),b.state.inert_documents.adopted.len(),b.state.dom_commits);let before=snapshot(&b);let limit=b.state.retained_limit;let copies=b.state.copy_work;
+        for storage in [true,false]{let(parsed,dtype,roots)=identity_source();let count=parsed.nodes.len()+1;if storage{b.state.retained_limit=b.state.retained;}else{let payload=parsed.nodes.iter().map(|node|node_bytes(node)).sum::<usize>();b.state.copy_work=payload;}assert!(b.publish_parsed_document(parsed,"https://parsed-storage.test/refused".into(),roots,dtype,count).is_err());assert_eq!(snapshot(&b),before);b.state.retained_limit=limit;b.state.copy_work=copies;}
+        let(parsed,dtype,roots)=identity_source();let count=parsed.nodes.len()+1;let Value::Host(owner)=b.publish_parsed_document(parsed,"https://parsed-storage.test/recovered".into(),roots,dtype,count).unwrap()else{panic!("recovered batch")};let Kind::Document(record)=&b.state.inert_documents.node(owner).unwrap().kind else{unreachable!()};let body=record.body.unwrap();let root=b.inert_children(body).unwrap()[0];assert!(node_index(root).is_some());assert_eq!(b.state.inert_documents.node(root).unwrap().owner,owner);
+    }
 
     fn start(source: &str) -> (Document, Forms, Page, Outcome) {
         let mut doc = crate::html::parse(

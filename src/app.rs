@@ -6294,3 +6294,7 @@ mod inert_direct_insertion_tests;
 #[cfg(test)]
 #[path="app_xml_factory_root_identity_tests.rs"]
 mod xml_factory_root_identity_tests;
+
+#[cfg(test)]
+#[path="app_domparser_node_identity_tests.rs"]
+mod domparser_node_identity_tests;
