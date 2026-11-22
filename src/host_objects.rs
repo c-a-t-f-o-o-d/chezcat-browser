@@ -21,7 +21,7 @@ impl Runtime {
             let document = self.native_constructor_prototypes[&(window, "Document")];
             self.define_readonly_node_getter(document, window, "implementation", implementation_get)?;
             self.define_readonly_node_getter(document,window,"doctype",super::DOCUMENT_DOCTYPE_GET)?;
-            for name in ["DOMImplementation", "DocumentType"] {
+            for name in ["DOMImplementation", "DocumentType", "XMLDocument"] {
                 let allocation = self.allocate_host_function_with_length(window, name, 0).map_err(Fault::new)?;
                 if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) =
                     self.functions.get_mut(allocation.id)
@@ -30,15 +30,15 @@ impl Runtime {
                     *illegal_interface_constructor = true;
                 }
                 let prototype = self.new_object(None)?;
-                if name == "DocumentType" {
-                    let parent = self.native_constructor_prototypes[&(window, "Node")];
+                if name == "DocumentType"||name=="XMLDocument" {
+                    let parent = self.native_constructor_prototypes[&(window, if name=="XMLDocument"{"Document"}else{"Node"})];
                     self.objects[prototype].prototype = Some(Ordinary::Object(parent));
                     if let Value::Function(parent_constructor) = self.objects[parent].properties["constructor"].value.as_value()? {
                         self.objects[self.function_properties[allocation.id]].prototype = Some(Ordinary::Function(*parent_constructor));
                     }
-                    for &(name,method) in super::DOCUMENT_TYPE_GETTERS {self.define_readonly_node_getter(prototype,window,name,method)?;}
+                    if name=="DocumentType"{for &(name,method) in super::DOCUMENT_TYPE_GETTERS {self.define_readonly_node_getter(prototype,window,name,method)?;}}
                 } else {
-                    for (name, operation,length) in [("createHTMLDocument", create,0), ("hasFeature", has_feature,0),("createDocumentType","\0DOMImplementation.createDocumentType",3)] {
+                    for (name, operation,length) in [("createHTMLDocument", create,0), ("hasFeature", has_feature,0),("createDocumentType","\0DOMImplementation.createDocumentType",3),("createDocument","\0DOMImplementation.createDocument",2)] {
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;

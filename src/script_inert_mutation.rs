@@ -33,7 +33,7 @@ impl Bridge<'_> {
         // DocumentNodes retains these actual structural identities. Moving one
         // needs the separate Document getter/root update transaction.
         if arena.node(source.owner).is_some_and(|owner|matches!(&owner.kind,
-            Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(child))) {
+            Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(&Some(*child)))) {
             return Err(("NotSupportedError","Moving inert document structure nodes is not implemented.".into()));
         }
         if method=="removeChild" {
