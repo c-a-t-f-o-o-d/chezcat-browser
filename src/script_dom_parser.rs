@@ -239,13 +239,13 @@ impl Bridge<'_> {
         payload = payload.saturating_add(document_children.capacity() * size_of::<u32>());
         entries.push(node(
             Kind::Document(DocumentNodes {
-                kind:parsed.kind,mode:parsed.mode,
+                kind:parsed.kind,mode:parsed.mode,content_type:"text/html",
                 implementation,
                 doctype,
                 url,
-                html: handle(html),
-                head: handle(head),
-                body: handle(body),
+                html: Some(handle(html)),
+                head: Some(handle(head)),
+                body: Some(handle(body)),
                 title: std::mem::take(&mut parsed.title),
             }),
             None,

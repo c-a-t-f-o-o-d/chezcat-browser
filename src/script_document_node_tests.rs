@@ -1,13 +1,14 @@
 //! Genuine logical main-Document Node facts; no full Document implementation.
 use super::*;
 
-fn fixture(source:&str)->(Document,Forms,Page) {
+fn fixture_with_profile(source:&str,browser:bool)->(Document,Forms,Page) {
     let mut doc=crate::html::parse("<html><head></head><body><p id=p>old</p><form id=nodeType name=nodeType></form></body></html>");doc.scripting_enabled=true;
-    let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    let mut forms=Forms::new(&doc);let mut page=if browser{Page::new()}else{Page::for_test()};
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/original").unwrap().0),path:None,root:None,fragment:String::new()});
     let out=page.start(&mut doc,&mut forms,&[Script {node:0,label:"Original main Document Node identity".into(),source:source.into()}]);
     assert_eq!(out.errors,0,"{}",page.report());(doc,forms,page)
 }
+fn fixture(source:&str)->(Document,Forms,Page){fixture_with_profile(source,false)}
 fn evaluate(page:&mut Page,doc:&mut Document,forms:&mut Forms,source:&str) {
     let out=page.console_eval(doc,forms,source);assert_eq!(out.errors,0,"{}",page.report());
 }
@@ -55,13 +56,13 @@ if(document.nodeType!==9||p.nodeType!==1||nameGetter.call(document)!=='#document
 
 #[test]
 fn document_node_saved_getters_keep_actual_holder_and_receiver_owner_guards() {
-    let (mut doc,mut forms,mut page)=fixture(r#"
+    let (mut doc,mut forms,mut page)=fixture_with_profile(r#"
 var typeGetter=Object.getOwnPropertyDescriptor(Node.prototype,'nodeType').get,nameGetter=Object.getOwnPropertyDescriptor(Node.prototype,'nodeName').get;
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,ChildFunction=w.Function;
 var childGetter=ChildFunction('return Object.getOwnPropertyDescriptor(Node.prototype,"nodeType").get;')(),marker={entered:0};
 var invoke=ChildFunction('getter','node','marker','marker.entered++;return getter.call(node);');
 if(Object.getPrototypeOf(childGetter)!==ChildFunction.prototype||childGetter===typeGetter||childGetter.call(document)!==9||invoke(nameGetter,document,marker)!=='#document'||marker.entered!==1)throw 'genuine child owner and same-origin borrowing';
-"#);
+"#,true);
     let commits=page.state.dom_commits;
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
     for source in ["childGetter.call(document);","invoke(typeGetter,document,marker);","invoke(nameGetter,document,marker);"] {

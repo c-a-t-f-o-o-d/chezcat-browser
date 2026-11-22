@@ -3566,13 +3566,14 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
+        index==0&&method==xml_documents::CREATE
+            ||index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
             ||index==0&&method=="createElementNS"&&(object==DOCUMENT||self.inert_document(object))
             ||index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
             ||index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==2&&method=="setAttributeNS"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
-            ||self.inert_factory(object,method)==Some("createTextNode")
+            ||matches!(self.inert_factory(object,method),Some("createTextNode"|"createComment"))
             ||self.event_target_interface(object)&&matches!(method,"Text"|"Comment"))
             ||index==1&&(method==CREATE_PROCESSING_INSTRUCTION||method=="createProcessingInstruction"
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
@@ -3584,6 +3585,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
         if method==element_names::DEFAULT_METHOD{return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
@@ -3706,6 +3708,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if method==xml_documents::CREATE{return Some(2);}
         if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
         if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
         if self.inert_factory(object, method).is_some() {
@@ -3765,7 +3768,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)
             && matches!(method, CREATE_CDATA_SECTION | CREATE_PROCESSING_INSTRUCTION | DOCUMENT_IMPORT_NODE
                 | PROCESSING_INSTRUCTION_TARGET_GET | HTML_TEMPLATE_CONTENT_GET | "ProcessingInstruction"
-                | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | script_inert_documents::HAS_FEATURE)
+                | script_inert_documents::GET | script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | xml_documents::CREATE | script_inert_documents::HAS_FEATURE)
         {
             return Some(object);
         }
@@ -3827,6 +3830,7 @@ impl Host for Bridge<'_> {
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if method==xml_documents::CREATE&&index==0{return true;}
         if (STYLE_BASE..DATASET_BASE).contains(&object) && method == "setProperty" && index == 2 { return true; }
         if object==WINDOW && method=="getComputedStyle" && index==1 {return true;}
         if (object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS")
@@ -3878,6 +3882,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==xml_documents::CREATE{return 2;}
         if method==element_names::DEFAULT_METHOD{return 1;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
@@ -3971,6 +3976,9 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method==xml_documents::CREATE{return self.validate_xml_document_factory(args);}
+        if method=="createElement"&&self.inert_document(object){if let Some(Value::String(name))=args.first(){if !script_attribute_names::valid_element_local_name(name){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
+
         if self.event_target_interface(object)&&matches!(method,"XMLHttpRequestEventTarget"|"XMLHttpRequestUpload"){return Err(("TypeError","Illegal request interface constructor.".into()));}
         if method.starts_with("\0XHR.") {
             if let Some(name)=crate::javascript::xhr_interface::getter(method).or_else(||crate::javascript::xhr_interface::setter(method)){return self.xhr_validate_member(object,name);}
@@ -4430,7 +4438,7 @@ impl Host for Bridge<'_> {
                 return self.html_slot_receiver(receiver);
             }
             if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
-            if matches!(method, script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | script_inert_documents::HAS_FEATURE) {
+            if matches!(method, script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | xml_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
         }
@@ -5982,6 +5990,7 @@ impl Host for Bridge<'_> {
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
         if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
         if method == script_inert_documents::parser::PARSE && self.inert_parser(object) { return self.parse_inert_document(args); }
+        if method==xml_documents::CREATE{return self.create_xml_document(object,args);}
         if method==script_inert_documents::CREATE_DOCTYPE{return self.create_document_type(object,args);}
         if method == script_inert_documents::CREATE { return self.create_inert_document(args); }
         if matches!(placeholder::operation(method),Some((_,false))){return self.placeholder_get(object);}
@@ -7509,10 +7518,9 @@ if(item!==images.item || item.call(images,0)!==first)throw Error('method identit
 var rejected=false;try{item(0);}catch(error){rejected=error.name==='TypeError';}
 if(!rejected)throw Error('unbound method accepted');
 document.title='Images inspected';
-"#, "document.images.length=0;", "if(document.images.length!==6)throw Error('mutable collection');"],
+"#, "document.images.length=0;", "var lengthGetter=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length').get;if(document.images.length!==6||lengthGetter.call(document.images)!==6)throw Error('mutable collection');"],
         );
-        assert_eq!(outcome.errors, 1, "{}", page.report());
-        assert!(page.report().contains("image collection is read-only"));
+        assert_eq!(outcome.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "Images inspected");
         assert_eq!(doc.attr(id(&doc, "renamed"), "name"), Some("logo"));
     }
@@ -8582,3 +8590,9 @@ use script_inert_documents::element_names;
 #[cfg(test)]
 #[path="script_native_expanded_names_tests.rs"]
 mod native_expanded_names_tests;
+
+use script_inert_documents::xml_documents;
+
+#[cfg(test)]
+#[path="script_native_xml_document_tests.rs"]
+mod native_xml_document_tests;

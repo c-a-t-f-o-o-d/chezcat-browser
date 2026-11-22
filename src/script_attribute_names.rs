@@ -21,6 +21,11 @@ pub(super) fn valid_attribute_name(name: &str) -> bool {
     !name.is_empty() && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '=' | '>'))
 }
 
+pub(super) fn valid_element_local_name(local:&str)->bool{
+    let forbidden=|c:char|matches!(c,'\0'|'\t'|'\n'|'\u{c}'|'\r'|' '|'/'|'>');
+    let mut chars=local.chars();match chars.next(){Some(c) if c.is_ascii_alphabetic()=>!local.chars().any(forbidden),Some(c) if c==':'||c=='_'||c>='\u{80}'=>chars.all(|c|c.is_ascii_alphanumeric()||matches!(c,'-'|'.'|':'|'_')||c>='\u{80}'),_=>false}
+}
+
 // Element-context validation differs from attribute-context validation (for
 // example, '=' is permitted after an ASCII alpha). Unsupported factory slices
 // are checked separately, after the real name/namespace exceptions.
@@ -41,12 +46,7 @@ pub(super) fn validate_element_namespace_value(namespace:&crate::javascript::Val
 fn validate_element_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&str)->Result<(),(&'static str,String)> {
     let forbidden=|c:char|matches!(c,'\0'|'\t'|'\n'|'\u{c}'|'\r'|' '|'/'|'>');
     let (prefix,local)=qualified.split_once(':').map_or((None,qualified),|(p,l)|(Some(p),l));
-    let mut chars=local.chars();
-    let valid=match chars.next() {
-        Some(c) if c.is_ascii_alphabetic()=>!local.chars().any(forbidden),
-        Some(c) if c==':'||c=='_'||c>='\u{80}'=>chars.all(|c|c.is_ascii_alphanumeric()||matches!(c,'-'|'.'|':'|'_')||c>='\u{80}'),
-        _=>false,
-    };
+    let valid=valid_element_local_name(local);
     if !valid||prefix.is_some_and(|p|p.is_empty()||p.chars().any(forbidden)) {return Err(("InvalidCharacterError","Invalid element local name or namespace prefix.".into()));}
     let declaration=qualified=="xmlns"||prefix==Some("xmlns");
     if prefix.is_some()&&!present||prefix==Some("xml")&&!xml

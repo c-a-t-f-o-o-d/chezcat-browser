@@ -158,7 +158,7 @@ fn browser_inert_storage_parsed_sources_cross_old_count_with_real_order_and_owne
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
     let Value::Host(owner) = bridge.parse_inert_document(&[Value::String(markup)]).unwrap() else { panic!("real parsed document") };
     let Kind::Document(document) = &bridge.state.inert_documents.node(owner).unwrap().kind else { panic!("document record") };
-    let body = document.body;
+    let body = document.body.expect("actual parsed HTML body");
     let children = bridge.inert_children(body).unwrap();
     assert_eq!(children.len(), 70_000);
     for handle in [children[0], children[69_999]] {

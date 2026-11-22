@@ -5,6 +5,8 @@ use std::rc::Rc;
 
 #[path="script_element_names.rs"]
 pub(super) mod element_names;
+#[path="script_xml_documents.rs"]
+pub(super) mod xml_documents;
 
 #[path="script_inert_content.rs"]
 mod content;
@@ -68,12 +70,13 @@ struct TemplateIndexGrowth {
 struct DocumentNodes {
     kind:crate::html::DocumentKind,
     mode:crate::html::DocumentMode,
+    content_type:&'static str,
     implementation: u32,
     doctype: Option<u32>,
     url: String,
-    html: u32,
-    head: u32,
-    body: u32,
+    html: Option<u32>,
+    head: Option<u32>,
+    body: Option<u32>,
     title: String,
 }
 
@@ -268,7 +271,8 @@ impl Bridge<'_> {
         }
         if self.inert_parser(object) { return Some("DOMParser"); }
         Some(match &self.state.inert_documents.node(object)?.kind {
-            Kind::Document(_) | Kind::TemplateDocument { .. } => "Document",
+            Kind::Document(doc)=>if doc.kind==crate::html::DocumentKind::Xml{"XMLDocument"}else{"Document"},
+            Kind::TemplateDocument { .. }=>"Document",
             Kind::Fragment { .. } => "DocumentFragment",
             Kind::Parsed { source, .. } => {
                 let node = self.parsed_source(*source)?.0;
@@ -298,6 +302,7 @@ impl Bridge<'_> {
             "createElement" => Some("createElement"),
             "createElementNS" => Some("createElementNS"),
             "createTextNode" => Some("createTextNode"),
+            "createComment"=>Some("createComment"),
             "createDocumentFragment" => Some("createDocumentFragment"),
             _ => None,
         }
@@ -1544,8 +1549,8 @@ impl Bridge<'_> {
         entries.try_reserve_exact(count).map_err(|_| "Cannot stage inert document entries.")?;
         entries.extend([
             node(Kind::Document(DocumentNodes {
-                kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,
-                implementation, doctype: Some(doctype), url: text_copy("about:blank")?, html, head, body, title: normalized,
+                kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,content_type:"text/html",
+                implementation, doctype: Some(doctype), url: text_copy("about:blank")?, html:Some(html), head:Some(head), body:Some(body), title: normalized,
             }), None, links(&[doctype, html])?),
             Entry::Implementation,
             node(Kind::Doctype(crate::html::DocumentTypeData::html()?), Some(document), Vec::new()),
@@ -1579,6 +1584,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="createComment"{let data=self.dom_text(args.first().ok_or("createComment requires one argument.")?)?;return self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Comment(data),namespace:crate::html::Namespace::None,children:Vec::new()},0).map(Value::Host);}
+        if method=="createElement"&&self.state.inert_documents.node(owner).is_some_and(|node|matches!(&node.kind,Kind::Document(doc) if doc.kind==crate::html::DocumentKind::Xml)){return self.create_xml_element(owner,args);}
+
         if method=="createElementNS"{return self.create_expanded_element(owner,args);}
         let kind = if method == "createDocumentFragment" {
             Kind::Fragment { template: None }
@@ -1697,6 +1705,8 @@ impl Bridge<'_> {
         if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
+        if self.inert_document(object)&&matches!(property,"head"|"body"){return self.inert_document_structure_get(object,property);}
+        if self.inert_document(object)&&property=="title"{return self.inert_document_title_get(object);}
         if element_names::property(property)&&self.inert_node_type(object)==Some(1){return self.inert_element_name_get(object,property);}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Doctype(data)=&node.kind {
@@ -1833,9 +1843,9 @@ impl Bridge<'_> {
                 let Kind::Text(value) = &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
                 Value::Number(value.encode_utf16().count() as f64)
             }
-            "documentElement" => host(document.map(|doc| doc.html)),
-            "head" => host(document.map(|doc| doc.head)),
-            "body" => host(document.map(|doc| doc.body)),
+            "documentElement" => host(document.and_then(|doc| doc.html)),
+            "head" => host(document.and_then(|doc| doc.head)),
+            "body" => host(document.and_then(|doc| doc.body)),
             "doctype" => host(document.and_then(|doc| doc.doctype)),
             "implementation" => host(document.map(|doc| doc.implementation).or(template_implementation)),
             "title" if template_implementation.is_some() => string(""),
@@ -1845,7 +1855,7 @@ impl Bridge<'_> {
                 string(&document.title)
             }
             "URL" | "documentURI" if html_document => string(document.map_or("about:blank", |doc| &doc.url)),
-            "contentType" if html_document => string("text/html"),
+            "contentType" if html_document => string(document.map_or("text/html",|doc|doc.content_type)),
             "compatMode" if html_document => string(document.map_or(crate::html::DocumentMode::NoQuirks,|doc|doc.mode).compat_mode()),
             "characterSet" if html_document => string("UTF-8"),
             "defaultView" if html_document => Value::Null,

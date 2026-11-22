@@ -106,7 +106,7 @@ impl Bridge<'_> {
         }
         for handle in [incoming, outgoing] {
             let n = arena.node(handle).unwrap();
-            if arena.node(n.owner).is_some_and(|owner|matches!(&owner.kind,Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(&handle))){return Err(("NotSupportedError","Replacing or moving inert document structure is not implemented.".into()));}
+            if arena.node(n.owner).is_some_and(|owner|matches!(&owner.kind,Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(&Some(handle)))){return Err(("NotSupportedError","Replacing or moving inert document structure is not implemented.".into()));}
         }
         Ok(())
     }
