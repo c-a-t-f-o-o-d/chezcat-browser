@@ -8,7 +8,7 @@ impl Bridge<'_> {
         object: u32,
         text: DomString,
     ) -> Result<(), String> {
-        if !matches!(self.inert_node_type(object), Some(3 | 7 | 8)) {
+        if !matches!(self.inert_node_type(object), Some(3 | 4 | 7 | 8)) {
             return Err("Inert CharacterData receiver is unavailable.".into());
         }
         let kind = &self.state.inert_documents.node(object).unwrap().kind;
@@ -45,6 +45,7 @@ impl Bridge<'_> {
             let source_node = self.parsed_source(source).unwrap().0;
             let kind = match &source_node.kind {
                 NodeKind::Text(_) => NodeKind::Text(text),
+                NodeKind::Cdata(_)=>NodeKind::Cdata(text),
                 NodeKind::Comment(_) => NodeKind::Comment(text),
                 NodeKind::ProcessingInstruction { target, .. } => NodeKind::ProcessingInstruction {
                     target: script_clone_node::copy_text(target)?,

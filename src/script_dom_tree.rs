@@ -464,7 +464,7 @@ impl Bridge<'_> {
                 || self.state.dom.created.contains(&node) { return true; }
         // A raw-text child retains its Text identity when the sheet or script
         // connects. Its containing resource still owns all content mutations.
-        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_))
+        if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_))
             && self.state.dom.connected.get(node)==Some(&true)
             && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
                 tag(self.doc,parent)=="script" || self.created_html_style(parent)) {
@@ -592,7 +592,7 @@ impl Bridge<'_> {
             || self.dom_stylesheet(node)
                 && script_stylesheets::link_attribute(property)
                     .is_some_and(|name| name != "disabled")
-            || matches!(self.doc.nodes[node].kind, NodeKind::Text(_)) && property == "data"
+            || matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_)) && property == "data"
             || self.comment_receiver(object) && matches!(property,"data"|"nodeValue"|"textContent")
     }
 
@@ -920,6 +920,7 @@ impl Bridge<'_> {
             return self.html_offset(object, Offset::Coordinate(axis)).map(Some);
         }
         let text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
+        let cdata=matches!(self.doc.nodes[node].kind,NodeKind::Cdata(_));
         let comment = matches!(self.doc.nodes[node].kind, NodeKind::Comment(_));
         let target = match &self.doc.nodes[node].kind {
             NodeKind::ProcessingInstruction { target, .. } => Some(target.as_str()),
@@ -928,7 +929,7 @@ impl Bridge<'_> {
         if let Some(value) = self.frame_content(node, property) { return Ok(Some(value)); }
         if common_node_property(property) {
             return Ok(Some(match property {
-                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if comment { 8.0 } else if target.is_some() { 7.0 } else if matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)){10.0}else { 1.0 }),
+                "nodeType" => Value::Number(if self.fragment_receiver(object) {11.0} else if text { 3.0 } else if cdata {4.0} else if comment { 8.0 } else if target.is_some() { 7.0 } else if matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)){10.0}else { 1.0 }),
                 "nodeName" => {
                     if let Some(target) = target {
                         self.state.copies(target.len())?;
@@ -936,7 +937,7 @@ impl Bridge<'_> {
                     }
                     let name = if self.fragment_receiver(object) { "#document-fragment".into() } else if text {
                         "#text".into()
-                    } else if comment {
+                    } else if cdata {"#cdata-section".into()} else if comment {
                         "#comment".into()
                     } else {
                         element_node_name(self.doc, node)
@@ -1047,7 +1048,7 @@ impl Bridge<'_> {
         }
         let bytes = match &kind {
             NodeKind::Element {tag,id,href,attrs,expanded_name}=>tag.capacity()+id.as_ref().map_or(0,String::capacity)+href.as_ref().map_or(0,String::capacity)+attrs.capacity()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>()+crate::html::element_names::owned_bytes(expanded_name),
-            NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
+            NodeKind::Text(text) | NodeKind::Cdata(text) | NodeKind::Comment(text) => text.capacity(),
             NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             NodeKind::DocumentFragment => 0,
             NodeKind::DocumentType(data)=>data.capacity(),
@@ -1061,7 +1062,7 @@ impl Bridge<'_> {
             "DOM retained node/payload backing allowance exhausted ({remaining} bytes available; {bytes} payload bytes requested)."))?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
         let work = match &kind {
-            NodeKind::Text(text) | NodeKind::Comment(text) => text.used_bytes(),
+            NodeKind::Text(text) | NodeKind::Cdata(text) | NodeKind::Comment(text) => text.used_bytes(),
             NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
             _ => bytes,
         };
@@ -1441,7 +1442,7 @@ impl Bridge<'_> {
         if method != "removeChild" && parent_depth.saturating_add(depth) > MAX_DOM_DEPTH {
             return Err("DOM tree depth limit reached (128).".into());
         }
-        if self.dom_script(parent) && !matches!(self.doc.nodes[child].kind, NodeKind::Text(_)) {
+        if self.dom_script(parent) && !matches!(self.doc.nodes[child].kind, NodeKind::Text(_) | NodeKind::Cdata(_)) {
             return Err("Created scripts accept text children only in this subset.".into());
         }
         self.state.work(
@@ -1540,7 +1541,7 @@ impl Bridge<'_> {
         let mut text = String::new();
         for &child in &self.doc.nodes[node].children {
             self.state.work(1)?;
-            if let NodeKind::Text(value) = &self.doc.nodes[child].kind {
+            if let NodeKind::Text(value) | NodeKind::Cdata(value) = &self.doc.nodes[child].kind {
                 let value=value.scalar()?;
                 if text.len().saturating_add(value.len()) > self.state.limits.host.string_bytes {
                     return Err("Raw element text exceeds the configured string allowance.".into());
@@ -1632,7 +1633,7 @@ impl Bridge<'_> {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);
             }
-            let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
+            let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
                 DomString::new()
@@ -1643,7 +1644,7 @@ impl Bridge<'_> {
             self.state.replace_storage(old_bytes, text.capacity(), text.used_bytes())?;
             self.state.ranges_replace_data(node);
             match &mut self.doc.nodes[node].kind {
-                NodeKind::Text(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
+                NodeKind::Text(data) | NodeKind::Cdata(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
                     *data = text;
                 }
                 _ => unreachable!("character data was checked above"),

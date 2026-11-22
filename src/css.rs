@@ -162,12 +162,12 @@ fn stylesheet_sources_with<'a>(doc:&'a Document,external:&'a HashMap<usize,Strin
         } else {
             if let Some(meter)=meter.as_deref_mut() {meter.work(entry.children.len().saturating_mul(2))?;}
             let mut length=Some(0usize);
-            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {length=length.and_then(|n|n.checked_add(text.len()));}}
+            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text) | NodeKind::Cdata(text),..})=doc.nodes.get(child) {length=length.and_then(|n|n.checked_add(text.len()));}}
             let Some(length)=length.filter(|&n|n<=doc.stylesheet_limits.sheet_bytes) else {sources.push(SheetCandidate::Error(format!("CSS node {node}: complete inline stylesheet exceeds its byte allowance.")));continue;};
             if let Some(meter)=meter.as_deref_mut() {meter.work(length.max(1).div_ceil(64).saturating_mul(2))?;meter.copies(length)?;}
             let mut source=String::new();
             if source.try_reserve(length).is_err() {sources.push(SheetCandidate::Error(format!("CSS node {node}: stylesheet allocation failed.")));continue;}
-            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {source.push_str(text);}}
+            for &child in &entry.children {if let Some(crate::html::Node{kind:NodeKind::Text(text) | NodeKind::Cdata(text),..})=doc.nodes.get(child) {source.push_str(text);}}
             std::borrow::Cow::Owned(source)
         };
         sources.push(SheetCandidate::Source(node,source));
@@ -205,7 +205,7 @@ pub(crate) fn document_order(doc:&Document)->Vec<usize> {
 }
 pub(crate) fn inline_stylesheet(doc:&Document,node:usize)->Result<String,String> {
     let mut source=String::new();
-    for &child in &doc.nodes[node].children {if let Some(crate::html::Node{kind:NodeKind::Text(text),..})=doc.nodes.get(child) {
+    for &child in &doc.nodes[node].children {if let Some(crate::html::Node{kind:NodeKind::Text(text) | NodeKind::Cdata(text),..})=doc.nodes.get(child) {
         let length=source.len().checked_add(text.len()).ok_or("Stylesheet text length overflow.")?;
         if length>doc.stylesheet_limits.sheet_bytes {return Err("Complete inline stylesheet exceeds its byte allowance.".into());}
         source.try_reserve(text.len()).map_err(|_|"Inline stylesheet allocation failed.")?;source.push_str(text);

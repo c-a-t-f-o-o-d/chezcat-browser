@@ -63,7 +63,7 @@ pub(crate) fn textarea_content(doc: &Document, node: usize) -> Option<&str> {
         [child] => {
             let child = doc.nodes.get(*child)?;
             match &child.kind {
-                NodeKind::Text(text) if child.namespace == crate::html::Namespace::None && child.children.is_empty() => Some(text),
+                NodeKind::Text(text) | NodeKind::Cdata(text) if child.namespace == crate::html::Namespace::None && child.children.is_empty() => Some(text),
                 _ => None,
             }
         }

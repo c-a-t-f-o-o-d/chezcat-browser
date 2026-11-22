@@ -2666,7 +2666,7 @@ impl Bridge<'_> {
             if !self.state.tree.active[node] && !self.state.detached_nodes.contains(&node) {
                 continue;
             }
-            if let NodeKind::Text(text) = &self.doc.nodes[node].kind {
+            if let NodeKind::Text(text) | NodeKind::Cdata(text) = &self.doc.nodes[node].kind {
                 parts.try_reserve(1).map_err(|_|"Cannot reserve native textContent parts.")?;
                 parts.push(text);
             }
@@ -3037,7 +3037,7 @@ impl Bridge<'_> {
     /// Author data uses VM backing only for represented CharacterData owners.
     /// Native content/resource mutation eligibility remains independently checked.
     fn character_data_author_receiver(&self, object: u32) -> bool {
-        if matches!(self.inert_node_type(object), Some(3 | 7 | 8)) {
+        if matches!(self.inert_node_type(object), Some(3 | 4 | 7 | 8)) {
             return true;
         }
         node_index(object).is_some_and(|node| {
@@ -3126,6 +3126,7 @@ impl Host for Bridge<'_> {
         Some(match self.doc.nodes[index].kind {
             NodeKind::Element { .. } => 1,
             NodeKind::Text(_) => 3,
+            NodeKind::Cdata(_)=>4,
             NodeKind::Comment(_) => 8,
             NodeKind::ProcessingInstruction { .. } => 7,
             NodeKind::DocumentFragment => 11,
@@ -3133,7 +3134,7 @@ impl Host for Bridge<'_> {
         })
     }
     fn mutation_observation_target(&self, target: u32) -> Option<bool> {
-        if let Some(kind)=self.inert_node_type(target){return Some(matches!(kind,3|7|8));}
+        if let Some(kind)=self.inert_node_type(target){return Some(matches!(kind,3|4|7|8));}
         self.text_content_receiver(target).then(|| node_index(target).is_some_and(|node|
             self.dom_accessible(node) && self.doc.nodes[node].kind.character_data().is_some()))
     }
@@ -3300,6 +3301,7 @@ impl Host for Bridge<'_> {
                 } else {(WINDOW,"Element")}
             } else if self.fragment_receiver(object) {(WINDOW,"DocumentFragment")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Text(_)) {(WINDOW,"Text")}
+            else if matches!(self.doc.nodes[node].kind,NodeKind::Cdata(_)){(WINDOW,"CDATASection")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::Comment(_)) {(WINDOW,"Comment")}
             else if matches!(self.doc.nodes[node].kind, NodeKind::ProcessingInstruction { .. }) {(WINDOW,"ProcessingInstruction")}
             else if matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)){(WINDOW,"DocumentType")}
@@ -3491,7 +3493,7 @@ impl Host for Bridge<'_> {
         if property=="textContent"&&self.text_content_receiver(object){return true;}
         if property=="name"&&self.html_slot_receiver(object){return true;}
         if self.mutation_observation_target(object)==Some(true)&&matches!(property,"data"|"nodeValue"){return true;}
-        if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
+        if matches!(self.inert_node_type(object),Some(3|4|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
 
         if self.iframe_sandbox_member(object,property) {return true;}
         if self.textarea_value_member(object,property) {return true;}
@@ -3566,7 +3568,8 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==0&&method==xml_documents::CREATE
+        index==0&&method==CREATE_CDATA_SECTION
+            ||index==0&&method==xml_documents::CREATE
             ||index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
             ||index==0&&method=="createElementNS"&&(object==DOCUMENT||self.inert_document(object))
             ||index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
@@ -4075,9 +4078,7 @@ impl Host for Bridge<'_> {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
         if method == DOCUMENT_IMPORT_NODE { return self.validate_import_source(args); }
-        if method == CREATE_CDATA_SECTION {
-            return Err(("NotSupportedError", "HTML documents cannot create CDATA sections.".into()));
-        }
+        if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
         if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
             let valid_target = matches!(args.first(), Some(Value::String(target))
                 if script_attribute_names::valid_xml_name(target));
@@ -5685,7 +5686,7 @@ impl Host for Bridge<'_> {
         if self.inert_interface(object).is_some() {
             if property=="name"&&self.html_slot_receiver(object){return self.set_inert_attribute(object,&[Value::String("name".into()),value]).map(|_|());}
             if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){DomString::new()}else{self.dom_text(&value)?};return self.replace_inert_text_content(object,text);}
-            if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=if matches!(value,Value::Null)&&property!="data"{DomString::new()}else{self.dom_text(&value)?};return self.write_inert_character_data(object,text);}
+            if matches!(self.inert_node_type(object),Some(3|4|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=if matches!(value,Value::Null)&&property!="data"{DomString::new()}else{self.dom_text(&value)?};return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));
         }
@@ -5979,6 +5980,7 @@ impl Host for Bridge<'_> {
             if !self.doctype_receiver(object){return Err("DocumentType getter requires a genuine accessible DocumentType.".into());}
             return self.get_with_caller(self.state.navigation_incumbent,object,property);
         }
+        if method==CREATE_CDATA_SECTION{return self.create_cdata_section(object,args);}
         if method == PROCESSING_INSTRUCTION_TARGET_GET { return self.processing_instruction_target(object); }
         if method == HTML_TEMPLATE_CONTENT_GET { return self.template_content(object); }
         if method == CREATE_PROCESSING_INSTRUCTION {
@@ -6501,7 +6503,7 @@ fn node_bytes(node: &Node) -> usize {
     match &node.kind {
         NodeKind::DocumentFragment => 0,
         NodeKind::DocumentType(data)=>data.capacity(),
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
+        NodeKind::Text(text) | NodeKind::Cdata(text) | NodeKind::Comment(text) => text.capacity(),
         NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
         NodeKind::Element { id, attrs, expanded_name, .. } => {
             id.as_ref().map_or(0, String::capacity)
@@ -6521,7 +6523,7 @@ fn copied_node_bytes(node: &Node) -> usize {
                 + attrs.len() * size_of::<crate::html::Attribute>()
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
         }
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.used_bytes(),
+        NodeKind::Text(text) | NodeKind::Cdata(text) | NodeKind::Comment(text) => text.used_bytes(),
         NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
         NodeKind::DocumentFragment => 0,
         NodeKind::DocumentType(data)=>data.used_bytes(),
@@ -6535,7 +6537,7 @@ fn copied_payload_extra(kind: &NodeKind) -> usize {
                 + attrs.iter().map(|attr| attr.owned_bytes() - attr.bytes()).sum::<usize>()
                 + id.as_ref().map_or(0, |text| text.capacity() - text.len())
         }
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity() - text.used_bytes(),
+        NodeKind::Text(text) | NodeKind::Cdata(text) | NodeKind::Comment(text) => text.capacity() - text.used_bytes(),
         NodeKind::ProcessingInstruction { target, data } => {
             target.capacity() - target.len() + data.capacity() - data.used_bytes()
         }
@@ -8596,3 +8598,6 @@ use script_inert_documents::xml_documents;
 #[cfg(test)]
 #[path="script_native_xml_document_tests.rs"]
 mod native_xml_document_tests;
+#[cfg(test)]
+#[path="script_native_cdata_tests.rs"]
+mod native_cdata_tests;

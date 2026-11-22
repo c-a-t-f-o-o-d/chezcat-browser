@@ -6266,3 +6266,7 @@ mod native_expanded_names_tests;
 #[cfg(test)]
 #[path="app_native_xml_document_tests.rs"]
 mod native_xml_document_tests;
+
+#[cfg(test)]
+#[path="app_native_cdata_tests.rs"]
+mod native_cdata_tests;

@@ -1609,7 +1609,7 @@ fn used_font_characters(loaded: &mut Loaded) -> HashMap<String, BTreeSet<u32>> {
             continue;
         }
         let text = match &item.kind {
-            NodeKind::Text(text) => text.render_projection(),
+            NodeKind::Text(text) | NodeKind::Cdata(text) => text.render_projection(),
             NodeKind::Element { tag, .. }
                 if matches!(tag.as_str(), "input" | "textarea" | "select") =>
             {
@@ -2425,7 +2425,7 @@ fn check_script(doc: &Document, node: usize) -> Result<(), String> {
 fn script_text(doc: &Document, node: usize, previous: usize, capacity: crate::javascript::limits::Capacities) -> Result<String, String> {
     let mut source = String::new();
     for &child in &doc.nodes[node].children {
-        if let NodeKind::Text(text) = &doc.nodes[child].kind {
+        if let NodeKind::Text(text) | NodeKind::Cdata(text) = &doc.nodes[child].kind {
             check_script_size(source.len().saturating_add(text.len()), previous, capacity)?;
             source.push_str(text);
         }

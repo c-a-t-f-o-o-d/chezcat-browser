@@ -300,7 +300,7 @@ impl Bridge<'_> {
         }
         let mut bytes = 0usize;
         for &child in &entry.children {
-            let NodeKind::Text(value) = &self.doc.nodes[child].kind else {
+            let (NodeKind::Text(value) | NodeKind::Cdata(value)) = &self.doc.nodes[child].kind else {
                 return Err("Created style elements currently admit only direct text children.".into());
             };
             bytes = bytes.checked_add(value.len()).ok_or("Stylesheet source size overflow.")?;

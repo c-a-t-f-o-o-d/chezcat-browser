@@ -138,9 +138,9 @@ impl Bridge<'_> {
     fn range_length(&mut self, handle: u32) -> Result<usize, String> {
         let node = self.range_node(handle)?;
         let item = &self.doc.nodes[node];
-        if let Some(text) = item.kind.character_data() {
-            self.state.work(text.len())?;
-            Ok(text.encode_utf16().count())
+        if let Some(text) = item.kind.character_dom_string() {
+            self.state.work(text.used_bytes())?;
+            Ok(text.utf16_len())
         } else {
             Ok(item.children.len())
         }
@@ -511,7 +511,7 @@ impl Bridge<'_> {
         let mut output = Vec::new();
         while let Some(node) = stack.pop() {
             self.state.work(1)?;
-            if matches!(self.doc.nodes[node].kind, NodeKind::Text(_)) {
+            if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_)) {
                 let handle = node_handle(node);
                 let length = self.range_length(handle)?;
                 if self.range_compare(
@@ -555,7 +555,7 @@ impl Bridge<'_> {
                 output
                     .try_reserve(count)
                     .map_err(|_| "Range string reservation failed.")?;
-                let NodeKind::Text(text) = &self.doc.nodes[node].kind else {
+                let (NodeKind::Text(text) | NodeKind::Cdata(text)) = &self.doc.nodes[node].kind else {
                     unreachable!()
                 };
                 output.extend(text.encode_utf16().skip(start).take(count));

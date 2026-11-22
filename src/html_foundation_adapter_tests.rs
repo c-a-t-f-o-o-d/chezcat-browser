@@ -58,6 +58,7 @@ fn dump(doc:&Document)->Result<String,String> {
                 for (name,value) in attributes {writeln!(&mut output,"| {indent}  {name}=\"{value}\"").unwrap();}
             },
             NodeKind::Text(text)=>{writeln!(&mut output,"| {indent}\"{text}\"").unwrap();},
+            NodeKind::Cdata(_)=>return Err("F01: XML CDATA tree dump schema is unavailable in this HTML parser adapter.".into()),
             NodeKind::Comment(text)=>{writeln!(&mut output,"| {indent}<!-- {text} -->").unwrap();},
             NodeKind::ProcessingInstruction {target,data}=>{writeln!(&mut output,"| {indent}<?{target} {data}?>").unwrap();},
             NodeKind::DocumentType(data)=>{

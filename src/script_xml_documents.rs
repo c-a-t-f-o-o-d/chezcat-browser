@@ -32,7 +32,7 @@ impl Bridge<'_>{
         }
         let Some(title)=title else{return Ok(Value::String(String::new()));};
         let children=self.inert_children(title).ok_or("Missing title child nodes.")?;let mut handles=Vec::new();handles.try_reserve_exact(children.len()).map_err(|_|"Cannot reserve title text references.")?;
-        handles.extend(children.iter().copied().filter(|&node|self.inert_node_type(node)==Some(3)));
+        handles.extend(children.iter().copied().filter(|&node|matches!(self.inert_node_type(node),Some(3|4))));
         let (bytes,count)={let parts=self.inert_dom_text_parts(&handles)?;(parts.iter().try_fold(0usize,|n,p|n.checked_add(p.used_bytes()).ok_or("Title input size overflow."))?,parts.iter().try_fold(0usize,|n,p|n.checked_add(p.utf16_len()).ok_or("Title unit count overflow."))?)};
         self.state.work(bytes)?;self.state.copies(count.checked_mul(2).ok_or("Title temporary size overflow.")?)?;
         let parts=self.inert_dom_text_parts(&handles)?;let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve title code units.")?;let mut whitespace=false;

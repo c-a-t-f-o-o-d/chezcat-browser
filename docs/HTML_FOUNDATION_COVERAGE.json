@@ -480,7 +480,10 @@
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/script_cdata.rs",
+                "src/script_native_cdata_tests.rs",
+                "src/app_native_cdata_tests.rs"
               ],
               "integration_dependencies": [
                 "F06",
@@ -489,7 +492,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Genuine native CDATA factory records preserve exact UTF-16, actual XML owner, Text/CharacterData ancestry and kind through supported clone/import/mutation/promotion. Saved identity/author fields/old-value observation, exclusive-Text normalize boundaries, Range strings, actual storage/native-slot fallback/refusal/recovery and connected Windows App text/pixels/editor/link have original evidence. HTML factory rejection and XML closing-delimiter validation preserve ordered IDL conversion. XML byte/DTD/entity/parser/serialization producers, complete CharacterData methods and unchanged browser WPT remain open; no F01/F08 closure.",
               "closing_evidence": []
             }
           ]

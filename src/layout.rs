@@ -2089,7 +2089,7 @@ impl Engine<'_> {
         };
         match &node.kind {
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => {},
-            NodeKind::Text(text) => self.text(text, &style, link),
+            NodeKind::Text(text) | NodeKind::Cdata(text) => self.text(text, &style, link),
             NodeKind::Element { tag, id, .. } => {
                 if style.display == Display::None
                     || matches!(
@@ -2874,10 +2874,10 @@ impl Engine<'_> {
         }
         let mut value = match &self.doc.nodes[node].kind {
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => Intrinsic::default(),
-            NodeKind::Text(text) if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) => {
+            NodeKind::Text(text) | NodeKind::Cdata(text) if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) => {
                 self.collapsed_text_intrinsic(text, &style)
             }
-            NodeKind::Text(text) => {
+            NodeKind::Text(text) | NodeKind::Cdata(text) => {
                 let advance = self.space_width(&style);
                 let shaped = self.font_spec(&style).map(|font| font.shape(text));
                 let (mut line, mut word, mut longest, mut preferred) =
@@ -3016,7 +3016,7 @@ impl Engine<'_> {
                             continue;
                         }
                         if matches!(style.display, Display::Flex | Display::InlineFlex | Display::Grid)
-                            && matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) if text.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}')))
+                            && matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) | NodeKind::Cdata(text) if text.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}')))
                         {
                             continue;
                         }
@@ -3356,8 +3356,8 @@ impl Engine<'_> {
                 self.walk(child, link, depth + 1);
                 continue;
             }
-            let anonymous = matches!(self.doc.nodes[child].kind, NodeKind::Text(_));
-            if let NodeKind::Text(text) = &self.doc.nodes[child].kind {
+            let anonymous = matches!(self.doc.nodes[child].kind, NodeKind::Text(_) | NodeKind::Cdata(_));
+            if let NodeKind::Text(text) | NodeKind::Cdata(text) = &self.doc.nodes[child].kind {
                 if text
                     .chars()
                     .all(|c| matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{000c}'))
@@ -4116,7 +4116,7 @@ impl Engine<'_> {
             && self.doc.nodes[index].namespace == crate::html::Namespace::Html
             && self.doc.nodes[index].children.iter().all(|&child| {
                 self.doc.nodes.get(child).is_some_and(|child| {
-                    matches!(child.kind, NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. })
+                    matches!(child.kind, NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. })
                 })
             })
         {

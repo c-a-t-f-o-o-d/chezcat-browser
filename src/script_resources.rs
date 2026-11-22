@@ -193,7 +193,7 @@ impl Bridge<'_> {
         }
         let source = self.doc.attr(node, "src").map(str::to_owned);
         if source.is_none() && self.doc.nodes[node].children.iter().all(|&child| {
-            !matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) if !text.trim().is_empty())
+            !matches!(&self.doc.nodes[child].kind, NodeKind::Text(text) | NodeKind::Cdata(text) if !text.trim().is_empty())
         }) {
             return Ok(()); // An empty script can acquire src/text later.
         }

@@ -146,7 +146,7 @@ impl Bridge<'_> {
                     for &child in &document.nodes[local].children {
                         self.state.work(1)?;
                         let valid = match &document.nodes[child].kind {
-                            NodeKind::Text(_) | NodeKind::Comment(_) => true,
+                            NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) => true,
                             NodeKind::Element { tag, .. } => match name {
                                 "select" => matches!(tag.as_str(), "option" | "optgroup"),
                                 "optgroup" => tag == "option",

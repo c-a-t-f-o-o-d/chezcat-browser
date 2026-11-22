@@ -7,6 +7,8 @@ use std::rc::Rc;
 pub(super) mod element_names;
 #[path="script_xml_documents.rs"]
 pub(super) mod xml_documents;
+#[path="script_cdata.rs"]
+mod cdata;
 
 #[path="script_inert_content.rs"]
 mod content;
@@ -253,6 +255,7 @@ impl Bridge<'_> {
             Kind::Parsed { source, .. } => match self.parsed_source(source)?.0.kind {
                 NodeKind::Element { .. } => 1,
                 NodeKind::Text(_) => 3,
+                NodeKind::Cdata(_)=>4,
                 NodeKind::Comment(_) => 8,
                 NodeKind::ProcessingInstruction { .. } => 7,
                 NodeKind::DocumentFragment => 11,
@@ -283,6 +286,7 @@ impl Bridge<'_> {
                         _ => "Element",
                     },
                     NodeKind::Text(_) => "Text",
+                    NodeKind::Cdata(_)=>"CDATASection",
                     NodeKind::Comment(_) => "Comment",
                     NodeKind::ProcessingInstruction { .. } => "ProcessingInstruction",
                     NodeKind::DocumentFragment => "DocumentFragment",
@@ -325,7 +329,7 @@ impl Bridge<'_> {
             Kind::Fragment { .. } => false,
             Kind::Parsed { source, .. } => match self.parsed_source(source).map(|(node, _)| &node.kind) {
                 Some(NodeKind::Element { .. }) => matches!(name, "attributes" | "id" | "localName" | "tagName" | "namespaceURI" | "prefix"),
-                Some(NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }) =>
+                Some(NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }) =>
                     matches!(name, "data" | "length"),
                 _ => false,
             },
@@ -942,7 +946,7 @@ impl Bridge<'_> {
                 ParsedSource::Generated(_) => generated.as_deref().unwrap(),
             };
             match &node.kind {
-                NodeKind::Text(text) => escaped(self.state, &mut output, text.scalar()?, false, raw)?,
+                NodeKind::Text(text) | NodeKind::Cdata(text) => escaped(self.state, &mut output, text.scalar()?, false, raw)?,
                 NodeKind::Comment(data) => {
                     for piece in ["<!--", data.scalar()?, "-->"] { append(self.state, &mut output, piece)?; }
                 }
@@ -1174,7 +1178,7 @@ impl Bridge<'_> {
     }
 
     fn clone_inert_tree_with_slots(&mut self, object: u32, deep: bool, reserve_slots: bool) -> Result<Value, String> {
-        if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots) {
+        if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots && self.inert_node_type(object)==Some(3)) {
             let size = data.used_bytes();
             self.state.copies(size)?;
             let text = self.inert_text_value(object).unwrap().try_clone()?;
@@ -1661,7 +1665,7 @@ impl Bridge<'_> {
         match &self.state.inert_documents.node(object)?.kind {
             Kind::Text(value) => Some(value),
             Kind::Parsed { source, .. } => match &self.parsed_source(*source)?.0.kind {
-                NodeKind::Text(value) => Some(value),
+                NodeKind::Text(value) | NodeKind::Cdata(value) => Some(value),
                 _ => None,
             },
             _ => None,
@@ -1823,6 +1827,7 @@ impl Bridge<'_> {
                 Kind::Parsed { source, .. } => match &self.parsed_source(*source).ok_or("Inert parsed node is unavailable.")?.0.kind {
                     NodeKind::Element { tag, .. } => string(tag),
                     NodeKind::Text(_) => string("#text"),
+                    NodeKind::Cdata(_)=>string("#cdata-section"),
                     NodeKind::Comment(_) => string("#comment"),
                     NodeKind::ProcessingInstruction { target, .. } => string(target),
                     NodeKind::DocumentFragment => string("#document-fragment"),
@@ -1877,7 +1882,7 @@ impl Bridge<'_> {
 
 fn template_node_can_park(node: &Node) -> bool {
     match &node.kind {
-        NodeKind::Text(_) | NodeKind::Comment(_) => true,
+        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
         NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => crate::html::svg_dom_transfer(node),

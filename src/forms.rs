@@ -88,7 +88,7 @@ pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
 fn tag(doc: &Document, node: usize) -> &str {
     match &doc.nodes[node].kind {
         NodeKind::Element { tag, .. } => tag,
-        NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
+        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
         | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => "",
     }
 }
@@ -139,7 +139,7 @@ pub fn caption(doc: &Document, node: usize, kind: Kind) -> String {
             match &doc.nodes[child].kind {
                 NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
                 NodeKind::DocumentFragment => stack.extend(doc.nodes[child].children.iter().rev().copied()),
-                NodeKind::Text(value) => {
+                NodeKind::Text(value) | NodeKind::Cdata(value) => {
                     for ch in value.chars().take(256 - text.chars().count().min(256)) {
                         text.push(ch);
                     }
@@ -225,7 +225,7 @@ fn option_text(doc: &Document, node: usize) -> (String, bool) {
         match &doc.nodes[child].kind {
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
             NodeKind::DocumentFragment => stack.extend(doc.nodes[child].children.iter().rev().copied()),
-            NodeKind::Text(value) => {
+            NodeKind::Text(value) | NodeKind::Cdata(value) => {
                 for ch in value.chars() {
                     bytes += ch.len_utf8();
                     if bytes > MAX_TOTAL_VALUE_BYTES {
@@ -561,7 +561,7 @@ fn textarea_initial(doc: &Document, node: usize) -> (String, bool) {
         }
         match &doc.nodes[child].kind {
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
-            NodeKind::Text(value) => {
+            NodeKind::Text(value) | NodeKind::Cdata(value) => {
                 for ch in value.chars() {
                     units += ch.len_utf16();
                     if units > MAX_VALUE_UNITS {

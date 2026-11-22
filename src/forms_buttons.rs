@@ -63,7 +63,7 @@ fn button_shape(doc: &Document, node: usize) -> Result<(), String> {
 /// Plain caption leaves only. A BUTTON itself is not an admissible descendant.
 pub(crate) fn button_caption_node(doc: &Document, node: usize) -> bool {
     doc.nodes.get(node).is_some_and(|entry| match &entry.kind {
-        NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => entry.namespace == crate::html::Namespace::None && entry.children.is_empty(),
+        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => entry.namespace == crate::html::Namespace::None && entry.children.is_empty(),
         NodeKind::Element { tag, .. } => entry.namespace == crate::html::Namespace::Html && matches!(tag.as_str(),
             "span" | "b" | "i" | "em" | "strong" | "small" | "s" | "u" | "mark" | "sub" | "sup"
             | "code" | "kbd" | "samp" | "var" | "abbr" | "cite" | "q" | "time" | "br" | "wbr"),
@@ -106,7 +106,7 @@ fn checked_caption(doc: &Document, root: usize) -> Result<String, String> {
         if node != root && !button_caption_node(doc,node) {
             return Err("BUTTON captions accept only plain HTML phrasing text; native, interactive, resource or foreign interiors are not implemented.".into());
         }
-        if let NodeKind::Text(text) = &doc.nodes[node].kind {
+        if let NodeKind::Text(text) | NodeKind::Cdata(text) = &doc.nodes[node].kind {
             for ch in text.chars().take(256 - raw_chars) {
                 raw_chars += 1;
                 if ch.is_ascii_whitespace() { pending_space = !caption.is_empty(); }
@@ -213,15 +213,17 @@ mod tests {
         let foreign = id(&doc,"foreign");
         doc.nodes[foreign].namespace = crate::html::Namespace::UnknownForeign;
         let mut forms = Forms::new(&doc);
-        for name in ["submit","reset","input-button","hidden","actual","auto","foreign"] {
+        assert!(!forms.controls.contains_key(&foreign),"A non-HTML BUTTON has no native form-control state");
+        assert!(forms.script_set_value(foreign,"a\r\nb").is_err());
+        for name in ["submit","reset","input-button","hidden","actual","auto"] {
             let node = id(&doc,name);
             forms.script_set_value(node,"a\r\nb").unwrap();
             assert_eq!(forms.controls[&node].value.text(),"a\r\nb");
             assert_eq!(forms.controls[&node].button_element,matches!(name,"actual"|"auto"),"{name}");
         }
         forms.reset(id(&doc,"f"));
-        for name in ["submit","reset","input-button","hidden","foreign"] {
-            assert_eq!(forms.controls[&id(&doc,name)].value.text(),"ab","The existing INPUT/non-HTML normalization path must remain: {name}");
+        for name in ["submit","reset","input-button","hidden"] {
+            assert_eq!(forms.controls[&id(&doc,name)].value.text(),"ab","The existing INPUT normalization path must remain: {name}");
         }
         for name in ["actual","auto"] {
             let control = &forms.controls[&id(&doc,name)];
