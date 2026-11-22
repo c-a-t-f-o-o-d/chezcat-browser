@@ -3,6 +3,9 @@ use super::*;
 use crate::html::{DocumentKind,ExpandedElementName,Namespace};
 use crate::html::element_names::{self,NamespaceRef};
 
+pub(in crate::scripting) const LOOKUP_URI:&str="\0Node.lookupNamespaceURI";
+pub(in crate::scripting) const LOOKUP_PREFIX:&str="\0Node.lookupPrefix";
+pub(in crate::scripting) fn namespace_method(method:&str)->bool{matches!(method,DEFAULT_METHOD|LOOKUP_URI|LOOKUP_PREFIX)}
 pub(in crate::scripting) const DEFAULT_METHOD:&str="\0Node.isDefaultNamespace";
 pub(in crate::scripting) fn property(name:&str)->bool{matches!(name,"tagName"|"nodeName"|"localName"|"namespaceURI"|"prefix")}
 fn result_bytes(class:Namespace,tag:&str,names:&[ExpandedElementName],property:&str)->Result<usize,String>{
@@ -132,3 +135,45 @@ impl Bridge<'_>{
         Err("Cyclic namespace ancestry.".into())
     }
 }
+
+#[derive(Clone,Copy)]
+enum NamespaceResult{Null,Static(&'static str),Uri(u32),Prefix(u32),AttributeValue(u32,usize),AttributeLocal(u32,usize)}
+impl Bridge<'_>{
+ fn namespace_result_view(&self,result:NamespaceResult)->Result<Option<crate::dom_string::DomStringRef<'_>>,String>{
+  use crate::dom_string::DomStringRef;
+  Ok(match result{
+   NamespaceResult::Null=>None,NamespaceResult::Static(value)=>Some(DomStringRef::Scalar(value)),
+   NamespaceResult::Uri(element)=>{let(class,names,_)=self.namespace_facts(element)?;match element_names::namespace(class,names)?{NamespaceRef::Null=>None,NamespaceRef::Static(value)=>Some(DomStringRef::Scalar(value)),NamespaceRef::Owned(value)=>Some(value.view())}},
+   NamespaceResult::Prefix(element)=>{let(class,names,_)=self.namespace_facts(element)?;element_names::prefix(class,names)?.map(DomString::view)},
+   NamespaceResult::AttributeValue(element,index)=>Some(self.namespace_facts(element)?.2.get(index).ok_or("Namespace declaration changed during native lookup.")?.value.view()),
+   NamespaceResult::AttributeLocal(element,index)=>Some(self.namespace_facts(element)?.2.get(index).ok_or("Namespace declaration changed during native lookup.")?.name.local().view()),
+  })
+ }
+ fn namespace_result(&mut self,result:NamespaceResult)->Result<Value,String>{
+  let Some(view)=self.namespace_result_view(result)?else{return Ok(Value::Null);};let length=view.logical_bytes();if length>self.state.limits.host.string_bytes{return Err("Namespace result exceeds the host string allowance.".into());}self.state.copies(length)?;
+  let Some(view)=self.namespace_result_view(result)?else{unreachable!()};match view{crate::dom_string::DomStringRef::Scalar(value)=>Ok(Value::String(script_clone_node::copy_text(value)?)),crate::dom_string::DomStringRef::Raw(units)=>{let mut value=Vec::new();value.try_reserve_exact(units.len()).map_err(|_|"Cannot reserve namespace result units.")?;value.extend_from_slice(units);Ok(Value::StringUnits(value))}}
+ }
+ pub(in crate::scripting) fn native_namespace_lookup(&mut self,object:u32,args:&[Value],prefix_lookup:bool)->Result<Value,String>{
+  let query=args.first().ok_or("Namespace lookup requires one argument.")?;if !matches!(query,Value::String(_)|Value::StringUnits(_)|Value::Null|Value::Undefined){return Err("Namespace lookup requires a converted nullable DOMString.".into());}
+  let empty=namespace_matches(NamespaceRef::Null,query);
+  if let Some(result)=self.frame_default_namespace(object){let namespace=result?;let result=if prefix_lookup||namespace.is_none(){NamespaceResult::Null}else if namespace_matches(NamespaceRef::Static("xml"),query){NamespaceResult::Static("http://www.w3.org/XML/1998/namespace")}else if namespace_matches(NamespaceRef::Static("xmlns"),query){NamespaceResult::Static("http://www.w3.org/2000/xmlns/")}else if empty{NamespaceResult::Static(namespace.unwrap())}else{NamespaceResult::Null};return self.namespace_result(result);}
+  if prefix_lookup&&empty{return Ok(Value::Null);}
+  self.state.rebuild(self.doc)?;if object==DOCUMENT{self.state.work(self.doc.nodes[0].children.len())?;}
+  let mut current=self.namespace_start(object)?;let maximum=self.doc.nodes.len().checked_add(self.state.inert_documents.entries.len()).and_then(|n|n.checked_add(self.state.inert_documents.adopted.len())).and_then(|n|n.checked_add(1)).ok_or("Namespace lookup ancestry overflow.")?;
+  for _ in 0..maximum{
+   let Some(element)=current else{return Ok(Value::Null);};self.state.work(1)?;
+   let(class,names,attrs)=self.namespace_facts(element)?;let bytes=namespace_bytes(element_names::namespace(class,names)?).checked_add(element_names::prefix(class,names)?.map_or(0,DomString::logical_bytes)).and_then(|n|attrs.iter().try_fold(n,|n,a|n.checked_add(a.name.bytes()).and_then(|n|n.checked_add(a.value.logical_bytes())))).and_then(|n|n.checked_add(query.bytes())).ok_or("Namespace lookup work overflow.")?;self.state.work(bytes)?;
+   let(class,names,attrs)=self.namespace_facts(element)?;let namespace=element_names::namespace(class,names)?;let prefix=element_names::prefix(class,names)?;
+   let result=if prefix_lookup{
+    if namespace_matches(namespace,query)&&prefix.is_some(){Some(NamespaceResult::Prefix(element))}else{attrs.iter().enumerate().find(|(_,a)|a.name.prefix().is_some_and(|p|p=="xmlns")&&namespace_matches(NamespaceRef::Owned(&a.value),query)).map(|(index,_)|NamespaceResult::AttributeLocal(element,index))}
+   }else if namespace_matches(NamespaceRef::Static("xml"),query){Some(NamespaceResult::Static("http://www.w3.org/XML/1998/namespace"))}else if namespace_matches(NamespaceRef::Static("xmlns"),query){Some(NamespaceResult::Static("http://www.w3.org/2000/xmlns/"))}else if !matches!(namespace,NamespaceRef::Null)&&prefix.map_or(empty,|p|namespace_matches(NamespaceRef::Owned(p),query)){Some(NamespaceResult::Uri(element))}else{
+    attrs.iter().enumerate().find(|(_,a)|a.name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/")&&(if empty{a.name.prefix().is_none()&&a.name.local()=="xmlns"}else{a.name.prefix().is_some_and(|p|p=="xmlns")&&namespace_matches(NamespaceRef::Owned(a.name.local()),query)})).map(|(index,a)|if a.value.logical_bytes()==0{NamespaceResult::Null}else{NamespaceResult::AttributeValue(element,index)})
+   };
+   if let Some(result)=result{return self.namespace_result(result);}current=self.namespace_parent_element(element);
+  }Err("Cyclic namespace lookup ancestry.".into())
+ }
+}
+
+#[cfg(test)]
+#[path="script_node_namespace_lookup_storage_tests.rs"]
+mod lookup_storage_tests;

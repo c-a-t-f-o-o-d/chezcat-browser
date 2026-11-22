@@ -386,7 +386,7 @@ impl Bridge<'_> {
     pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded,false)}
     pub(in crate::scripting) fn write_inert_attribute_node_value(&mut self,object:u32,name:crate::html::AttributeName,value:DomString)->Result<(),String>{self.write_inert_attribute_mode(object,name,Some(value),true,false,true)}
     fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool,replace_name:bool)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (!name.namespace.is_empty()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (!name.namespace.is_empty()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let (source,initial_template)=match inert.kind{
             Kind::Parsed{source,initial_template}=>(Some(source),initial_template),

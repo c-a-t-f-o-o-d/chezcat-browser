@@ -2483,7 +2483,7 @@ impl Bridge<'_> {
         self.attribute_dom_named_prepared(node,name,value.map(DomString::from),input)
     }
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3590,7 +3590,7 @@ impl Host for Bridge<'_> {
             ||index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
             ||index==0&&method==CREATE_CDATA_SECTION
             ||index==0&&method==xml_documents::CREATE
-            ||index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
+            ||index==0&&(element_names::namespace_method(method)||method=="isDefaultNamespace"&&self.namespace_receiver(object))
             ||index==0&&method=="createElementNS"&&(object==DOCUMENT||self.inert_document(object))
             ||index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
             ||index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
@@ -3612,7 +3612,7 @@ impl Host for Bridge<'_> {
         if let Some(ns)=script_attr::factory_operation(method){return if ns{&[(0,true),(1,true)]}else{&[(0,true)]};}
         if dom_collections::operation(method).is_some(){return &[(0,true)];}
         if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
-        if method==element_names::DEFAULT_METHOD{return &[(0,true)];}
+        if element_names::namespace_method(method){return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
@@ -3827,7 +3827,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD | element_names::DEFAULT_METHOD) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -3872,7 +3872,7 @@ impl Host for Bridge<'_> {
             || self.inert_document(object) && method=="createElementNS") && index==0 {return true;}
         if object == HISTORY && matches!(method,"replaceState"|"pushState") && index == 2 { return true; }
         if self.named_map_receiver(object) { return script_named_map::operation(method).unwrap_or(method) == "getNamedItemNS" && index == 0; }
-        method==element_names::DEFAULT_METHOD&&index==0
+        element_names::namespace_method(method)&&index==0
             ||method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attribute_names_receiver(object)
     }
@@ -3922,7 +3922,7 @@ impl Host for Bridge<'_> {
         if let Some(ns)=script_attr::factory_operation(method){return if ns{2}else{1};}
         if dom_collections::operation(method).is_some(){return 1;}
         if method==xml_documents::CREATE{return 2;}
-        if method==element_names::DEFAULT_METHOD{return 1;}
+        if element_names::namespace_method(method){return 1;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
         if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
@@ -4457,7 +4457,7 @@ impl Host for Bridge<'_> {
         if script_attr::member_operation(method).is_some(){return self.event_target_interface(object)&&self.attr_receiver(receiver);}
         if script_attr::factory_operation(method).is_some(){return self.event_target_interface(object)&&(receiver==DOCUMENT||self.inert_document(receiver));}
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
-        if method==element_names::DEFAULT_METHOD{return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
+        if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
             let Some((_,upload))=self.xhr_index(receiver) else{return false};
@@ -6195,6 +6195,7 @@ impl Host for Bridge<'_> {
             self.state.work(1)?;
             return self.compare_document_position(object, args);
         }
+        if matches!(method,element_names::LOOKUP_URI|element_names::LOOKUP_PREFIX){return self.native_namespace_lookup(object,args,method==element_names::LOOKUP_PREFIX);}
         if method==element_names::DEFAULT_METHOD || method == "isDefaultNamespace" {
             self.state.work(1)?;
             return self.is_default_namespace(object, args);
@@ -8739,3 +8740,7 @@ mod document_template_clone_tests;
 #[cfg(test)]
 #[path="script_template_document_children_tests.rs"]
 mod template_document_children_tests;
+
+#[cfg(test)]
+#[path="script_node_namespace_lookup_tests.rs"]
+mod node_namespace_lookup_tests;
