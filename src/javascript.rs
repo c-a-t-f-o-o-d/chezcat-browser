@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use work_attribution::Kind as WorkKind;
+#[path="character_data_interface.rs"]
+pub(crate) mod character_data_interface;
 
 #[path = "arguments.rs"]
 mod arguments;
@@ -570,6 +572,14 @@ pub struct NativeChildListChange {
     pub next: Option<u32>,
 }
 
+/// A native string proposal; no author conversion occurs after this plan.
+pub struct NativeCharacterDataEdit {
+    pub value:Value,
+    pub offset:usize,
+    pub removed:usize,
+    pub inserted:usize,
+}
+
 pub struct NativeAttributeChange {
     pub local_name: crate::dom_string::DomString,
     pub namespace: Option<crate::dom_string::DomString>,
@@ -903,6 +913,8 @@ pub trait Host {
     fn get_with_caller(&mut self, _caller: Option<u32>, object: u32, property: &str) -> Result<Value, String> {
         self.get(object, property)
     }
+    fn prepare_character_data_edit(&mut self,_target:u32,_method:&str,_args:&[Value])->Result<NativeCharacterDataEdit,String>{Err("Native CharacterData edit preparation is unavailable.".into())}
+    fn set_character_data_splice(&mut self,_target:u32,_value:Value,_offset:usize,_removed:usize,_inserted:usize)->Result<(),String>{Err("Native CharacterData splice storage is unavailable.".into())}
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String>;
     /// Incumbent native caller, captured independently of a saved method's owner
     /// realm. Called after coercion and immediately before a host operation.
@@ -9222,7 +9234,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
-            if method=="\0CharacterData.substringData"&&kind=="IndexSizeError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if (method=="\0CharacterData.substringData"||character_data_interface::operation(method).is_some())&&kind=="IndexSizeError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"createElement"|"createElementNS"|"\0DOMImplementation.createDocument")&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")&&matches!(kind,"InUseAttributeError"|"NotFoundError"|"WrongDocumentError"|"NotSupportedError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
@@ -9338,6 +9350,7 @@ impl Runtime {
         if method==DOCUMENT_IMPORT_NODE{self.validate_native_access(object,host)?;for &index in host.native_reference_arguments(object,method){if let Some(Value::Host(source))=args.get(index){self.validate_native_access(*source,host)?;}}}
         if let Err((kind,message))=host.validate_dictionary_call(object,method,args,fields.as_deref()){if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}return Err(Fault::exception(kind,message));}
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
+        if character_data_interface::operation(method).is_some(){let edit=host.prepare_character_data_edit(object,method,args).map_err(Fault::new)?;if !edit.value.is_string(){return Err(Fault::new("Native CharacterData edit requires an already-converted string."));}self.host_set_character_data_splice(object,edit,host)?;return Ok(Value::Undefined);}
         let ticket=self.prepare_host_microtask(host,object,method,args,false)?;
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));

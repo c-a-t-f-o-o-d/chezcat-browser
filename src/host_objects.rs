@@ -432,6 +432,8 @@ impl Runtime {
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(substring.id){*receiver_required=true;}
             self.store_property(self.function_properties[substring.id],"name".into(),Value::String("substringData".into()),Some((false,false,true)))?;
             self.store_property(character,"substringData".into(),Value::Function(substring.id),Some((true,true,true)))?;
+            for (key,operation,length) in super::character_data_interface::METHODS{let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;self.store_property(character,key.into(),Value::Function(method.id),Some((true,true,true)))?;}
+
             self.put_binding(self.global_environment,"CharacterData".into(),Some(constructor),super::Declaration::Var,false)?;
             self.global_attributes.insert("CharacterData".into(),(false,true,true));
             self.native_constructor_prototypes.insert((window,"CharacterData"),character);
@@ -1253,8 +1255,9 @@ impl Runtime {
 
     /// Shared native conversion/validation/selection transaction. A canonical
     /// accessor calls this directly, so own shadows cannot intercept its slots.
-    pub(super) fn host_set_native(&mut self,handle:u32,name:&str,value:Value,host:&mut dyn Host)
-        ->Result<(),Fault>
+    pub(super) fn host_set_native(&mut self,handle:u32,name:&str,value:Value,host:&mut dyn Host)->Result<(),Fault>{self.host_set_native_edit(handle,name,value,None,host)}
+    pub(super) fn host_set_character_data_splice(&mut self,handle:u32,edit:super::NativeCharacterDataEdit,host:&mut dyn Host)->Result<(),Fault>{let splice=Some((edit.offset,edit.removed,edit.inserted));self.host_set_native_edit(handle,"data",edit.value,splice,host)}
+    fn host_set_native_edit(&mut self,handle:u32,name:&str,value:Value,splice:Option<(usize,usize,usize)>,host:&mut dyn Host)->Result<(),Fault>
     {
         self.validate_native_access(handle,host)?;
         self.reject_foreign_window(&Value::Host(handle),host)?;
@@ -1306,7 +1309,7 @@ impl Runtime {
         };
         host.native_operation_caller(self.native_access_caller
             .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
-        let result=host.set(handle,name,value).map_err(Fault::new);
+        let result=if let Some((offset,removed,inserted))=splice{host.set_character_data_splice(handle,value,offset,removed,inserted)}else{host.set(handle,name,value)}.map_err(Fault::new);
         if tree_observation {
             self.finish_tree_observation(observation, host)?;
         } else {

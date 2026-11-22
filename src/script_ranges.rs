@@ -75,6 +75,17 @@ impl State {
             }
         }
     }
+    // Offset/count/result lengths have been admitted before this infallible step.
+    pub(super) fn ranges_splice_data(&mut self,node:u32,offset:usize,removed:usize,inserted:usize){
+        let end=offset+removed;
+        for range in &mut self.ranges {
+            for point in [&mut range.start,&mut range.end] {
+                if point.node!=node {continue;}
+                if point.offset>offset&&point.offset<=end {point.offset=offset;}
+                else if point.offset>end {point.offset=point.offset-removed+inserted;}
+            }
+        }
+    }
     pub(super) fn ranges_replace_data(&mut self, node: usize) {
         for range in &mut self.ranges {
             for point in [&mut range.start, &mut range.end] {
