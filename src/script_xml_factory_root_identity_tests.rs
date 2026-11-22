@@ -1,0 +1,20 @@
+//! Factory roots reserve the eventual native ID before any getter returns it.
+use super::*;
+fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body><div id=mount></div><input id=field value=seed></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());}
+#[test]
+fn xml_factory_root_identity_implementation_doctype_and_saved_views_survive_direct_promotion(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var ns='http://www.w3.org/1999/xhtml',dtype=document.implementation.createDocumentType('span','original','source'),owner=document.implementation.createDocument(ns,'h:span',dtype),root=owner.documentElement,watch=new MutationObserver(function(){}),mount=document.getElementById('mount');
+if(!(owner instanceof XMLDocument)||owner.contentType!=='application/xhtml+xml'||root.ownerDocument!==owner||root.parentNode!==owner||root.tagName!=='h:span'||root.prefix!=='h'||root.localName!=='span'||owner.firstChild!==dtype||owner.lastChild!==root||dtype.nextSibling!==root||root.previousSibling!==dtype||owner.doctype!==dtype||dtype.ownerDocument!==owner)throw 'real factory owner and doctype order';
+root.setAttribute('data-note','held');var attr=root.getAttributeNode('data-note'),text=owner.createTextNode('native root'),list=root.childNodes,state={held:root};root.appendChild(text);root.bindingState=state;watch.observe(owner,{childList:true});if(mount.appendChild(root)!==root||root.ownerDocument!==document||root.parentNode!==mount||root.tagName!=='H:SPAN'||root.bindingState!==state||state.held!==root||root.getAttributeNode('data-note')!==attr||attr.ownerDocument!==document||root.firstChild!==text||root.childNodes!==list||text.ownerDocument!==document||list[0]!==text||owner.documentElement!==null||owner.doctype!==dtype||dtype.parentNode!==owner||owner.childNodes.length!==1)throw 'factory ID directly becomes rendered ID';var records=watch.takeRecords();if(records.length!==1||records[0].removedNodes[0]!==root||records[0].target!==owner||records[0].previousSibling!==dtype)throw 'actual source document root removal';
+var next=owner.implementation.createDocument(null,'Next');if(!(next instanceof XMLDocument)||next.documentElement.ownerDocument!==next||next===owner||owner.implementation!==owner.implementation)throw 'real implementation association after root move';
+"#);
+}
+#[test]
+fn xml_factory_root_identity_known_svg_clone_and_foreign_refusal_are_actual_records(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var owner=document.implementation.createDocument('http://www.w3.org/2000/svg','s:svg'),root=owner.documentElement,copy=root.cloneNode(true);if(root.ownerDocument!==owner||root.namespaceURI!=='http://www.w3.org/2000/svg'||root.prefix!=='s'||copy===root||copy.ownerDocument!==owner||copy.prefix!=='s'||copy.localName!=='svg')throw 'real native SVG root clone';var mount=document.getElementById('mount');if(mount.appendChild(root)!==root||root.ownerDocument!==document||root.parentNode!==mount||owner.documentElement!==null||root.namespaceURI!=='http://www.w3.org/2000/svg'||root.prefix!=='s')throw 'same SVG root identity';
+var raw=document.implementation.createDocument('\ud800','q:Case'),foreign=raw.documentElement,caught=false;try{mount.appendChild(foreign);}catch(e){caught=e instanceof DOMException&&e.name==='NotSupportedError';}if(!caught||raw.documentElement!==foreign||foreign.ownerDocument!==raw||foreign.parentNode!==raw||foreign.namespaceURI.charCodeAt(0)!==0xd800||foreign.prefix!=='q'||foreign.localName!=='Case')throw 'foreign activation refusal preserves real source';
+"#);assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());
+}

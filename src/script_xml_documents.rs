@@ -79,48 +79,52 @@ impl Bridge<'_>{
         };
         let doctype=args.get(2).and_then(|value|if let Value::Host(handle)=value{Some(*handle)}else{None});
         let adoption=doctype.map(|handle|self.prepare_xml_doctype_adoption(handle)).transpose()?;
-        let count=2+usize::from(root.is_some());
-        let first=FIRST_ENTRY.checked_add(u32::try_from(self.state.inert_documents.entries.len()).map_err(|_|"XML document identity overflow.")?).ok_or("XML document identity overflow.")?;
-        let root_handle=root.as_ref().map(|_|first+2);
-        let mut children=Vec::new();children.try_reserve_exact(usize::from(root.is_some())+usize::from(doctype.is_some())).map_err(|_|"Cannot reserve XML document child links.")?;
-        if let Some(handle)=doctype{children.push(handle);}
-        if let Some(handle)=root_handle{children.push(handle);}
-        let url=script_clone_node::copy_text("about:blank")?;
-        let mut payload=url.capacity().checked_add(children.capacity()*size_of::<u32>()).ok_or("XML document payload overflow.")?;
-        let generated_base=self.state.inert_documents.generated.len();
-        let generated=if let Some(node)=root{
-            let NodeKind::Element{tag,href,..}=&node.kind else{unreachable!()};
-            payload=payload.checked_add(node_bytes(&node)).and_then(|n|n.checked_add(tag.capacity())).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::capacity))).and_then(|n|n.checked_add(size_of::<Node>()+2*size_of::<usize>())).ok_or("XML root source payload overflow.")?;
-            Some(GeneratedNode{node:Rc::new(node),unsafe_nonce:false})
-        }else{None};
-        let mut entries=Vec::new();entries.try_reserve_exact(count).map_err(|_|"Cannot reserve staged XML identities.")?;
-        entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,base_url_override:None,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));
-        entries.push(Entry::Implementation);
-        if root_handle.is_some(){entries.push(Entry::Node(InertNode{kind:Kind::Parsed{source:ParsedSource::Generated(generated_base),initial_template:None},owner:first,parent:Some(first),children:Vec::new()}));}
-        let native=adoption.as_ref().and_then(|plan|plan.native);
-        let (index_growth,index_bytes)=if let Some(handle)=doctype.filter(|_|native.is_some()){
-            self.prepare_adopted_index(std::iter::once(handle),self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("XML adoption payload allowance exhausted.")?)?
-        }else{(None,0)};
-        payload=payload.checked_add(index_bytes).ok_or("XML adoption storage overflow.")?;
-        let admitted=self.reserve_inert_entries(count,payload,usize::from(generated.is_some()))?;debug_assert_eq!(admitted,first);
-        if let Some(source)=generated{self.state.inert_documents.generated.push(source);}
-        self.state.inert_documents.entries.extend(entries);
-        if let Some(plan)=adoption{self.commit_xml_doctype_adoption(plan,first,index_growth);}
-        Ok(Value::Host(first))
+        // Root, Document and implementation remain unpublished until the
+        // whole factory succeeds. Reuse the real leaf reservation before any
+        // caller can save its identity; no returned handle is ever remapped.
+        let checkpoint=self.template_import_checkpoint();
+        let result=(||{
+            let first=FIRST_ENTRY.checked_add(u32::try_from(self.state.inert_documents.entries.len()).map_err(|_|"XML document identity overflow.")?).and_then(|handle|handle.checked_add(u32::from(root.is_some()))).ok_or("XML document handle overflow.")?;
+            let root_handle=if let Some(node)=root{Some(self.append_inert_source_leaf(first,Some(first),node,0)?)}else{None};
+            let mut children=Vec::new();children.try_reserve_exact(usize::from(root_handle.is_some())+usize::from(doctype.is_some())).map_err(|_|"Cannot reserve XML document child links.")?;
+            if let Some(handle)=doctype{children.push(handle);}if let Some(handle)=root_handle{children.push(handle);}
+            let url=script_clone_node::copy_text("about:blank")?;let payload=url.capacity().checked_add(children.capacity()*size_of::<u32>()).ok_or("XML document payload overflow.")?;
+            let native=adoption.as_ref().and_then(|plan|plan.native);
+            let(index_growth,index_bytes)=if let Some(handle)=doctype.filter(|_|native.is_some()){
+                self.prepare_adopted_index(std::iter::once(handle),self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("XML adoption payload allowance exhausted.")?)?
+            }else{(None,0)};
+            let mut entries=Vec::new();entries.try_reserve_exact(2).map_err(|_|"Cannot reserve staged XML document identities.")?;
+            entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,base_url_override:None,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));entries.push(Entry::Implementation);
+            let admitted=self.reserve_inert_entries(2,payload.checked_add(index_bytes).ok_or("XML adoption storage overflow.")?,0)?;debug_assert_eq!(admitted,first);
+            self.state.inert_documents.entries.extend(entries);
+            if let Some(plan)=adoption{self.commit_xml_doctype_adoption(plan,first,index_growth);}
+            Ok(Value::Host(first))
+        })();
+        if result.is_err(){self.rollback_template_import(checkpoint);}result
     }
 }
 
 #[cfg(test)]
 mod storage_tests{
     use super::*;
+    fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><head></head><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+    #[test]
+    fn xml_factory_root_identity_late_header_refusal_rolls_back_unpublished_root_and_keeps_paid_backing(){
+        let root_cost={let(mut doc,mut forms,mut page)=fixture();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let before=b.state.retained;let Value::Host(owner)=b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::String(HTML_NAMESPACE.into()),Value::String("span".into())]).unwrap()else{panic!("measured factory")};let node=b.state.inert_documents.node(owner).unwrap();let Kind::Document(record)=&node.kind else{unreachable!()};assert!(node_index(record.html.unwrap()).is_some());b.state.retained-before-record.url.capacity()-node.children.capacity()*size_of::<u32>()};
+        let(mut doc,mut forms,mut page)=fixture();let dtype=doc.nodes[0].children[0];let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let original=b.doc.nodes[0].children.clone();let before=(b.state.retained,b.template_import_backing(),b.doc.nodes.len(),b.state.inert_documents.entries.len(),b.state.inert_documents.generated.len(),b.state.inert_documents.adopted.len(),b.state.dom_commits);let limit=b.state.retained_limit;let copies=b.state.copy_work;
+        b.state.retained_limit=b.state.retained+root_cost;assert!(b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::String(HTML_NAMESPACE.into()),Value::String("span".into()),Value::Host(node_handle(dtype))]).is_err());
+        assert_eq!((b.doc.nodes.len(),b.state.inert_documents.entries.len(),b.state.inert_documents.generated.len(),b.state.inert_documents.adopted.len(),b.state.dom_commits),(before.2,before.3,before.4,before.5,before.6));assert_eq!(b.doc.nodes[0].children,original);assert_eq!(b.state.tree.parents[dtype],Some(0));assert!(!b.inert_adopted_node(node_handle(dtype)));assert!(b.template_import_backing()>before.1,"late root reservation acquired actual backing");assert_eq!(b.state.retained,before.0+b.template_import_backing()-before.1,"only acquired backing survives rollback");
+        b.state.retained_limit=limit;let rollback=(b.state.retained,b.template_import_backing(),b.doc.nodes.len(),b.state.inert_documents.entries.len());b.state.copy_work=0;assert!(b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::String(HTML_NAMESPACE.into()),Value::String("span".into())]).is_err());assert_eq!((b.state.retained,b.template_import_backing(),b.doc.nodes.len(),b.state.inert_documents.entries.len()),rollback);
+        b.state.copy_work=copies;let Value::Host(owner)=b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::String(HTML_NAMESPACE.into()),Value::String("span".into()),Value::Host(node_handle(dtype))]).unwrap()else{panic!("fresh recovery")};let Kind::Document(record)=&b.state.inert_documents.node(owner).unwrap().kind else{unreachable!()};let root=record.html.unwrap();assert!(node_index(root).is_some());assert_eq!(record.doctype,Some(node_handle(dtype)));assert_eq!(b.inert_children(owner).unwrap(),[node_handle(dtype),root]);assert_eq!(b.state.inert_documents.node(root).unwrap().owner,owner);assert_eq!(b.state.inert_documents.node(node_handle(dtype)).unwrap().owner,owner);
+    }
     #[test]
     fn native_xml_document_exact_owned_payload_and_entry_source_backing_are_admitted(){
         let mut doc=crate::html::parse("<!doctype html><html><head></head><body></body></html>");doc.scripting_enabled=true;
         let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
         let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
-        let backing=|arena:&Arena|arena.entries.capacity()*size_of::<Entry>()+arena.generated.capacity()*size_of::<GeneratedNode>();
+        let backing=|bridge:&Bridge<'_>|bridge.template_import_backing();
         for (namespace,name) in [(Value::Null,""),(Value::String("urn:original".into()),"p:Mixed"),(Value::String("http://www.w3.org/1999/xhtml".into()),"h:html")]{
-            let before=bridge.state.retained;let previous=backing(&bridge.state.inert_documents);
+            let before=bridge.state.retained;let previous=backing(&bridge);
             let Value::Host(owner)=bridge.create_xml_document(MAIN_IMPLEMENTATION,&[namespace,Value::String(name.into()),Value::Null]).unwrap()else{panic!("real XML document")};
             let arena=&bridge.state.inert_documents;let Kind::Document(record)=&arena.node(owner).unwrap().kind else{panic!("owned document record")};
             let mut payload=record.url.capacity()+record.title.capacity()+arena.node(owner).unwrap().children.capacity()*size_of::<u32>();
@@ -130,7 +134,7 @@ mod storage_tests{
                 payload+=node_bytes(node)+tag.capacity()+href.as_ref().map_or(0,String::capacity)+size_of::<Node>()+2*size_of::<usize>();
                 assert_eq!(arena.node(root).unwrap().owner,owner);
             }
-            assert_eq!(bridge.state.retained-before,payload+backing(arena)-previous,"{name}");
+            assert_eq!(bridge.state.retained-before,payload+backing(&bridge)-previous,"{name}");
         }
     }
 }
