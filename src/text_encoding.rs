@@ -1,12 +1,18 @@
-//! Original bounded text/binary conversion. Unicode, legacy single-byte and
-//! x-user-defined decoding includes streaming, BOM handling and fatal errors. No
-//! platform codec, network, filesystem or device capability is used here.
+//! Original bounded text/binary conversion. Unicode, legacy single-byte,
+//! x-user-defined, GBK/gb18030 and EUC-KR decoding includes streaming, BOM handling
+//! and fatal errors. No platform codec, network, filesystem or device capability
+//! is used here.
 
 #[path = "text_encoding_single_byte.rs"]
 mod single_byte;
 #[cfg(test)]
 #[path = "text_encoding_single_byte_tests.rs"]
 mod single_byte_tests;
+#[path = "text_encoding_multibyte.rs"]
+mod multibyte;
+#[cfg(test)]
+#[path = "text_encoding_multibyte_tests.rs"]
+mod multibyte_tests;
 
 use super::{
     binary_data::Kind as BinaryKind, Builtin, Declaration, Fault, Host, NativeGetter, Ordinary,
@@ -19,6 +25,7 @@ enum Encoding {
     Utf16Le,
     Utf16Be,
     SingleByte(single_byte::SingleByte),
+    Multibyte(multibyte::Encoding),
     UserDefined,
 }
 impl Encoding {
@@ -28,6 +35,7 @@ impl Encoding {
             Self::Utf16Le => "utf-16le",
             Self::Utf16Be => "utf-16be",
             Self::SingleByte(encoding) => encoding.name(),
+            Self::Multibyte(encoding) => encoding.name(),
             Self::UserDefined => "x-user-defined",
         }
     }
@@ -39,7 +47,9 @@ impl Encoding {
             "csunicode" | "iso-10646-ucs-2" | "ucs-2" | "unicode" | "unicodefeff" | "utf-16"
             | "utf-16le" => Some(Self::Utf16Le),
             "x-user-defined" => Some(Self::UserDefined),
-            _ => single_byte::SingleByte::from_label(label).map(Self::SingleByte),
+            _ => single_byte::SingleByte::from_label(label)
+                .map(Self::SingleByte)
+                .or_else(|| multibyte::Encoding::from_label(label).map(Self::Multibyte)),
         }
     }
 }
@@ -487,6 +497,13 @@ impl Runtime {
                     Some(character) => Scalar::Character(character, 1),
                     None => Scalar::Invalid(1),
                 },
+                Encoding::Multibyte(encoding) => match encoding.step(&bytes[at..], stream) {
+                    multibyte::Step::Character(character, consumed) => {
+                        Scalar::Character(character, consumed)
+                    }
+                    multibyte::Step::Invalid(consumed) => Scalar::Invalid(consumed),
+                    multibyte::Step::Incomplete => Scalar::Incomplete,
+                },
                 Encoding::UserDefined => {
                     let byte = bytes[at];
                     let value = if byte < 0x80 {
@@ -545,6 +562,9 @@ impl Runtime {
     /// Original decoder shared with document-owned request adapters. This does
     /// not expose a new JS API or bypass the active job's work/string budgets.
     pub(crate) fn decode_request_text(&mut self,bytes:&[u8],label:&str)->Result<String,String> {
+        // Request adapters lowercase MIME charset labels. Quoted parameter
+        // values can still contain Encoding's surrounding ASCII whitespace.
+        let label = label.trim_matches(|c| matches!(c, '\t' | '\n' | '\x0c' | '\r' | ' '));
         let encoding=if bytes.starts_with(&[0xef,0xbb,0xbf]) {Encoding::Utf8}else if bytes.starts_with(&[0xff,0xfe]) {Encoding::Utf16Le}else if bytes.starts_with(&[0xfe,0xff]) {Encoding::Utf16Be}else{Encoding::label(label).ok_or_else(||format!("Request text encoding {label} is not implemented."))?};
         self.work(bytes.len()).map_err(Fault::display)?;
         let mut decoder=Decoder{encoding,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0};

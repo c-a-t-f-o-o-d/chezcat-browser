@@ -217,7 +217,7 @@ if(d.decode(bom).length!==3||d.decode(bom)!==new TextDecoder('x-user-defined',{i
 fn single_byte_label_validation_options_order_and_native_brands_remain_real() {
     succeeds(r#"
 function rejects(f,name){try{f();}catch(e){if(e.name===name)return;throw e;}throw 'missing '+name;}
-for(var label of ['',null,'unknown','replacement','iso-2022-cn','hz-gb-2312','gbk','gb18030','big5','euc-jp','iso-2022-jp','shift_jis','euc-kr','\vwindows-1251','windows-1251\u00a0']){
+for(var label of ['',null,'unknown','replacement','iso-2022-cn','hz-gb-2312','big5','euc-jp','iso-2022-jp','shift_jis','\vwindows-1251','windows-1251\u00a0']){
   rejects(function(){new TextDecoder(label);},'RangeError');
 }
 var log=[],label={toString:function(){log.push('label');return 'cp1251';}},options={
