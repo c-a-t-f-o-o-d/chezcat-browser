@@ -6330,3 +6330,7 @@ mod element_name_units_tests;
 #[cfg(test)]
 #[path="app_attribute_filter_units_tests.rs"]
 mod attribute_filter_units_tests;
+
+#[cfg(test)]
+#[path="app_loaded_clone_snapshot_tests.rs"]
+mod loaded_clone_snapshot_tests;

@@ -1152,6 +1152,9 @@ impl Page {
     pub(crate) fn dom_commit_generation(&self) -> Option<u64> { self.state.dom_commits }
 
     #[cfg(test)]
+    pub(crate) fn native_node_limit_for_test(&mut self,limit:usize)->usize{std::mem::replace(&mut self.state.node_limit,limit)}
+
+    #[cfg(test)]
     pub(crate) fn loading_state_for_test(&self) -> (&'static str, bool) {
         (self.state.ready, self.state.dynamic.load_ready)
     }
