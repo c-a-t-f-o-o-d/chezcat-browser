@@ -2,10 +2,13 @@
 use super::*;
 
 fn fixture(source:&str)->(Document,Forms,Page) {
+    fixture_with_limits(source,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+fn fixture_with_limits(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page){
     let mut doc=crate::html::parse("<html><head></head><body><div id=parent><button id=button type=button>Run</button></div></body></html>");
     doc.scripting_enabled=true;
     let mut forms=Forms::new(&doc);
-    let mut page=Page::for_test();
+    let mut page=Page::with_limits(limits);
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/page").unwrap().0),path:None,root:None,fragment:String::new()});
     let outcome=page.start(&mut doc,&mut forms,&[Script {node:0,label:"Original real CustomEvent interface".into(),source:source.into()}]);
     assert_eq!(outcome.errors,0,"{}",page.report());
@@ -105,7 +108,7 @@ if(!target.dispatchEvent(factory)||calls!==1||factory.detail!==payload)throw 'le
 
 #[test]
 fn custom_event_interface_main_child_owners_and_any_foreign_references_keep_security_boundaries() {
-    let(mut doc,mut forms,mut page)=fixture(r#"
+    let(mut doc,mut forms,mut page)=fixture_with_limits(r#"
 var RootC=CustomEvent,RootP=RootC.prototype,RootFunction=Function,main=new RootC('main',{detail:{value:41}});
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,ChildC=w.CustomEvent,ChildP=ChildC.prototype,ChildFunction=w.Function,ChildObject=w.Object;
 if(ChildC===RootC||Object.getPrototypeOf(ChildC)!==w.Event||Object.getPrototypeOf(ChildP)!==w.Event.prototype)throw 'genuine child roots';
@@ -118,7 +121,7 @@ var own=ChildFunction('C','var e=new C("own",{detail:window});return e.detail===
 ChildFunction('CustomEvent=17;Function=19;')();CustomEvent=23;delete window.CustomEvent;
 if(typeof CustomEvent!=='undefined'||Object.getPrototypeOf(new RootC('saved-main'))!==RootP||Object.getPrototypeOf(new ChildC('saved-child'))!==ChildP)throw 'saved canonical roots ignore globals';
 var converted=0,type={toString:function(){converted++;return 'forbidden';}},dictionary={get detail(){converted++;return null;}};
-"#);
+"#,crate::javascript::limits::BROWSER);
     let count=page.state.created_events.len();let next=page.state.next_event;
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/parent").unwrap().0),path:None,root:None,fragment:String::new()});
     for source in ["new w.CustomEvent(type,dictionary);","new ChildC(type,dictionary);","read(main);","getterRead(main);","call(get,main,type);","call(init,main,type);","childGet.call(main);","childInit.call(main,type);"] {

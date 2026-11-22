@@ -3182,8 +3182,7 @@ impl Host for Bridge<'_> {
     fn mutable_native_wrapper_prototype(&self, object: u32) -> bool {
         self.fragment_receiver(object) || self.inert_node_type(object)==Some(11)
             || self.element_expando_receiver(object) && self.concrete_html_interface(object) == Some("HTMLElement")
-            || self.ordinary_event_owner(object).is_some() && !self.ui_receiver(object)
-                && !self.custom_receiver(object) && !self.mouse_receiver(object)
+            || self.ordinary_event_owner(object).is_some()
     }
     fn native_ancestry_inspection(&self,object:u32)->bool {self.event_receiver(object)||self.exposed_native_prototype(object)||self.namespace_receiver(object)}
     fn ordinary_inherited_enumeration(&self, object: u32) -> bool {
@@ -8499,6 +8498,10 @@ mod svg_author_properties_tests;
 #[cfg(test)]
 #[path="script_fragment_author_prototype_tests.rs"]
 mod fragment_author_prototype_tests;
+
+#[cfg(test)]
+#[path="script_event_author_prototype_tests.rs"]
+mod event_author_prototype_tests;
 
 #[cfg(test)]
 #[path="script_node_base_uri_tests.rs"]
