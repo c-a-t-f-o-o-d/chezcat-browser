@@ -4443,9 +4443,8 @@ if(bad!==4||innerFragment.firstChild!==null||outerFragment.firstChild!==inner||
 "#);
     assert_eq!(result.errors, 0, "{}", page.report());
     let retained = page.state.retained;
-    let result = page.console_eval(&mut doc, &mut forms, "innerFragment.appendChild(outer);");
-    assert_eq!(result.errors, 1);
-    assert!(page.report().contains("ancestor cycle"));
+    let result = page.console_eval(&mut doc, &mut forms, "var cycle=false;try{innerFragment.appendChild(outer);}catch(e){cycle=e instanceof DOMException&&e.name==='HierarchyRequestError'&&e.message.indexOf('ancestor cycle')>=0;}if(!cycle)throw 'actual typed ancestor cycle refusal';");
+    assert_eq!(result.errors,0,"{}",page.report());
     assert_eq!(page.state.retained, retained);
     let result = page.console_eval(&mut doc, &mut forms, "if(outer.parentNode!==null||innerFragment.firstChild!==null||outerFragment.firstChild!==inner)throw 'cycle changed tree';");
     assert_eq!(result.errors, 0, "{}", page.report());
