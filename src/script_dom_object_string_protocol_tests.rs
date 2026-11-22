@@ -236,10 +236,10 @@ var receiver=null;
 Object.defineProperty(P,'documentElement',{configurable:true,get:function(){receiver=this;return 47;}});
 if(document.documentElement!==47||receiver!==document||get.call(document)!==html)throw 'live prototype versus saved native getter';
 Object.defineProperty(P,'documentElement',field);
-var ordinaryCall=false,allocation=false;
+var ordinaryCall=false;
 try{C();}catch(e){ordinaryCall=e instanceof TypeError;}
-try{new C();}catch(e){allocation=e.name==='NotSupportedError';}
-if(!ordinaryCall||!allocation||document.documentElement!==html)throw 'independent allocation boundary';
+var allocated=new C();
+if(!ordinaryCall||allocated===document||Object.getPrototypeOf(allocated)!==P||allocated instanceof XMLDocument||allocated.ownerDocument!==null||allocated.defaultView!==null||get.call(allocated)!==null||allocated.contentType!=='application/xml'||allocated.URL!=='about:blank'||allocated.implementation===document.implementation||document.documentElement!==html)throw 'genuine independent allocation preserves displayed tree';
 "#);
     assert_eq!(doc.nodes.len(),before);
     assert_eq!(page.state.dom_commits,commits);
