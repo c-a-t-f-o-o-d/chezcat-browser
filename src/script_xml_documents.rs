@@ -1,5 +1,7 @@
 //! Original native XML document factory. Parsing XML bytes is owned by F08.
 use super::*;
+#[path="script_xml_doctype_adoption.rs"]
+mod doctype_adoption;
 pub(in crate::scripting) const CREATE:&str="\0DOMImplementation.createDocument";
 impl Bridge<'_>{
     fn document_element_named(&self,element:u32,namespace:crate::html::Namespace,name:&str)->bool{
@@ -57,7 +59,6 @@ impl Bridge<'_>{
     pub(in crate::scripting) fn validate_xml_document_factory(&self,args:&[Value])->Result<(),(&'static str,String)>{
         if let Some(doctype)=args.get(2).filter(|v|!matches!(v,Value::Null|Value::Undefined)){
             if !matches!(doctype,Value::Host(handle) if self.doctype_receiver(*handle)){return Err(("TypeError","createDocument requires a DocumentType or null.".into()));}
-            return Err(("NotSupportedError","Document-root doctype adoption is not implemented; no document was created.".into()));
         }
         if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)){
             if !name.is_empty(){script_attribute_names::validate_element_namespace_value(namespace,name)?;}
@@ -76,10 +77,13 @@ impl Bridge<'_>{
             let(tag,expanded_name,namespace)=crate::html::element_names::prepare(namespace,qualified)?;
             Some(Node{kind:NodeKind::Element{tag,expanded_name,id:None,href:None,attrs:Vec::new()},namespace,children:Vec::new()})
         };
+        let doctype=args.get(2).and_then(|value|if let Value::Host(handle)=value{Some(*handle)}else{None});
+        let adoption=doctype.map(|handle|self.prepare_xml_doctype_adoption(handle)).transpose()?;
         let count=2+usize::from(root.is_some());
         let first=FIRST_ENTRY.checked_add(u32::try_from(self.state.inert_documents.entries.len()).map_err(|_|"XML document identity overflow.")?).ok_or("XML document identity overflow.")?;
         let root_handle=root.as_ref().map(|_|first+2);
-        let mut children=Vec::new();children.try_reserve_exact(usize::from(root.is_some())).map_err(|_|"Cannot reserve XML document child links.")?;
+        let mut children=Vec::new();children.try_reserve_exact(usize::from(root.is_some())+usize::from(doctype.is_some())).map_err(|_|"Cannot reserve XML document child links.")?;
+        if let Some(handle)=doctype{children.push(handle);}
         if let Some(handle)=root_handle{children.push(handle);}
         let url=script_clone_node::copy_text("about:blank")?;
         let mut payload=url.capacity().checked_add(children.capacity()*size_of::<u32>()).ok_or("XML document payload overflow.")?;
@@ -90,12 +94,19 @@ impl Bridge<'_>{
             Some(GeneratedNode{node:Rc::new(node),unsafe_nonce:false})
         }else{None};
         let mut entries=Vec::new();entries.try_reserve_exact(count).map_err(|_|"Cannot reserve staged XML identities.")?;
-        entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype:None,url,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));
+        entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));
         entries.push(Entry::Implementation);
         if root_handle.is_some(){entries.push(Entry::Node(InertNode{kind:Kind::Parsed{source:ParsedSource::Generated(generated_base),initial_template:None},owner:first,parent:Some(first),children:Vec::new()}));}
+        let native=adoption.as_ref().and_then(|plan|plan.native);
+        let (index_growth,index_bytes)=if let Some(handle)=doctype.filter(|_|native.is_some()){
+            self.prepare_adopted_index(std::iter::once(handle),self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("XML adoption payload allowance exhausted.")?)?
+        }else{(None,0)};
+        payload=payload.checked_add(index_bytes).ok_or("XML adoption storage overflow.")?;
         let admitted=self.reserve_inert_entries(count,payload,usize::from(generated.is_some()))?;debug_assert_eq!(admitted,first);
         if let Some(source)=generated{self.state.inert_documents.generated.push(source);}
-        self.state.inert_documents.entries.extend(entries);Ok(Value::Host(first))
+        self.state.inert_documents.entries.extend(entries);
+        if let Some(plan)=adoption{self.commit_xml_doctype_adoption(plan,first,index_growth);}
+        Ok(Value::Host(first))
     }
 }
 

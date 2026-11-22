@@ -14,6 +14,7 @@ impl Bridge<'_> {
     pub(super) fn child_list_change_plan(&mut self, receiver: u32, method: &str, args: &[Value])
         -> Result<Vec<NativeChildListChange>, String>
     {
+        if method==xml_documents::CREATE{return self.xml_doctype_adoption_changes(args);}
         if !matches!(method, "appendChild" | "insertBefore" | "removeChild" | "replaceChild") {
             return Ok(Vec::new());
         }

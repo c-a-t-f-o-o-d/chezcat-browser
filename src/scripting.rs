@@ -8601,3 +8601,6 @@ mod native_xml_document_tests;
 #[cfg(test)]
 #[path="script_native_cdata_tests.rs"]
 mod native_cdata_tests;
+#[cfg(test)]
+#[path="script_xml_doctype_adoption_tests.rs"]
+mod xml_doctype_adoption_tests;
