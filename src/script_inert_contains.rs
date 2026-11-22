@@ -17,3 +17,13 @@ impl Bridge<'_>{
   Err("Cyclic inert containment ancestry.".into())
  }
 }
+
+#[cfg(test)]
+mod tests{
+ use super::*;
+ #[test]
+ fn node_equality_inert_contains_work_refusal_preserves_tree_and_recovers(){
+  let mut doc=crate::html::parse("<html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);assert_eq!(page.console_eval(&mut doc,&mut forms,"var owner=new Document(),a=owner.createElement('div'),b=owner.createTextNode('native');owner.appendChild(a);a.appendChild(b);").errors,0);
+  let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(a)=page.runtime.execute("a",&mut bridge).unwrap()else{panic!("a")};let Value::Host(b)=page.runtime.execute("b",&mut bridge).unwrap()else{panic!("b")};let before=(bridge.state.retained,bridge.state.dom_commits,bridge.state.inert_documents.entries.len(),bridge.state.inert_documents.node(b).unwrap().parent);let work=bridge.state.host_work;bridge.state.host_work=1;assert!(bridge.node_contains(a,&[Value::Host(b)]).unwrap_err().contains("work limit"));assert_eq!((bridge.state.retained,bridge.state.dom_commits,bridge.state.inert_documents.entries.len(),bridge.state.inert_documents.node(b).unwrap().parent),before);bridge.state.host_work=work;assert!(matches!(bridge.node_contains(a,&[Value::Host(b)]).unwrap(),Value::Bool(true)));assert_eq!((bridge.state.retained,bridge.state.dom_commits,bridge.state.inert_documents.entries.len(),bridge.state.inert_documents.node(b).unwrap().parent),before);
+ }
+}
