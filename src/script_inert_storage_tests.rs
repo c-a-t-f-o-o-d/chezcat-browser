@@ -48,6 +48,36 @@ fn inert_leaf_identity_joint_storage_copy_refusal_and_paid_native_slot() {
 }
 
 #[test]
+fn inert_clone_identity_joint_backing_refusal_and_exact_owned_payload() {
+    let (mut doc, mut forms, mut page) = page("<html><body><template></template></body></html>");
+    let template=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element {tag,..} if tag=="template")).unwrap();
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.set_template_html(node_handle(template),"<b>x</b><i>y</i>").unwrap();
+    let Value::Host(source)=bridge.template_content(node_handle(template)).unwrap() else {panic!("source")};
+    let snapshot=|bridge:&Bridge<'_>| (bridge.state.retained,bridge.doc.nodes.len(),bridge.doc.nodes.capacity(),
+        bridge.state.inert_documents.backing_bytes(),bridge.state.node_state_bytes(),bridge.state.node_sets_storage_bytes(),
+        bridge.state.inert_documents.entries.len(),bridge.state.inert_documents.generated.len(),bridge.state.inert_documents.adopted.len());
+    let before=snapshot(&bridge);
+    let limit=bridge.state.retained_limit;
+    bridge.state.retained_limit=bridge.state.retained;
+    assert!(bridge.clone_inert_tree(source,true).is_err());
+    assert_eq!(snapshot(&bridge),before);
+    bridge.state.retained_limit=limit;bridge.state.copy_work=0;
+    assert!(bridge.clone_inert_tree(source,true).is_err());
+    assert_eq!(snapshot(&bridge),before);
+    bridge.state.copy_work=bridge.state.limits.copy_bytes;bridge.state.host_work=bridge.state.limits.host_work;
+    let Value::Host(cloned)=bridge.clone_inert_tree(source,true).unwrap() else {panic!("clone")};
+    let after=snapshot(&bridge);
+    assert_eq!(after.1,before.1+4);
+    assert_eq!(after.7,before.7,"parsed clones share immutable sources");
+    let mut pending=vec![cloned];let mut payload=0;
+    while let Some(handle)=pending.pop(){let node=bridge.state.inert_documents.node(handle).unwrap();payload+=node.children.capacity()*size_of::<u32>();pending.extend_from_slice(&node.children);}
+    assert_eq!(after.0-before.0,payload+(after.2-before.2)*size_of::<Node>()+after.3-before.3+after.4-before.4+after.5-before.5);
+    assert_eq!(bridge.inert_children(source).unwrap().len(),2);
+    assert_ne!(bridge.inert_children(source).unwrap(),bridge.inert_children(cloned).unwrap());
+}
+
+#[test]
 fn browser_inert_storage_seventy_thousand_parsers_and_leaf_identities_keep_owners() {
     for parsers in [true, false] {
         let (mut doc, mut forms, mut page) = page("<html><body></body></html>");
