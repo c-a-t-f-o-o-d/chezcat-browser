@@ -6342,3 +6342,7 @@ mod inert_document_import_tests;
 #[cfg(test)]
 #[path="app_template_document_owner_tests.rs"]
 mod template_document_owner_tests;
+
+#[cfg(test)]
+#[path="app_inert_template_import_tests.rs"]
+mod inert_template_import_tests;

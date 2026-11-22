@@ -768,7 +768,7 @@ impl Bridge<'_> {
 
     fn template_source(&self, object: u32) -> Option<(u32, Option<usize>)> {
         if let Some(index) = node_index(object).filter(|_| !self.inert_adopted_node(object)) {
-            return (self.dom_accessible(index) && self.parsed_template(index)).then_some((DOCUMENT, Some(index)));
+            return (self.dom_accessible(index) && self.parsed_template(index)).then_some((DOCUMENT, (!self.state.dom.created.contains(&index)).then_some(index)));
         }
         let node = self.state.inert_documents.node(object)?;
         match &node.kind {

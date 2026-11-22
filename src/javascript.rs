@@ -864,7 +864,7 @@ pub trait Host {
     fn validate_dictionary_member(&self,_object:u32,_method:&str,_member:&str,_value:&Value)
         ->Result<(),(&'static str,String)>{Ok(())}
     /// Final native validation after dictionary getters have completed.
-    fn validate_dictionary_call(&self,_object:u32,_method:&str,_args:&[Value],_fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{Ok(())}
+    fn validate_dictionary_call(&mut self,_object:u32,_method:&str,_args:&[Value],_fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,

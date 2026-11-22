@@ -4937,7 +4937,7 @@ impl Host for Bridge<'_> {
         }
         Ok(())
     }
-    fn validate_dictionary_call(&self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields));}Ok(())}
+    fn validate_dictionary_call(&mut self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields)).map(|_|());}Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -8724,3 +8724,7 @@ mod inert_document_import_tests;
 #[cfg(test)]
 #[path="script_template_document_owner_tests.rs"]
 mod template_document_owner_tests;
+
+#[cfg(test)]
+#[path="script_inert_template_import_tests.rs"]
+mod inert_template_import_tests;
