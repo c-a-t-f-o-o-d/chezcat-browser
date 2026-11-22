@@ -3566,7 +3566,9 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
+        index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
+            ||index==0&&method=="createElementNS"&&(object==DOCUMENT||self.inert_document(object))
+            ||index<3&&method==script_inert_documents::CREATE_DOCTYPE&&self.inert_implementation(object)
             ||index==1&&method=="setAttribute"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==2&&method=="setAttributeNS"&&(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1))
             ||index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
@@ -3582,6 +3584,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==element_names::DEFAULT_METHOD{return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
@@ -3788,7 +3791,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD) {return Some(object);}
+        if self.event_target_interface(object) && matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD | element_names::DEFAULT_METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -3830,7 +3833,8 @@ impl Host for Bridge<'_> {
             || self.inert_document(object) && method=="createElementNS") && index==0 {return true;}
         if object == HISTORY && matches!(method,"replaceState"|"pushState") && index == 2 { return true; }
         if self.named_map_receiver(object) { return script_named_map::operation(method).unwrap_or(method) == "getNamedItemNS" && index == 0; }
-        method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
+        method==element_names::DEFAULT_METHOD&&index==0
+            ||method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
             || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attribute_names_receiver(object)
     }
 
@@ -3874,6 +3878,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==element_names::DEFAULT_METHOD{return 1;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
         if let Some(operation)=crate::javascript::xhr_interface::operation(method){return match operation {"open"|"setRequestHeader"=>2,"getResponseHeader"|"overrideMimeType"=>1,_=>0};}
@@ -4394,6 +4399,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if method==element_names::DEFAULT_METHOD{return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
             let Some((_,upload))=self.xhr_index(receiver) else{return false};
@@ -6115,7 +6121,7 @@ impl Host for Bridge<'_> {
             self.state.work(1)?;
             return self.compare_document_position(object, args);
         }
-        if method == "isDefaultNamespace" {
+        if method==element_names::DEFAULT_METHOD || method == "isDefaultNamespace" {
             self.state.work(1)?;
             return self.is_default_namespace(object, args);
         }
@@ -6479,45 +6485,9 @@ fn handler_event(property: &str) -> Option<&str> {
         _ => None,
     }
 }
-fn text_container(tag: &str) -> bool {
-    matches!(
-        tag,
-        "div"
-            | "span"
-            | "p"
-            | "a"
-            | "b"
-            | "strong"
-            | "i"
-            | "em"
-            | "u"
-            | "s"
-            | "small"
-            | "mark"
-            | "sub"
-            | "sup"
-            | "code"
-            | "pre"
-            | "kbd"
-            | "samp"
-            | "var"
-            | "label"
-            | "button"
-            | "h1"
-            | "h2"
-            | "h3"
-            | "h4"
-            | "h5"
-            | "h6"
-            | "li"
-            | "dt"
-            | "dd"
-            | "legend"
-            | "blockquote"
-            | "br"
-            | "wbr"
-    )
-}
+const TEXT_CONTAINERS:&[&str]=&["div","span","p","a","b","strong","i","em","u","s","small","mark","sub","sup","code","pre","kbd","samp","var","label","button","h1","h2","h3","h4","h5","h6","li","dt","dd","legend","blockquote","br","wbr"];
+fn text_container(tag:&str)->bool{TEXT_CONTAINERS.contains(&tag)}
+
 fn node_bytes(node: &Node) -> usize {
     match &node.kind {
         NodeKind::DocumentFragment => 0,
@@ -8606,3 +8576,9 @@ mod custom_host_content_tests;
 #[cfg(test)]
 #[path="script_native_document_records_tests.rs"]
 mod native_document_records_tests;
+
+use script_inert_documents::element_names;
+
+#[cfg(test)]
+#[path="script_native_expanded_names_tests.rs"]
+mod native_expanded_names_tests;

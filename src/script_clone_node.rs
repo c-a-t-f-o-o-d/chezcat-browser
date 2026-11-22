@@ -8,13 +8,10 @@ mod import_controls;
 
 pub(super) const CLONE_METHOD: &str = "\0Node.cloneNode";
 
-pub(super) fn ordinary_clone_element(name: &str) -> bool {
+pub(super) fn ordinary_clone_element(name:&str)->bool{
     crate::html::valid_custom_element_name(name)
-        || (text_container(name) && !matches!(name, "button" | "legend"))
-        || matches!(name, "nav" | "main" | "section" | "article" | "aside" | "header"
-            | "footer" | "address" | "figure" | "figcaption" | "ol" | "ul" | "dl"
-            | "table" | "caption" | "col" | "colgroup" | "thead" | "tbody" | "tfoot"
-            | "tr" | "td" | "th" | "hr" | "time" | "slot")
+        ||TEXT_CONTAINERS.iter().any(|tag|!matches!(*tag,"button"|"legend")&&tag.eq_ignore_ascii_case(name))
+        ||["nav","main","section","article","aside","header","footer","address","figure","figcaption","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
 }
 
 pub(super) fn copy_text(text:&str)->Result<String,String>{

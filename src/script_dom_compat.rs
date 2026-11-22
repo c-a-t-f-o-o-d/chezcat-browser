@@ -240,6 +240,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn create_image(&mut self, args: &[Value]) -> Result<Value, String> {
+        self.create_image_named(args,Vec::new())
+    }
+    pub(super) fn create_image_named(&mut self,args:&[Value],expanded_name:Vec<crate::html::ExpandedElementName>)->Result<Value,String>{
         self.state.rebuild(self.doc)?;
         if self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
@@ -253,7 +256,7 @@ impl Bridge<'_> {
                 attrs.push(crate::html::Attribute::unqualified((*name).into(), dimension.to_string()));
             }
         }
-        let bytes = 3 + attrs.capacity()*size_of::<crate::html::Attribute>() + attrs
+        let bytes = 3 + crate::html::element_names::owned_bytes(&expanded_name) + attrs.capacity()*size_of::<crate::html::Attribute>() + attrs
             .iter()
             .map(crate::html::Attribute::owned_bytes)
             .sum::<usize>();
@@ -265,7 +268,7 @@ impl Bridge<'_> {
         let node = self.doc.nodes.len();
         self.doc.nodes.push(Node {
             namespace: crate::html::Namespace::Html,
-            kind: NodeKind::Element {expanded_name:Vec::new(),
+            kind: NodeKind::Element {expanded_name,
                 tag: "img".into(),
                 id: None,
                 href: None,

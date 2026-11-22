@@ -446,31 +446,13 @@ impl Bridge<'_> {
     }
     pub(super) fn namespace_receiver(&self, object: u32) -> bool {
         object == DOCUMENT
+            || self.inert_node_type(object).is_some()
             || self.attr_receiver(object)
             || node_index(object).is_some_and(|node| self.dom_accessible(node))
             || self.frame_node_constant_readonly(object)
     }
 
-    pub(super) fn is_default_namespace(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
-        let query = match args.first() {
-            Some(Value::Null | Value::Undefined) => None,
-            Some(Value::String(text)) => if text.is_empty() { None } else { Some(text.as_str()) },
-            _ => return Err("isDefaultNamespace requires a converted nullable string.".into()),
-        };
-        if let Some(result) = self.attr_default_namespace(object) {
-            return result.map(|namespace| Value::Bool(query == namespace));
-        }
-        if let Some(result) = self.frame_default_namespace(object) {
-            return result.map(|namespace| Value::Bool(query == namespace));
-        }
-        let node = if object == DOCUMENT {
-            self.state.rebuild(self.doc)?;
-            0
-        } else { self.dom_node(object)? };
-        let parent = self.state.tree.parents.get(node).copied().flatten();
-        default_namespace(self.doc, node, parent, self.state)
-            .map(|namespace| Value::Bool(query == namespace))
-    }
+    pub(super) fn is_default_namespace(&mut self,object:u32,args:&[Value])->Result<Value,String>{self.native_is_default_namespace(object,args)}
 
     pub(super) fn dom_accessible(&self, node: usize) -> bool {
         if node == 0 || node >= self.doc.nodes.len() || self.inert_adopted_node(node_handle(node)) {
@@ -535,7 +517,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn dom_script(&self, node: usize) -> bool {
-        tag(self.doc, node) == "script" && self.state.dom.created.contains(&node)
+        self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc, node) == "script" && self.state.dom.created.contains(&node)
     }
 
     pub(super) fn dom_method(&self, object: u32, property: &str) -> Option<&'static str> {
@@ -638,8 +620,7 @@ impl Bridge<'_> {
         }
         if (object == DOCUMENT || self.inert_document(object)) && method=="createElementNS" {
             if let (Some(namespace),Some(Value::String(name)))=(args.first(),args.get(1)) {
-                let namespace=match namespace{Value::String(value) if !value.is_empty()=>Some(value.as_str()),_=>None};
-                super::script_attribute_names::validate_element_namespace(namespace,name)?;
+                super::script_attribute_names::validate_element_namespace_value(namespace,name)?;
             }
         }
         if matches!(method,"setAttributeNode"|"setAttributeNodeNS") && node_index(object).is_some() {return self.validate_attr_attachment(object,args);}
@@ -866,6 +847,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         let node = self.dom_node(object)?;
+        if element_names::property(property)&&matches!(self.doc.nodes[node].kind,NodeKind::Element{..}){return self.element_name_get(node,property).map(Some);}
         if let NodeKind::DocumentType(data)=&self.doc.nodes[node].kind {
             let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
             if let Some(text)=text{return Self::dom_string_value(self.state,text).map(Some);}
@@ -1085,7 +1067,7 @@ impl Bridge<'_> {
         };
         self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM node/payload storage overflow.")?, work)?;
         self.commit_main_nodes(node_growth);
-        if matches!(&kind, NodeKind::Element { tag, .. } if tag == "script") {
+        if namespace==crate::html::Namespace::Html&&matches!(&kind, NodeKind::Element { tag, .. } if tag == "script") {
             self.state.dom.force_async.insert(node);
         }
         self.doc.nodes.push(Node {
@@ -1739,23 +1721,7 @@ impl Bridge<'_> {
             }
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS") {return self.create_attribute(args,method=="createAttributeNS").map(Some);}
-        if object==DOCUMENT && method=="createElementNS" {
-            let namespace=match args.first(){Some(Value::String(s)) if !s.is_empty()=>Some(s.as_str()),_=>None};
-            let name=self.text(args.get(1).ok_or("createElementNS requires two arguments.")?)?;
-            super::script_attribute_names::validate_element_namespace(namespace,&name).map_err(|(_,message)|message)?;
-            if namespace==Some("http://www.w3.org/2000/svg")&&!name.contains(':'){
-                if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("SVG creation options are not implemented; no node was created.".into());}
-                if !crate::html::svg_dom_name(&name){return Err("SVG element is outside the supported passive shape/container subset; no node was created.".into());}
-                return self.create_dom_node_ns(NodeKind::Element{expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()},crate::html::Namespace::Svg).map(Some);
-            }
-            if namespace!=Some("http://www.w3.org/1999/xhtml")||name.contains(':') {return Err("createElementNS currently implements the HTML namespace with a null prefix; no node was created.".into());}
-            if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)) {return Err("Element creation options/custom registries are not implemented; no node was created.".into());}
-            if !name.bytes().all(|c|c.is_ascii_alphanumeric()||matches!(c,b'-'|b'_'|b'.')) {return Err("Valid element name is outside the supported factory spelling subset; no node was created.".into());}
-            // Unlike createElement, preserve local-name case. Uppercase IMG is
-            // an ordinary unknown HTML element, never an Image/resource alias.
-            if name=="img" {return self.create_image(&[]).map(Some);}
-            return self.create_dom_node(NodeKind::Element {expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
-        }
+        if object==DOCUMENT&&method=="createElementNS"{return self.create_expanded_element(object,args).map(Some);}
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
             let value=args.first().ok_or("DOM creation requires one argument.")?;
             let text = if method=="createElement"{DomString::from(self.text(value)?)}else{self.dom_text(value)?};

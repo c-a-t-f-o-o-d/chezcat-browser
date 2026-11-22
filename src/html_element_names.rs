@@ -10,6 +10,16 @@ pub(crate) struct ExpandedElementName {
     pub(crate) namespace:ElementNamespaceValue,
     pub(crate) prefix:Option<String>,
 }
+pub(crate) enum NamespaceRef<'a>{Null,Static(&'static str),Owned(&'a DomString)}
+pub(crate) fn namespace(class:Namespace,names:&[ExpandedElementName])->Result<NamespaceRef<'_>,String>{
+    if names.len()>1{return Err("An Element has multiple expanded-name records.".into());}
+    if let Some(name)=names.first(){
+        if name.namespace.classification()!=class{return Err("Element namespace classification differs from its owned record.".into());}
+        return Ok(match &name.namespace{ElementNamespaceValue::Html=>NamespaceRef::Static("http://www.w3.org/1999/xhtml"),ElementNamespaceValue::Svg=>NamespaceRef::Static("http://www.w3.org/2000/svg"),ElementNamespaceValue::Null=>NamespaceRef::Null,ElementNamespaceValue::Other(uri)=>NamespaceRef::Owned(uri)});
+    }
+    class.element_uri().map(NamespaceRef::Static).ok_or_else(||"Element namespace provenance has no native URI record.".into())
+}
+pub(crate) fn prefix(class:Namespace,names:&[ExpandedElementName])->Result<Option<&str>,String>{namespace(class,names)?;Ok(names.first().and_then(|name|name.prefix.as_deref()))}
 impl ElementNamespaceValue {
     pub(crate) fn classification(&self)->Namespace{match self{Self::Html=>Namespace::Html,Self::Svg=>Namespace::Svg,Self::Null|Self::Other(_)=>Namespace::Other}}
     fn owned_bytes(&self)->usize{match self{Self::Other(value)=>value.capacity(),_=>0}}

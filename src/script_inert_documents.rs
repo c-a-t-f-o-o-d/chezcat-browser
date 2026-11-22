@@ -3,6 +3,9 @@
 use super::*;
 use std::rc::Rc;
 
+#[path="script_element_names.rs"]
+pub(super) mod element_names;
+
 #[path="script_inert_content.rs"]
 mod content;
 #[path="script_inert_observation.rs"]
@@ -1576,6 +1579,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_create_node(&mut self, owner: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method=="createElementNS"{return self.create_expanded_element(owner,args);}
         let kind = if method == "createDocumentFragment" {
             Kind::Fragment { template: None }
         } else if method == "createTextNode" {
@@ -1693,6 +1697,7 @@ impl Bridge<'_> {
         if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
+        if element_names::property(property)&&self.inert_node_type(object)==Some(1){return self.inert_element_name_get(object,property);}
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Doctype(data)=&node.kind {
             let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
