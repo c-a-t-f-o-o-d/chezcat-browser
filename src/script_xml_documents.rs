@@ -8,16 +8,14 @@ impl Bridge<'_>{
         match self.inert_import_source(element){Some(ImportSource::Element(tag))=>namespace==crate::html::Namespace::Html&&tag==name,Some(ImportSource::Parsed{node,..})=>node.namespace==namespace&&matches!(&node.kind,NodeKind::Element{tag,..} if tag==name),_=>false}
     }
     pub(in crate::scripting) fn inert_document_structure_get(&mut self,document:u32,property:&str)->Result<Value,String>{
-        let Kind::Document(record)=&self.state.inert_documents.node(document).ok_or("Missing document record.")?.kind else{return Ok(Value::Null);};
-        let Some(root)=record.html else{return Ok(Value::Null);};
+        let Some((Some(root),_))=self.inert_document_roots(document)else{return Ok(Value::Null);};
         if !self.document_element_named(root,crate::html::Namespace::Html,"html"){return Ok(Value::Null);}
         let children=self.inert_children(root).ok_or("Missing document root children.")?;self.state.work(children.len())?;
         let children=self.inert_children(root).unwrap();
         Ok(children.iter().copied().find(|&child|if property=="head"{self.document_element_named(child,crate::html::Namespace::Html,"head")}else{self.document_element_named(child,crate::html::Namespace::Html,"body")||self.document_element_named(child,crate::html::Namespace::Html,"frameset")}).map_or(Value::Null,Value::Host))
     }
     pub(in crate::scripting) fn inert_document_title_get(&mut self,document:u32)->Result<Value,String>{
-        let Kind::Document(record)=&self.state.inert_documents.node(document).ok_or("Missing document record.")?.kind else{return Ok(Value::String(String::new()));};
-        let Some(root)=record.html else{return Ok(Value::String(String::new()));};
+        let Some((Some(root),_))=self.inert_document_roots(document)else{return Ok(Value::String(String::new()));};
         let mut title=None;
         if self.document_element_named(root,crate::html::Namespace::Svg,"svg"){
             let children=self.inert_children(root).ok_or("Missing SVG document children.")?;self.state.work(children.len())?;

@@ -19,8 +19,9 @@ mod storage_tests{
  }
 }
 impl Bridge<'_>{
+ pub(in crate::scripting) fn inert_document_roots(&self,document:u32)->Option<(Option<u32>,Option<u32>)>{match &self.state.inert_documents.node(document)?.kind{Kind::Document(record)=>Some((record.html,record.doctype)),Kind::TemplateDocument{html,doctype,..}=>Some((*html,*doctype)),_=>None}}
  pub(in crate::scripting) fn inert_document_children_receiver(&self,parent:u32)->bool{
-  self.state.inert_documents.node(parent).is_some_and(|node|matches!(node.kind,Kind::Document(_)))
+  self.state.inert_documents.node(parent).is_some_and(|node|matches!(node.kind,Kind::Document(_)|Kind::TemplateDocument{..}))
  }
  pub(super) fn validate_document_children(&self,parent:u32,method:&str,args:&[Value])->Result<(),(&'static str,String)>{
   if !self.inert_document_children_receiver(parent)||method=="removeChild"{return Ok(());}
@@ -39,18 +40,18 @@ impl Bridge<'_>{
    for &node in self.inert_children(*incoming).unwrap_or(&[]){match self.inert_node_type(node){Some(1) if !element=>element=true,Some(7|8)=>{},_=>return Err(reject())}}
    if !element{return Ok(());}
   }
-  let Kind::Document(record)=&self.state.inert_documents.node(parent).unwrap().kind else{unreachable!()};
+  let(root,doctype)=self.inert_document_roots(parent).ok_or_else(reject)?;
   // The current pinned DOM excludes only the replaced child. It does not
   // exclude an incoming node already in this document from validity checks.
   if element{
-   if record.html.is_some_and(|root|Some(root)!=outgoing){return Err(reject());}
-   if let Some(doctype)=record.doctype{
+   if root.is_some_and(|root|Some(root)!=outgoing){return Err(reject());}
+   if let Some(doctype)=doctype{
     let at=children.iter().position(|&node|node==doctype).unwrap();
     if reference.is_some()&&(at>insertion||at==insertion&&Some(doctype)!=outgoing){return Err(reject());}
    }
   }else if kind==Some(10){
-   if record.doctype.is_some_and(|doctype|Some(doctype)!=outgoing){return Err(reject());}
-   if let Some(root)=record.html{
+   if doctype.is_some_and(|doctype|Some(doctype)!=outgoing){return Err(reject());}
+   if let Some(root)=root{
     let at=children.iter().position(|&node|node==root).unwrap();
     if reference.is_some()&&at<insertion||reference.is_none()&&Some(root)!=outgoing{return Err(reject());}
    }
@@ -69,6 +70,10 @@ impl Bridge<'_>{
   if !self.inert_document_children_receiver(parent){return;}
   let mut element=None;let mut doctype=None;
   for &node in self.inert_children(parent).unwrap(){match self.inert_node_type(node){Some(1)=>element=Some(node),Some(10)=>doctype=Some(node),_=>{}}}
-  let Kind::Document(record)=&mut self.state.inert_documents.node_mut(parent).unwrap().kind else{unreachable!()};record.html=element;record.doctype=doctype;
+  match &mut self.state.inert_documents.node_mut(parent).unwrap().kind{Kind::Document(record)=>{record.html=element;record.doctype=doctype;},Kind::TemplateDocument{html,doctype:stored,..}=>{*html=element;*stored=doctype;},_=>unreachable!()}
  }
 }
+
+#[cfg(test)]
+#[path="script_template_document_children_storage_tests.rs"]
+mod template_document_children_storage_tests;

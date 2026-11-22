@@ -94,7 +94,7 @@ impl Bridge<'_>{
     fn namespace_start(&self,object:u32)->Result<Option<u32>,String>{
         if self.attr_receiver(object){return Ok(self.state.attributes[script_attr::index(object).unwrap()].owner);}
         if object==DOCUMENT{return Ok(self.doc.nodes[0].children.iter().copied().find(|&node|matches!(self.doc.nodes[node].kind,NodeKind::Element{..})).map(node_handle));}
-        if let Some(node)=self.state.inert_documents.node(object){return Ok(match &node.kind{Kind::Document(doc)=>doc.html,Kind::TemplateDocument{..}|Kind::Doctype(_)|Kind::Fragment{..}=>None,_=>if self.inert_node_type(object)==Some(1){Some(object)}else{self.namespace_parent_element(object)}});}
+        if let Some(node)=self.state.inert_documents.node(object){return Ok(match &node.kind{Kind::Document(doc)=>doc.html,Kind::TemplateDocument{html,..}=>*html,Kind::Doctype(_)|Kind::Fragment{..}=>None,_=>if self.inert_node_type(object)==Some(1){Some(object)}else{self.namespace_parent_element(object)}});}
         let node=node_index(object).filter(|&node|self.dom_accessible(node)).ok_or("Namespace lookup requires a genuine accessible Node.")?;
         Ok(match self.doc.nodes[node].kind{NodeKind::Element{..}=>Some(object),NodeKind::DocumentType(_)|NodeKind::DocumentFragment=>None,_=>self.namespace_parent_element(object)})
     }

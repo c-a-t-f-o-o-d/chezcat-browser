@@ -120,7 +120,7 @@ struct GeneratedNode {
 
 enum Kind {
     Document(DocumentNodes),
-    TemplateDocument { implementation: u32, kind:crate::html::DocumentKind },
+    TemplateDocument { implementation: u32, kind:crate::html::DocumentKind, html:Option<u32>, doctype:Option<u32> },
     Fragment { template: Option<u32> },
     Parsed { source: ParsedSource, initial_template: Option<usize> },
     Doctype(crate::html::DocumentTypeData),
@@ -203,22 +203,13 @@ impl Bridge<'_> {
         if owner == DOCUMENT {
             return self.main_node_base_uri();
         }
-        let document = self
-            .state
-            .inert_documents
-            .node(owner)
-            .and_then(|node| match &node.kind {
-                Kind::Document(document) => Some(document),
-                _ => None,
-            });
-        let Some(document) = document else {
-            return self.string("about:blank");
-        };
-        let length = document.url.len();
+        let document_url=match self.state.inert_documents.node(owner).map(|node|&node.kind){Some(Kind::Document(record))=>record.url.as_str(),Some(Kind::TemplateDocument{..})=>"about:blank",_=>return self.string("about:blank")};
+        let length = document_url.len();
         self.state.work(length)?;
         self.state.copies(length)?;
         let fallback = match &self.state.inert_documents.node(owner).unwrap().kind {
             Kind::Document(document) => script_clone_node::copy_text(&document.url)?,
+            Kind::TemplateDocument{..}=>script_clone_node::copy_text("about:blank")?,
             _ => unreachable!(),
         };
         // Use the actual current inert tree and native attributes, never an
@@ -912,7 +903,7 @@ impl Bridge<'_> {
         let mut payload = 0usize;
         if existing_owner.is_none() {
             staged.push(Entry::Node(InertNode {
-                kind: Kind::TemplateDocument { implementation: first + 1,kind:document_kind },
+                kind: Kind::TemplateDocument { implementation: first + 1,kind:document_kind,html:None,doctype:None },
                 owner, parent: None, children: Vec::new(),
             }));
             staged.push(Entry::Implementation);
@@ -1754,6 +1745,7 @@ impl Bridge<'_> {
         if property=="baseURI" {return self.inert_node_base_uri(object);}
         if property == "childNodes" { return self.create_inert_child_list(object); }
         if property=="attributes"&&self.inert_node_type(object)==Some(1){return Ok(Value::Host(script_named_map::handle(object)));}
+        if self.inert_document(object)&&matches!(property,"documentElement"|"doctype"){let (root,doctype)=self.inert_document_roots(object).ok_or("Missing document root metadata.")?;return Ok(if property=="doctype"{doctype}else{root}.map_or(Value::Null,Value::Host));}
         if self.inert_document(object)&&matches!(property,"head"|"body"){return self.inert_document_structure_get(object,property);}
         if self.inert_document(object)&&property=="title"{return self.inert_document_title_get(object);}
         if element_names::property(property)&&self.inert_node_type(object)==Some(1){return self.inert_element_name_get(object,property);}
