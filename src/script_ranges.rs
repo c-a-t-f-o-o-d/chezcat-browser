@@ -87,6 +87,8 @@ impl State {
         }
     }
     pub(super) fn ranges_split_text(&mut self,source:u32,new_node:u32,offset:usize,parent:Option<(u32,usize)>){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==source&&point.offset>offset{point.node=new_node;point.offset-=offset;}else if parent.is_some_and(|(parent,gap)|point.node==parent&&point.offset==gap){point.offset+=1;}}}}
+    pub(super) fn ranges_normalize_remove(&mut self,parent:u32,node:u32,index:usize){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=parent;point.offset=index;}else if point.node==parent&&point.offset>index{point.offset-=1;}}}}
+    pub(super) fn ranges_normalize_merge(&mut self,parent:u32,node:u32,keeper:u32,index:usize,offset:usize){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=keeper;point.offset+=offset;}else if point.node==parent{if point.offset==index{point.node=keeper;point.offset=offset;}else if point.offset>index{point.offset-=1;}}}}}
     pub(super) fn ranges_replace_data(&mut self, node: usize) {
         for range in &mut self.ranges {
             for point in [&mut range.start, &mut range.end] {
