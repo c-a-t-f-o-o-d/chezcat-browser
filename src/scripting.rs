@@ -4061,7 +4061,7 @@ impl Host for Bridge<'_> {
         if method == crate::javascript::abort_interface::SIGNAL_INTERFACE && self.event_target_interface(object) {
             return Err(("TypeError", "Illegal AbortSignal constructor.".into()));
         }
-        if object == WINDOW && matches!(method, "DOMImplementation" | "DocumentType") {
+        if self.event_target_interface(object) && matches!(method, "DOMImplementation" | "DocumentType" | "XMLDocument") {
             return Err(("TypeError", "Illegal inert DOM interface constructor.".into()));
         }
         if matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
@@ -4115,9 +4115,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && method=="DocumentFragment" {
             return if object==WINDOW {Ok(())} else {Err(("NotSupportedError","Child DocumentFragment allocation is not implemented.".into()))};
         }
-        if self.event_target_interface(object) && method=="Document" {
-            return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
-        }
+        if self.event_target_interface(object)&&method=="Document"{return if object==WINDOW{Ok(())}else{Err(("NotSupportedError","Child-realm Document construction requires its actual realm ownership; no object was created.".into()))};}
         if method == DOCUMENT_ADOPT_NODE{return self.validate_node_adoption(object,args);}
         if method==DOCUMENT_IMPORT_NODE{return self.validate_import_source(args);}
         if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
@@ -6016,6 +6014,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if object==WINDOW&&method=="Document"{return self.create_generic_document();}
         if script_attr::node_method(method){return match method{"getAttributeNode"=>self.get_attribute_node(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"removeAttributeNode"=>self.remove_attribute_node(object,args),_=>self.set_attribute_node(object,args)};}
         if let Some((name,setter))=script_attr::member_operation(method){return if setter{Err("Attr setters require the native conversion transaction.".into())}else{self.attr_get(object,name)};}
         if let Some(ns)=script_attr::factory_operation(method){return self.create_attribute_for_document(object,args,ns);}
@@ -8728,3 +8727,7 @@ mod template_document_owner_tests;
 #[cfg(test)]
 #[path="script_inert_template_import_tests.rs"]
 mod inert_template_import_tests;
+
+#[cfg(test)]
+#[path="script_generic_document_tests.rs"]
+mod generic_document_tests;

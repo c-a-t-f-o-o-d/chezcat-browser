@@ -92,7 +92,7 @@ impl Bridge<'_>{
                 self.prepare_adopted_index(std::iter::once(handle),self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("XML adoption payload allowance exhausted.")?)?
             }else{(None,0)};
             let mut entries=Vec::new();entries.try_reserve_exact(2).map_err(|_|"Cannot reserve staged XML document identities.")?;
-            entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,base_url_override:None,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));entries.push(Entry::Implementation);
+            entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{xml_interface:true,kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type,implementation:first+1,doctype,url,base_url_override:None,html:root_handle,head:None,body:None,title:String::new()}),owner:first,parent:None,children}));entries.push(Entry::Implementation);
             let admitted=self.reserve_inert_entries(2,payload.checked_add(index_bytes).ok_or("XML adoption storage overflow.")?,0)?;debug_assert_eq!(admitted,first);
             self.state.inert_documents.entries.extend(entries);
             if let Some(plan)=adoption{self.commit_xml_doctype_adoption(plan,first,index_growth);}
