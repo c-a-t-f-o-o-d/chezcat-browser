@@ -86,7 +86,7 @@ impl Bridge<'_> {
         Ok((handles, parked))
     }
     pub(in crate::scripting) fn next_inert_text_identity(&self) -> Result<u32, String> {
-        if self.can_park_inert_text() {
+        if self.can_reserve_inert_leaf() {
             return Ok(node_handle(self.doc.nodes.len()));
         }
         FIRST_ENTRY
@@ -97,7 +97,7 @@ impl Bridge<'_> {
             .filter(|&id| id < ENTRY_END)
             .ok_or_else(|| "Inert text identity space exhausted.".into())
     }
-    fn can_park_inert_text(&self) -> bool {
+    fn can_reserve_inert_leaf(&self) -> bool {
         self.doc.nodes.len() < (STYLE_BASE - NODE_BASE) as usize
             && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes)
                 < self.state.node_limit
@@ -108,37 +108,59 @@ impl Bridge<'_> {
     pub(super) fn append_inert_text(
         &mut self, owner: u32, parent: Option<u32>, text: String, metadata: usize,
     ) -> Result<u32, String> {
-        if !self.can_park_inert_text() {
+        if !self.can_reserve_inert_leaf() {
             let handle = self.reserve_inert_storage(1, text.capacity(), 0, 0, metadata)?;
             self.state.inert_documents.entries.push(Entry::Node(InertNode {
                 kind: Kind::Text(text), owner, parent, children: Vec::new(),
             }));
             return Ok(handle);
         }
+        self.append_inert_source_leaf(owner, parent,
+            Node { kind: NodeKind::Text(text), namespace: crate::html::Namespace::None, children: Vec::new() }, metadata)
+    }
+
+    pub(super) fn append_inert_source_leaf(
+        &mut self, owner: u32, parent: Option<u32>, node: Node, metadata: usize,
+    ) -> Result<u32, String> {
+        let mut payload = node_bytes(&node).checked_add(size_of::<Node>() + 2 * size_of::<usize>())
+            .ok_or("Inert leaf source storage overflow.")?;
+        if let NodeKind::Element { tag, href, .. } = &node.kind {
+            payload = payload.checked_add(tag.capacity()).and_then(|bytes| bytes.checked_add(href.as_ref().map_or(0,String::capacity)))
+                .ok_or("Inert element source storage overflow.")?;
+        }
+        let source = self.state.inert_documents.generated.len();
+        let parked = self.can_reserve_inert_leaf() && template_node_can_park(&node);
+        let node = Rc::new(node);
+        if !parked {
+            let handle = self.reserve_inert_storage(1, payload, 1, 0, metadata)?;
+            let arena = &mut self.state.inert_documents;
+            arena.generated.push(GeneratedNode { node, unsafe_nonce: false });
+            arena.entries.push(Entry::Node(InertNode {
+                kind: Kind::Parsed { source: ParsedSource::Generated(source), initial_template: None },
+                owner, parent, children: Vec::new(),
+            }));
+            return Ok(handle);
+        }
         let handle = node_handle(self.doc.nodes.len());
-        let payload = text.capacity().checked_add(size_of::<Node>() + 2 * size_of::<usize>())
-            .ok_or("Inert Text source storage overflow.")?;
         let arena = &self.state.inert_documents;
         let minimum = arena.entries.len().checked_add(1)
             .and_then(|n| n.saturating_sub(arena.entries.capacity()).checked_mul(size_of::<Entry>()))
             .and_then(|bytes| arena.generated.len().checked_add(1)
                 .and_then(|n| n.saturating_sub(arena.generated.capacity()).checked_mul(size_of::<GeneratedNode>()))
                 .and_then(|sources| bytes.checked_add(sources)))
-            .ok_or("Inert Text registry storage overflow.")?;
+            .ok_or("Inert leaf registry storage overflow.")?;
         let available = self.state.retained_limit.checked_sub(self.state.retained)
             .and_then(|bytes| bytes.checked_sub(payload))
             .and_then(|bytes| bytes.checked_sub(metadata))
             .and_then(|bytes| bytes.checked_sub(minimum))
-            .ok_or("Inert Text joint backing allowance exhausted.")?;
+            .ok_or("Inert leaf joint backing allowance exhausted.")?;
         let native_minimum = self.main_node_minimum(1)?;
         let (index_growth, index_bytes) = self.prepare_adopted_index(std::iter::once(handle),
-            available.checked_sub(native_minimum).ok_or("Inert Text native backing allowance exhausted.")?)?;
+            available.checked_sub(native_minimum).ok_or("Inert leaf native backing allowance exhausted.")?)?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(1,
-            available.checked_sub(index_bytes).ok_or("Inert Text index allowance exhausted.")?)?;
+            available.checked_sub(index_bytes).ok_or("Inert leaf index allowance exhausted.")?)?;
         let metadata = metadata.checked_add(index_bytes).and_then(|bytes| bytes.checked_add(node_bytes))
-            .ok_or("Inert Text joint storage overflow.")?;
-        let source = self.state.inert_documents.generated.len();
-        let node = Rc::new(Node { kind: NodeKind::Text(text), namespace: crate::html::Namespace::None, children: Vec::new() });
+            .ok_or("Inert leaf joint storage overflow.")?;
         self.reserve_inert_storage(1, payload, 1, 0, metadata)?;
         self.commit_main_nodes(node_growth);
         let arena = &mut self.state.inert_documents;
