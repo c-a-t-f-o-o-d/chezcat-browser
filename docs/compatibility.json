@@ -4,7 +4,14 @@
   "release_candidate": {
     "version": "0.82.0-alpha.2",
     "integrated_through": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-    "status": "Owner-requested candidate; exact tagged checks, publication and downloaded-asset verification pending",
+    "tag": "v0.82.0-alpha.2",
+    "tag_source": "14134aba8ac2ab001c8ec13db77f68fa220b1400",
+    "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445",
+    "status": "Immutable candidate failed normal Windows qualification; packaging and publication were not reached, and no alpha.2 release assets were published",
+    "qualification_status": "failed",
+    "failure_stage": "normal native tests",
+    "diagnostic_boundary": "The failure-summary step also rejected its relative output path; failing native test identities and root cause are not established by the public output.",
+    "publication_status": "not_published",
     "verified_downloadable_baseline": "v0.82.0-alpha.1",
     "measurement_scope": "Existing source-bound workflow records retain their original revisions and are not alpha.2 runtime results",
     "latest_reported_homepage_checkpoint": {
@@ -16,6 +23,73 @@
       "later_source_note": "PR #430 is integrated, but no post-PR #430 live acceptance result is recorded",
       "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
     }
+  },
+  "recent_original_fixtures": {
+    "record_scope": "Reported original-fixture evidence from the linked integrated PRs; not new executions by this documentation review or actual-site acceptance.",
+    "selected_component_path": {
+      "pull_request": 416,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416",
+      "integrated_source": "cd0b372521244a30a687c46955710517fecebf67",
+      "result": "Original App composition exercises nested inert ownership, attribute preparation/import, styles, author/native ARIA forwarding, observer/Promise jobs, icons, events, focus, typing and a native link.",
+      "boundary": "Models selected noPatch calls without running the matching deployed polyfill; not full native Custom Elements or Shadow DOM."
+    },
+    "native_base_uri": {
+      "pull_request": 429,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429",
+      "integrated_source": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
+      "result": "Original loopback App checks admitted/CSP-blocked bases, real relative-image requests and pixels, edited input preservation and native link activation.",
+      "boundary": "Existing HTTP(S) URL projection and 16 KiB bounds remain; general scheme expansion and live main-document base mutation are outside the slice."
+    },
+    "passive_custom_host_content": {
+      "pull_request": 433,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433",
+      "integrated_source": "ce464a4710fa764ad9e6199f14898ad07280bf82",
+      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
+      "result": "The PR records 49 focused affected checks, including an original App click/Promise/observer/Range/pixel update, production compilation and publication controls.",
+      "boundary": "Newly created inert-leaf promotion was incomplete at this revision; the later PR #434 Text increment is recorded separately. No new actual-site result is claimed."
+    },
+    "depth_16_traversal": {
+      "pull_request": 430,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/430",
+      "integrated_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+      "input_scope": "Original depth-16 fixture with a pinned unmodified development polyfill and identical HTML bytes.",
+      "constructors_and_connections": 17,
+      "script_entries": 2033391,
+      "development_timing_pair_seconds": {
+        "baseline": 24.583,
+        "candidate": 22.595
+      },
+      "boundary": "One preliminary timing pair, not a performance guarantee or actual-site fix. Production budgets, upstream code and page configuration were unchanged."
+    },
+    "new_inert_text_identity": {
+      "pull_request": 434,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434",
+      "integrated_source": "117bbb58eef717edae53a556b4a98b4808a06572",
+      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
+      "result": "The PR records 8 focused checks for direct App activation, storage/copy refusal and recovery, observers, Range, pixels and neighboring editor/link behavior. The affected selection has 75 unchanged passes plus the corrected 70,000-identity check; production compilation and publication controls pass.",
+      "boundary": "Native quota exhaustion keeps inert staging and atomic direct-promotion refusal. General inert element construction and subtree cloning remain outside this increment. No actual-site usability is claimed."
+    },
+    "constructed_inert_element_identity": {
+      "pull_request": 435,
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435",
+      "integrated_source": "ad58c9a2a527fbd140110fb94f1ad5844320deea",
+      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
+      "result": "The PR records 84 focused affected checks, including created HTML/style/SVG App activation, pixels, Promise-driven trusted click, preserved editor/link interaction, refusal/recovery, production compilation and publication controls.",
+      "boundary": "General inert subtree cloning remains incomplete. Protected controls, late inline handlers, storage admission and final resource checks retain their boundaries. No new actual-site result is claimed."
+    }
+  },
+  "current_priority": {
+    "source_commit": "ad58c9a2a527fbd140110fb94f1ad5844320deea",
+    "milestone": "P1: template preparation and stamping toward the first usable signed-out shell",
+    "implementation_scope": "Complete known shared template/import, stable identity and ownership, mutation/observation, styling and input contracts in dependency order.",
+    "validation_scope": "Focused affected checks during implementation, connected original App checks at package boundaries, and actual-site checks at milestone readiness or for a specific unresolved runtime question.",
+    "acceptance": "Connected original App behavior must preserve genuine controls, icons, identity, input, focus, observation and resource policy. The overall usable signed-out header/guide/search checkpoint also needs P2 layout and interaction; the latest recorded homepage check does not establish it.",
+    "later_stages": [
+      "Real query and results",
+      "Watch navigation and Back",
+      "Advancing decoded video and audio"
+    ],
+    "historical_next_scope": "The legacy jQuery/React tasks in the top-level next array retain the earlier alpha.1 workflow backlog; they are not the active P1 ordering."
   },
   "source_baseline": {
     "scope": "Historical source-bound workflow results for the alpha.1 integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",

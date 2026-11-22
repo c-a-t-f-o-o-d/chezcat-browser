@@ -50,17 +50,30 @@ are different states. Report only the state actually reached.
 
 ## Current release candidate
 
-`0.82.0-alpha.2` consolidates merged source through `1de1f24`, with matching Cargo
-and Windows resource versions and a new [change summary](../CHANGELOG.md#0820-alpha2).
-Its immutable tag, normal Windows gates, exact packages and downloaded-byte
-verification remain pending. The published baseline below retains its original
-source and measured delivery; update current download pointers only after the
-new release is verified.
+The immutable `v0.82.0-alpha.2` tag identifies
+`14134aba8ac2ab001c8ec13db77f68fa220b1400`, including merged source through PR #430
+and the matching Cargo/resource versions and [change summary](../CHANGELOG.md#0820-alpha2)
+prepared in PR #431. The
+[tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+failed at the normal native-test stage. The optimized build, package checks,
+publication and downloaded-byte verification were not reached. **No alpha.2
+release assets were published; alpha.1 remains the verified download.**
+
+The failure-summary step also rejected its relative output path, so this run's
+public output does not identify the failing native tests or their root cause.
+Keep that diagnostic gap explicit. Current development source corrects the
+summary invocation to use its checked absolute default output path, preserving
+the existing privacy and containment rules. That repair applies to future runs;
+it cannot recover this completed runner's missing diagnostics or identify the
+native failure. Establish that cause before claiming qualification. Changed release source
+requires the next unused version and tag; preserve this candidate's immutable tag.
+Development source after the tag, including PR #433, is not part of this attempt.
 
 ## Published baseline
 
 | Snapshot | Recorded outcome |
 | :--- | :--- |
+| **v0.82.0-alpha.2** | Immutable candidate at `14134aba8ac2ab001c8ec13db77f68fa220b1400`. Normal Windows test stage failed; failure-summary reporting also failed. Packaging was not reached and publication was skipped. No release assets. [Validation attempt](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) |
 | **[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** | Published from `f2e1823266a7c08c89bce7293572d801da62053c`. All four downloads matched their public digests. Both archives and the release notes passed verification. The extracted browser started and completed the App input journey. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **[v0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** | Published from `57cc1d5`; runtime/source ZIPs, `publication.json` and `SHA256SUMS` all downloaded and verified, including extracted runtime checks |
 | **v0.81.0-alpha.2** | Published from `36adf20`, with runtime/source ZIPs, `publication.json`, `SHA256SUMS`, and downloaded/extracted verification |

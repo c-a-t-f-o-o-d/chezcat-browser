@@ -159,9 +159,13 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-The source package version is `0.82.0-alpha.2`. During release preparation, a
-local build remains a development build unless the normal tagged workflow binds
-the matching immutable tag. The candidate's publication is not yet verified.
+The source package version is `0.82.0-alpha.2`. Its immutable tag identifies
+`14134aba8ac2ab001c8ec13db77f68fa220b1400`; the
+[tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+failed at the normal native-test stage before the optimized release build and
+package publication. Alpha.2 has no published release assets. A local build
+remains a development build unless the normal tagged
+workflow binds the matching immutable tag.
 
 Published `0.82.0-alpha.1` identifies tagged source
 `f2e1823266a7c08c89bce7293572d801da62053c`. Its downloaded package, PE, HTTP User-Agent,
@@ -177,6 +181,11 @@ revision is known and `+dev.unknown` otherwise. Declared tagged builds display t
 base version and identify the declared tag with publication unverified. About
 shows clean, dirty or unknown source state separately. That embedded label is not
 rewritten by later download verification.
+
+The `dev` ordinal is **not a pull-request number**. Compare the full source revision
+with the intended merged commit, and record whether the working tree was clean.
+Pulling newer source does not replace an existing executable; rebuild before
+using that executable as evidence for the newer source.
 
 <details>
 <summary><strong>📦 Packaging boundaries and private-review exports</strong></summary>

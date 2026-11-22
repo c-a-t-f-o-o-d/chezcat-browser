@@ -12,8 +12,9 @@
 
 > [!IMPORTANT]
 > **The full contracts remain normative.** This page is an index, not a replacement
-> specification or relaxed acceptance gate. [Complete contract text](FEATURE_CONTRACTS_DETAIL.md)
-> is preserved byte-for-byte from the pre-refresh document at `1558c66`.
+> specification or relaxed acceptance gate. The [detailed reference](FEATURE_CONTRACTS_DETAIL.md)
+> contains the foundational contracts and later language, DOM, CSS and resource
+> increments; its historical execution notes remain scoped to their recorded source.
 
 Scope is agreed before implementation. Completion requires all contracted normal,
 error, lifecycle and security acceptance. Missing criteria cannot be hidden by
@@ -36,11 +37,22 @@ Use current source-linked evidence for status; preserve the lasting requirements
 
 At the historical `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
 
-Release candidate `0.82.0-alpha.2` includes integrated source through
-[`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c)
-and awaits exact tagged checks, publication and downloaded-asset verification.
-It changes no acceptance requirement or historical measurement; the verified
-downloadable baseline remains `0.82.0-alpha.1` until delivery is established.
+Tagged candidate `0.82.0-alpha.2` identifies
+[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
+including integrated feature work through `1de1f24` and release preparation.
+Its [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+failed at the normal Windows test stage, before packages or publication. No
+alpha.2 assets were published. This changes no acceptance requirement or
+historical measurement; the verified downloadable baseline remains `0.82.0-alpha.1`.
+
+The [current P1–P6 dependency sequence](ROADMAP.md#current-product-sequence)
+provides the active product checkpoints. Its first-shell path uses genuine shared
+DOM behavior with the selected authored polyfill; full native Custom Elements
+and Shadow DOM are broader unfinished features. Connected App fixtures and
+actual site acceptance remain separate outcomes. The legacy contract directory
+below preserves foundational requirements rather than listing every newer
+language or DOM increment; those supported slices and exclusions live in
+[CAPABILITIES.md](CAPABILITIES.md).
 
 ## Contract directory
 
@@ -255,6 +267,23 @@ Retained finite integration requirements and deferred broader scope.
 **[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f6--staged-authored-page-and-media-integration)**
 
 ---
+
+## Later contract increments
+
+The reference has grown beyond the original milestone directory. These grouped
+links expose the current shared behavior contracts without turning the index into
+a duplicate capability matrix.
+
+| Area | Detailed requirements |
+| :--- | :--- |
+| **History and native interfaces** | [Same-document entries](FEATURE_CONTRACTS_DETAIL.md#same-document-session-entries), [live Range boundaries](FEATURE_CONTRACTS_DETAIL.md#live-dom-range-boundary-increment), [form named lookup](FEATURE_CONTRACTS_DETAIL.md#native-form-interface-and-named-lookup) and [textarea values](FEATURE_CONTRACTS_DETAIL.md#native-textarea-interface-and-canonical-value) |
+| **Templates, owners and activation** | [Nested templates](FEATURE_CONTRACTS_DETAIL.md#nested-checked-template-fragments), [inert queries](FEATURE_CONTRACTS_DETAIL.md#inert-selectors-and-genuine-query-snapshots), [passive HTML](FEATURE_CONTRACTS_DETAIL.md#passive-html-containers-through-cloneimport), [native controls](FEATURE_CONTRACTS_DETAIL.md#default-native-control-import-and-activation), [images](FEATURE_CONTRACTS_DETAIL.md#plain-image-cloneimport-and-real-activation) and [style batches](FEATURE_CONTRACTS_DETAIL.md#inline-style-cloneimport-and-atomic-mixed-stamping) |
+| **Mutations and observation** | [Inert tree records](FEATURE_CONTRACTS_DETAIL.md#inert-tree-mutation-records-and-characterdata), [whole-content replacement](FEATURE_CONTRACTS_DETAIL.md#whole-content-replacement-notifications), [transient subtrees](FEATURE_CONTRACTS_DETAIL.md#transient-subtree-mutation-observation) and [same-owner replacement/promotion](FEATURE_CONTRACTS_DETAIL.md#same-inert-owner-node-replacement-and-loaded-parked-promotion) |
+| **Native and author properties** | [HTML reflections](FEATURE_CONTRACTS_DETAIL.md#common-htmlelement-reflections-and-author-overrides), [ARIA strings](FEATURE_CONTRACTS_DETAIL.md#element-ariamixin-nullable-string-reflections) and [placeholder hints](FEATURE_CONTRACTS_DETAIL.md#native-text-control-placeholder-reflection) |
+| **Requests and body values** | [Asynchronous XHR](FEATURE_CONTRACTS_DETAIL.md#original-script-request-and-xmlhttprequest-increment), [Headers](FEATURE_CONTRACTS_DETAIL.md#native-headers-values-for-shared-request-and-response-adapters) and [buffered Response/Body](FEATURE_CONTRACTS_DETAIL.md#buffered-response-values-and-native-body-consumption) |
+| **CSS and SVG** | [Variable layout values](FEATURE_CONTRACTS_DETAIL.md#shared-variable-sizing-and-existing-layout-grammars), [typed sizing math](FEATURE_CONTRACTS_DETAIL.md#shared-typed-sizing-calculations), [computed presentation](FEATURE_CONTRACTS_DETAIL.md#actual-computed-display-and-foreground), [SVG geometry](FEATURE_CONTRACTS_DETAIL.md#svg-geometry-in-the-shared-document-cascade) and [SVG paint](FEATURE_CONTRACTS_DETAIL.md#shared-svg-fill-stroke-and-color) |
+| **Events and diagnostics** | [AnimationEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-animationevent-construction), [WheelEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-wheelevent-construction), [ErrorEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-errorevent-construction-and-synthetic-delivery) and [native Error console provenance](FEATURE_CONTRACTS_DETAIL.md#native-error-console-provenance-and-saved-namespace-operations) |
+| **Connected component preparation** | [Resource-governed flattening](FEATURE_CONTRACTS_DETAIL.md#resource-governed-iterative-array-flattening) and [template SVG with real focus](FEATURE_CONTRACTS_DETAIL.md#loaded-flow-template-svg-and-connected-component-focus) |
 
 ## Maintaining contracts
 

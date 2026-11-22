@@ -1675,8 +1675,11 @@ follow receipt of a complete bounded response, with actual received-body counts.
 There is no incremental reader or stream facade. Synchronous XHR, explicit auth,
 child-window dispatch, preflight, Blob/FormData/Document serialization, non-text
 response types and XML response documents remain unsupported. In-flight timeout
-changes are refused. Fetch, Headers, Request, Response and stream bodies remain
-separate work. The optional nonstandard XMLHttpRequest.prototype.fetch is absent.
+changes are refused. Native [Headers values](#native-headers-values-for-shared-request-and-response-adapters)
+and [buffered Response/Body values](#buffered-response-values-and-native-body-consumption)
+have separate implemented contracts below. Network Fetch, Request and readable
+stream bodies remain open; these value types do not broaden XHR transport authority.
+The optional nonstandard XMLHttpRequest.prototype.fetch is absent.
 Implementation checks do not establish a usable site or successful application
 API requests. See the [XHR standard](https://xhr.spec.whatwg.org/) and
 [Fetch standard](https://fetch.spec.whatwg.org/).

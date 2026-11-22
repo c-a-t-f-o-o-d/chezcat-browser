@@ -83,9 +83,28 @@ Node/Element ancestry does not fabricate every specialized immediate prototype.
 
 The scripting Page owns one document realm. File/network work is handed to App
 through bounded requests rather than performed by page callbacks on arbitrary
-background threads. JavaScript UTF-16 strings, modules, fetch/XHR, and many APIs
-remain incomplete. See [implemented capabilities](CAPABILITIES.md) and the
-[measured application boundaries](COMPATIBILITY.md), not library names alone.
+background threads. Main-document asynchronous text XMLHttpRequest uses that
+native request/completion path with cancellation, origin/CSP and credential checks.
+It buffers responses; general Fetch, streams, preflight and wider response types
+remain incomplete. Headers and buffered Response values are separate implemented
+primitives and do not by themselves provide network Fetch.
+
+Supported inert documents and template contents retain distinct owners and stable
+native identities. Checked clone/import, mutation observation and selected
+same-identity promotion connect them to the displayed document. Newly created
+inert Text nodes reserve their eventual native identities when backing is
+available. Under native quota exhaustion they retain inert staging and refuse
+direct promotion atomically; import copying remains supported. General inert
+subtree cloning and broader owner transitions retain separate limitations.
+Supported inert HTML/custom/style and SVG constructors also reserve native
+identities; promotion rechecks current attributes and resource policy. These shared DOM paths can support authored Web Components
+polyfills without advertising a native custom-element registry or complete Shadow
+DOM. The current approach extends these paths; it does not require an architecture
+rewrite before the selected component journey can progress.
+
+UTF-16 language/host operations, modules and other APIs retain the specific
+boundaries in [implemented capabilities](CAPABILITIES.md). Application results
+belong in the [measured compatibility record](COMPATIBILITY.md).
 
 ## Resource and rendering boundaries
 

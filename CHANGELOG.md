@@ -11,7 +11,7 @@
 ---
 
 > [!NOTE]
-> Versioned entries below retain their historical wording and scope. Their
+> Versioned entries below retain their historical scope and measured source. Their
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
@@ -20,7 +20,9 @@
 Consolidated JavaScript, DOM, rendering, resource and capacity improvements since
 `v0.82.0-alpha.1`, integrated through
 [`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c).
-The final tag and `publication.json` identify the exact packaged source.
+The immutable tag identifies `14134aba8ac2ab001c8ec13db77f68fa220b1400`.
+Its normal Windows test gate failed; no alpha.2 release assets or publication
+record were published. See the [release record](docs/RELEASING.md#current-release-candidate).
 
 - Expand supported async/await expressions and control flow, generator functions
   and delegation, async iteration, computed class methods and tagged templates.
@@ -33,10 +35,13 @@ The final tag and `publication.json` identify the exact packaged source.
   edited controls and resource policies. MutationObserver records cover admitted
   child, attribute, character and content changes with deferred delivery.
 - Extend genuine DOM interfaces, Range boundaries, native event families,
-  session History/storage and document messaging. Supported author descriptors
-  and prototype overlays coexist with canonical native Node operations.
+  session History with admitted primitive state and document messaging. Supported
+  author descriptors and prototype overlays coexist with canonical native Node
+  operations.
   `Node.baseURI` reads the admitted owner/document base and preserves origin,
   native branding and URL limits; it performs no fetch or navigation.
+  History state does not implement `sessionStorage` or `localStorage`; Web Storage
+  remains unsupported.
 - Add a finite asynchronous main-document HTTP(S) text XMLHttpRequest adapter,
   including real buffered completion and progress. Original Headers/Response
   body primitives support their documented admitted paths. Global Fetch,

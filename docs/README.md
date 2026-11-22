@@ -48,10 +48,30 @@ The verified downloadable baseline is
 from tagged source `f2e1823266a7c08c89bce7293572d801da62053c`. Download and runtime
 checks are recorded alongside earlier releases in the [release history](RELEASING.md#published-baseline).
 
-The `0.82.0-alpha.2` release candidate collects integrated source through
-`1de1f24`. Its [change summary](../CHANGELOG.md#0820-alpha2) and current capability
-records describe the candidate; Windows release gates and verified delivery
-remain pending.
+The `v0.82.0-alpha.2` tag identifies source
+[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
+including integrated changes through PR #430 and release preparation in PR #431.
+Its [change summary](../CHANGELOG.md#0820-alpha2) describes the source scope;
+[Windows release qualification and verified delivery](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+stopped at the normal native-test stage. No alpha.2 packages were published.
+Development source subsequently added passive HTML/custom-host content replacement
+through PR #433 (`ce464a4`) and stable newly created inert Text identities through
+PR #434 (`117bbb5`). PR #435 (`ad58c9a`) extends identity reservation to supported
+inert HTML/custom/style and SVG constructors. These increments are outside the
+tagged candidate; their exact scope is recorded in [capabilities](CAPABILITIES.md).
+
+### Current reading path
+
+| Question | Read next |
+| :--- | :--- |
+| **What should become usable next?** | The [roadmap](ROADMAP.md): first signed-out shell, followed by search/results, navigation and playback. |
+| **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha2) for the release-line summary. |
+| **What has actually worked on a page?** | The [latest homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recent original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
+| **Which build should I run?** | [Build instructions](BUILDING.md) for local development; [release history](RELEASING.md#published-baseline) for verified downloads and exact source identities. |
+
+The current YouTube observation remains a skeleton. Merged engine changes and
+passing original fixtures are useful progress, but they do not establish a
+working homepage, search journey or playback.
 
 Named releases require an explicit owner request. The development agent owns
 failure diagnosis for ordinary PRs and releases.
