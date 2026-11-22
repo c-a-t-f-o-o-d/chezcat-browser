@@ -1049,6 +1049,7 @@ impl Bridge<'_> {
             NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
             NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             NodeKind::DocumentFragment => 0,
+            NodeKind::DocumentType(data)=>data.capacity(),
         };
         let node = self.doc.nodes.len();
         let handle = u32::try_from(node).ok().and_then(|index|NODE_BASE.checked_add(index))

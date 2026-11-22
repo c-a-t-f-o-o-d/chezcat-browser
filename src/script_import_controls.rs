@@ -97,6 +97,7 @@ impl Bridge<'_> {
             nodes.push(node);
         }
         let document = Document {
+            kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,
             stylesheet_limits: crate::css::StylesheetLimits::default(),
             media_environment: None,
             title: String::new(),

@@ -246,6 +246,7 @@ impl Bridge<'_> {
                 NodeKind::Comment(_) => 8,
                 NodeKind::ProcessingInstruction { .. } => 7,
                 NodeKind::DocumentFragment => 11,
+                NodeKind::DocumentType(_)=>10,
             },
             Kind::Doctype => 10,
             Kind::Element(_) => 1,
@@ -274,6 +275,7 @@ impl Bridge<'_> {
                     NodeKind::Comment(_) => "Comment",
                     NodeKind::ProcessingInstruction { .. } => "ProcessingInstruction",
                     NodeKind::DocumentFragment => "DocumentFragment",
+                    NodeKind::DocumentType(_)=>"DocumentType",
                 }
             }
             Kind::Doctype => "DocumentType",
@@ -936,6 +938,7 @@ impl Bridge<'_> {
                     for piece in ["<?", target, " ", data.scalar()?, "?>"] { append(self.state, &mut output, piece)?; }
                 }
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
+                NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut output,piece)?;}},
                 NodeKind::Element { tag, attrs, .. } => {
                     if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
                         return Err("Template serialization of foreign elements is unavailable.".into());
@@ -1665,6 +1668,15 @@ impl Bridge<'_> {
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Parsed { source, .. } = node.kind {
             let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;
+            if let NodeKind::DocumentType(data)=&parsed.kind {
+                let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
+                if let Some(text)=text {
+                    let bytes=text.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("DocumentType DOMString exceeds the host string allowance.".into());}
+                    self.state.copies(bytes)?;
+                    let NodeKind::DocumentType(data)=&self.parsed_source(source).unwrap().0.kind else{unreachable!()};
+                    return Self::dom_string_copy(match property {"publicId"=>&data.public_id,"systemId"=>&data.system_id,_=>&data.name});
+                }
+            }
             if let Some(data) = parsed.kind.character_dom_string() {
                 match property {
                     "data" | "nodeValue" | "textContent" => {
@@ -1761,6 +1773,7 @@ impl Bridge<'_> {
                     NodeKind::Comment(_) => string("#comment"),
                     NodeKind::ProcessingInstruction { target, .. } => string(target),
                     NodeKind::DocumentFragment => string("#document-fragment"),
+                    NodeKind::DocumentType(_)=>unreachable!("doctype name handled before generic node names"),
                 },
                 Kind::Doctype => string("html"),
                 Kind::Element(name) => Value::String(name.to_ascii_uppercase()),

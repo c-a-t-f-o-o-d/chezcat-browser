@@ -88,7 +88,7 @@ fn tag(doc: &Document, node: usize) -> &str {
     match &doc.nodes[node].kind {
         NodeKind::Element { tag, .. } => tag,
         NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
-        | NodeKind::DocumentFragment => "",
+        | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => "",
     }
 }
 
@@ -136,7 +136,7 @@ pub fn caption(doc: &Document, node: usize, kind: Kind) -> String {
         let mut stack: Vec<_> = doc.nodes[node].children.iter().rev().copied().collect();
         while let Some(child) = stack.pop() {
             match &doc.nodes[child].kind {
-                NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
+                NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
                 NodeKind::DocumentFragment => stack.extend(doc.nodes[child].children.iter().rev().copied()),
                 NodeKind::Text(value) => {
                     for ch in value.chars().take(256 - text.chars().count().min(256)) {
@@ -222,7 +222,7 @@ fn option_text(doc: &Document, node: usize) -> (String, bool) {
             return (text, true);
         }
         match &doc.nodes[child].kind {
-            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
             NodeKind::DocumentFragment => stack.extend(doc.nodes[child].children.iter().rev().copied()),
             NodeKind::Text(value) => {
                 for ch in value.chars() {
@@ -559,7 +559,7 @@ fn textarea_initial(doc: &Document, node: usize) -> (String, bool) {
             return (text, true);
         }
         match &doc.nodes[child].kind {
-            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } => {},
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentType(_) => {},
             NodeKind::Text(value) => {
                 for ch in value.chars() {
                     units += ch.len_utf16();

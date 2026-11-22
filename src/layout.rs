@@ -2088,7 +2088,7 @@ impl Engine<'_> {
             return;
         };
         match &node.kind {
-            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment => {},
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => {},
             NodeKind::Text(text) => self.text(text, &style, link),
             NodeKind::Element { tag, id, .. } => {
                 if style.display == Display::None
@@ -2873,7 +2873,7 @@ impl Engine<'_> {
             return Intrinsic::default();
         }
         let mut value = match &self.doc.nodes[node].kind {
-            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment => Intrinsic::default(),
+            NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => Intrinsic::default(),
             NodeKind::Text(text) if matches!(style.white_space, WhiteSpace::Normal | WhiteSpace::NoWrap) => {
                 self.collapsed_text_intrinsic(text, &style)
             }
@@ -3339,7 +3339,7 @@ impl Engine<'_> {
             lines: Vec::new(),
         };
         for &child in &self.doc.nodes[node].children {
-            if self.doc.nodes[child].kind.is_nonrendered_character_data() { continue; }
+            if self.doc.nodes[child].kind.is_nonrendered_node() { continue; }
             if group.items.len() == MAX_FLEX_ITEMS {
                 break;
             }

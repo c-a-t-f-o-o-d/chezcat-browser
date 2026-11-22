@@ -37,6 +37,7 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
         NodeKind::Comment(text)=>NodeKind::Comment(text.try_clone()?),
         NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:data.try_clone()?},
         NodeKind::DocumentFragment=>NodeKind::DocumentFragment,
+        NodeKind::DocumentType(data)=>NodeKind::DocumentType(data.try_clone()?),
     })
 }
 

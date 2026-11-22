@@ -33,8 +33,30 @@ impl NativeNode{
     pub(crate) fn set(&self,node:Option<usize>){self.0.store(node.unwrap_or(usize::MAX),std::sync::atomic::Ordering::Relaxed);}
 }
 
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(crate) enum DocumentKind {Html,Xml}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(crate) enum DocumentMode {NoQuirks,LimitedQuirks,Quirks}
+impl DocumentMode {
+    pub(crate) fn compat_mode(self)->&'static str{if self==Self::Quirks{"BackCompat"}else{"CSS1Compat"}}
+}
+#[derive(Debug)]
+pub(crate) struct DocumentTypeData {
+    pub(crate) name:DomString,
+    pub(crate) public_id:DomString,
+    pub(crate) system_id:DomString,
+}
+impl DocumentTypeData {
+    pub(crate) fn html()->Self{Self{name:"html".into(),public_id:DomString::new(),system_id:DomString::new()}}
+    pub(crate) fn capacity(&self)->usize{self.name.capacity()+self.public_id.capacity()+self.system_id.capacity()}
+    pub(crate) fn used_bytes(&self)->usize{self.name.used_bytes()+self.public_id.used_bytes()+self.system_id.used_bytes()}
+    pub(crate) fn try_clone(&self)->Result<Self,String>{Ok(Self{name:self.name.try_clone()?,public_id:self.public_id.try_clone()?,system_id:self.system_id.try_clone()?})}
+}
+
 #[derive(Debug)]
 pub struct Document {
+    pub(crate) kind:DocumentKind,
+    pub(crate) mode:DocumentMode,
     /// Host-owned resource policy, never exposed as a document capability.
     pub stylesheet_limits: crate::css::StylesheetLimits,
     /// Host-only screen context; page script cannot supply viewport or input capabilities.
@@ -88,7 +110,7 @@ impl Document {
                 .find(|attr| attr.name.html_is(name.as_ref()))
                 .map(|attr| &attr.value),
             NodeKind::Text(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }
-            | NodeKind::DocumentFragment => None,
+            | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => None,
         }
     }
 }
@@ -185,6 +207,7 @@ pub enum NodeKind {
     ProcessingInstruction { target: String, data: DomString },
     // A genuine detached Node container; insertion splices its children.
     DocumentFragment,
+    DocumentType(DocumentTypeData),
 }
 
 impl NodeKind {
@@ -194,19 +217,19 @@ impl NodeKind {
     pub(crate) fn character_data(&self) -> Option<&str> {
         match self {
             Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data),
-            Self::Element { .. } | Self::DocumentFragment => None,
+            Self::Element { .. } | Self::DocumentFragment | Self::DocumentType(_) => None,
         }
     }
 
     pub(crate) fn character_data_capacity(&self) -> Option<usize> {
         match self {
             Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data.capacity()),
-            Self::Element { .. } | Self::DocumentFragment => None,
+            Self::Element { .. } | Self::DocumentFragment | Self::DocumentType(_) => None,
         }
     }
 
-    pub(crate) fn is_nonrendered_character_data(&self) -> bool {
-        matches!(self, Self::Comment(_) | Self::ProcessingInstruction { .. })
+    pub(crate) fn is_nonrendered_node(&self) -> bool {
+        matches!(self, Self::Comment(_) | Self::ProcessingInstruction { .. } | Self::DocumentType(_))
     }
 }
 
@@ -297,6 +320,7 @@ fn parse_internal(
         return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
     }
     let mut document = Document {
+        kind:DocumentKind::Html,mode:DocumentMode::NoQuirks,
         stylesheet_limits: crate::css::StylesheetLimits::default(),
         media_environment: None,
         title: String::new(),

@@ -3129,6 +3129,7 @@ impl Host for Bridge<'_> {
             NodeKind::Comment(_) => 8,
             NodeKind::ProcessingInstruction { .. } => 7,
             NodeKind::DocumentFragment => 11,
+            NodeKind::DocumentType(_)=>10,
         })
     }
     fn mutation_observation_target(&self, target: u32) -> Option<bool> {
@@ -6498,6 +6499,7 @@ fn text_container(tag: &str) -> bool {
 fn node_bytes(node: &Node) -> usize {
     match &node.kind {
         NodeKind::DocumentFragment => 0,
+        NodeKind::DocumentType(data)=>data.capacity(),
         NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
         NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
         NodeKind::Element { id, attrs, .. } => {
@@ -6519,6 +6521,7 @@ fn copied_node_bytes(node: &Node) -> usize {
         NodeKind::Text(text) | NodeKind::Comment(text) => text.used_bytes(),
         NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
         NodeKind::DocumentFragment => 0,
+        NodeKind::DocumentType(data)=>data.used_bytes(),
     }
 }
 fn copied_payload_extra(kind: &NodeKind) -> usize {
@@ -6533,6 +6536,7 @@ fn copied_payload_extra(kind: &NodeKind) -> usize {
             target.capacity() - target.len() + data.capacity() - data.used_bytes()
         }
         NodeKind::DocumentFragment => 0,
+        NodeKind::DocumentType(data)=>data.capacity()-data.used_bytes(),
     }
 }
 fn document_bytes(doc: &Document) -> usize {

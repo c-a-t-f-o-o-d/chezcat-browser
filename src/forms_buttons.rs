@@ -67,7 +67,7 @@ pub(crate) fn button_caption_node(doc: &Document, node: usize) -> bool {
         NodeKind::Element { tag, .. } => entry.namespace == crate::html::Namespace::Html && matches!(tag.as_str(),
             "span" | "b" | "i" | "em" | "strong" | "small" | "s" | "u" | "mark" | "sub" | "sup"
             | "code" | "kbd" | "samp" | "var" | "abbr" | "cite" | "q" | "time" | "br" | "wbr"),
-        NodeKind::DocumentFragment => false,
+        NodeKind::DocumentFragment | NodeKind::DocumentType(_) => false,
     })
 }
 
