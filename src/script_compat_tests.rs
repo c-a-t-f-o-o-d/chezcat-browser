@@ -2622,15 +2622,16 @@ var caught=false;try{(function(){'use strict';detached.offsetTop=7;})();}catch(e
     for handle in invalid {
         for property in ["tabIndex", "offsetLeft", "offsetTop"] {
             assert!(bridge.get(handle, property).is_err());
-            assert!(bridge.has(handle, property).is_err());
+            let has=bridge.has(handle, property);
+            assert!(has.is_err(),"invalid handle={handle}, property={property}, result={has:?}");
             assert!(!bridge.readonly_property(handle, property));
         }
     }
     let diagnostic = bridge.get(node_handle(connected), "offsetLeft").unwrap_err();
     assert!(diagnostic.contains("class=span; connected=true; created=false; geometry-attached=false"), "{diagnostic}");
     assert!(diagnostic.len() < 300);
-    assert!(bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).is_err());
-    assert_eq!(bridge.doc.attr(connected, "tabindex"), None);
+    bridge.set(node_handle(connected), "tabIndex", Value::Number(3.0)).unwrap();
+    assert_eq!(bridge.doc.attr(connected, "tabindex"), Some("3"));
     bridge.state.copy_work = 0;
     assert!(bridge.get(node_handle(connected), "tabIndex").is_err());
     bridge.state.host_work = 0;

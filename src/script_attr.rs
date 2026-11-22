@@ -539,9 +539,10 @@ impl Bridge<'_> {
         // does not rerun a parsed script. Attribution reporting is unavailable:
         // preserve its content attribute without advertising an IDL API or
         // generating an attribution/report request.
+        let tab_index=key=="tabindex"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html;
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !placeholder_attribute && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
-            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute {
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute && !tab_index {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {

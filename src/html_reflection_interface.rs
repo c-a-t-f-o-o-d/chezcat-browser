@@ -12,7 +12,11 @@ pub(crate) const ATTRIBUTES: &[(&str, &str, &str)] = &[
     ),
     ("lang", "\0HTMLElement.get.lang", "\0HTMLElement.set.lang"),
     ("dir", "\0HTMLElement.get.dir", "\0HTMLElement.set.dir"),
+    ("tabIndex", "\0HTMLElement.get.tabIndex", "\0HTMLElement.set.tabIndex"),
 ];
+pub(crate) fn attribute(name:&str)->Option<&'static str> {
+    property(name).map(|name|if name=="tabIndex" {"tabindex"}else{name})
+}
 pub(crate) fn property(name: &str) -> Option<&'static str> {
     ATTRIBUTES
         .iter()

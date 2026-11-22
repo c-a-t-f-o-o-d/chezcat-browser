@@ -394,7 +394,7 @@ impl Bridge<'_> {
         )
     }
 
-    fn html_tab_index(&mut self, node: usize) -> Result<i32, String> {
+    pub(in crate::scripting) fn html_tab_index(&mut self, node: usize) -> Result<i32, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else { return Err("tabIndex requires an HTML Element.".into()); };
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html {
             return Err("tabIndex for unsupported foreign parser contexts is unavailable.".into());

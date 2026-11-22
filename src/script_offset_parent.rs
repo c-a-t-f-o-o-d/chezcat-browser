@@ -34,7 +34,7 @@ impl Bridge<'_> {
 
     pub(super) fn html_offset_attribute(&self, object: u32, name: &str) -> bool {
         matches!(name, "offsetParent" | "offsetLeft" | "offsetTop")
-            && self.html_element_receiver(object)
+            && self.html_element_receiver(object) && self.html_reflection_receiver(object)
     }
 
     pub(super) fn validate_html_offset(
@@ -42,7 +42,7 @@ impl Bridge<'_> {
         object: u32,
         offset: Offset,
     ) -> Result<(), (&'static str, String)> {
-        if !self.html_element_receiver(object) {
+        if !self.html_element_receiver(object) || !self.html_reflection_receiver(object) {
             return Err((
                 "TypeError",
                 "Offset geometry requires an HTMLElement.".into(),

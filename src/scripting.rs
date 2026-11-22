@@ -2540,6 +2540,7 @@ impl Bridge<'_> {
             self.state.dirty = true;
         }
         let disabled = name.html_is("disabled");
+        let tab_index=name.html_is("tabindex");
         if let Some(index) = slot {
             if let Some(value) = value {
                 attrs[index].value = value;
@@ -2560,6 +2561,10 @@ impl Bridge<'_> {
         }
         if let Some(plan) = input { plan.commit(self.forms); }
         if let Some(plan) = button { plan.commit(self.forms); }
+        if tab_index {
+            let value=self.doc.attr(node,"tabindex").and_then(forms::parse_tab_index).unwrap_or(0);
+            if let Some(control)=self.forms.controls.get_mut(&node) {control.tab_index=value;}
+        }
         if slot.is_some() || new != 0 {
             self.state.canvas_contexts.commit_resize(node, canvas_resize);
             self.state.dom_committed();
@@ -3137,7 +3142,7 @@ impl Host for Bridge<'_> {
 
     fn observed_attribute_setter(&self, target: u32, property: &str) -> Option<&'static str> {
         if self.aria_reflection_attribute(target,property){return crate::javascript::aria_reflection_interface::property(property);}
-        if self.html_reflection_receiver(target){if let Some(name)=crate::javascript::html_reflection_interface::property(property){return Some(name);}}
+        if self.html_reflection_receiver(target){if let Some(name)=crate::javascript::html_reflection_interface::attribute(property){return Some(name);}}
         if self.placeholder_member(target,property){return Some("placeholder");}
         (property == "name" && self.html_slot_receiver(target)).then_some("name")
     }
@@ -3440,7 +3445,7 @@ impl Host for Bridge<'_> {
     fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.aria_reflection_attribute(object,property){return true;}
-        if property!="hidden"&&crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return true;}
+        if !matches!(property,"hidden"|"tabIndex")&&crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return true;}
         if property=="style"&&self.html_element_receiver(object){return true;}
         if self.placeholder_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return property=="responseType";}
@@ -3509,6 +3514,7 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if property=="tabIndex"&&self.html_reflection_receiver(object){return true;}
         if self.xhr_index(object).is_some(){return property=="timeout";}
 
         if self.canvas_member(object, property) {return true;}
@@ -8460,6 +8466,10 @@ mod html_reflector_tests;
 
 #[path="script_html_reflections.rs"]
 mod html_reflections;
+
+#[cfg(test)]
+#[path="script_tab_index_reflection_tests.rs"]
+mod tab_index_reflection_tests;
 
 #[path="script_aria_reflections.rs"]
 mod aria_reflections;
