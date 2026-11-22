@@ -6338,3 +6338,7 @@ mod loaded_clone_snapshot_tests;
 #[cfg(test)]
 #[path="app_inert_document_import_tests.rs"]
 mod inert_document_import_tests;
+
+#[cfg(test)]
+#[path="app_template_document_owner_tests.rs"]
+mod template_document_owner_tests;
