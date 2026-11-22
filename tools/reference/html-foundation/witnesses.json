@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "scope": "Original requirement witnesses fixed before the first native baseline; not a complete F01 or browser-WPT denominator",
+  "cases": [
+    {
+      "id": "F05-implicit-document-roots",
+      "kind": "tree",
+      "input": "<p>A",
+      "expected": "| <html>\n|   <head>\n|   <body>\n|     <p>\n|       \"A\"\n"
+    },
+    {
+      "id": "F05-head-to-body",
+      "kind": "tree",
+      "input": "<title>T</title><p>B",
+      "expected": "| <html>\n|   <head>\n|     <title>\n|       \"T\"\n|   <body>\n|     <p>\n|       \"B\"\n"
+    },
+    {
+      "id": "F05-table-foster-and-tbody",
+      "kind": "tree",
+      "input": "<html><head></head><body><table>A<tr><td>B</table></body></html>",
+      "expected": "| <html>\n|   <head>\n|   <body>\n|     \"A\"\n|     <table>\n|       <tbody>\n|         <tr>\n|           <td>\n|             \"B\"\n"
+    },
+    {
+      "id": "F05-formatting-reconstruction",
+      "kind": "tree",
+      "input": "<html><head></head><body><p><b>A</p>B</b></body></html>",
+      "expected": "| <html>\n|   <head>\n|   <body>\n|     <p>\n|       <b>\n|         \"A\"\n|     <b>\n|       \"B\"\n"
+    },
+    {
+      "id": "F04-loaded-iframe-rawtext",
+      "kind": "tree",
+      "input": "<html><head></head><body><iframe><b>A</b></iframe></body></html>",
+      "expected": "| <html>\n|   <head>\n|   <body>\n|     <iframe>\n|       \"<b>A</b>\"\n"
+    },
+    {
+      "id": "F04-multicodepoint-reference",
+      "kind": "tree",
+      "entry": "fragment",
+      "context": "div",
+      "input": "&NotEqualTilde;",
+      "expected": "| \"\u2242\u0338\"\n"
+    },
+    {
+      "id": "F01-loaded-doctype-node",
+      "kind": "tree",
+      "input": "<!doctype html><html><head></head><body></body></html>",
+      "expected": "| <!DOCTYPE html>\n| <html>\n|   <head>\n|   <body>\n"
+    },
+    {
+      "id": "F01-html-document-factory-kind-and-owner",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var d=document.implementation.createHTMLDocument('original');if(!(d instanceof Document)||d.contentType!=='text/html'||d.defaultView!==null||d.doctype.name!=='html'||d.doctype.ownerDocument!==d||d.body.ownerDocument!==d)throw 'real HTML document factory';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-xml-document-factory-and-namespace",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var d=document.implementation.createDocument('urn:original','p:Mixed',null);if(!(d instanceof XMLDocument)||d.documentElement.namespaceURI!=='urn:original'||d.documentElement.prefix!=='p'||d.documentElement.localName!=='Mixed'||d.documentElement.ownerDocument!==d)throw 'real XML document factory';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-arbitrary-element-namespace-prefix-and-clone",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var n=document.createElementNS('urn:original','p:Mixed'),copy=n.cloneNode(true);if(n.namespaceURI!=='urn:original'||n.prefix!=='p'||n.localName!=='Mixed'||copy.namespaceURI!==n.namespaceURI||copy.prefix!=='p'||copy.localName!=='Mixed'||copy===n)throw 'arbitrary real namespaces';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-text-domstring-unpaired-utf16",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var n=document.createTextNode('\\ud800');if(n.data.length!==1||n.data.charCodeAt(0)!==0xd800)throw 'native Text DOMString lost a code unit';n.data='\\udfff';if(n.data.charCodeAt(0)!==0xdfff)throw 'native Text setter lost a code unit';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-attribute-domstring-unpaired-utf16",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var n=document.createElement('span');n.setAttribute('data-original','\\ud800');var a=n.getAttributeNode('data-original');if(a.value.charCodeAt(0)!==0xd800||n.getAttribute('data-original').charCodeAt(0)!==0xd800)throw 'native Attr DOMString lost a code unit';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-usvstring-replacement-distinct-from-domstring",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var e=new ErrorEvent('original',{filename:'\\ud800'});if(e.filename.length!==1||e.filename.charCodeAt(0)!==0xfffd)throw 'native USVString replacement';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    },
+    {
+      "id": "F01-stable-template-import-owner-and-saved-text",
+      "kind": "page",
+      "entry": "native-dom-api",
+      "scripting": "on",
+      "input": "var t=document.createElement('template');t.innerHTML='<owned-card><span>native</span></owned-card>';var original=t.content,owner=original.ownerDocument,copy=document.importNode(t,true),content=copy.content,root=content.firstChild,text=root.firstChild.firstChild;if(owner===document||content.ownerDocument!==owner||root===original.firstChild)throw 'real template owner';document.body.appendChild(content);if(content.firstChild!==null||root.firstChild.firstChild!==text||text.ownerDocument!==document||original.firstChild.ownerDocument!==owner||original.textContent!=='native')throw 'saved imported identities';document.title='foundation-ok';",
+      "expected": "foundation-ok"
+    }
+  ]
+}

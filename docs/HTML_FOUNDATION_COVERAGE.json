@@ -4,7 +4,7 @@
   "prepared_owner_date": "2026-11-21",
   "reviewed_source_revision": "250705b6c46ad472f7dc8fd6a1442503a85e7dfd",
   "plan": "HTML_FOUNDATION_PLAN.md",
-  "kind": "initial requirements and source-review inventory; not executed test results",
+  "kind": "Requirements and source-review inventory with an explicitly scoped native baseline; not whole-browser conformance",
   "completion_policy": {
     "all_required_contracts_verified": true,
     "blocked_or_unrun_required_cases_block_closure": true,
@@ -100,6 +100,42 @@
       "multi_codepoint_count": 93,
       "semicolonless_legacy_count": 106,
       "fixture_manifest": "required before generation"
+    },
+    "infra": {
+      "repository": "https://github.com/whatwg/infra",
+      "revision": "f0c9a81337e50baf827cf48a73d856ea4bd8b3e0",
+      "reviewed_commit_date": "2026-11-15T09:08:13Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "dom_parsing": {
+      "repository": "https://github.com/w3c/DOM-Parsing",
+      "revision": "aefb90de7f19d7256600d0e7036c2f13089704d1",
+      "reviewed_commit_date": "2026-09-02T22:13:29Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "ui_events": {
+      "repository": "https://github.com/w3c/uievents",
+      "revision": "8c1b80982c16b10f28a210e4541ac799dbe39a51",
+      "reviewed_commit_date": "2026-02-21T11:00:31Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "selection_api": {
+      "repository": "https://github.com/w3c/selection-api",
+      "revision": "b475d4ba72cbe08f5015040dcd9fb4cf9133dd00",
+      "reviewed_commit_date": "2026-06-11T16:03:10Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "input_events": {
+      "repository": "https://github.com/w3c/input-events",
+      "revision": "9758626096bfae9a3181ab370542b576a41e74f1",
+      "reviewed_commit_date": "2026-11-20T04:55:30Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "pointer_events": {
+      "repository": "https://github.com/w3c/pointerevents",
+      "revision": "7affe62fa4332543f8b13c56292104e4e9dfa517",
+      "reviewed_commit_date": "2026-10-08T14:39:58Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
     }
   },
   "manifest_requirements": [
@@ -127,7 +163,7 @@
       "id": "F00",
       "title": "Requirements, fixed inputs and native baseline",
       "prerequisites_for_core": [],
-      "status": "planned",
+      "status": "verified",
       "scope": "required",
       "source_anchors": [
         "tools/check_compatibility.py",
@@ -137,28 +173,40 @@
         {
           "id": "F00.01",
           "requirement": "Inventory all scoped families without claiming passes",
-          "status": "unassessed",
-          "verification": [],
+          "status": "verified",
+          "verification": [
+            "Retained complete supplied inventory: 84 tokenizer states,21 insertion modes,115 indexed elements,22 input states,40 encoding names/228 labels. Frozen initial inventory SHA256 fab85750e2b70405ae507a7b4996d634b5efe56814922edf1a7084fa7a28029a; counts are inventory, not passes."
+          ],
           "dependency_details": []
         },
         {
           "id": "F00.02",
           "requirement": "Lock corpus, input hashes, licenses, selection and mode expansion",
-          "status": "unassessed",
-          "verification": [],
-          "dependency_details": []
+          "status": "verified",
+          "verification": [
+            "132 exact-byte inputs with pinned Git blobs/SHA256, licenses/format documents and static first-package dependencies in tools/reference/html-foundation/inputs.json. Selection is 10,968 native case/modes plus21 required browser-file groups, with no browser subtest count. Catalog f3b391339a96b741fdc445ce6104a7b6bee5e47b43e3d774009a01837ebc2b2e fixed before execution."
+          ],
+          "dependency_details": [
+            "Required unchanged browser subtests need F06/F10 harness enumeration; file bytes and all-assertions selection are fixed, no subtest count claimed."
+          ]
         },
         {
           "id": "F00.03",
           "requirement": "Validate adapter controls and record one fixed source-bound parser baseline",
-          "status": "unassessed",
-          "verification": [],
-          "dependency_details": []
+          "status": "verified",
+          "verification": [
+            "8 original adapter controls pass, including malformed fixture/missing input/timeout/abnormal exit classification; actual native correct output accepted and deliberate mismatch rejected.",
+            "Initial clean-source native baseline2a1e1713cd112d3b1abf4d33797ecaf903180202 enumerated every selected native mode and recorded every outcome; raw records remain confined in private verification storage. Baseline does not pass parser correctness or unchanged browser WPT."
+          ],
+          "dependency_details": [
+            "Required native failures/harness blocks are retained in the baseline and block their producer/consumer package closures, not completion of the F00 measurement-methodology gate."
+          ]
         }
       ],
       "note": "Prerequisites select core implementation order; integration-dependent contracts can remain blocked while later producers are implemented. A package core checkpoint is not full package acceptance.",
       "integration_prerequisites": [],
-      "evidence_selection_status": "Required/supplementary case-level selections and harness owners must be frozen before this package executes; none have been run by this planning change."
+      "evidence_selection_status": "F00 input/selection/native-baseline methodology gate complete. Required native correctness failures and unavailable token/diagnostic/script/namespace entries remain owned by F01/F04/F05/F07/F10. The fixed 21-file F01 unchanged-browser selection remains required; F06/F10 must enumerate and execute its subtests before that package closes.",
+      "milestone_state": "verified"
     },
     {
       "id": "F01",
@@ -181,35 +229,510 @@
           "requirement": "HTML/XML kind, MIME, encoding, URL/origin, document modes and doctype",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "detail_requirements": [
+            {
+              "id": "F01.01.kind",
+              "requirement": "HTML versus XML document kind and MIME",
+              "normative_anchor": "https://dom.spec.whatwg.org/#concept-document-content-type",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "parser",
+                "DOMImplementation.createDocument/createHTMLDocument",
+                "loader MIME commit"
+              ],
+              "status": "absent",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F02",
+                "F08"
+              ],
+              "required_original_witness_ids": [
+                "F01-html-document-factory-kind-and-owner",
+                "F01-xml-document-factory-and-namespace"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.01.metadata",
+              "requirement": "Document URL/base/origin, encoding, scripting and readiness state",
+              "normative_anchor": "https://html.spec.whatwg.org/multipage/dom.html#documents",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "loader document commit",
+                "Document getters",
+                "inert/child factories"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F02",
+                "F03",
+                "F10"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.01.doctype",
+              "requirement": "Genuine doctype record, identifiers, owner and native identity",
+              "normative_anchor": "https://dom.spec.whatwg.org/#interface-documenttype",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "loaded parser",
+                "DOMImplementation factories",
+                "clone/import"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F05",
+                "F06"
+              ],
+              "required_original_witness_ids": [
+                "F01-loaded-doctype-node"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.01.modes",
+              "requirement": "No-quirks, limited-quirks and quirks with actual consumers",
+              "normative_anchor": "https://html.spec.whatwg.org/multipage/parsing.html#the-initial-insertion-mode",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "loaded/full-document parser",
+                "fragment inherited mode",
+                "compatMode",
+                "layout"
+              ],
+              "status": "absent",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F05",
+                "F07",
+                "F13"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            }
+          ]
         },
         {
           "id": "F01.02",
           "requirement": "Arbitrary namespace URI/prefix/local name and XML node kinds",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "detail_requirements": [
+            {
+              "id": "F01.02.element-name",
+              "requirement": "Arbitrary element namespace URI, prefix and local name",
+              "normative_anchor": "https://dom.spec.whatwg.org/#concept-element",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "createElementNS",
+                "HTML/XML parser sinks",
+                "clone/import/adopt"
+              ],
+              "status": "absent",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F05",
+                "F06",
+                "F08"
+              ],
+              "required_original_witness_ids": [
+                "F01-arbitrary-element-namespace-prefix-and-clone"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.02.attr-name",
+              "requirement": "Null/arbitrary attribute namespaces and real expanded names",
+              "normative_anchor": "https://dom.spec.whatwg.org/#interface-attr",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "createAttributeNS",
+                "setAttributeNS",
+                "Attr aliases",
+                "clone/import"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F06",
+                "F08"
+              ],
+              "required_original_witness_ids": [
+                "F01-attribute-domstring-unpaired-utf16"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.02.node-kinds",
+              "requirement": "Document/XMLDocument/DocumentType/CDATA/PI/Text/Comment/Fragment records",
+              "normative_anchor": "https://dom.spec.whatwg.org/#nodes",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "native factories",
+                "parser sinks",
+                "bindings",
+                "serialization"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F06",
+                "F07",
+                "F08"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            }
+          ]
         },
         {
           "id": "F01.03",
           "requirement": "DOMString versus USVString and UTF-16 boundary preservation",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "detail_requirements": [
+            {
+              "id": "F01.03.domstring",
+              "requirement": "Preserve unpaired UTF-16 in native DOMString text, attribute and reflected-value boundaries",
+              "normative_anchor": "https://webidl.spec.whatwg.org/#idl-DOMString",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "factories",
+                "CharacterData/data/nodeValue/textContent",
+                "Attr APIs",
+                "HTML reflections"
+              ],
+              "status": "absent",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F06",
+                "F09"
+              ],
+              "required_original_witness_ids": [
+                "F01-text-domstring-unpaired-utf16",
+                "F01-attribute-domstring-unpaired-utf16"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.03.usvstring",
+              "requirement": "Perform scalar replacement only at specified USVString boundaries",
+              "normative_anchor": "https://webidl.spec.whatwg.org/#idl-USVString",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "error filename",
+                "URL and typed API conversion"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F03",
+                "F06"
+              ],
+              "required_original_witness_ids": [
+                "F01-usvstring-replacement-distinct-from-domstring"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            }
+          ]
         },
         {
           "id": "F01.04",
           "requirement": "Stable ownership, template owners, handles and mutation sink",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "detail_requirements": [
+            {
+              "id": "F01.04.identity",
+              "requirement": "Stable node/Attr/collection owner and generation through actual mutations",
+              "normative_anchor": "https://dom.spec.whatwg.org/#concept-node-document",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "detached/inert/main/child",
+                "clone/import/adopt",
+                "Range/observer metadata"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F06"
+              ],
+              "required_original_witness_ids": [
+                "F01-stable-template-import-owner-and-saved-text"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.04.template-owner",
+              "requirement": "Separate appropriate template owner and equivalent source records",
+              "normative_anchor": "https://html.spec.whatwg.org/multipage/scripting.html#template-contents",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "template creation",
+                "nested clone/import",
+                "promotion",
+                "serialization"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F07",
+                "F08"
+              ],
+              "required_original_witness_ids": [
+                "F01-stable-template-import-owner-and-saved-text"
+              ],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.04.sink-hooks",
+              "requirement": "Shared insertion/attribute/children-parsed hooks preserving observable parser/reaction ordering",
+              "normative_anchor": "https://html.spec.whatwg.org/multipage/parsing.html#creating-and-inserting-nodes",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "parser sink",
+                "document.write",
+                "observers",
+                "Custom Elements"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F05",
+                "F06",
+                "F10",
+                "F12"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            }
+          ]
         },
         {
           "id": "F01.05",
           "requirement": "Fallible reservation, publication and rollback",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "detail_requirements": [
+            {
+              "id": "F01.05.admission",
+              "requirement": "Fallible joint record/payload/index/topology admission and no premature publication",
+              "normative_anchor": "https://dom.spec.whatwg.org/#concept-node-insert",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "factory",
+                "clone/import",
+                "parser sink",
+                "mutation"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F05",
+                "F06"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.05.failure-order",
+              "requirement": "Retain author conversions/reactions and prior normative commits after later failure",
+              "normative_anchor": "https://webidl.spec.whatwg.org/#es-type-mapping",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "native conversion",
+                "reentrant mutation",
+                "incremental parser"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/html.rs",
+                "src/host_objects.rs",
+                "src/script_inert_documents.rs",
+                "src/script_clone_node.rs",
+                "src/script_template_imports.rs"
+              ],
+              "integration_dependencies": [
+                "F06",
+                "F07",
+                "F10",
+                "F12"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "closing_evidence": []
+            }
+          ]
         }
       ],
       "note": "Prerequisites select core implementation order; integration-dependent contracts can remain blocked while later producers are implemented. A package core checkpoint is not full package acceptance.",
@@ -218,7 +741,7 @@
         "F07",
         "F08"
       ],
-      "evidence_selection_status": "Required/supplementary case-level selections and harness owners must be frozen before this package executes; none have been run by this planning change."
+      "evidence_selection_status": "Required original cases and unchanged browser file/all-assertions selection locked before F01 measurement; browser subtest enumeration blocked by F06/F10."
     },
     {
       "id": "F02",
@@ -3372,20 +3895,114 @@
       "pr": 439,
       "scope": "Genuine Event subclass author chains preserving native trust and brands",
       "source_review": "Merged during planning; preserve actual code and evidence"
+    },
+    {
+      "source": "c07c6123cd7cc610c9757922b18ad68b5143cff3",
+      "pr": 441,
+      "behavior": "Inherited HTML tabIndex, actual attribute/Attr/observation paths and native control focus-order updates; preserve native brand/origin/quota guards.",
+      "evidence": "11focused covered;68affected covered66unchanged+2corrected;production/publication passed. Not foundation or actual-site acceptance."
     }
   ],
   "progress": {
     "executed_in_this_planning_change": false,
-    "verified_contract_count": 0,
-    "current_baseline_results": null,
-    "note": "Zero verified register rows means no conformance run recorded here, not zero existing browser features."
+    "verified_contract_count": 3,
+    "current_baseline_results": {
+      "kind": "Initial native parser/DOM data baseline; not unchanged browser WPT or Windows App acceptance",
+      "source": "2a1e1713cd112d3b1abf4d33797ecaf903180202",
+      "dirty": false,
+      "platform": "Windows x86_64-pc-windows-msvc",
+      "profile": "Cargo test unoptimized+debuginfo; native Page witnesses use BROWSER",
+      "executable_sha256": "d259dcc7b46381116ef38680d4794ce3c79d88ea7cd9ad7786ca945e1aeefb6f",
+      "adapter_sha256": "1387922c92a373609869f0d39088fa4ce07bc6d7bba3390797a8fb567a3e817c",
+      "native_adapter_sha256": "6c837b82851820888035ae7ba48ac5b876c870c00598abf4bcac95b4daf0fbe4",
+      "input_manifest_sha256": "69a7e819f8a2c15cec236e42235196f08acaab0a437662087e7be7ee812b3429",
+      "selection_sha256": "4a6c4b4daa3676b765801bfccac29c96d2f6605530ac89a503b69439e617c5a0",
+      "case_catalog_sha256": "f3b391339a96b741fdc445ce6104a7b6bee5e47b43e3d774009a01837ebc2b2e",
+      "native_case_mode_count": 10968,
+      "native_outcomes": {
+        "pass": 3,
+        "fail": 3537,
+        "timeout": 0,
+        "crash": 0,
+        "harness_blocked": 7428,
+        "skipped_deferred": 0,
+        "not_run": 0
+      },
+      "native_enumeration_complete": true,
+      "browser_required_file_groups": 21,
+      "browser_file_outcome": "harness_blocked",
+      "browser_subtest_count": null,
+      "browser_enumeration_complete": false,
+      "tree_output_only": {
+        "matches": 36,
+        "mismatches": 3489,
+        "native_refusal_failures": 44,
+        "entry_or_script_blocks": 342,
+        "all_required_assertions_passed": 0,
+        "note": "Every matching WPT tree still lacks required parse-diagnostic evidence; matching output alone is not a case pass."
+      },
+      "tokenizer_case_modes": 7050,
+      "tokenizer_outcome": "harness_blocked",
+      "original_witness_outcomes": {
+        "original:F05-implicit-document-roots": "fail",
+        "original:F05-head-to-body": "fail",
+        "original:F05-table-foster-and-tbody": "fail",
+        "original:F05-formatting-reconstruction": "fail",
+        "original:F04-loaded-iframe-rawtext": "fail",
+        "original:F04-multicodepoint-reference": "fail",
+        "original:F01-loaded-doctype-node": "fail",
+        "original:F01-html-document-factory-kind-and-owner": "pass",
+        "original:F01-xml-document-factory-and-namespace": "fail",
+        "original:F01-arbitrary-element-namespace-prefix-and-clone": "fail",
+        "original:F01-text-domstring-unpaired-utf16": "fail",
+        "original:F01-attribute-domstring-unpaired-utf16": "fail",
+        "original:F01-usvstring-replacement-distinct-from-domstring": "pass",
+        "original:F01-stable-template-import-owner-and-saved-text": "pass"
+      },
+      "effective_guards": {
+        "tree": true,
+        "page": true,
+        "tokenizer": false,
+        "diagnostics": false,
+        "script_integration": false,
+        "foreign_fragment": false,
+        "document_node_guard": 262144,
+        "fragment_node_guard": 20000,
+        "open_element_guard": 128,
+        "pe_stack_reserve_bytes": 8388608,
+        "per_worker_timeout_seconds": 5
+      },
+      "primary_summary_sha256": "a6b302ce2826dd93d2687bf46bfbd92cdee7a54eef0988d4e64f28e8e13c280d",
+      "closure_blocked": true
+    },
+    "note": "Three verified F00 rows establish inventory/input/adapter/baseline methodology only. Required product failures and blocked browser/token/diagnostic/script/namespace evidence remain open; no foundation or whole-browser percentage is justified.",
+    "executed_in_f00": true
   },
-  "reconciled_public_main": "31647743f184382a40f58ab1b43bebf6788910fb",
+  "reconciled_public_main": "c07c6123cd7cc610c9757922b18ad68b5143cff3",
   "milestone_states": [
     "planned",
     "core_in_progress",
     "core_verified_integration_open",
     "integration_in_progress",
     "verified"
+  ],
+  "known_product_requirements_mapped_to_foundation": [
+    {
+      "requirement": "MediaQueryList legacy listeners and genuine native change lifecycle",
+      "owner_packages": [
+        "F10",
+        "F13"
+      ],
+      "observed_source": "31647743f184382a40f58ab1b43bebf6788910fb",
+      "state": "known missing; preserved for dependency-order implementation, no P1-first override"
+    },
+    {
+      "requirement": "Repeating timer/clearInterval scheduling over document lifetime",
+      "owner_packages": [
+        "F10.03"
+      ],
+      "observed_source": "31647743f184382a40f58ab1b43bebf6788910fb",
+      "state": "known missing; preserved for dependency-order implementation"
+    }
   ]
 }
