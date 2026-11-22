@@ -9220,6 +9220,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")&&matches!(kind,"InUseAttributeError"|"NotFoundError"|"WrongDocumentError"|"NotSupportedError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,DOCUMENT_CREATE_ATTRIBUTE|DOCUMENT_CREATE_ATTRIBUTE_NS)&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}

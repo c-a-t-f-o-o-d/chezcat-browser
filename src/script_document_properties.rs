@@ -8,7 +8,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn document_inherited_property(&self, object:u32, name:&str)->bool {
-        if name == "importNode" { return object == DOCUMENT; }
+        if name == "importNode" { return object == DOCUMENT || self.inert_document(object); }
         if matches!(name, "createCDATASection" | "createProcessingInstruction") {
             return object == DOCUMENT || self.inert_document(object);
         }

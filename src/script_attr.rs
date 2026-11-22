@@ -19,6 +19,13 @@ mod factory_storage_tests{
   for storage in [true,false]{if storage{b.state.retained_limit=b.state.retained;}else{b.state.copy_work=0;}assert!(b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).is_err());assert!(b.create_attribute_for_document(owner,&[Value::StringUnits(vec![0xd800,0x41,0xdfff]),Value::String("p:Refused".into())],true).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits),before);b.state.retained_limit=limit;b.state.copy_work=copies;}
   let Value::Host(handle)=b.create_attribute_for_document(owner,&[Value::String("Fresh".into())],false).unwrap()else{panic!("recovery")};let attr=&b.state.attributes[index(handle).unwrap()];assert_eq!(attr.document,owner);assert_eq!(attr.name.qualified,"Fresh");
  }
+ #[test]
+ fn attribute_clone_actual_name_value_registry_backing_storage_copy_refusal_and_recovery(){
+  let mut doc=crate::html::parse("<html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(source)=b.create_attribute_for_document(DOCUMENT,&[Value::StringUnits(vec![0xd800]),Value::StringUnits(vec![0xd800,0x3a,0x41,0xdfff])],true).unwrap()else{panic!("source")};b.attr_set(source,"value",Value::StringUnits(vec![0xd800,0x41,0xdfff])).unwrap();let source_id=index(source).unwrap();let backing=|b:&Bridge<'_>|b.state.attributes.capacity()*size_of::<Attr>()+b.state.attached_attributes.capacity()*size_of::<usize>();let before=(b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits);let limit=b.state.retained_limit;let copies=b.state.copy_work;
+  for storage in [true,false]{if storage{b.state.retained_limit=before.0;}else{b.state.copy_work=0;}assert!(b.clone_attribute_node(source,None).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.attached_attributes.len(),b.state.dom_commits),before);assert_eq!(b.state.attributes[source_id].owner,None);assert!(b.state.attributes[source_id].value.code_units().eq([0xd800,0x41,0xdfff]));b.state.retained_limit=limit;b.state.copy_work=copies;}
+  let Value::Host(copy)=b.clone_attribute_node(source,None).unwrap()else{panic!("copy")};assert_ne!(copy,source);let cloned=&b.state.attributes[index(copy).unwrap()];assert_eq!(cloned.owner,None);assert_eq!(cloned.document,DOCUMENT);assert!(cloned.name.same_expanded_name(&b.state.attributes[source_id].name));assert!(cloned.value.code_units().eq([0xd800,0x41,0xdfff]));assert_eq!(b.state.retained,before.0+cloned.name.owned_bytes()+cloned.value.capacity()+backing(&b)-before.1);assert_eq!(b.state.attached_attributes.len(),before.3);
+ }
+
 }
 pub(super) fn member_operation(method:&str)->Option<(&str,bool)>{let(name,setter)=if let Some(name)=method.strip_prefix("\0Attr.get."){(name,false)}else if method=="\0Attr.set.value"{("value",true)}else{return None;};matches!(name,"namespaceURI"|"prefix"|"localName"|"name"|"value"|"ownerElement"|"specified").then_some((name,setter))}
 const ATTR_HANDLES: usize = 0x0100_0000;
@@ -156,6 +163,19 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
+    /// An Attr is a native leaf: copy the actual name/value, never its owner.
+    /// New identity backing and payload are admitted before publication.
+    pub(super) fn clone_attribute_node(&mut self,source:u32,document:Option<u32>)->Result<Value,String>{
+        let id=index(source).filter(|&id|id<self.state.attributes.len()).ok_or("Attr clone requires a genuine Attr.")?;
+        let attr=&self.state.attributes[id];let document=document.unwrap_or(attr.document);if document!=DOCUMENT&&!self.inert_document(document){return Err("Attr clone document is unavailable.".into());}
+        let owner=attr.owner;let name_bytes=attr.name.bytes();
+        let slot=if let Some(owner)=owner{let attrs=self.element_attribute_source(owner).ok_or("Attr clone owner is unavailable.")?;let work=attrs.iter().fold(attrs.len(),|n,a|n.saturating_add(a.name.bytes()));self.state.work(work)?;Some(self.element_attribute_source(owner).unwrap().iter().position(|a|a.name.same_expanded_name(&self.state.attributes[id].name)).ok_or("Attr clone owner value is missing.")?)}else{None};
+        let value=if let(Some(owner),Some(slot))=(owner,slot){&self.element_attribute_source(owner).unwrap()[slot].value}else{&self.state.attributes[id].value};
+        self.state.copies(name_bytes.checked_add(value.used_bytes()).and_then(|n|n.checked_add(size_of::<Attr>())).ok_or("Attr clone copy overflow.")?)?;
+        let name=copy_name(&self.state.attributes[id].name)?;let value=if let(Some(owner),Some(slot))=(owner,slot){self.element_attribute_source(owner).unwrap()[slot].value.try_clone()?}else{self.state.attributes[id].value.try_clone()?};
+        let payload=name.owned_bytes().checked_add(value.capacity()).ok_or("Attr clone payload overflow.")?;let occupied=self.state.retained.checked_add(payload).ok_or("Attr clone retained overflow.")?;let reservation=self.prepare_attribute_storage(1,0,occupied)?;let added=reservation.added;
+        self.commit_attribute_storage(reservation);self.state.retained=occupied+added;let handle=ATTR_BASE+self.state.attributes.len() as u32;self.state.attributes.push(Attr{owner:None,document,name,value});self.state.dom_committed();Ok(Value::Host(handle))
+    }
     pub(super) fn validate_attr_attachment(&self,object:u32,args:&[Value])->Result<(),(&'static str,String)> {
         let Some(Value::Host(handle))=args.first() else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
         let Some(attr)=index(*handle).and_then(|id|self.state.attributes.get(id)) else {return Err(("TypeError","setAttributeNode requires a genuine Attr.".into()));};
