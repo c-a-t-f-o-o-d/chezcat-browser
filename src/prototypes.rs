@@ -605,6 +605,7 @@ impl Runtime {
             self.work(name.len())?;
             return self.proxy_get(owner, PropertyKey::String(name.to_owned()), receiver, host);
         }
+        self.materialize_host_accessor(owner, name, false)?;
         if let Some(accessor) = self.objects[owner]
             .properties
             .get(name)
@@ -665,6 +666,7 @@ impl Runtime {
             if self.objects[owner].proxy.is_some() {
                 return self.assign_via_proxy(owner, PropertyKey::String(name), &value, &receiver, host);
             }
+            self.materialize_host_accessor(owner, &name, true)?;
             if let Some(accessor) = self.objects[owner]
                 .properties
                 .get(&name)
@@ -729,6 +731,7 @@ impl Runtime {
             if self.objects[owner].proxy.is_some() {
                 return self.assign_via_proxy(owner, PropertyKey::String(name), &value, &receiver, host);
             }
+            self.materialize_host_accessor(owner, &name, true)?;
             if let Some(accessor) = self.objects[owner].properties.get(&name).and_then(|property| property.accessor) {
                 if accessor.set.is_none() {
                     return if self.strict { Err(Fault::exception("TypeError", "The inherited property has no setter.")) } else { Ok(()) };
@@ -946,6 +949,8 @@ impl Runtime {
         if !self.owns_property(id, name)? {
             return Ok(Value::Undefined);
         }
+        self.materialize_host_accessor(id, name, false)?;
+        self.materialize_host_accessor(id, name, true)?;
         if let Some(property) = self.objects[id].properties.get(name) {
             if let Some(accessor) = property.accessor {
                 return self.accessor_descriptor(
@@ -1163,6 +1168,32 @@ impl Runtime {
         key: PropertyKey,
         descriptor: PropertyDescriptor,
     ) -> Result<(), Fault> {
+        if let PropertyKey::String(name) = &key {
+            if let Some(property) = self.objects[id].properties.get(name) {
+                if matches!(property.value, super::StoredValue::DeferredHostAttribute(_)) {
+                    if !descriptor.is_accessor() && !descriptor.is_data() {
+                        if !property.configurable && (descriptor.configurable == Some(true)
+                            || descriptor.enumerable.is_some_and(|flag| flag != property.enumerable)) {
+                            return Err(Fault::exception("TypeError", "Cannot redefine a nonconfigurable property."));
+                        }
+                        self.step()?;
+                        let property = self.objects[id].properties.get_mut(name).unwrap();
+                        property.enumerable = descriptor.enumerable.unwrap_or(property.enumerable);
+                        property.configurable = descriptor.configurable.unwrap_or(property.configurable);
+                        return Ok(());
+                    }
+                    if descriptor.is_accessor() {
+                        let configurable = property.configurable;
+                        if !configurable || descriptor.get.is_none() {
+                            self.materialize_host_accessor(id, name, false)?;
+                        }
+                        if !configurable || descriptor.set.is_none() {
+                            self.materialize_host_accessor(id, name, true)?;
+                        }
+                    }
+                }
+            }
+        }
         let previous = self.stored_descriptor_property(id, &key);
         if previous.is_some_and(|property| property.getter.is_some()) {
             return Err(Fault::new(

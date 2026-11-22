@@ -26,6 +26,65 @@ fn fixture(capacity:bool)->Runtime {
     runtime
 }
 
+#[test]
+fn deferred_host_attribute_preserves_descriptor_identity_and_retries_a_late_refusal() {
+    let mut runtime = fixture(false);
+    let prototype = runtime.new_object(None).unwrap();
+    let initial_functions = runtime.function_arena.occupied;
+    runtime.define_host_attribute(prototype, 77, "example", "read", Some("write")).unwrap();
+    assert_eq!(runtime.function_arena.occupied, initial_functions);
+    let objects = runtime.objects.len();
+    let properties = runtime.properties;
+    let payload = |r: &Runtime| r.value_bytes - r.retained_arena_bytes();
+    let before = payload(&runtime);
+    let previous = runtime.event_property_allowance_for_test(1);
+    // length fits on the new function, but its name does not. Repeating
+    // this failed read must leave the same property and identity available.
+    for _ in 0..2 {
+        assert!(runtime.materialize_host_accessor(prototype, "example", false).is_err());
+        assert_eq!((runtime.function_arena.occupied, runtime.objects.len(), runtime.properties),
+                   (initial_functions, objects, properties));
+        assert_eq!(payload(&runtime), before);
+    }
+    runtime.event_property_allowance_for_test(previous);
+    runtime.materialize_host_accessor(prototype, "example", false).unwrap();
+    let getter = runtime.objects[prototype].properties["example"].accessor.unwrap().get.unwrap();
+    assert_eq!(runtime.function_arena.occupied, initial_functions + 1);
+    runtime.define_global("samplePrototype", Value::Object(prototype)).unwrap();
+    runtime.execute(r#"
+        Object.freeze(samplePrototype);
+        var a = Object.getOwnPropertyDescriptor(samplePrototype, 'example');
+        var b = Object.getOwnPropertyDescriptor(samplePrototype, 'example');
+        if(a.get !== b.get || a.set !== b.set || a.get === a.set || a.configurable || !a.enumerable) throw 'identity or flags';
+        if(a.get.name !== 'get example' || a.set.name !== 'set example' || a.get.length !== 0 || a.set.length !== 1) throw 'accessor functions';
+    "#, &mut Native).unwrap();
+    assert_eq!(runtime.objects[prototype].properties["example"].accessor.unwrap().get, Some(getter));
+}
+
+#[test]
+fn deferred_host_attribute_replacement_and_deletion_do_not_allocate_unused_functions() {
+    let mut runtime = fixture(false);
+    let prototype = runtime.new_object(None).unwrap();
+    for name in ["removed", "replaced", "flags"] {
+        runtime.define_host_attribute(prototype, 77, name, "read", Some("write")).unwrap();
+    }
+    runtime.define_global("samplePrototype", Value::Object(prototype)).unwrap();
+    runtime.execute("Object.keys({}); Object.defineProperty({}, 'warm', {value:1});", &mut Native).unwrap();
+    let functions = runtime.function_arena.occupied;
+    runtime.execute(r#"
+        var keys = Object.keys(samplePrototype);
+        if(!('removed' in samplePrototype) || keys.length !== 3 || keys[0] !== 'removed' || keys[1] !== 'replaced' || keys[2] !== 'flags') throw 'keys';
+        delete samplePrototype.removed;
+        Object.defineProperty(samplePrototype, 'replaced', {value: 42});
+        Object.defineProperty(samplePrototype, 'flags', {enumerable:false, configurable:false});
+        if('removed' in samplePrototype || samplePrototype.replaced !== 42) throw 'replacement';
+    "#, &mut Native).unwrap();
+    assert_eq!(runtime.function_arena.occupied, functions);
+    let property = &runtime.objects[prototype].properties["flags"];
+    assert!(!property.enumerable && !property.configurable);
+    assert!(matches!(property.value, StoredValue::DeferredHostAttribute(_)));
+}
+
 fn fatal(runtime:&mut Runtime,source:&str,message:&str) {
     let error=runtime.execute(source,&mut Native).unwrap_err();
     assert!(error.contains(message),"{error}");

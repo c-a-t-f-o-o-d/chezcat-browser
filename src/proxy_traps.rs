@@ -126,7 +126,9 @@ impl Runtime {
             let property = runtime.stored_descriptor_property(target, &key);
             if property.is_some_and(|property| !property.configurable) {
                 if let Some(accessor) = property.and_then(|property| property.accessor) {
-                    if accessor.get.is_none() && !matches!(result, Value::Undefined) {
+                    if accessor.get.is_none()
+                        && !property.is_some_and(|p| matches!(p.value, StoredValue::DeferredHostAttribute(_)))
+                        && !matches!(result, Value::Undefined) {
                         return Err(Fault::exception(
                             "TypeError",
                             "Proxy get violates a frozen accessor.",
@@ -194,9 +196,7 @@ impl Runtime {
             if property.is_some_and(|property| !property.configurable) {
                 if property.is_some_and(|property| {
                     property.getter.is_some()
-                        || property
-                            .accessor
-                            .is_some_and(|accessor| accessor.set.is_none())
+                        || (property.accessor.is_some() && !runtime.accessor_has_setter(property))
                 }) {
                     return Err(Fault::exception(
                         "TypeError",

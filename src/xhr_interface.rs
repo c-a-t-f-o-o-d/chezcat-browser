@@ -1,5 +1,5 @@
 //! Canonical request interface objects and synchronous native notification seam.
-use super::{Accessors, Declaration, Fault, Function, Host, Ordinary, Runtime, Value};
+use super::{Declaration, Fault, Function, Host, Ordinary, Runtime, Value};
 pub(crate) const CALL_PREFIX: &str = "\0XHR.call.";
 #[derive(Clone, Copy)]
 pub struct Progress {
@@ -86,38 +86,6 @@ impl Runtime {
         )?;
         Ok(Value::Function(allocation.id))
     }
-    fn request_attribute(
-        &mut self,
-        window: u32,
-        prototype: usize,
-        name: &str,
-        getter: &'static str,
-        setter: Option<&'static str>,
-    ) -> Result<(), Fault> {
-        let Value::Function(get) =
-            self.request_function(window, getter, &format!("get {name}"), 0)?
-        else {
-            unreachable!()
-        };
-        let set = setter
-            .map(|operation| self.request_function(window, operation, &format!("set {name}"), 1))
-            .transpose()?
-            .map(|value| {
-                let Value::Function(id) = value else {
-                    unreachable!()
-                };
-                id
-            });
-        self.store_accessor_property(
-            prototype,
-            name.into(),
-            Accessors {
-                get: Some(get),
-                set,
-            },
-            (true, true),
-        )
-    }
     pub(crate) fn define_xhr_interfaces(&mut self, window: u32) -> Result<(), String> {
         let marker = self.inhibit_transient_collection();
         let result = (|| {
@@ -186,7 +154,7 @@ impl Runtime {
                     .insert(name.into(), (false, true, true));
                 if name == "XMLHttpRequestEventTarget" {
                     for &(name, get, set) in HANDLERS {
-                        self.request_attribute(window, prototype, name, get, Some(set))?;
+                        self.define_host_attribute(prototype, window, name, get, Some(set))?;
                     }
                 }
                 if name == "XMLHttpRequest" {
@@ -216,7 +184,7 @@ impl Runtime {
                         ("responseText", "\0XHR.get.responseText", None),
                         ("responseXML", "\0XHR.get.responseXML", None),
                     ] {
-                        self.request_attribute(window, prototype, name, get, set)?;
+                        self.define_host_attribute(prototype, window, name, get, set)?;
                     }
                     for (name, operation, length) in [
                         ("open", "\0XHR.call.open", 2),

@@ -35,6 +35,7 @@ impl Runtime {
         self.programs.iter().map(|program|program.retained_bytes.get()).sum::<usize>() + bytes(&self.programs) + bytes(&self.functions) + bytes(&self.function_properties) + bytes(&self.function_realms)
             + bytes(&self.function_initial_names) + bytes(&self.function_arena.free)
             + bytes(&self.environments) + bytes(&self.free_environments) + bytes(&self.deferred_native_methods)
+            + bytes(&self.deferred_host_attributes)
     }
 
     pub(super) fn function_count_refused(&self, additional: usize) -> bool {

@@ -7,6 +7,15 @@ use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET, html_reflection_interface, aria_reflection_interface};
 
+/// Static operations for a prototype attribute. The stored property owns its
+/// creation order, flags, and any callable identities already observed.
+#[derive(Clone, Copy)]
+pub(super) struct HostAttribute {
+    window: u32,
+    getter: &'static str,
+    setter: Option<&'static str>,
+}
+
 #[cfg(test)]
 #[path = "host_document_property_limits_tests.rs"]
 mod document_property_limits_tests;
@@ -136,7 +145,7 @@ impl Runtime {
                     self.define_readonly_node_getter(prototype, window, "aborted", ABORTED)?;
                     self.define_readonly_node_getter(prototype, window, "reason", REASON)?;
                     self.define_canvas_operation(prototype, window, "throwIfAborted", THROW, 0)?;
-                    self.define_node_attribute(prototype, window, "onabort", ON_ABORT, Some(SET_ON_ABORT))?;
+                    self.define_host_attribute(prototype, window, "onabort", ON_ABORT, Some(SET_ON_ABORT))?;
                     let method = self.allocate_host_function_with_length(window, STATIC_ABORT, 0).map_err(Fault::new)?;
                     self.store_property(self.function_properties[method.id], "name".into(), Value::String("abort".into()), Some((false, false, true)))?;
                     self.store_property(properties, "abort".into(), Value::Function(method.id), Some((true, true, true)))?;
@@ -210,7 +219,7 @@ impl Runtime {
                         self.define_canvas_operation(prototype, window, "postMessage", POST, 1)?;
                         self.define_canvas_operation(prototype, window, "start", START, 0)?;
                         self.define_canvas_operation(prototype, window, "close", CLOSE, 0)?;
-                        self.define_node_attribute(prototype, window, "onmessage", MESSAGE, Some(SET_MESSAGE))?;
+                        self.define_host_attribute(prototype, window, "onmessage", MESSAGE, Some(SET_MESSAGE))?;
                     } else {
                         for (property, operation) in [("data", DATA), ("origin", ORIGIN), ("source", SOURCE), ("lastEventId", LAST_ID)] {
                             self.define_readonly_node_getter(prototype, window, property, operation)?;
@@ -293,7 +302,7 @@ impl Runtime {
         let method=self.allocate_host_function_with_length(window,"Attr",0).map_err(Fault::new)?;if let Some(Function::Host{constructible,illegal_interface_constructor,..})=self.functions.get_mut(method.id){*constructible=true;*illegal_interface_constructor=true;}
         let prototype=self.new_object(None)?;self.objects[prototype].prototype=Some(Ordinary::Object(node));self.objects[self.function_properties[method.id]].prototype=Some(Ordinary::Function(parent));let constructor=Value::Function(method.id);
         self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;self.store_property(self.function_properties[method.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("Attr".into()),Some((false,false,true)))?;
-        for(key,getter)in[("namespaceURI","\0Attr.get.namespaceURI"),("prefix","\0Attr.get.prefix"),("localName","\0Attr.get.localName"),("name","\0Attr.get.name"),("value","\0Attr.get.value"),("ownerElement","\0Attr.get.ownerElement"),("specified","\0Attr.get.specified")]{self.define_node_attribute(prototype,window,key,getter,if key=="value"{Some("\0Attr.set.value")}else{None})?;}
+        for(key,getter)in[("namespaceURI","\0Attr.get.namespaceURI"),("prefix","\0Attr.get.prefix"),("localName","\0Attr.get.localName"),("name","\0Attr.get.name"),("value","\0Attr.get.value"),("ownerElement","\0Attr.get.ownerElement"),("specified","\0Attr.get.specified")]{self.define_host_attribute(prototype,window,key,getter,if key=="value"{Some("\0Attr.set.value")}else{None})?;}
         self.put_binding(self.global_environment,"Attr".into(),Some(constructor),super::Declaration::Var,false)?;self.global_attributes.insert("Attr".into(),(false,true,true));self.native_constructor_prototypes.insert((window,"Attr"),prototype);Ok(())
     }
     pub fn define_node_interfaces(&mut self,window:u32,constants:&[(&str,u16)],image:Option<(u32,&'static str)>)->Result<(),String> {
@@ -329,10 +338,7 @@ impl Runtime {
                         self.store_property(prototype, name.into(), Value::Function(method.id), Some((true,true,true)))?;
                     }
                     for (key,operation) in [("nodeType","\0Node.get.nodeType"),("nodeName","\0Node.get.nodeName")] {
-                        let getter=self.allocate_host_function_with_length(window,operation,0).map_err(Fault::new)?;
-                        if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
-                        self.store_property(self.function_properties[getter.id],"name".into(),Value::String(format!("get {key}")),Some((false,false,true)))?;
-                        self.store_accessor_property(prototype,key.into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+                        self.define_host_attribute(prototype, window, key, operation, None)?;
                     }
                     for &(key,value) in constants {
                         for object in [prototype,self.function_properties[allocation.id]] {
@@ -342,7 +348,7 @@ impl Runtime {
                     for (property, operation) in NODE_TRAVERSAL_GETTERS {
                         self.define_readonly_node_getter(prototype, window, property, operation)?;
                     }
-                    self.define_node_attribute(prototype, window, "textContent",
+                    self.define_host_attribute(prototype, window, "textContent",
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
@@ -352,19 +358,19 @@ impl Runtime {
                         self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
                         self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
                     }
-                    for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_node_attribute(prototype,window,key,get,Some(set))?;}
+                    for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_host_attribute(prototype,window,key,get,Some(set))?;}
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;
                     }
                 }
                 if name=="Element" {
-                    self.define_node_attribute(prototype, window, "innerHTML",
+                    self.define_host_attribute(prototype, window, "innerHTML",
                         ELEMENT_INNER_HTML_GET, Some(ELEMENT_INNER_HTML_SET))?;
                     for (key, getter, setter) in [
                         ("scrollLeft", "\0Element.get.scrollLeft", "\0Element.set.scrollLeft"),
                         ("scrollTop", "\0Element.get.scrollTop", "\0Element.set.scrollTop"),
                     ] {
-                        self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                        self.define_host_attribute(prototype, window, key, getter, Some(setter))?;
                     }
                     self.define_element_sibling_getters(prototype,window,"Element")?;
                     self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Element.get.assignedSlot")?;
@@ -391,10 +397,10 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
-                    for &(key,get,set) in html_reflection_interface::ATTRIBUTES{self.define_node_attribute(prototype,window,key,get,Some(set))?;}
-                    self.define_node_attribute(prototype, window, "contentEditable",
+                    for &(key,get,set) in html_reflection_interface::ATTRIBUTES{self.define_host_attribute(prototype,window,key,get,Some(set))?;}
+                    self.define_host_attribute(prototype, window, "contentEditable",
                         "\0HTMLElement.get.contentEditable", Some("\0HTMLElement.set.contentEditable"))?;
-                    self.define_node_attribute(prototype, window, "style",
+                    self.define_host_attribute(prototype, window, "style",
                         ELEMENT_STYLE_GET, Some(ELEMENT_STYLE_SET))?;
                     for (key, operation) in [
                         ("offsetParent", "\0HTMLElement.get.offsetParent"),
@@ -465,7 +471,7 @@ impl Runtime {
                     self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
                 }
                 if name=="Document" {
-                    self.define_node_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
+                    self.define_host_attribute(prototype,window,"documentElement","\0Document.get.documentElement",None)?;
                     for (property, getter) in super::DOCUMENT_ENCODING_GETTERS {
                         self.define_readonly_node_getter(prototype, window, property, getter)?;
                     }
@@ -535,7 +541,7 @@ impl Runtime {
         self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
         let tag=self.symbol_to_string_tag.ok_or_else(||Fault::new("Missing SVGElement class-tag symbol."))?;
         self.store_symbol_property(prototype,tag,Value::String("SVGElement".into()),Some((false,false,true)))?;
-        self.define_node_attribute(prototype,window,"style",SVG_STYLE_GET,Some(SVG_STYLE_SET))?;
+        self.define_host_attribute(prototype,window,"style",SVG_STYLE_GET,Some(SVG_STYLE_SET))?;
         self.native_constructor_prototypes.insert((window,"SVGElement"),prototype);
         self.put_binding(self.global_environment,"SVGElement".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("SVGElement".into(),(false,true,true));
@@ -603,14 +609,14 @@ impl Runtime {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
             }
             if name == "HTMLSlotElement" {
-                self.define_node_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
+                self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLIFrameElement" {
-                self.define_node_attribute(prototype,window,"sandbox",super::IFRAME_SANDBOX_GET,Some(super::IFRAME_SANDBOX_SET))?;
+                self.define_host_attribute(prototype,window,"sandbox",super::IFRAME_SANDBOX_GET,Some(super::IFRAME_SANDBOX_SET))?;
             }
-            if matches!(name,"HTMLTextAreaElement"|"HTMLInputElement"){let (get,set)=if name=="HTMLTextAreaElement"{("\0HTMLTextAreaElement.get.placeholder","\0HTMLTextAreaElement.set.placeholder")}else{("\0HTMLInputElement.get.placeholder","\0HTMLInputElement.set.placeholder")};self.define_node_attribute(prototype,window,"placeholder",get,Some(set))?;}
+            if matches!(name,"HTMLTextAreaElement"|"HTMLInputElement"){let (get,set)=if name=="HTMLTextAreaElement"{("\0HTMLTextAreaElement.get.placeholder","\0HTMLTextAreaElement.set.placeholder")}else{("\0HTMLInputElement.get.placeholder","\0HTMLInputElement.set.placeholder")};self.define_host_attribute(prototype,window,"placeholder",get,Some(set))?;}
             if name == "HTMLTextAreaElement" {
-                self.define_node_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
+                self.define_host_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
             }
             if name == "HTMLInputElement" {
                 for (key, getter, setter) in [
@@ -618,7 +624,7 @@ impl Runtime {
                     ("checked", "\0HTMLInputElement.get.checked", "\0HTMLInputElement.set.checked"),
                     ("defaultChecked", "\0HTMLInputElement.get.defaultChecked", "\0HTMLInputElement.set.defaultChecked"),
                 ] {
-                    self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                    self.define_host_attribute(prototype, window, key, getter, Some(setter))?;
                 }
             }
             if name == "HTMLCanvasElement" {
@@ -626,7 +632,7 @@ impl Runtime {
                     ("width", "\0HTMLCanvasElement.get.width", "\0HTMLCanvasElement.set.width"),
                     ("height", "\0HTMLCanvasElement.get.height", "\0HTMLCanvasElement.set.height"),
                 ] {
-                    self.define_node_attribute(prototype, window, key, getter, Some(setter))?;
+                    self.define_host_attribute(prototype, window, key, getter, Some(setter))?;
                 }
                 self.define_canvas_operation(
                     prototype,
@@ -690,7 +696,7 @@ impl Runtime {
             "canvas",
             "\0CanvasRenderingContext2D.get.canvas",
         )?;
-        self.define_node_attribute(
+        self.define_host_attribute(
             prototype,
             window,
             "fillStyle",
@@ -887,10 +893,7 @@ impl Runtime {
         }
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
         self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
-        let getter=self.allocate_host_function_with_length(window,"\0NodeList.get.length",0).map_err(Fault::new)?;
-        if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
-        self.store_property(self.function_properties[getter.id],"name".into(),Value::String("get length".into()),Some((false,false,true)))?;
-        self.store_accessor_property(prototype,"length".into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+        self.define_host_attribute(prototype, window, "length", "\0NodeList.get.length", None)?;
         self.put_binding(self.global_environment,"NodeList".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("NodeList".into(),(false,true,true));
         self.native_constructor_prototypes.insert((window,"NodeList"),prototype);
@@ -957,26 +960,83 @@ impl Runtime {
         name: &'static str,
         operation: &'static str,
     ) -> Result<(), Fault> {
-        self.define_node_attribute(prototype, window, name, operation, None)
+        self.define_host_attribute(prototype, window, name, operation, None)
     }
 
-    fn define_node_attribute(&mut self, prototype: usize, window: u32, name: &'static str,
+    pub(super) fn define_host_attribute(&mut self, prototype: usize, window: u32, name: &'static str,
         getter: &'static str, setter: Option<&'static str>) -> Result<(), Fault> {
-        let mut accessor = |operation, prefix, length| -> Result<usize, Fault> {
-            let f = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
-            if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(f.id) {
-                *receiver_required = true;
+        let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+        let growth = super::limits::prepare_retained_growth(&self.deferred_host_attributes, 1, available)?;
+        self.work(growth.added.saturating_add(if growth.added > 0 { self.deferred_host_attributes.len() } else { 0 }))?;
+        let bytes = growth.added;
+        growth.commit(&mut self.deferred_host_attributes);
+        self.value_bytes += bytes;
+        self.store_accessor_property(prototype, name.into(), Accessors { get: None, set: None }, (true, true))?;
+        let index = self.deferred_host_attributes.len();
+        self.deferred_host_attributes.push(HostAttribute { window, getter, setter });
+        self.objects[prototype].properties.get_mut(name).unwrap().value = super::StoredValue::DeferredHostAttribute(index);
+        Ok(())
+    }
+
+    pub(super) fn materialize_host_accessor(&mut self, owner: usize, name: &str, setter: bool) -> Result<(), Fault> {
+        let Some(property) = self.objects[owner].properties.get(name) else { return Ok(()); };
+        let super::StoredValue::DeferredHostAttribute(index) = property.value else { return Ok(()); };
+        let current = property.accessor.expect("host attribute descriptor");
+        if (if setter { current.set } else { current.get }).is_some() { return Ok(()); }
+        let definition = self.deferred_host_attributes[index];
+        let Some(operation) = (if setter { definition.setter } else { Some(definition.getter) }) else { return Ok(()); };
+        let realm = self.objects[owner].realm;
+        let id = self.with_intrinsic_realm(realm, |runtime|
+            runtime.allocate_attribute_callable(definition.window, operation, name, setter))?;
+        let property = self.objects[owner].properties.get_mut(name).unwrap();
+        let actual = property.accessor.as_mut().unwrap();
+        if setter { actual.set = Some(id); } else { actual.get = Some(id); }
+        if actual.get.is_some() && (definition.setter.is_none() || actual.set.is_some()) {
+            property.value = super::StoredValue::Value(Value::Undefined);
+        }
+        Ok(())
+    }
+
+    fn allocate_attribute_callable(&mut self, window: u32, operation: &'static str,
+        name: &str, setter: bool) -> Result<usize, Fault> {
+        if self.function_count_refused(1) {
+            return Err(self.function_limit_fault("host"));
+        }
+        let first_object = self.objects.len();
+        let allocation = self.insert_function_slot(Function::Host {
+            object: window, method: operation, receiver_required: true, constructible: false,
+            illegal_interface_constructor: false,
+        })?;
+        let result = self.initialize_function_properties(allocation, operation, usize::from(setter), false)
+            .and_then(|()| {
+                let prefix = if setter { "set" } else { "get" };
+                self.store_property(self.function_properties[allocation.id], "name".into(),
+                    Value::String(format!("{prefix} {name}")), Some((false, false, true)))
+            });
+        if let Err(error) = result {
+            // A nonconstructible host callable creates just its own ordinary
+            // properties object. No author code runs before publication.
+            if self.function_is_occupied(allocation.id) {
+                self.rollback_unpublished_function(allocation)?;
             }
-            self.store_property(self.function_properties[f.id], "name".into(),
-                Value::String(format!("{prefix} {name}")), Some((false, false, true)))?;
-            Ok(f.id)
-        };
-        let get = Some(accessor(getter, "get", 0)?);
-        let set = setter.map(|operation| accessor(operation, "set", 1)).transpose()?;
-        self.store_accessor_property(
-            prototype, name.into(),
-            Accessors { get, set }, (true, true),
-        )
+            if self.objects.len() > first_object {
+                debug_assert_eq!(self.objects.len(), first_object + 1);
+                let unpublished = self.objects.pop().unwrap();
+                self.properties -= unpublished.properties.len();
+                for (key, property) in unpublished.properties {
+                    self.value_bytes -= key.len() + property.value.bytes();
+                }
+            }
+            return Err(error);
+        }
+        Ok(allocation.id)
+    }
+
+    pub(super) fn accessor_has_setter(&self, property: &super::Property) -> bool {
+        match property.value {
+            super::StoredValue::DeferredHostAttribute(index) => self.deferred_host_attributes[index].setter.is_some(),
+            _ => property.accessor.is_some_and(|pair| pair.set.is_some()),
+        }
     }
 
     fn define_element_sibling_getters(&mut self,prototype:usize,window:u32,family:&str)->Result<(),Fault> {
@@ -986,10 +1046,7 @@ impl Runtime {
             _=>return Err(Fault::new("Unknown element-sibling declaring interface.")),
         };
         for (key,operation) in operations {
-            let getter=self.allocate_host_function_with_length(window,operation,0).map_err(Fault::new)?;
-            if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(getter.id) {*receiver_required=true;}
-            self.store_property(self.function_properties[getter.id],"name".into(),Value::String(format!("get {key}")),Some((false,false,true)))?;
-            self.store_accessor_property(prototype,key.into(),Accessors {get:Some(getter.id),set:None},(true,true))?;
+            self.define_host_attribute(prototype, window, key, operation, None)?;
         }
         Ok(())
     }

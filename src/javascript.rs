@@ -3915,16 +3915,18 @@ struct Accessors {
 enum StoredValue {
     Value(Value),
     DeferredNative(usize),
+    DeferredHostAttribute(usize),
 }
 
 impl StoredValue {
     fn bytes(&self) -> usize {
-        match self { Self::Value(value) => value.bytes(), Self::DeferredNative(_) => 0 }
+        match self { Self::Value(value) => value.bytes(), Self::DeferredNative(_) | Self::DeferredHostAttribute(_) => 0 }
     }
     fn as_value(&self) -> Result<&Value, Fault> {
         match self {
             Self::Value(value) => Ok(value),
             Self::DeferredNative(_) => Err(Fault::new("Deferred native data value requires materialization.")),
+            Self::DeferredHostAttribute(_) => Err(Fault::new("Host accessor has no data value.")),
         }
     }
 }
@@ -4185,6 +4187,7 @@ pub struct Runtime {
     failed_intrinsics: u8,
     array_to_string_intrinsic: Option<usize>,
     deferred_native_methods: Vec<deferred_native_methods::NativeMethod>,
+    deferred_host_attributes: Vec<host_objects::HostAttribute>,
 }
 
 impl Default for Runtime {
@@ -4340,6 +4343,7 @@ impl Runtime {
             failed_intrinsics: 0,
             array_to_string_intrinsic: None,
             deferred_native_methods: Vec::new(),
+            deferred_host_attributes: Vec::new(),
         };
         runtime.initialize_realm_intrinsics().expect("initial intrinsic capacity");
         runtime
