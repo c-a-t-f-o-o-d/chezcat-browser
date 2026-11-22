@@ -6274,3 +6274,7 @@ mod native_cdata_tests;
 #[cfg(test)]
 #[path="app_xml_doctype_adoption_tests.rs"]
 mod xml_doctype_adoption_tests;
+
+#[cfg(test)]
+#[path="app_document_children_tests.rs"]
+mod document_children_tests;

@@ -9,6 +9,8 @@ pub(super) mod element_names;
 pub(super) mod xml_documents;
 #[path="script_cdata.rs"]
 mod cdata;
+#[path="script_document_children.rs"]
+mod document_children;
 
 #[path="script_inert_content.rs"]
 mod content;

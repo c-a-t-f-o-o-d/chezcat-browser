@@ -23,6 +23,7 @@ impl Bridge<'_> {
         }
         match self.inert_node_type(parent) {
             Some(1 | 11) => {}
+            Some(9) if self.inert_document_children_receiver(parent)=>{},
             Some(9) => {
                 return Err((
                     "NotSupportedError",
@@ -87,7 +88,7 @@ impl Bridge<'_> {
         }
         if self
             .tree_walker_node_type(incoming)
-            .is_some_and(|kind| !matches!(kind, 1 | 3 | 4 | 7 | 8 | 11))
+            .is_some_and(|kind| !matches!(kind, 1 | 3 | 4 | 7 | 8 | 11)&&!(kind==10&&self.inert_document_children_receiver(parent)))
         {
             return Err((
                 "HierarchyRequestError",
@@ -104,11 +105,7 @@ impl Bridge<'_> {
                 "Cross-document inert replacement adoption is not implemented.".into(),
             ));
         }
-        for handle in [incoming, outgoing] {
-            let n = arena.node(handle).unwrap();
-            if arena.node(n.owner).is_some_and(|owner|matches!(&owner.kind,Kind::Document(nodes) if [nodes.html,nodes.head,nodes.body].contains(&Some(handle)))){return Err(("NotSupportedError","Replacing or moving inert document structure is not implemented.".into()));}
-        }
-        Ok(())
+        self.validate_document_children(parent,"replaceChild",args)
     }
     pub(in crate::scripting) fn replace_inert_child(
         &mut self,
@@ -170,11 +167,13 @@ impl Bridge<'_> {
                 {
                     return Err("Inert replacement fragment ownership is inconsistent.".into());
                 }
-                self.validate_svg_edge(parent, root)?;
+                if !self.inert_document_children_receiver(parent){self.validate_svg_edge(parent, root)?;}
             }
         } else {
-            self.validate_svg_edge(parent, incoming)?;
+            if !self.inert_document_children_receiver(parent){self.validate_svg_edge(parent, incoming)?;}
         }
+        self.prepare_document_children_sync(parent,count)?;
+        if let Some(old)=old_parent{self.prepare_document_children_sync(old,0)?;}
         let siblings = &self.state.inert_documents.node(parent).unwrap().children;
         let original = siblings.len();
         let out_at = siblings
@@ -272,6 +271,7 @@ impl Bridge<'_> {
             arena.node_mut(incoming).unwrap().parent = Some(parent);
             arena.node_mut(parent).unwrap().children[insertion] = incoming;
         }
+        self.sync_document_children(parent);if let Some(old)=old_parent{if old!=parent{self.sync_document_children(old);}}
         self.state.dom_committed();
         Ok(Value::Host(outgoing))
     }
