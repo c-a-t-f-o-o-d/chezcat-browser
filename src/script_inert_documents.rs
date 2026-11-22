@@ -15,6 +15,8 @@ mod document_children;
 mod document_clone;
 #[path="script_node_adoption.rs"]
 mod node_adoption;
+#[path="script_inert_direct_insertion.rs"]
+mod direct_insertion;
 
 #[path="script_inert_content.rs"]
 mod content;
@@ -498,12 +500,16 @@ impl Bridge<'_> {
 
     /// Promote the measured safe HTML subset from template markup. The
     /// destination tree only sees the existing identities after all checks.
-    pub(super) fn splice_checked_inert_fragment(
-        &mut self, parent: usize, fragment: u32, reference: Option<usize>,
+    pub(super) fn splice_checked_inert_fragment(&mut self,parent:usize,fragment:u32,reference:Option<usize>)->Result<Value,String>{self.splice_checked_inert_source(parent,fragment,reference,false)}
+    pub(in crate::scripting) fn splice_checked_inert_node(&mut self,parent:usize,source:u32,reference:Option<usize>)->Result<Value,String>{self.splice_checked_inert_source(parent,source,reference,true)}
+    fn splice_checked_inert_source(
+        &mut self, parent: usize, source: u32, reference: Option<usize>, single:bool,
     ) -> Result<Value, String> {
-        let children = self.inert_children(fragment).ok_or("Inert fragment is unavailable.")?;
-        let count = children.len();
-        if count == 0 { return Ok(Value::Host(fragment)); }
+        let count=if single{1}else{self.inert_children(source).ok_or("Inert fragment is unavailable.")?.len()};
+        let source_owner=self.state.inert_documents.node(source).ok_or("Inert insertion source is unavailable.")?.owner;
+        let old_parent=if single{self.state.inert_documents.node(source).unwrap().parent}else{None};
+        let old_slot=if let Some(old)=old_parent{let children=self.inert_children(old).ok_or("Inert insertion source parent is unavailable.")?;let length=children.len();let slot=children.iter().position(|&node|node==source).ok_or("Inert insertion source link is unavailable.")?;self.state.work(length)?;self.state.copies((length-slot-1).checked_mul(size_of::<u32>()).ok_or("Inert insertion source removal overflow.")?)?;self.prepare_document_children_sync(old,0)?;Some(slot)}else{None};
+        if count == 0 { return Ok(Value::Host(source)); }
         self.state.work(count)?;
         self.mutation_ancestors(parent)?;
         if self.doc.nodes[parent].namespace != crate::html::Namespace::Html
@@ -519,12 +525,12 @@ impl Bridge<'_> {
             depth += 1;
             ancestor = self.state.tree.parents[node];
         }
-        let children = self.inert_children(fragment).ok_or("Inert fragment is unavailable.")?;
         let mut roots = Vec::new();
         let mut pending = Vec::new();
         roots.try_reserve_exact(count).map_err(|_| "Cannot reserve promoted fragment roots.")?;
         pending.try_reserve(count).map_err(|_| "Cannot reserve promoted fragment traversal.")?;
-        for &handle in children {
+        for slot in 0..count {
+            let handle=if single{source}else{self.inert_children(source).unwrap()[slot]};
             roots.push(node_index(handle).ok_or("Inert fragment root has no reserved document slot.")?);
             pending.push((handle, parent, depth + 1));
         }
@@ -538,6 +544,7 @@ impl Bridge<'_> {
             self.state.work(1)?;
             let (inert, source, index) = self.parked_template_source(handle)
                 .ok_or("Inert fragment contains unsupported active markup.")?;
+            if inert.owner!=source_owner{return Err("Inert insertion source ownership is inconsistent.".into());}
             released = inert.children.capacity().checked_mul(size_of::<u32>())
                 .and_then(|bytes| released.checked_add(bytes)).ok_or("Promoted inert child-link refund overflow.")?;
             // The reserved main slot can still own its original leaf payload.
@@ -680,7 +687,7 @@ impl Bridge<'_> {
                 self.state.work(shifted)?;
                 self.state.copies(self.state.dom.inert_child_lists.movement_bytes(shifted))?;
             }
-            let attr_changes=if self.state.inert_documents.node(fragment).unwrap().owner!=DOCUMENT{let lookup=(usize::BITS-indices.len().leading_zeros()) as usize+1;self.prepare_attr_document_rebind(|owner|node_index(owner).is_some_and(|index|indices.binary_search(&index).is_ok()),lookup,DOCUMENT)?}else{Vec::new()};
+            let attr_changes=if source_owner!=DOCUMENT{let lookup=(usize::BITS-indices.len().leading_zeros()) as usize+1;self.prepare_attr_document_rebind(|owner|node_index(owner).is_some_and(|index|indices.binary_search(&index).is_ok()),lookup,DOCUMENT)?}else{Vec::new()};
             self.state.prepare_range_changes(1,0)?;
             self.state.replace_storage(released, retained, retained)?;
             Ok::<_, String>((inline,attr_changes))
@@ -707,7 +714,8 @@ impl Bridge<'_> {
             self.state.dom.inert_child_lists.retain(|handle|
                 !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
         }
-        self.state.inert_documents.node_mut(fragment).unwrap().children.clear();
+        if !single{self.state.inert_documents.node_mut(source).unwrap().children.clear();}
+        if let Some(old)=old_parent{self.state.inert_documents.node_mut(old).unwrap().children.remove(old_slot.unwrap());self.sync_document_children(old);}
         self.doc.nodes[parent].children.splice(position..position, roots);
         self.state.inert_documents.adopted.retain(|handle|
             !node_index(*handle).is_some_and(|node| indices.binary_search(&node).is_ok()));
@@ -725,7 +733,7 @@ impl Bridge<'_> {
         self.state.dom_committed();
         self.state.dirty = true;
         if connected { self.state.layout_changed(); }
-        Ok(Value::Host(fragment))
+        Ok(Value::Host(source))
     }
 
     fn parsed_source(&self, source: ParsedSource) -> Option<(&Node, bool)> {
@@ -1639,7 +1647,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn create_inert_processing_instruction(&mut self, owner: u32, target: String, data: DomString) -> Result<Value, String> {
-        self.append_inert_leaf(owner, Kind::ProcessingInstruction { target, data })
+        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::ProcessingInstruction{target,data},namespace:crate::html::Namespace::None,children:Vec::new()},0).map(Value::Host)
     }
 
     fn create_inert_svg(&mut self,owner:u32,name:String)->Result<Value,String>{
@@ -1896,7 +1904,7 @@ impl Bridge<'_> {
 
 fn template_node_can_park(node: &Node) -> bool {
     match &node.kind {
-        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) => true,
+        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction{..} => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
         NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => crate::html::svg_dom_transfer(node),

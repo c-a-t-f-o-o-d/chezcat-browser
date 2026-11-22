@@ -670,6 +670,7 @@ impl Bridge<'_> {
         if node_index(object).is_some()
             && matches!(method, "appendChild" | "insertBefore" | "removeChild")
         {
+            if method!="removeChild"{if let Some(Value::Host(source))=args.first(){if self.inert_node_type(*source).is_some_and(|kind|kind!=11){return self.validate_inert_direct_insertion(object,*source,method,args);}}}
             if let (true, Some(Value::Host(handle))) = (method != "removeChild", args.first()) {
                 if let Some(template) = self.checked_inert_fragment(*handle) {
                     return self.validate_inert_fragment_insertion(object, template, method, args);
@@ -1382,6 +1383,7 @@ impl Bridge<'_> {
             return Err("A DOM node is required.".into());
         };
         if method != "removeChild" {
+            if self.inert_node_type(*handle).is_some_and(|kind|kind!=11){self.validate_inert_direct_insertion(node_handle(parent),*handle,method,args).map_err(|(name,message)|format!("{name}: {message}"))?;let reference=if method=="insertBefore"{if let Some(Value::Host(reference))=args.get(1){node_index(*reference)}else{None}}else{None};return self.splice_checked_inert_node(parent,*handle,reference);}
             if let Some(template) = self.checked_inert_fragment(*handle) {
                 self.validate_inert_fragment_insertion(node_handle(parent), template, method, args)
                     .map_err(|(name, error)| format!("{name}: {error}"))?;
