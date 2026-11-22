@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
 use crate::dom_string::DomString;
+
+#[cfg(test)]
+#[path="script_native_dom_string_tests.rs"]
+mod native_dom_string_tests;
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
@@ -2664,7 +2668,7 @@ impl Bridge<'_> {
             }
             stack.extend(self.doc.nodes[node].children.iter().rev().copied());
         }
-        let (logical,bytes)=DomString::concat_size(&parts)?;
+        let (logical,_bytes)=DomString::concat_size(&parts)?;
         if logical>self.state.limits.host.string_bytes{return Err("textContent result exceeds the host string allowance.".into());}
         self.state.copies(DomString::concat_copy_work(&parts)?)?;
         let result=DomString::concat(&parts,DomString::storage_bound(self.state.limits.host.string_bytes)?)?;

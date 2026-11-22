@@ -139,8 +139,8 @@ impl Bridge<'_> {
                     }
                     tag.len()
                 }
-                ImportSource::Text(data) => data.len(),
-                ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+                ImportSource::Text(data) => data.used_bytes(),
+                ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
                 ImportSource::Fragment => 0,
             };
             bytes = bytes.checked_add(cost).ok_or("DOM import size overflow.")?;

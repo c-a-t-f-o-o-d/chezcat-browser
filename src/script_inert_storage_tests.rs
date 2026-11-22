@@ -36,14 +36,14 @@ fn inert_leaf_identity_joint_storage_copy_refusal_and_paid_native_slot() {
     bridge.state.copy_work = bridge.state.limits.copy_bytes;
     let text = String::from("payload");
     let payload = text.capacity() + size_of::<Node>() + 2 * size_of::<usize>();
-    let handle = bridge.append_inert_text(owner, None, text, 0).unwrap();
+    let handle = bridge.append_inert_text(owner, None, text.into(), 0).unwrap();
     let after = snapshot(&bridge);
     assert_eq!(node_index(handle), Some(before.1));
     assert_eq!(after.1, before.1 + 1);
     assert_eq!(after.0 - before.0, payload + (after.2-before.2)*size_of::<Node>()
         + after.3-before.3 + after.4-before.4 + after.5-before.5);
     assert_eq!(bridge.state.inert_documents.node(handle).unwrap().owner, owner);
-    assert_eq!(bridge.inert_text_value(handle), Some("payload"));
+    assert_eq!(bridge.inert_text_value(handle).map(|text|text.scalar().unwrap()), Some("payload"));
     assert!(!bridge.state.dom.connected[before.1]);
 }
 

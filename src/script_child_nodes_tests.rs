@@ -264,7 +264,7 @@ fn child_nodes_parsed_executed_script_text_inspection_does_not_unlock_loaded_mut
     // actual pending removal; do not mistake normalize's legal no-op for a
     // loaded-script mutation refusal. The parsed source Text remains intact.
     let empty=doc.nodes.len();
-    doc.nodes.push(Node {kind:NodeKind::Text(String::new()),children:Vec::new(),namespace:crate::html::Namespace::None});
+    doc.nodes.push(Node {kind:NodeKind::Text(String::new().into()),children:Vec::new(),namespace:crate::html::Namespace::None});
     doc.nodes[script].children.push(empty);
     let mut forms=Forms::new(&doc);let mut page=Page::for_test();
     let outcome=page.start(&mut doc,&mut forms,&[Script {node:script,source:SOURCE.into(),label:"Original parsed and executed script Text".into()}]);

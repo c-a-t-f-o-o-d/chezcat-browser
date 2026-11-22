@@ -6250,3 +6250,7 @@ mod fragment_author_prototype_tests;
 #[cfg(test)]
 #[path="app_custom_host_content_tests.rs"]
 mod custom_host_content_tests;
+
+#[cfg(test)]
+#[path="app_native_dom_string_tests.rs"]
+mod native_dom_string_tests;

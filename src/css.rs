@@ -4559,10 +4559,10 @@ mod tests {
         let text=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Text(value) if value.contains("changed after request"))).unwrap();
         let source="#target{width:77px}";let external=HashMap::new();
         assert!(check_stylesheet_candidate(&doc,&external,link,source).is_ok());
-        doc.nodes[text].kind=NodeKind::Text(format!("/*{}*/#target{{width:199px}}","x".repeat(70)));
+        doc.nodes[text].kind=NodeKind::Text(format!("/*{}*/#target{{width:199px}}","x".repeat(70)).into());
         assert!(check_stylesheet_candidate(&doc,&external,link,source).unwrap_err().contains("per document"));
         assert!(external.is_empty(),"Preflight must not publish the source");
-        doc.nodes[text].kind=NodeKind::Text(String::new());assert!(check_stylesheet_candidate(&doc,&external,link,source).is_ok());
+        doc.nodes[text].kind=NodeKind::Text(String::new().into());assert!(check_stylesheet_candidate(&doc,&external,link,source).is_ok());
     }
 
     #[test]

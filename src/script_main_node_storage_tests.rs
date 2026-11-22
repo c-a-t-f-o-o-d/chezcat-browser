@@ -24,13 +24,13 @@ fn main_node_storage_exact_record_payload_and_movement_refuse_without_capacity_p
     let bundle=size_of::<Node>()+2+size_of::<Option<usize>>()+size_of::<usize>()+64;
     page.state.retained_limit=before+bundle-1;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    assert!(bridge.create_dom_node(NodeKind::Comment(wide("x",64))).is_err());
+    assert!(bridge.create_dom_node(NodeKind::Comment(wide("x",64).into())).is_err());
     bridge.state.retained_limit+=1;bridge.state.copy_work=0;
-    assert!(bridge.create_dom_node(NodeKind::Comment(wide("x",64))).is_err());
+    assert!(bridge.create_dom_node(NodeKind::Comment(wide("x",64).into())).is_err());
     assert_eq!(bridge.doc.nodes.len(),count);assert_eq!(bridge.doc.nodes.capacity(),capacity);
     assert_eq!(bridge.state.retained,before);assert!(bridge.state.dom.created.is_empty());
     bridge.state.copy_work=(count+1)*(size_of::<Node>()+2+size_of::<Option<usize>>()+size_of::<usize>())+1;
-    let Value::Host(created)=bridge.create_dom_node(NodeKind::Comment(wide("x",64))).unwrap()else{panic!("native Comment")};
+    let Value::Host(created)=bridge.create_dom_node(NodeKind::Comment(wide("x",64).into())).unwrap()else{panic!("native Comment")};
     assert_eq!(created,node_handle(count));assert_eq!(bridge.doc.nodes.capacity(),count+1);
     assert_eq!(bridge.state.retained,before+bundle);assert_eq!(bridge.state.copy_work,0);
     assert_eq!(bridge.doc.nodes[text].kind.character_data(),Some("kept"));

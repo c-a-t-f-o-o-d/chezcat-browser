@@ -9,7 +9,7 @@ fn execute(doc:&mut Document,forms:&mut Forms,page:&mut Page,script:&str){assert
 fn inert_node_insert_before_refusal_identifies_actual_operation_and_receiver(){
     let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"
 var owner=document.getElementById('seed').content.ownerDocument,f=owner.createTextNode('leaf'),effects=0,caught=false;
-try{Node.prototype.insertBefore.call(f,owner.createDocumentFragment(),null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('Operation "insertBefore"')>=0&&error.message.indexOf('Text (native handle 0x86')>=0;}
+try{Node.prototype.insertBefore.call(f,owner.createDocumentFragment(),null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('Operation "insertBefore"')>=0&&error.message.indexOf('Text (native handle 0x01')>=0;}
 if(!caught||f.childNodes.length!==0||f.data!=='leaf')throw 'actual inert leaf refusal diagnostic';
 caught=false;try{Node.prototype.insertBefore.call({toString:function(){effects++;throw 'coerced';}},f,null);}catch(error){caught=error instanceof TypeError&&error.message.indexOf('actual receiver: object.')>=0;}if(!caught||effects!==0)throw 'diagnostic must not coerce receiver';
 "#);

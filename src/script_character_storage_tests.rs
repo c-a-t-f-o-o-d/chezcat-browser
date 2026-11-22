@@ -20,9 +20,9 @@ fn character_storage_constructors_admit_capacity_before_identity_and_copy_only_t
     for family in 0..3 {
         let (mut doc, mut forms, mut page) = start(crate::html::parse("<html><body></body></html>"));
         let kind = || match family {
-            0 => NodeKind::Text(wide("x", 64)),
-            1 => NodeKind::Comment(wide("x", 64)),
-            _ => NodeKind::ProcessingInstruction { target: wide("fixture", 32), data: wide("x", 64) },
+            0 => NodeKind::Text(wide("x", 64).into()),
+            1 => NodeKind::Comment(wide("x", 64).into()),
+            _ => NodeKind::ProcessingInstruction { target: wide("fixture", 32), data: wide("x", 64).into() },
         };
         let cost = if family == 2 { 96 } else { 64 };
         let cost=cost+Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(1).unwrap();
@@ -50,8 +50,8 @@ fn character_storage_baseline_and_shrinking_setters_refund_owned_buffers() {
     let mut doc = crate::html::parse_inert_html("<html><body><p>x<!--y--></p></body></html>", 64, &|| Ok(())).unwrap().0;
     let text = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Text(data) if data == "x")).unwrap();
     let comment = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Comment(_))).unwrap();
-    doc.nodes[text].kind = NodeKind::Text(wide("x", 64));
-    doc.nodes[comment].kind = NodeKind::Comment(wide("y", 128));
+    doc.nodes[text].kind = NodeKind::Text(wide("x", 64).into());
+    doc.nodes[comment].kind = NodeKind::Comment(wide("y", 128).into());
     doc.title = wide("old", 32);
     let baseline = document_bytes(&doc);
     let (mut doc, mut forms, mut page) = start(doc);
@@ -74,7 +74,7 @@ fn character_storage_normalize_exact_refund_keeps_detached_text_and_recovers() {
     let mut doc = crate::html::parse("<html><body><p>x</p></body></html>");
     let parent = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "p")).unwrap();
     let first = doc.nodes[parent].children[0];
-    doc.nodes[first].kind = NodeKind::Text(wide("x", 64));
+    doc.nodes[first].kind = NodeKind::Text(wide("x", 64).into());
     let second = doc.nodes.len();
     doc.nodes.push(Node { kind: NodeKind::Text("yz".into()), children: Vec::new(), namespace: crate::html::Namespace::None });
     doc.nodes[parent].children.push(second);
@@ -100,7 +100,7 @@ fn character_storage_clone_compacts_source_and_content_moves_real_capacity() {
     let mut doc = crate::html::parse("<html><body><p>x</p></body></html>");
     let parent = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "p")).unwrap();
     let source = doc.nodes[parent].children[0];
-    doc.nodes[source].kind = NodeKind::Text(wide("x", 128));
+    doc.nodes[source].kind = NodeKind::Text(wide("x", 128).into());
     let (mut doc, mut forms, mut page) = start(doc);
     let before = page.state.retained;
     let clone_cost=1+Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(1).unwrap();
@@ -110,12 +110,12 @@ fn character_storage_clone_compacts_source_and_content_moves_real_capacity() {
     assert_eq!(page.state.retained, before + clone_cost);
     let text_cost=64+Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(1).unwrap();
     page.state.retained_limit = before + clone_cost + text_cost;
-    Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("new", 64)).unwrap();
+    Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("new", 64).into()).unwrap();
     assert_eq!(page.state.retained, before + clone_cost + text_cost);
     assert_eq!(doc.nodes[source].kind.character_data(), Some("x"));
     assert!(page.state.detached_nodes.contains(&source));
     let count = doc.nodes.len();
-    Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("", 64)).unwrap();
+    Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("", 64).into()).unwrap();
     assert_eq!(doc.nodes.len(), count);
     assert_eq!(page.state.retained, before + clone_cost + text_cost);
 }

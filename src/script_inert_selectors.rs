@@ -73,8 +73,8 @@ impl Bridge<'_> {
                 })
                 .ok_or("Inert selector payload overflow.")?,
             Some(ImportSource::Element(name)) => name.len(),
-            Some(ImportSource::Text(text)) => text.len(),
-            Some(ImportSource::ProcessingInstruction { target, data }) => target.len() + data.len(),
+            Some(ImportSource::Text(text)) => text.used_bytes(),
+            Some(ImportSource::ProcessingInstruction { target, data }) => target.len() + data.used_bytes(),
             Some(ImportSource::Fragment) => 0,
             None => {
                 if self.inert_node_type(handle) == Some(9) {

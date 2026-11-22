@@ -36,6 +36,9 @@ impl DomString {
         else{Ok(&self.projection)}
     }
     pub(crate) fn render_projection(&self)->&str{&self.projection}
+    /// Compatibility view for existing scalar display fixtures/consumers.
+    /// Native DOM values must use code_units or raw_units instead.
+    pub(crate) fn as_str(&self)->&str{self.render_projection()}
     pub(crate) fn append_parser_scalar(&mut self,text:&str)->Result<(),String>{
         if self.units.is_some(){return Err("Scalar parser append cannot replace stored DOMString code units.".into());}
         self.projection.try_reserve(text.len()).map_err(|_|"Cannot reserve parser character data.")?;

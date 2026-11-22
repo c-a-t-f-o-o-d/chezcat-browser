@@ -27,7 +27,7 @@ fn sibling_order_empty_text_replacement_preserves_existing_paid_slot_rows() {
     let source=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{tag,..}if tag=="div")).unwrap();
     let count=doc.nodes.len();let capacity=page.state.tree.sibling_slots.capacity();let bytes=page.state.node_state_bytes();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    bridge.set_text_content(source,String::new()).unwrap();
+    bridge.set_text_content(source,String::new().into()).unwrap();
     assert_eq!(bridge.doc.nodes.len(),count);assert_eq!(bridge.state.tree.sibling_slots.len(),count);
     assert_eq!(bridge.state.tree.sibling_slots.capacity(),capacity);assert_eq!(bridge.state.node_state_bytes(),bytes);
     assert!(bridge.state.dirty);bridge.state.rebuild(bridge.doc).unwrap();
