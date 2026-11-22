@@ -85,7 +85,7 @@ a.setAttribute('data-note','one');var note=a.attributes[0];f.appendChild(a);f.ap
 if(view[0]!==b||view[1]!==a||text.parentNode!==a||a.firstChild!==text||note.ownerElement!==a||note.ownerDocument!==owner)throw 'fresh tree reorder aliases';
 var caught=false;try{a.removeChild(b);}catch(error){caught=error.name==='NotFoundError';}if(!caught||b.parentNode!==f)throw 'remove real child only';
 var other=document.implementation.createHTMLDocument('other'),foreign=other.createElement('p');caught=false;try{f.appendChild(foreign);}catch(error){caught=error.name==='NotSupportedError';}if(!caught||foreign.parentNode!==null||foreign.ownerDocument!==other||f.children.length!==2)throw 'cross owner boundary';
-var otherFragment=other.createDocumentFragment();caught=false;try{otherFragment.appendChild(other.body);}catch(error){caught=error.name==='NotSupportedError';}if(!caught||other.body.parentNode!==other.documentElement||otherFragment.childNodes.length!==0)throw 'document structure boundary';
+var otherFragment=other.createDocumentFragment(),savedBody=other.body,otherRoot=other.documentElement;otherFragment.appendChild(savedBody);if(other.body!==null||savedBody.parentNode!==otherFragment||otherFragment.firstChild!==savedBody||savedBody.ownerDocument!==other)throw 'current detached body structure';otherRoot.appendChild(otherFragment);if(other.body!==savedBody||savedBody.parentNode!==otherRoot||otherFragment.childNodes.length!==0)throw 'current restored body structure';
 caught=false;try{Node.prototype.appendChild.call({},a);}catch(error){caught=error instanceof TypeError;}if(!caught||a.parentNode!==f)throw 'native receiver guard';
 f.appendChild(owner.createDocumentFragment());if(f.children.length!==2)throw 'empty donor';
 "#);
