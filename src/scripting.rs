@@ -1247,7 +1247,6 @@ impl Page {
             (HISTORY, "replaceState"),
             (HISTORY, "pushState"),
             (PERFORMANCE, "now"),
-            (DOCUMENT, "getElementById"),
             (DOCUMENT, "getElementsByTagName"),
             (DOCUMENT, "querySelector"),
             (DOCUMENT, "querySelectorAll"),

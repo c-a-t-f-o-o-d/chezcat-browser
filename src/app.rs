@@ -6376,6 +6376,10 @@ mod inert_position_tests;
 mod inert_attribute_units_tests;
 
 #[cfg(test)]
+#[path="app_identifier_lookup_tests.rs"]
+mod identifier_lookup_tests;
+
+#[cfg(test)]
 #[path="app_pi_domstring_validation_tests.rs"]
 mod pi_domstring_validation_tests;
 
