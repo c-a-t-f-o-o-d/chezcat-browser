@@ -106,7 +106,7 @@ impl Bridge<'_> {
     // Assign the eventual native identity at creation. The inert route keeps
     // ownership until promotion; no saved handle or observer record is remapped.
     pub(super) fn append_inert_text(
-        &mut self, owner: u32, parent: Option<u32>, text: String, metadata: usize,
+        &mut self, owner: u32, parent: Option<u32>, text: DomString, metadata: usize,
     ) -> Result<u32, String> {
         if !self.can_reserve_inert_leaf() {
             let handle = self.reserve_inert_storage(1, text.capacity(), 0, 0, metadata)?;
@@ -180,7 +180,7 @@ impl Bridge<'_> {
     pub(in crate::scripting) fn replace_inert_text_content(
         &mut self,
         object: u32,
-        text: String,
+        text: DomString,
     ) -> Result<(), String> {
         if !self.inert_text_replacement_receiver(object) {
             return Err("Inert text replacement requires a supported Element or fragment.".into());

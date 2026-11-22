@@ -779,6 +779,8 @@ pub trait Host {
     fn argument_conversions(&self, _object: u32, _method: &str, _args: &[Value]) -> &'static [(usize, bool)] {
         &[]
     }
+    fn preserves_dom_string_argument(&self,_object:u32,_method:&str,_index:usize)->bool{false}
+    fn preserves_dom_string_setter(&self,_object:u32,_property:&str)->bool{false}
     /// Native interface references checked after ordered primitive conversion.
     fn native_reference_arguments(&self,_object:u32,_method:&str)->&'static [usize] {&[]}
     /// Explicit WebIDL variadic DOMString conversion, in argument order before
@@ -9159,9 +9161,10 @@ impl Runtime {
             }
             for (index, string_hint) in conversions.iter().copied()
                 .chain((0..if variadic {args.len()} else {0}).map(|index|(index,true))) {
-                if let Some(value) = converted.get(index).cloned() {
+                if index<converted.len() {
                     host.validate_argument_prefix(object, method, index, &converted)
                         .map_err(|(kind, message)| Fault::exception(kind, message))?;
+                    let value=std::mem::replace(&mut converted[index],Value::Undefined);
                     if string_hint && host.nullable_string_argument(object, method, index)
                         && matches!(value, Value::Null | Value::Undefined)
                     {
@@ -9171,7 +9174,8 @@ impl Runtime {
                     let primitive = self.primitive_with_hint(value, string_hint, host)?;
                     self.work(primitive.bytes())?;
                     converted[index] = self.checked_value(if string_hint {
-                        Value::String(primitive.script_text()?)
+                        if host.preserves_dom_string_argument(object,method,index)&&primitive.is_string(){primitive}
+                        else{Value::String(primitive.script_text()?)}
                     } else {
                         let number = primitive.script_number()?;
                         Value::Number(if method == canvas_readback::METHOD {

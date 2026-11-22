@@ -89,16 +89,16 @@ enum Kind {
     Parsed { source: ParsedSource, initial_template: Option<usize> },
     Doctype,
     Element(String),
-    Text(String),
-    ProcessingInstruction { target: String, data: String },
+    Text(DomString),
+    ProcessingInstruction { target: String, data: DomString },
 }
 
 pub(super) enum ImportSource<'a> {
     Parsed { node: &'a Node, unsafe_nonce: bool },
     Element(&'a str),
-    Text(&'a str),
+    Text(&'a DomString),
     Fragment,
-    ProcessingInstruction { target: &'a str, data: &'a str },
+    ProcessingInstruction { target: &'a str, data: &'a DomString },
 }
 
 struct InertNode {
@@ -925,12 +925,12 @@ impl Bridge<'_> {
                 ParsedSource::Generated(_) => generated.as_deref().unwrap(),
             };
             match &node.kind {
-                NodeKind::Text(text) => escaped(self.state, &mut output, text, false, raw)?,
+                NodeKind::Text(text) => escaped(self.state, &mut output, text.scalar()?, false, raw)?,
                 NodeKind::Comment(data) => {
-                    for piece in ["<!--", data, "-->"] { append(self.state, &mut output, piece)?; }
+                    for piece in ["<!--", data.scalar()?, "-->"] { append(self.state, &mut output, piece)?; }
                 }
                 NodeKind::ProcessingInstruction { target, data } => {
-                    for piece in ["<?", target, " ", data, "?>"] { append(self.state, &mut output, piece)?; }
+                    for piece in ["<?", target, " ", data.scalar()?, "?>"] { append(self.state, &mut output, piece)?; }
                 }
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
                 NodeKind::Element { tag, attrs, .. } => {
@@ -1156,9 +1156,9 @@ impl Bridge<'_> {
 
     fn clone_inert_tree_with_slots(&mut self, object: u32, deep: bool, reserve_slots: bool) -> Result<Value, String> {
         if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots) {
-            let size = data.len();
+            let size = data.used_bytes();
             self.state.copies(size)?;
-            let text = script_clone_node::copy_text(self.inert_text_value(object).unwrap())?;
+            let text = self.inert_text_value(object).unwrap().try_clone()?;
             let owner = self.state.inert_documents.node(object).unwrap().owner;
             return self.append_inert_text(owner, None, text, 0).map(Value::Host);
         }
@@ -1254,8 +1254,9 @@ impl Bridge<'_> {
                 return Err("Inert DOM identity limit reached during cloning.".into());
             }
             let string_bytes = match kind {
-                Kind::Element(name) | Kind::Text(name) => name.len(),
-                Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+                Kind::Element(name) => name.len(),
+                Kind::Text(data) => data.used_bytes(),
+                Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
                 _ => 0,
             };
             self.state.work(extra.saturating_add(1))?;
@@ -1286,9 +1287,9 @@ impl Bridge<'_> {
                     Kind::Parsed { source, initial_template } =>
                         Kind::Parsed { source: *source, initial_template: if deep { *initial_template } else { None } },
                     Kind::Element(name) => Kind::Element(name.clone()),
-                    Kind::Text(data) => Kind::Text(data.clone()),
+                    Kind::Text(data) => Kind::Text(data.try_clone()?),
                     Kind::ProcessingInstruction { target, data } =>
-                        Kind::ProcessingInstruction { target: target.clone(), data: data.clone() },
+                        Kind::ProcessingInstruction { target: target.clone(), data: data.try_clone()? },
                     Kind::Document(_) | Kind::TemplateDocument { .. } | Kind::Doctype =>
                         return Err("Cloning this inert document node is unavailable.".into()),
                 }
@@ -1520,14 +1521,15 @@ impl Bridge<'_> {
         if let Some(title) = title {
             entries.extend([
                 node(Kind::Element(text_copy("title")?), Some(head), links(&[text])?),
-                node(Kind::Text(title), Some(title_element), Vec::new()),
+                node(Kind::Text(title.into()), Some(title_element), Vec::new()),
             ]);
         }
         let payload = entries.iter().try_fold(0usize, |bytes, entry| {
             let Entry::Node(node) = entry else { return Ok::<_, String>(bytes); };
             let text = match &node.kind {
                 Kind::Document(doc) => doc.url.capacity().checked_add(doc.title.capacity()),
-                Kind::Element(text) | Kind::Text(text) => Some(text.capacity()),
+                Kind::Element(text) => Some(text.capacity()),
+                Kind::Text(data) => Some(data.capacity()),
                 _ => Some(0),
             }.ok_or("Inert document payload overflow.")?;
             node.children.capacity().checked_mul(size_of::<u32>())
@@ -1544,7 +1546,7 @@ impl Bridge<'_> {
         let kind = if method == "createDocumentFragment" {
             Kind::Fragment { template: None }
         } else if method == "createTextNode" {
-            Kind::Text(self.text(args.first().ok_or("createTextNode requires a value.")?)?)
+            Kind::Text(self.dom_text(args.first().ok_or("createTextNode requires a value.")?)?)
         } else {
             let namespace_aware = method == "createElementNS";
             let name = self.text(args.get(usize::from(namespace_aware)).ok_or("Element creation requires a name.")?)?;
@@ -1573,7 +1575,7 @@ impl Bridge<'_> {
         self.append_inert_leaf(owner, kind)
     }
 
-    pub(super) fn create_inert_processing_instruction(&mut self, owner: u32, target: String, data: String) -> Result<Value, String> {
+    pub(super) fn create_inert_processing_instruction(&mut self, owner: u32, target: String, data: DomString) -> Result<Value, String> {
         self.append_inert_leaf(owner, Kind::ProcessingInstruction { target, data })
     }
 
@@ -1597,7 +1599,8 @@ impl Bridge<'_> {
             }
         }
         let bytes = match &kind {
-            Kind::Element(name) | Kind::Text(name) => name.capacity(),
+            Kind::Element(name) => name.capacity(),
+            Kind::Text(data) => data.capacity(),
             Kind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             _ => 0,
         };
@@ -1608,7 +1611,7 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
-    fn inert_text_value(&self, object: u32) -> Option<&str> {
+    fn inert_text_value(&self, object: u32) -> Option<&DomString> {
         match &self.state.inert_documents.node(object)?.kind {
             Kind::Text(value) => Some(value),
             Kind::Parsed { source, .. } => match &self.parsed_source(*source)?.0.kind {
@@ -1619,25 +1622,34 @@ impl Bridge<'_> {
         }
     }
 
+    fn inert_dom_text_parts<'a>(&'a self,handles:&[u32])->Result<Vec<&'a DomString>,String>{
+        let mut parts=Vec::new();parts.try_reserve_exact(handles.len()).map_err(|_|"Cannot reserve inert DOMString part references.")?;
+        for &handle in handles {parts.push(self.inert_text_value(handle).ok_or("Inert DOMString source disappeared.")?);}
+        Ok(parts)
+    }
     fn inert_text_content(&mut self, object: u32) -> Result<Value, String> {
         let mut pending = vec![object];
-        let mut text = String::new();
+        let mut handles = Vec::new();
         while let Some(id) = pending.pop() {
             self.state.work(1)?;
             let node = self.state.inert_documents.node(id).ok_or("Unknown inert Node.")?;
-            if let Some(value) = self.inert_text_value(id) {
-                let bytes = value.len();
-                if text.len().saturating_add(bytes) > self.state.limits.host.string_bytes {
-                    return Err("Inert DOM textContent exceeds the host string limit.".into());
-                }
-                self.state.copies(bytes)?;
-                text.push_str(self.inert_text_value(id).unwrap());
+            if self.inert_text_value(id).is_some() {
+                handles.try_reserve(1).map_err(|_|"Cannot reserve inert textContent parts.")?;
+                handles.push(id);
             } else {
                 pending.try_reserve(node.children.len()).map_err(|_| "Cannot reserve inert text traversal.")?;
                 pending.extend(node.children.iter().rev().copied());
             }
         }
-        Ok(Value::String(text))
+        let (logical,work)={
+            let parts=self.inert_dom_text_parts(&handles)?;
+            (DomString::concat_size(&parts)?.0,DomString::concat_copy_work(&parts)?)
+        };
+        if logical>self.state.limits.host.string_bytes{return Err("Inert textContent result exceeds the host string allowance.".into());}
+        self.state.copies(work)?;
+        let parts=self.inert_dom_text_parts(&handles)?;
+        let text=DomString::concat(&parts,DomString::storage_bound(self.state.limits.host.string_bytes)?)?;
+        Ok(Self::dom_string_owned(text))
     }
 
     pub(super) fn inert_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
@@ -1650,17 +1662,19 @@ impl Bridge<'_> {
         let node = self.state.inert_documents.node(object).ok_or("Unknown inert Node.")?;
         if let Kind::Parsed { source, .. } = node.kind {
             let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;
-            if let Some(data) = parsed.kind.character_data() {
+            if let Some(data) = parsed.kind.character_dom_string() {
                 match property {
                     "data" | "nodeValue" | "textContent" => {
-                        self.state.copies(data.len())?;
-                        let data = self.parsed_source(source).unwrap().0.kind.character_data().unwrap();
-                        return Ok(Value::String(data.into()));
+                        let bytes=data.logical_bytes();
+                        if bytes>self.state.limits.host.string_bytes{return Err("Inert DOMString result exceeds the host string allowance.".into());}
+                        self.state.copies(bytes)?;
+                        let data = self.parsed_source(source).unwrap().0.kind.character_dom_string().unwrap();
+                        return Self::dom_string_copy(data);
                     }
                     "length" => {
-                        self.state.work(data.len())?;
-                        let data = self.parsed_source(source).unwrap().0.kind.character_data().unwrap();
-                        return Ok(Value::Number(data.encode_utf16().count() as f64));
+                        self.state.work(data.logical_bytes())?;
+                        let data = self.parsed_source(source).unwrap().0.kind.character_dom_string().unwrap();
+                        return Ok(Value::Number(data.utf16_len() as f64));
                     }
                     _ => {}
                 }
@@ -1691,10 +1705,12 @@ impl Bridge<'_> {
             match property {
                 "target" | "nodeName" | "data" | "nodeValue" | "textContent" => {
                     let read_target = matches!(property, "target" | "nodeName");
-                    self.state.copies(if read_target { target.len() } else { data.len() })?;
+                    let bytes=if read_target { target.len() } else { data.logical_bytes() };
+                    if bytes>self.state.limits.host.string_bytes{return Err("Inert DOMString result exceeds the host string allowance.".into());}
+                    self.state.copies(bytes)?;
                     let Kind::ProcessingInstruction { target, data } =
                         &self.state.inert_documents.node(object).unwrap().kind else { unreachable!() };
-                    return Ok(Value::String(if read_target { target.clone() } else { data.clone() }));
+                    return if read_target {Ok(Value::String(target.clone()))}else{Self::dom_string_copy(data)};
                 }
                 "length" => {
                     self.state.work(data.len())?;

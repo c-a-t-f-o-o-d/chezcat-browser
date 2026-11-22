@@ -119,13 +119,13 @@ impl Bridge<'_> {
                 crate::html::Namespace::Html,
             ),
             Some(ImportSource::Text(text)) => (
-                NodeKind::Text(script_clone_node::copy_text(text)?),
+                NodeKind::Text(text.try_clone()?),
                 crate::html::Namespace::None,
             ),
             Some(ImportSource::ProcessingInstruction { target, data }) => (
                 NodeKind::ProcessingInstruction {
                     target: script_clone_node::copy_text(target)?,
-                    data: script_clone_node::copy_text(data)?,
+                    data: data.try_clone()?,
                 },
                 crate::html::Namespace::None,
             ),

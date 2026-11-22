@@ -10,6 +10,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
+use crate::dom_string::DomString;
 
 #[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
@@ -176,15 +177,18 @@ pub enum NodeKind {
         href: Option<String>,
         attrs: Vec<Attribute>,
     },
-    Text(String),
+    Text(DomString),
     // Non-rendering DOM Comment data retained with its real parent and order.
-    Comment(String),
-    ProcessingInstruction { target: String, data: String },
+    Comment(DomString),
+    ProcessingInstruction { target: String, data: DomString },
     // A genuine detached Node container; insertion splices its children.
     DocumentFragment,
 }
 
 impl NodeKind {
+    pub(crate) fn character_dom_string(&self)->Option<&DomString>{
+        match self {Self::Text(data)|Self::Comment(data)|Self::ProcessingInstruction {data,..}=>Some(data),_=>None}
+    }
     pub(crate) fn character_data(&self) -> Option<&str> {
         match self {
             Self::Text(data) | Self::Comment(data) | Self::ProcessingInstruction { data, .. } => Some(data),
@@ -313,7 +317,7 @@ fn parse_internal(
     };
     if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
         let text = if matches!(context, Some("title" | "textarea")) { decode_entities(input) } else { input.to_owned() }.replace('\0', "\u{fffd}");
-        if !append_text_value(&mut document, 0, text, node_limit) { return Err(node_limit_error()); }
+        if !append_text_value(&mut document, 0, text, node_limit)? { return Err(node_limit_error()); }
         document.scripting_enabled = scripting;
         return Ok(document);
     }
@@ -343,8 +347,8 @@ fn parse_internal(
             let appended = if checked {
                 let mut text = decode_entities(&input[position..end]);
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
-                append_text_value(&mut document, parent, text, node_limit)
-            } else { append_text(&mut document, parent, &input[position..end], node_limit) };
+                append_text_value(&mut document, parent, text, node_limit)?
+            } else { append_text(&mut document, parent, &input[position..end], node_limit)? };
             if !appended {
                 if fail_on_capacity { return Err(node_limit_error()); }
                 break;
@@ -365,7 +369,7 @@ fn parse_internal(
             document.nodes.try_reserve(1).map_err(|_|"Could not reserve HTML comment node.")?;
             document.nodes[parent].children.try_reserve(1).map_err(|_|"Could not reserve HTML comment child link.")?;
             let node=document.nodes.len();
-            document.nodes.push(Node{kind:NodeKind::Comment(data),namespace:Namespace::None,children:Vec::new()});
+            document.nodes.push(Node{kind:NodeKind::Comment(data.into()),namespace:Namespace::None,children:Vec::new()});
             document.nodes[parent].children.push(node);
             position+=4+consumed;continue;
         }
@@ -410,7 +414,7 @@ fn parse_internal(
                 }
                 svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
-                if !append_text(&mut document, parent, "<", node_limit) {
+                if !append_text(&mut document, parent, "<", node_limit)? {
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
@@ -568,12 +572,12 @@ fn parse_internal(
                         .collect::<Vec<_>>()
                         .join(" ");
                 }
-                if !append_text_value(&mut document, node, content, node_limit) {
+                if !append_text_value(&mut document, node, content, node_limit)? {
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
             } else if matches!(tag.name.as_str(), "style" | "script")
-                && !append_text_value(&mut document, node, input[position..content_end].to_owned(), node_limit)
+                && !append_text_value(&mut document, node, input[position..content_end].to_owned(), node_limit)?
             {
                 if fail_on_capacity { return Err(node_limit_error()); }
                 break;
@@ -658,31 +662,31 @@ fn fragment_formatting(name: &str) -> bool {
     matches!(name, "a" | "b" | "i" | "em" | "strong" | "u" | "small" | "big" | "code" | "font" | "nobr" | "s" | "strike" | "tt")
 }
 
-fn append_text(document: &mut Document, parent: usize, source: &str, node_limit: usize) -> bool {
+fn append_text(document: &mut Document, parent: usize, source: &str, node_limit: usize) -> Result<bool,String> {
     append_text_value(document, parent, decode_entities(source), node_limit)
 }
 
-fn append_text_value(document: &mut Document, parent: usize, text: String, node_limit: usize) -> bool {
+fn append_text_value(document: &mut Document, parent: usize, text: String, node_limit: usize) -> Result<bool,String> {
     if text.is_empty() {
-        return true;
+        return Ok(true);
     }
     if let Some(&last) = document.nodes[parent].children.last() {
         if let NodeKind::Text(previous) = &mut document.nodes[last].kind {
-            previous.push_str(&text);
-            return true;
+            previous.append_parser_scalar(&text)?;
+            return Ok(true);
         }
     }
     if document.nodes.len() == node_limit {
-        return false;
+        return Ok(false);
     }
     let node = document.nodes.len();
     document.nodes[parent].children.push(node);
     document.nodes.push(Node {
-        kind: NodeKind::Text(text),
+        kind: NodeKind::Text(text.into()),
         children: Vec::new(),
         namespace: Namespace::None,
     });
-    true
+    Ok(true)
 }
 
 struct Tag {

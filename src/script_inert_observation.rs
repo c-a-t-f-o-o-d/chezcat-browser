@@ -6,7 +6,7 @@ impl Bridge<'_> {
     pub(in crate::scripting) fn write_inert_character_data(
         &mut self,
         object: u32,
-        text: String,
+        text: DomString,
     ) -> Result<(), String> {
         if !matches!(self.inert_node_type(object), Some(3 | 7 | 8)) {
             return Err("Inert CharacterData receiver is unavailable.".into());
@@ -19,7 +19,7 @@ impl Bridge<'_> {
         };
         if let Some(old) = direct {
             self.state
-                .replace_storage(old, text.capacity(), text.len())?;
+                .replace_storage(old, text.capacity(), text.used_bytes())?;
             match &mut self.state.inert_documents.node_mut(object).unwrap().kind {
                 Kind::Text(old) => *old = text,
                 Kind::ProcessingInstruction { data, .. } => *data = text,
@@ -41,7 +41,7 @@ impl Bridge<'_> {
                 NodeKind::ProcessingInstruction { target, .. } => target.len(),
                 _ => 0,
             };
-            self.state.copies(text.len().saturating_add(target_bytes))?;
+            self.state.copies(text.used_bytes().saturating_add(target_bytes))?;
             let source_node = self.parsed_source(source).unwrap().0;
             let kind = match &source_node.kind {
                 NodeKind::Text(_) => NodeKind::Text(text),

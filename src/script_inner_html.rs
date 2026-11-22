@@ -71,16 +71,16 @@ impl Bridge<'_> {
                     self.state.work(item.children.len())?;
                     stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));
                 }
-                NodeKind::Text(text) => escaped(self.state, &mut out, text, false, raw)?,
+                NodeKind::Text(text) => escaped(self.state, &mut out, text.scalar()?, false, raw)?,
                 NodeKind::Comment(data) => {
                     self.state.work(data.len())?;
                     append(self.state, &mut out, "<!--")?;
-                    append(self.state, &mut out, data)?;
+                    append(self.state, &mut out, data.scalar()?)?;
                     append(self.state, &mut out, "-->")?;
                 }
                 NodeKind::ProcessingInstruction { target, data } => {
                     self.state.work(target.len().saturating_add(data.len()))?;
-                    for piece in ["<?", target, " ", data, "?>"] {
+                    for piece in ["<?", target, " ", data.scalar()?, "?>"] {
                         append(self.state, &mut out, piece)?;
                     }
                 }

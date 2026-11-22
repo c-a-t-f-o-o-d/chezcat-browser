@@ -1251,7 +1251,8 @@ impl Runtime {
             } else { value };
             let primitive = self.primitive_with_hint(value, true, host)?;
             self.work(primitive.bytes())?;
-            self.checked_value(Value::String(primitive.script_text()?))?
+            self.checked_value(if host.preserves_dom_string_setter(handle,name)&&primitive.is_string(){primitive}
+                else{Value::String(primitive.script_text()?)})?
         } else if host.number_setter(handle, name) {
             let primitive = self.primitive_with_hint(value, false, host)?;
             self.work(primitive.bytes())?;
