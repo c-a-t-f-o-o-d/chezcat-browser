@@ -6370,3 +6370,7 @@ mod pi_domstring_validation_tests;
 #[cfg(test)]
 #[path="app_character_substring_tests.rs"]
 mod character_substring_tests;
+
+#[cfg(test)]
+#[path="app_character_splice_tests.rs"]
+mod character_splice_tests;

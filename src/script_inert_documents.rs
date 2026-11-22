@@ -1947,3 +1947,6 @@ mod generic_document_storage_tests;
 
 #[path="script_character_data_substring.rs"]
 pub(super) mod character_substring;
+
+#[path="script_character_data_edit.rs"]
+pub(super) mod character_edit;

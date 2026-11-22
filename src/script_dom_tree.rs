@@ -1586,12 +1586,8 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    pub(super) fn dom_set(
-        &mut self,
-        object: u32,
-        property: &str,
-        value: &Value,
-    ) -> Result<bool, String> {
+    pub(super) fn dom_set(&mut self,object:u32,property:&str,value:&Value)->Result<bool,String>{self.dom_set_with_character_splice(object,property,value,None)}
+    pub(super) fn dom_set_with_character_splice(&mut self,object:u32,property:&str,value:&Value,splice:Option<(usize,usize,usize)>)->Result<bool,String> {
         if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(true);}
         if self.fragment_receiver(object) {
             if property=="nodeValue" {self.state.work(1)?;return Ok(true);}
@@ -1621,7 +1617,7 @@ impl Bridge<'_> {
             };
             self.state.prepare_range_changes(1,0)?;
             self.state.replace_storage(old_bytes, text.capacity(), text.used_bytes())?;
-            self.state.ranges_replace_data(node);
+            if let Some((offset,removed,inserted))=splice{self.state.ranges_splice_data(object,offset,removed,inserted);}else{self.state.ranges_replace_data(node);}
             match &mut self.doc.nodes[node].kind {
                 NodeKind::Text(data) | NodeKind::Cdata(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
                     *data = text;
