@@ -157,7 +157,8 @@ impl Namespace {
 #[derive(Debug)]
 pub struct AttributeName {
     pub qualified: DomString,
-    pub namespace: Option<AttributeNamespace>,
+    /// Zero or one owned record; null-namespace names allocate no metadata.
+    pub namespace: Vec<AttributeNamespace>,
 }
 
 #[derive(Debug)]
@@ -168,12 +169,13 @@ pub struct AttributeNamespace {
 }
 
 impl AttributeName {
-    pub fn unqualified(qualified: String) -> Self { Self { qualified:qualified.into(), namespace: None } }
-    pub(crate) fn unqualified_dom(qualified:DomString)->Self{Self{qualified,namespace:None}}
-    pub fn namespace_uri(&self) -> Option<&DomString> { self.namespace.as_ref().map(|ns| &ns.uri) }
-    pub fn prefix(&self) -> Option<&DomString> { self.namespace.as_ref().and_then(|ns| ns.prefix.as_ref()) }
-    pub fn local(&self) -> &DomString { self.namespace.as_ref().map_or(&self.qualified, |ns| &ns.local) }
-    pub fn html_is(&self, name: &str) -> bool { self.namespace.is_none() && self.qualified == name }
+    pub(crate) fn namespace_storage(namespace:Option<AttributeNamespace>)->Result<Vec<AttributeNamespace>,String>{let mut records=Vec::new();if let Some(namespace)=namespace{records.try_reserve_exact(1).map_err(|_|"Cannot reserve attribute namespace record.")?;records.push(namespace);}Ok(records)}
+    pub fn unqualified(qualified: String) -> Self { Self { qualified:qualified.into(), namespace: Vec::new() } }
+    pub(crate) fn unqualified_dom(qualified:DomString)->Self{Self{qualified,namespace:Vec::new()}}
+    pub fn namespace_uri(&self) -> Option<&DomString> { self.namespace.first().map(|ns| &ns.uri) }
+    pub fn prefix(&self) -> Option<&DomString> { self.namespace.first().and_then(|ns| ns.prefix.as_ref()) }
+    pub fn local(&self) -> &DomString { self.namespace.first().map_or(&self.qualified, |ns| &ns.local) }
+    pub fn html_is(&self, name: &str) -> bool { self.namespace.is_empty() && self.qualified == name }
     pub fn matches(&self, namespace: Option<&str>, local: &str) -> bool {
         self.matches_dom(namespace.map(crate::dom_string::DomStringRef::Scalar),local)
     }
@@ -183,15 +185,15 @@ impl AttributeName {
     }
     pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches_names(other.namespace_uri().map(DomString::view), other.local().view()) }
     pub fn bytes(&self) -> usize {
-        self.qualified.used_bytes() + self.namespace.as_ref().map_or(0, |ns| ns.uri.used_bytes() + ns.local.used_bytes() + ns.prefix.as_ref().map_or(0, DomString::used_bytes))
+        self.namespace.len()*std::mem::size_of::<AttributeNamespace>() + self.qualified.used_bytes() + self.namespace.first().map_or(0, |ns| ns.uri.used_bytes() + ns.local.used_bytes() + ns.prefix.as_ref().map_or(0, DomString::used_bytes))
     }
     pub(crate) fn owned_bytes(&self)->usize {
-        self.qualified.capacity()+self.namespace.as_ref().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,DomString::capacity))
+        self.namespace.capacity()*std::mem::size_of::<AttributeNamespace>()+self.qualified.capacity()+self.namespace.first().map_or(0,|ns|ns.uri.capacity()+ns.local.capacity()+ns.prefix.as_ref().map_or(0,DomString::capacity))
     }
     // Callers charge bytes before cloning retained native metadata.
     pub fn copy(&self) -> Result<Self,String> {
-        Ok(Self { qualified: self.qualified.try_clone()?, namespace: self.namespace.as_ref().map(|ns|
-            Ok::<_,String>(AttributeNamespace { uri: ns.uri.try_clone()?, prefix: ns.prefix.as_ref().map(DomString::try_clone).transpose()?, local: ns.local.try_clone()? })).transpose()? })
+        Ok(Self { qualified: self.qualified.try_clone()?, namespace: Self::namespace_storage(self.namespace.first().map(|ns|
+            Ok::<_,String>(AttributeNamespace { uri: ns.uri.try_clone()?, prefix: ns.prefix.as_ref().map(DomString::try_clone).transpose()?, local: ns.local.try_clone()? })).transpose()?)? })
     }
 }
 

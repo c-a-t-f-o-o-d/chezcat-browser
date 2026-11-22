@@ -19,7 +19,7 @@ fn encode(text:&str)->String {
     out
 }
 fn attribute_name(name:&AttributeName)->Result<String,String> {
-    Ok(match name.namespace.as_ref() {
+    Ok(match name.namespace.first() {
         None=>name.qualified.scalar()?.to_owned(),
         Some(ns)=>{
             let prefix=match ns.uri.scalar().unwrap_or("") {

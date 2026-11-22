@@ -23,7 +23,7 @@ pub(super) fn compute<'a>(
     let mut value = crate::image::SvgStyle::new(font as f64, root as f64);
     if let NodeKind::Element { attrs, .. } = &doc.nodes[node].kind {
         for attr in attrs {
-            if attr.name.namespace.is_some()
+            if !attr.name.namespace.is_empty()
                 || !crate::image::SvgStyle::property(&attr.name.qualified)
             {
                 continue;

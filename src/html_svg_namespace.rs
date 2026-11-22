@@ -73,7 +73,7 @@ fn passive_attribute(tag:&str,key:&str,value:&str)->bool{match key {
 pub(super) fn dom_name(name:&str)->bool{matches!(name,"svg"|"defs"|"g"|"mask"|"clipPath"|"linearGradient"|"radialGradient"|"stop"|"symbol"|"use"|"circle"|"ellipse"|"line"|"path"|"polygon"|"polyline"|"rect")}
 pub(super) fn dom_attribute(tag:&str,name:&super::AttributeName,value:&str)->bool{
     if !dom_name(tag){return false;}
-    if let Some(namespace)=&name.namespace{return match namespace.uri.scalar().unwrap_or(""){
+    if let Some(namespace)=name.namespace.first(){return match namespace.uri.scalar().unwrap_or(""){
         "http://www.w3.org/1999/xlink"=>namespace.local=="href"&&namespace.prefix.as_deref()==Some("xlink")&&matches!(tag,"use"|"linearGradient"|"radialGradient")&&crate::svg_reference::fragment(value).is_some(),
         "http://www.w3.org/2000/xmlns/"=>(namespace.local=="xmlns"&&namespace.prefix.is_none()&&value=="http://www.w3.org/2000/svg")||(namespace.local=="xlink"&&namespace.prefix.as_deref()==Some("xmlns")&&value=="http://www.w3.org/1999/xlink"),
         _=>false,
@@ -109,13 +109,13 @@ pub(super) fn publish(nodes: &mut [Node]) {
                 };
                 if let Some(name) = adjusted { attr.name.qualified = name.into(); }
                 if attr.name.html_is("xmlns") {
-                    attr.name.namespace = Some(AttributeNamespace {
+                    attr.name.namespace = vec![AttributeNamespace {
                         uri: "http://www.w3.org/2000/xmlns/".into(), prefix: None, local: "xmlns".into(),
-                    });
+                    }];
                 }else if attr.name.html_is("xmlns:xlink"){
-                    attr.name.namespace=Some(AttributeNamespace{uri:"http://www.w3.org/2000/xmlns/".into(),prefix:Some("xmlns".into()),local:"xlink".into()});
+                    attr.name.namespace=vec![AttributeNamespace{uri:"http://www.w3.org/2000/xmlns/".into(),prefix:Some("xmlns".into()),local:"xlink".into()}];
                 }else if attr.name.html_is("xlink:href"){
-                    attr.name.namespace=Some(AttributeNamespace{uri:"http://www.w3.org/1999/xlink".into(),prefix:Some("xlink".into()),local:"href".into()});
+                    attr.name.namespace=vec![AttributeNamespace{uri:"http://www.w3.org/1999/xlink".into(),prefix:Some("xlink".into()),local:"href".into()}];
                 }
             }
         }

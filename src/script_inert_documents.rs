@@ -379,7 +379,7 @@ impl Bridge<'_> {
     pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded,false)}
     pub(in crate::scripting) fn write_inert_attribute_node_value(&mut self,object:u32,name:crate::html::AttributeName,value:DomString)->Result<(),String>{self.write_inert_attribute_mode(object,name,Some(value),true,false,true)}
     fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool,replace_name:bool)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (name.namespace.is_some()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (!name.namespace.is_empty()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let (source,initial_template)=match inert.kind{
             Kind::Parsed{source,initial_template}=>(Some(source),initial_template),
@@ -1247,7 +1247,7 @@ impl Bridge<'_> {
             let index = node_index(object).ok_or("Main template has no native node.")?;
             let source = &self.doc.nodes[index];
             let NodeKind::Element { tag, href, attrs, .. } = &source.kind else { unreachable!() };
-            if attrs.iter().any(|attr| attr.name.namespace.is_none()
+            if attrs.iter().any(|attr| attr.name.namespace.is_empty()
                 && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is"))) {
                 return Err("Template cloning cannot transfer active handlers or customized built-ins.".into());
             }
@@ -1911,7 +1911,7 @@ fn template_node_can_park(node: &Node) -> bool {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
-                && !attrs.iter().any(|attr| attr.name.namespace.is_some()
+                && !attrs.iter().any(|attr| !attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.

@@ -43,7 +43,7 @@ fn copy_text(text:&str)->Result<String,String>{
     copied.push_str(text);Ok(copied)
 }
 pub(super) fn copy_name(name:&AttributeName)->Result<AttributeName,String>{
-    Ok(AttributeName{qualified:name.qualified.try_clone()?,namespace:name.namespace.as_ref().map(|ns|Ok::<_,String>(AttributeNamespace{uri:ns.uri.try_clone()?,prefix:ns.prefix.as_ref().map(DomString::try_clone).transpose()?,local:ns.local.try_clone()?})).transpose()?})
+    Ok(AttributeName{qualified:name.qualified.try_clone()?,namespace:AttributeName::namespace_storage(name.namespace.first().map(|ns|Ok::<_,String>(AttributeNamespace{uri:ns.uri.try_clone()?,prefix:ns.prefix.as_ref().map(DomString::try_clone).transpose()?,local:ns.local.try_clone()?})).transpose()?)?})
 }
 struct Reservation {records:Option<Vec<Attr>>,index:Option<Vec<usize>>,added:usize}
 pub(super) enum InputPreparation {Pending,Ready(Option<forms::InputPlan>)}
@@ -141,7 +141,7 @@ impl Bridge<'_> {
         let Some(uri)=namespace(args)?else{return Ok(AttributeName::unqualified_dom(qualified));};
         self.state.copies(uri.copy_bytes()?.checked_add(qualified.used_bytes()).ok_or("Attribute expanded name copy overflow.")?)?;
         let(prefix,local)=qualified.view().split_colon();let prefix=prefix.map(DomStringRef::try_owned).transpose()?;let local=local.try_owned()?;let uri=uri.try_owned()?;
-        Ok(AttributeName{qualified,namespace:Some(AttributeNamespace{uri,prefix,local})})
+        Ok(AttributeName{qualified,namespace:AttributeName::namespace_storage(Some(AttributeNamespace{uri,prefix,local}))?})
     }
     pub(super) fn create_attribute_for_document(&mut self,document:u32,args:&[Value],namespaced:bool)->Result<Value,String>{
         self.validate_attribute_factory(document,args,namespaced).map_err(|(_,message)|message)?;
@@ -172,7 +172,7 @@ impl Bridge<'_> {
         let Value::Host(handle)=args[0] else {unreachable!()};let incoming=index(handle).unwrap();
         if self.state.attributes[incoming].owner==Some(node_handle(node)) {return Ok(Value::Host(handle));}
         let attr=&self.state.attributes[incoming];
-        let active_name=attr.name.namespace.is_none() && !attr.name.qualified.contains(':');
+        let active_name=attr.name.namespace.is_empty() && !attr.name.qualified.contains(':');
         if active_name && (self.dom_script(node) && matches!(attr.name.qualified.as_str(),"src"|"type"|"charset"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"async"|"defer"|"nomodule")
             || self.dom_stylesheet(node) && matches!(attr.name.qualified.as_str(),"href"|"rel"|"type"|"media"|"as"|"nonce"|"integrity"|"crossorigin"|"referrerpolicy"|"fetchpriority"|"disabled")) {
             return Err("Attribute-node adoption for active script/stylesheet settings is not implemented; no attribute was changed.".into());
@@ -520,7 +520,7 @@ impl Bridge<'_> {
     // Only real lower-case null-namespace HTML attributes have native effects.
     pub(super) fn public_dom_attribute(&mut self,node:usize,name:AttributeName,value:Option<DomString>,input:InputPreparation)->Result<(),String>{
         if value.as_ref().is_some_and(|v|v.raw_units().is_some()) {
-            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html || name.namespace.is_some() || !name.qualified.starts_with("data-") {return Err("Unpaired attribute DOMString integration currently requires passive HTML data metadata.".into());}
+            if self.doc.nodes[node].namespace!=crate::html::Namespace::Html || !name.namespace.is_empty() || !name.qualified.starts_with("data-") {return Err("Unpaired attribute DOMString integration currently requires passive HTML data metadata.".into());}
             self.attribute_dom_named_prepared(node,name,value,input)
         }else{self.public_attribute_prepared(node,name,value.map(|v|v.into_parts().0),input)}
     }
@@ -529,13 +529,13 @@ impl Bridge<'_> {
     }
     fn public_attribute_prepared(&mut self,node:usize,name:AttributeName,value:Option<String>,input:InputPreparation)->Result<(),String>{
         if self.doc.nodes[node].namespace==crate::html::Namespace::Svg{
-            if let Some(value)=value.as_deref(){self.state.work(name.bytes().saturating_add(value.len()))?;if !crate::html::svg_dom_attribute(tag(self.doc,node),&name,value){return Err("SVG attribute is outside the supported passive/local-reference policy; no attribute was changed.".into());}if name.namespace.is_none()&&name.qualified=="style"{validate_style(value,self.state.limits.host.string_bytes)?;}}
+            if let Some(value)=value.as_deref(){self.state.work(name.bytes().saturating_add(value.len()))?;if !crate::html::svg_dom_attribute(tag(self.doc,node),&name,value){return Err("SVG attribute is outside the supported passive/local-reference policy; no attribute was changed.".into());}if name.namespace.is_empty()&&name.qualified=="style"{validate_style(value,self.state.limits.host.string_bytes)?;}}
             return self.attribute_named_prepared(node,name,value,input);
         }
 
         // Non-ASCII spellings are ordinary data, including literal replacement
         // characters. They cannot name any native ASCII attribute effect.
-        if name.namespace.is_some() || !name.qualified.is_ascii() || name.qualified.contains(':') || name.qualified.bytes().any(|c| c.is_ascii_uppercase()) {
+        if !name.namespace.is_empty() || !name.qualified.is_ascii() || name.qualified.contains(':') || name.qualified.bytes().any(|c| c.is_ascii_uppercase()) {
             return self.attribute_named_prepared(node, name, value,input);
         }
         let key = name.qualified.as_str();

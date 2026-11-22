@@ -2498,7 +2498,7 @@ impl Bridge<'_> {
             && !media_source && ["src","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
             return Err("Changing parser-authored video source or native media attributes is not implemented; no attribute was changed.".into());
         }
-        if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
+        if name.namespace.is_empty() { self.frame_attribute_guard(node, &name.qualified)?; }
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
