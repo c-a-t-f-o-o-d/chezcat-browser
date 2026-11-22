@@ -19,7 +19,7 @@ impl Bridge<'_> {
         let mut parked = 0usize;
         for (offset, entry) in staged.iter().enumerate() {
             self.state.work(1)?;
-            let Entry::Node(node) = entry else { unreachable!() };
+            let Entry::Node(node) = entry else {if matches!(entry,Entry::Implementation){handles.push(first.checked_add(u32::try_from(offset).map_err(|_|"Clone implementation identity overflow.")?).ok_or("Clone implementation handle overflow.")?);continue;}unreachable!()};
             let safe = match &node.kind {
                 Kind::Parsed { source, .. } => {
                     let raw = match *source {
@@ -44,11 +44,16 @@ impl Bridge<'_> {
         let mut parked_nodes = Vec::new();
         parked_nodes.try_reserve_exact(parked).map_err(|_|"Cannot reserve cloned native owner plan.")?;
         for (offset, entry) in staged.iter_mut().enumerate() {
-            let Entry::Node(node) = entry else { unreachable!() };
+            let Entry::Node(node) = entry else {if matches!(entry,Entry::Implementation){continue;}unreachable!()};
             self.state.work(node.children.len().saturating_add(1))?;
             self.state.copies(node.children.len().checked_mul(size_of::<u32>()).ok_or("Clone edge projection overflow.")?)?;
             node.parent = node.parent.map(&project).transpose()?;
             for child in &mut node.children { *child=project(*child)?; }
+            if let Kind::Document(record)=&mut node.kind{
+                record.implementation=project(record.implementation)?;
+                record.html=record.html.map(&project).transpose()?;record.doctype=record.doctype.map(&project).transpose()?;
+                record.head=record.head.map(&project).transpose()?;record.body=record.body.map(&project).transpose()?;
+            }
             if let Kind::Fragment { template } = &mut node.kind {
                 *template=template.map(&project).transpose()?;
             }

@@ -6278,3 +6278,7 @@ mod xml_doctype_adoption_tests;
 #[cfg(test)]
 #[path="app_document_children_tests.rs"]
 mod document_children_tests;
+
+#[cfg(test)]
+#[path="app_document_clone_tests.rs"]
+mod document_clone_tests;

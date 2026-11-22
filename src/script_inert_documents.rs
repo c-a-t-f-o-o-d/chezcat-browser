@@ -11,6 +11,8 @@ pub(super) mod xml_documents;
 mod cdata;
 #[path="script_document_children.rs"]
 mod document_children;
+#[path="script_document_clone.rs"]
+mod document_clone;
 
 #[path="script_inert_content.rs"]
 mod content;
@@ -78,6 +80,7 @@ struct DocumentNodes {
     implementation: u32,
     doctype: Option<u32>,
     url: String,
+    base_url_override:Option<String>,
     html: Option<u32>,
     head: Option<u32>,
     body: Option<u32>,
@@ -193,13 +196,14 @@ impl Bridge<'_> {
         self.state.work(length)?;
         self.state.copies(length)?;
         let fallback = match &self.state.inert_documents.node(owner).unwrap().kind {
-            Kind::Document(document) => document.url.clone(),
+            Kind::Document(document) => script_clone_node::copy_text(&document.url)?,
             _ => unreachable!(),
         };
         // Use the actual current inert tree and native attributes, never an
         // author-overridden query/getAttribute or an activating resource path.
-        let base = self.inert_selector_query(owner, "querySelector", "base[href]")?;
-        let Value::Host(base) = base else {
+        let Some(base)=self.first_inert_base_element(owner)? else {
+            let value=match &self.state.inert_documents.node(owner).unwrap().kind{Kind::Document(document)=>document.base_url_override.as_deref(),_=>None};
+            if let Some(value)=value{let length=value.len();self.state.copies(length)?;let Kind::Document(record)=&self.state.inert_documents.node(owner).unwrap().kind else{unreachable!()};return Ok(Value::String(script_clone_node::copy_text(record.base_url_override.as_deref().unwrap())?));}
             return self.string(&fallback);
         };
         let Value::String(href) =
@@ -1171,7 +1175,7 @@ impl Bridge<'_> {
 
     pub(super) fn inert_clone_receiver(&self, object: u32) -> bool {
         self.state.inert_documents.node(object).is_some_and(|node| matches!(node.kind,
-            Kind::Fragment { .. } | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
+            Kind::Document(_) | Kind::Fragment { .. } | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
                 | Kind::ProcessingInstruction { .. } | Kind::Doctype(_)))
     }
 
@@ -1180,6 +1184,7 @@ impl Bridge<'_> {
     }
 
     fn clone_inert_tree_with_slots(&mut self, object: u32, deep: bool, reserve_slots: bool) -> Result<Value, String> {
+        if self.inert_document_children_receiver(object){return self.clone_inert_document(object,deep,reserve_slots);}
         if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots && self.inert_node_type(object)==Some(3)) {
             let size = data.used_bytes();
             self.state.copies(size)?;
@@ -1556,7 +1561,7 @@ impl Bridge<'_> {
         entries.extend([
             node(Kind::Document(DocumentNodes {
                 kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,content_type:"text/html",
-                implementation, doctype: Some(doctype), url: text_copy("about:blank")?, html:Some(html), head:Some(head), body:Some(body), title: normalized,
+                implementation, doctype: Some(doctype), url: text_copy("about:blank")?, base_url_override:None, html:Some(html), head:Some(head), body:Some(body), title: normalized,
             }), None, links(&[doctype, html])?),
             Entry::Implementation,
             node(Kind::Doctype(crate::html::DocumentTypeData::html()?), Some(document), Vec::new()),

@@ -242,7 +242,7 @@ impl Bridge<'_> {
                 kind:parsed.kind,mode:parsed.mode,content_type:"text/html",
                 implementation,
                 doctype,
-                url,
+                url,base_url_override:None,
                 html: Some(handle(html)),
                 head: Some(handle(head)),
                 body: Some(handle(body)),

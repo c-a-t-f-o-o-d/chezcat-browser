@@ -198,6 +198,7 @@ impl Bridge<'_> {
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
+        self.validate_document_clone(object,deep).map_err(|(_,message)|message)?;
         if self.template_receiver(object)&&!self.inert_clone_receiver(object){return self.import_node(&[Value::Host(object),Value::Bool(deep)],None);}
         if self.inert_clone_receiver(object) {return self.clone_inert_tree(object,deep);}
         let root = self.dom_node(object)?;
