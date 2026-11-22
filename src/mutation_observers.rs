@@ -435,6 +435,10 @@ impl Runtime {
         self.prepare_child_list_changes(target,generation,changes,host)
     }
 
+    pub(super) fn prepare_native_child_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
+        if !self.mutations.observes_tree_mutations(){return Ok(None);}
+        self.prepare_child_list_changes(target,generation,changes,host)
+    }
     fn prepare_child_list_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         if changes.is_empty() { return Ok(None); }
         let transient=self.prepare_transient_changes(&changes,host)?;

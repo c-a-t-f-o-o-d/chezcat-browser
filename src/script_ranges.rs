@@ -86,6 +86,7 @@ impl State {
             }
         }
     }
+    pub(super) fn ranges_split_text(&mut self,source:u32,new_node:u32,offset:usize,parent:Option<(u32,usize)>){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==source&&point.offset>offset{point.node=new_node;point.offset-=offset;}else if parent.is_some_and(|(parent,gap)|point.node==parent&&point.offset==gap){point.offset+=1;}}}}
     pub(super) fn ranges_replace_data(&mut self, node: usize) {
         for range in &mut self.ranges {
             for point in [&mut range.start, &mut range.end] {

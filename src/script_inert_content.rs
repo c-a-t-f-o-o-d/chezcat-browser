@@ -97,7 +97,7 @@ impl Bridge<'_> {
             .filter(|&id| id < ENTRY_END)
             .ok_or_else(|| "Inert text identity space exhausted.".into())
     }
-    fn can_reserve_inert_leaf(&self) -> bool {
+    pub(super) fn can_reserve_inert_leaf(&self) -> bool {
         self.doc.nodes.len() < (STYLE_BASE - NODE_BASE) as usize
             && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes)
                 < self.state.node_limit

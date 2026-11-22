@@ -183,6 +183,7 @@ mod script_blank_frames;
 mod script_inert_documents;
 use script_inert_documents::character_substring;
 use script_inert_documents::text_whole;
+use crate::javascript::text_split_interface;
 use crate::javascript::character_data_interface;
 
 #[path = "script_mutation_child_list.rs"]
@@ -516,6 +517,7 @@ struct State {
     background_tracking: bool,
     blank_frames: Vec<script_blank_frames::BlankFrame>,
     inert_documents: script_inert_documents::Arena,
+    text_split_plan:Option<script_inert_documents::text_split::Plan>,
     blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
     location: Option<LocationView>,
@@ -607,6 +609,7 @@ impl State {
         Self {
             blank_frames: Vec::new(),
             inert_documents: script_inert_documents::Arena::default(),
+            text_split_plan:None,
             blank_frame_nodes: 0,
             geometry: None,
             location: None,
@@ -3612,6 +3615,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==text_split_interface::METHOD{return &[(0,false)];}
         if let Some(edit)=character_data_interface::operation(method){return edit.conversions();}
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
         if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
@@ -3833,7 +3837,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -3930,6 +3934,7 @@ impl Host for Bridge<'_> {
         if method==xml_documents::CREATE{return 2;}
         if element_names::namespace_method(method){return 1;}
         if method==character_substring::METHOD{return 2;}
+        if method==text_split_interface::METHOD{return 1;}
         if let Some(edit)=character_data_interface::operation(method){return edit.arity();}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
@@ -4135,7 +4140,8 @@ impl Host for Bridge<'_> {
             };
         }
         if method==character_substring::METHOD{return self.validate_substring_data(object,args);}
-        if method==text_whole::GETTER{return if self.whole_text_receiver(object){Ok(())}else{Err(("TypeError","wholeText requires a genuine Text or CDATA node.".into()))};}
+        if method==text_whole::GETTER{return if self.text_node_receiver(object){Ok(())}else{Err(("TypeError","wholeText requires a genuine Text or CDATA node.".into()))};}
+        if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
@@ -4469,7 +4475,7 @@ impl Host for Bridge<'_> {
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if method==character_substring::METHOD{return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
-        if method==text_whole::GETTER{return self.event_target_interface(object)&&self.whole_text_receiver(receiver);}
+        if method==text_whole::GETTER||method==text_split_interface::METHOD{return self.event_target_interface(object)&&self.text_node_receiver(receiver);}
         if character_data_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -5741,6 +5747,9 @@ impl Host for Bridge<'_> {
         self.state.navigation_incumbent = window;
     }
 
+    fn prepare_text_split(&mut self,target:u32,args:&[Value])->Result<crate::javascript::NativeTextSplitInfo,(&'static str,String)>{self.prepare_native_text_split(target,args)}
+    fn commit_text_split(&mut self,target:u32)->Result<u32,String>{self.commit_native_text_split(target)}
+    fn abort_text_split(&mut self,target:u32){self.abort_native_text_split(target);}
     fn prepare_character_data_edit(&mut self,target:u32,method:&str,args:&[Value])->Result<crate::javascript::NativeCharacterDataEdit,String>{self.native_character_edit(target,method,args)}
     fn set_character_data_splice(&mut self,target:u32,value:Value,offset:usize,removed:usize,inserted:usize)->Result<(),String>{self.write_character_splice(target,value,offset,removed,inserted)}
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
@@ -8777,3 +8786,7 @@ mod character_splice_tests;
 #[cfg(test)]
 #[path="script_text_whole_tests.rs"]
 mod text_whole_tests;
+
+#[cfg(test)]
+#[path="script_text_split_tests.rs"]
+mod text_split_tests;
