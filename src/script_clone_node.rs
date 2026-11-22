@@ -182,7 +182,13 @@ impl Bridge<'_> {
         let bytes=bytes.checked_add(form_plan.as_ref().map_or(0,|plan|plan.retained_bytes)).ok_or("Imported native control payload overflow.")?;
         if templates.is_empty(){return self.publish_detached_copy(staged,bytes,form_plan);}
         let checkpoint=self.template_import_checkpoint();
-        let result=(||{self.prepare_main_template_contents(&templates,deep)?;self.publish_detached_copy(staged,bytes,form_plan)})();
+        let result=(||{
+            // Reserve the outer identities before content clones can claim
+            // native slots. These unpublished placeholders roll back together.
+            self.reserve_detached_import_slots(staged.len(),bytes)?;
+            self.prepare_main_template_contents(&templates,deep)?;
+            self.publish_detached_copy_at(base,true,staged,bytes,form_plan)
+        })();
         if result.is_err(){self.rollback_template_import(checkpoint);}result
     }
 
@@ -300,6 +306,25 @@ impl Bridge<'_> {
         form_plan: Option<forms::SelectFormPlan>) -> Result<Value, String>
     {
         let base = self.doc.nodes.len();
+        self.publish_detached_copy_at(base,false,staged,bytes,form_plan)
+    }
+
+    fn reserve_detached_import_slots(&mut self,count:usize,bytes:usize)->Result<(),String> {
+        let available=self.state.retained_limit.checked_sub(self.state.retained)
+            .and_then(|n|n.checked_sub(bytes)).ok_or("Template import outer payload allowance exhausted.")?;
+        let (growth,backing)=self.prepare_main_nodes(count,available)?;
+        self.state.replace_storage(0,bytes.checked_add(backing).ok_or("Template import outer bundle overflow.")?,bytes)?;
+        self.commit_main_nodes(growth);
+        for _ in 0..count {
+            self.doc.nodes.push(Node {namespace:crate::html::Namespace::None,kind:NodeKind::DocumentFragment,children:Vec::new()});
+            self.state.tree.parents.push(None);self.state.tree.active.push(false);self.state.dom.connected.push(false);
+        }
+        Ok(())
+    }
+
+    fn publish_detached_copy_at(&mut self,base:usize,reserved:bool,staged:Vec<DetachedCopy>,bytes:usize,
+        form_plan:Option<forms::SelectFormPlan>)->Result<Value,String>
+    {
         let count = staged.len();
         let nonce_count = staged.iter().filter(|copy| copy.unsafe_nonce).count();
         let end=base.checked_add(count).ok_or("DOM clone sibling identity overflow.")?;
@@ -310,21 +335,42 @@ impl Bridge<'_> {
         }
         self.state.work(links)?;
         self.state.copies(links.checked_mul(size_of::<usize>()).ok_or("DOM clone sibling copy overflow.")?)?;
-        let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
-            .ok_or("DOM clone node/payload backing allowance exhausted.")?;
-        let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
+        let (node_growth,node_bytes)=if reserved {
+            if end>self.doc.nodes.len(){return Err("Template import reserved range disappeared.".into());}
+            self.state.work(count)?;
+            for node in base..end {
+                if !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment)
+                    || self.doc.nodes[node].namespace!=crate::html::Namespace::None
+                    || self.inert_adopted_node(node_handle(node))
+                    || self.state.dom.created.contains(&node) || self.state.tree.parents[node].is_some()
+                    || self.state.dom.connected[node] {
+                    return Err("Template import reserved destination changed before publication.".into());
+                }
+            }
+            (None,0)
+        } else {
+            let available = self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(bytes)
+                .ok_or("DOM clone node/payload backing allowance exhausted.")?;
+            let (growth,bytes)=self.prepare_main_nodes(count,available)?;(Some(growth),bytes)
+        };
         self.doc.nonce_unsafe_nodes.try_reserve(nonce_count).map_err(|_| "DOM clone nonce reservation failed.")?;
-        self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM clone node/payload storage overflow.")?, bytes)?;
-        self.commit_main_nodes(node_growth);
-        for copy in staged {
-            let node = self.doc.nodes.len();
+        if reserved {
+            self.state.copies(count.checked_mul(size_of::<Node>()).ok_or("Template import reserved record copy overflow.")?)?;
+        } else {
+            self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM clone node/payload storage overflow.")?, bytes)?;
+        }
+        if let Some(growth)=node_growth {self.commit_main_nodes(growth);}
+        for (offset,copy) in staged.into_iter().enumerate() {
+            let node = base+offset;
             for (slot,&child) in copy.node.children.iter().enumerate() {self.state.tree.sibling_slots[child]=slot;}
-            self.doc.nodes.push(copy.node);
+            if reserved {self.doc.nodes[node]=copy.node;}else{self.doc.nodes.push(copy.node);}
             self.state.dom.created.insert(node);
             self.state.detached_nodes.insert(node);
-            self.state.tree.parents.push(copy.parent);
-            self.state.tree.active.push(false);
-            self.state.dom.connected.push(false);
+            if reserved {self.state.tree.parents[node]=copy.parent;}else{
+                self.state.tree.parents.push(copy.parent);
+                self.state.tree.active.push(false);
+                self.state.dom.connected.push(false);
+            }
             if copy.unsafe_nonce { self.doc.nonce_unsafe_nodes.insert(node); }
         }
         if let Some(plan) = form_plan { plan.commit(self.forms); }

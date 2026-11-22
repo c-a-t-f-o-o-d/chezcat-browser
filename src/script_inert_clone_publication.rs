@@ -53,6 +53,27 @@ impl Bridge<'_> {
                 *template=template.map(&project).transpose()?;
             }
             if handles[offset] >= FIRST_ENTRY { continue; }
+            if let Kind::Parsed {source:ParsedSource::Loaded(index),initial_template}=node.kind {
+                // A loaded source can only own its original native slot.
+                // A cloned slot needs an independent immutable generated
+                // snapshot, including nonce provenance and owned capacity.
+                let raw=&self.doc.nodes[index];
+                let mut cost=copied_node_bytes(raw);
+                if let NodeKind::Element {tag,href,attrs,..}=&raw.kind {
+                    self.state.work(attrs.len())?;
+                    cost=cost.checked_add(tag.len()).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::len))).ok_or("Loaded clone source copy overflow.")?;
+                }
+                self.state.copies(cost)?;
+                let raw=&self.doc.nodes[index];
+                let snapshot=Node {kind:script_clone_node::copy_node_kind(&raw.kind)?,namespace:raw.namespace,children:Vec::new()};
+                let mut bytes=node_bytes(&snapshot).checked_add(size_of::<Node>()+2*size_of::<usize>()).ok_or("Loaded clone source storage overflow.")?;
+                if let NodeKind::Element {tag,href,..}=&snapshot.kind {
+                    bytes=bytes.checked_add(tag.capacity()).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::capacity))).ok_or("Loaded clone element storage overflow.")?;
+                }
+                payload=payload.checked_add(bytes).ok_or("Loaded clone payload overflow.")?;
+                node.kind=Kind::Parsed {source:ParsedSource::Generated(source_base+sources.len()),initial_template};
+                sources.push(GeneratedNode {node:Rc::new(snapshot),unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)});
+            }
             if !matches!(node.kind,Kind::Parsed { .. }) {
                 let kind = match std::mem::replace(&mut node.kind,Kind::Doctype) {
                     Kind::Text(text)=>NodeKind::Text(text),

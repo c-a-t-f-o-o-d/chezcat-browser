@@ -82,13 +82,13 @@ fn template_main_import_rolls_back_new_content_links_and_keeps_reusable_backing(
     let contents = page.state.inert_documents.template_contents.len();
     let documents = page.state.inert_documents.template_documents.len();
     let retained = page.state.retained;
-    let backing = page.state.inert_documents.backing_bytes();
     let checkpoint = Bridge {
         doc: &mut doc,
         forms: &mut forms,
         state: &mut page.state,
     }
     .template_import_checkpoint();
+    let backing=checkpoint.backing;
     let destination = node_handle(doc.nodes.len());
     let mut bridge = Bridge {
         doc: &mut doc,
@@ -111,7 +111,7 @@ fn template_main_import_rolls_back_new_content_links_and_keeps_reusable_backing(
     );
     assert_eq!(
         bridge.state.retained,
-        retained + bridge.state.inert_documents.backing_bytes() - backing
+        retained + bridge.template_import_backing() - backing
     );
     assert!(!bridge
         .state
@@ -120,4 +120,37 @@ fn template_main_import_rolls_back_new_content_links_and_keeps_reusable_backing(
         .contains_key(&destination));
     drop(bridge);
     run(&mut doc,&mut forms,&mut page,"if(source.content!==old||old.textContent!=='Kept')throw 'failed import altered source identity';var copy=document.importNode(t,true);if(copy.content.firstChild.content.textContent!=='Kept'||copy.ownerDocument!==document)throw 'real recovery';");
+}
+
+#[test]
+fn template_import_identity_late_copy_failure_rolls_back_native_bundle_and_recovers() {
+    fn prepared() -> (Document,Forms,Page,u32,u32) {
+        let (mut doc,mut forms,mut page)=fixture();
+        let source=node_handle(doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element {id:Some(id),..} if id=="loaded")).unwrap());
+        let Value::Host(content)= (Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).template_content(source).unwrap() else {panic!("content")};
+        page.begin_job();
+        (doc,forms,page,source,content)
+    }
+    let (mut baseline,mut baseline_forms,mut baseline_page,source,_)=prepared();
+    let allowance=baseline_page.state.copy_work;
+    let mut bridge=Bridge {doc:&mut baseline,forms:&mut baseline_forms,state:&mut baseline_page.state};
+    bridge.import_node(&[Value::Host(source),Value::Bool(true)],None).unwrap();
+    let needed=allowance-bridge.state.copy_work;
+    let (mut doc,mut forms,mut page,source,content)=prepared();
+    let before=(doc.nodes.len(),page.state.retained,page.state.inert_documents.entries.len(),
+        page.state.inert_documents.adopted.len(),page.state.dom.created.len(),page.state.dom_commits);
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let backing=bridge.template_import_backing();
+    bridge.state.copy_work=needed-1;
+    assert!(bridge.import_node(&[Value::Host(source),Value::Bool(true)],None).is_err());
+    assert_eq!(bridge.doc.nodes.len(),before.0);
+    assert_eq!(bridge.state.inert_documents.entries.len(),before.2);
+    assert_eq!(bridge.state.inert_documents.adopted.len(),before.3);
+    assert_eq!(bridge.state.dom.created.len(),before.4);
+    assert_eq!(bridge.state.dom_commits,before.5);
+    assert!(bridge.template_import_backing()>backing,"late failure must exercise acquired bundle backing");
+    assert_eq!(bridge.state.retained,before.1+bridge.template_import_backing()-backing);
+    assert_eq!(bridge.state.inert_documents.template_contents.get(&source),Some(&content));
+    drop(bridge);page.begin_job();
+    run(&mut doc,&mut forms,&mut page,"var source=document.getElementById('loaded'),copy=document.importNode(source,true),content=copy.content,nested=content.lastChild,inner=nested.content.firstChild,span=content.firstChild;document.getElementById('mount').appendChild(copy);document.body.appendChild(nested.content);content.removeChild(nested);document.body.appendChild(content);if(span.ownerDocument!==document||inner.ownerDocument!==document||source.content.firstChild===span||source.content.textContent!=='Loaded')throw 'late import recovery';");
 }

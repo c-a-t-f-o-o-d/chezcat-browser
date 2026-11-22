@@ -1162,6 +1162,24 @@ impl Bridge<'_> {
             let owner = self.state.inert_documents.node(object).unwrap().owner;
             return self.append_inert_text(owner, None, text, 0).map(Value::Host);
         }
+        if deep {
+            // Loaded nested templates can still have lazy source contents.
+            // Materialize them before assigning any unpublished clone handle;
+            // their entries must not consume the clone's projected identities.
+            let mut pending=vec![object];
+            while let Some(source)=pending.pop() {
+                self.state.work(1)?;
+                if self.template_receiver(source) {
+                    let Value::Host(content)=self.template_content(source)? else {unreachable!()};
+                    pending.try_reserve(1).map_err(|_|"Cannot reserve nested clone source traversal.")?;
+                    pending.push(content);
+                }
+                let count=self.inert_children(source).map_or(0,|children|children.len());
+                self.state.work(count)?;
+                pending.try_reserve(count).map_err(|_|"Cannot reserve cloned source child traversal.")?;
+                if let Some(children)=self.inert_children(source) {pending.extend_from_slice(children);}
+            }
+        }
         #[derive(Clone, Copy)]
         struct Step {
             source: u32,

@@ -5,15 +5,21 @@ pub(in crate::scripting) struct TemplateImportCheckpoint {
     generated: usize,
     backing: usize,
     retained: usize,
+    nodes: usize,
 }
 impl Bridge<'_> {
+    pub(in crate::scripting) fn template_import_backing(&self)->usize {
+        self.state.inert_documents.backing_bytes()+self.doc.nodes.capacity()*size_of::<Node>()
+            +self.state.node_state_bytes()+self.state.node_sets_storage_bytes()
+    }
     pub(in crate::scripting) fn template_import_checkpoint(&self) -> TemplateImportCheckpoint {
         let arena = &self.state.inert_documents;
         TemplateImportCheckpoint {
             entries: arena.entries.len(),
             generated: arena.generated.len(),
-            backing: arena.backing_bytes(),
+            backing: self.template_import_backing(),
             retained: self.state.retained,
+            nodes: self.doc.nodes.len(),
         }
     }
     pub(in crate::scripting) fn rollback_template_import(
@@ -24,14 +30,20 @@ impl Bridge<'_> {
         let arena = &mut self.state.inert_documents;
         arena.entries.truncate(checkpoint.entries);
         arena.generated.truncate(checkpoint.generated);
+        arena.adopted.retain(|handle|node_index(*handle).is_none_or(|node|node<checkpoint.nodes));
         arena
             .template_contents
             .retain_entries(|_, &value| value < first);
         arena
             .template_documents
             .retain_entries(|_, &value| value < first);
-        // Payload disappears; fallibly acquired reusable backing remains owned.
-        self.state.retained = checkpoint.retained + (arena.backing_bytes() - checkpoint.backing);
+        self.doc.nodes.truncate(checkpoint.nodes);
+        self.state.tree.parents.truncate(checkpoint.nodes);
+        self.state.tree.active.truncate(checkpoint.nodes);
+        self.state.dom.connected.truncate(checkpoint.nodes);
+        self.state.tree.sibling_slots.truncate(checkpoint.nodes);
+        // Payload disappears; all acquired inert/native backing remains paid.
+        self.state.retained = checkpoint.retained + (self.template_import_backing() - checkpoint.backing);
     }
     fn main_template_owner(&mut self) -> Result<u32, String> {
         self.state
@@ -92,19 +104,24 @@ impl Bridge<'_> {
                 unreachable!()
             };
             let start = self.state.inert_documents.entries.len();
-            // The outer main import has already planned its destination slots.
-            // Keep this internal clone in the inert domain so it cannot occupy
-            // those unpublished slots or escape the existing import rollback.
-            let Value::Host(cloned) = self.clone_inert_tree_with_slots(fragment, deep, false)? else {
+            let native_start=self.doc.nodes.len();
+            let Value::Host(cloned) = self.clone_inert_tree(fragment, deep)? else {
                 unreachable!()
             };
             let end = self.state.inert_documents.entries.len();
-            self.state.work(end - start)?;
+            let native_end=self.doc.nodes.len();
+            self.state.work((end-start).checked_add((native_end-native_start).checked_mul(
+                self.state.inert_documents.adopted.lookup_work()).ok_or("Imported content owner lookup overflow.")?)
+                .ok_or("Imported content owner work overflow.")?)?;
+            self.state.copies((native_end-native_start).checked_mul(size_of::<u32>()).ok_or("Imported content owner copy overflow.")?)?;
             let arena = &mut self.state.inert_documents;
             for entry in &mut arena.entries[start..end] {
                 if let Entry::Node(node) = entry {
                     node.owner = owner;
                 }
+            }
+            for node in native_start..native_end {
+                arena.adopted.get_mut(&node_handle(node)).expect("unpublished cloned native owner").owner=owner;
             }
             let root = arena
                 .node_mut(cloned)
