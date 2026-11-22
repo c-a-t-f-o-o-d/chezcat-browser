@@ -10,7 +10,10 @@ impl Bridge<'_> {
     }
     // Parser and clone producers share the same unpublished identity projection.
     pub(super) fn publish_inert_batch(
-        &mut self, first:u32, mut staged:Vec<Entry>, mut sources:Vec<GeneratedNode>, mut payload:usize, mut links:Vec<(u32,u32)>, reserve_slots:bool,
+        &mut self, first:u32, staged:Vec<Entry>, sources:Vec<GeneratedNode>, payload:usize, links:Vec<(u32,u32)>, reserve_slots:bool,
+    )->Result<Value,String>{self.publish_inert_batch_with_document(first,staged,sources,payload,links,reserve_slots,None)}
+    pub(super) fn publish_inert_batch_with_document(
+        &mut self, first:u32, mut staged:Vec<Entry>, mut sources:Vec<GeneratedNode>, mut payload:usize, mut links:Vec<(u32,u32)>, reserve_slots:bool, document_index:Option<(u32,u32)>,
     )->Result<Value,String>{
         let base=self.doc.nodes.len();let source_base=self.state.inert_documents.generated.len();
         let extra=staged.iter().filter(|entry|matches!(entry,Entry::Node(InertNode{kind:Kind::Text(_)|Kind::Element(_)|Kind::Parsed{source:ParsedSource::Loaded(_),..},..}))).count();
@@ -103,7 +106,7 @@ impl Bridge<'_> {
         let arena=&self.state.inert_documents;
         let entry_min=arena.entries.len().checked_add(staged.len()).and_then(|n|n.saturating_sub(arena.entries.capacity()).checked_mul(size_of::<Entry>())).ok_or("Clone entry backing overflow.")?;
         let source_min=arena.generated.len().checked_add(sources.len()).and_then(|n|n.saturating_sub(arena.generated.capacity()).checked_mul(size_of::<GeneratedNode>())).ok_or("Clone source backing overflow.")?;
-        let content_min=arena.template_contents.minimum_growth(links.len())?;
+        let content_min=arena.template_contents.minimum_growth(links.len())?.checked_add(arena.template_documents.minimum_growth(usize::from(document_index.is_some()))?).ok_or("Clone template document backing overflow.")?;
         let available=self.state.retained_limit.checked_sub(self.state.retained)
             .and_then(|n|n.checked_sub(payload)).and_then(|n|n.checked_sub(entry_min))
             .and_then(|n|n.checked_sub(source_min)).and_then(|n|n.checked_sub(content_min))
@@ -114,7 +117,7 @@ impl Bridge<'_> {
         let (node_growth,node_bytes)=self.prepare_main_nodes(parked,
             available.checked_sub(index_bytes).ok_or("Clone owner index allowance exhausted.")?)?;
         let metadata=index_bytes.checked_add(node_bytes).ok_or("Clone joint metadata overflow.")?;
-        let (committed,indexes)=self.prepare_template_indexes(staged.len(),payload,sources.len(),None,&links,metadata)?;
+        let (committed,indexes)=self.prepare_template_indexes(staged.len(),payload,sources.len(),document_index,&links,metadata)?;
         debug_assert_eq!(committed,first);
         self.commit_main_nodes(node_growth);
         let arena=&mut self.state.inert_documents;
@@ -124,6 +127,7 @@ impl Bridge<'_> {
         for (key,node) in parked_nodes {arena.adopted.insert(key,node);}
         arena.template_documents.commit(indexes.documents);
         arena.template_contents.commit(indexes.contents);
+        if let Some((key,value))=document_index{arena.template_documents.insert(key,value);}
         for (key,value) in links {arena.template_contents.insert(key,value);}
         for _ in 0..parked {
             self.doc.nodes.push(Node {namespace:crate::html::Namespace::None,kind:NodeKind::DocumentFragment,children:Vec::new()});
