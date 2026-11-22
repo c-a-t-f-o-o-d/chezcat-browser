@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/whatwg/encoding",
+  "revision": "7d2e3e08e11f57ba1b080390b490d53648c6f69c",
+  "files": [
+    {
+      "path": "encodings.json",
+      "bytes": 8913,
+      "git_blob": "74019c09603e215110831276384aa7d96f55b645",
+      "sha256": "078212b3697f60b81225b6671bd9da2604497abff0aa8e96e4d46605c02ac9e7"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 16315,
+      "git_blob": "f2dcda46deccefd245749202a88a7837e35c6daa",
+      "sha256": "85dc6f5ccb57a6fe8c33d158f9fc8fc7ee5655a5d3db2cdd131c6a3d0f48a864"
+    },
+    {
+      "path": "index-gb18030.txt",
+      "bytes": 843967,
+      "git_blob": "b55fd601bf7d121b7b46dc9f0010fafcef73a9e7",
+      "sha256": "746b3c55f1a8ec4b90b451f384437a17fd37cd51cd668456a28071a758d10784"
+    },
+    {
+      "path": "index-gb18030-ranges.txt",
+      "bytes": 3110,
+      "git_blob": "43c5c37fd2dd97e922858243cf6900be85c5cff7",
+      "sha256": "874c6b6f6f74cf7d427ad228d5b41ddd9354fffd92a2259bf429f86e6baa7a1e"
+    },
+    {
+      "path": "index-euc-kr.txt",
+      "bytes": 671621,
+      "git_blob": "0c2b2c2864d0e415be5b7eaede9612dea3868d58",
+      "sha256": "89af20dd867c84cefb710b1790229786cfef2bf11916361a210d81b90381e267"
+    }
+  ]
+}

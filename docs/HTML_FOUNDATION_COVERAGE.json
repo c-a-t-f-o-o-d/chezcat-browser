@@ -813,7 +813,12 @@
         "src/text_encoding.rs",
         "src/text_encoding_single_byte.rs",
         "src/text_encoding_single_byte_tests.rs",
-        "tools/reference/text-encodings/manifest.json"
+        "tools/reference/text-encodings/manifest.json",
+        "src/text_encoding_multibyte.rs",
+        "src/text_encoding_multibyte_data.rs",
+        "src/text_encoding_multibyte_core_tests.rs",
+        "src/text_encoding_multibyte_tests.rs",
+        "tools/reference/multibyte-encodings/manifest.json"
       ],
       "contracts": [
         {
@@ -821,7 +826,8 @@
           "requirement": "All normative Encoding labels/decoder families and applicable encoders",
           "status": "partial",
           "verification": [
-            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed."
+            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed.",
+            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02."
           ],
           "dependency_details": []
         },
@@ -830,7 +836,8 @@
           "requirement": "Incremental decode, malformed sequences, BOM and EOF",
           "status": "partial",
           "verification": [
-            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed."
+            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed.",
+            "Independent Chinese/Korean decoder increment: TextDecoder and shared request-text decoding implement GBK, gb18030 and EUC-KR (20 labels). Original pure decoder checks compare all two-byte grid positions and byte pairs, all structurally valid GB18030 four-byte pointers, malformed-input restoration and split/EOF behavior against separately parsed pinned indexes/ranges. Ten native API witnesses cover aliases, supplementary scalars, streaming, copied pending bytes, errors/fatal reuse, BOM, BufferSource/options/brands, shared request decoding and resource refusal. Data generation and rejection controls are separate from Runtime, browser WPT and App evidence. Validation results are recorded with the integrating revision; this is partial F02."
           ],
           "dependency_details": []
         },
@@ -855,9 +862,17 @@
         "F05",
         "F10"
       ],
-      "evidence_selection_status": "The supplementary single-byte increment fixes nine native test functions and eight data/provenance controls in the named source files, using Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c. All 28 legacy names and every byte are included; no runtime output selects or drops a case. Full-package required browser and multibyte/loader selections remain to be frozen before their execution.",
+      "evidence_selection_status": "The supplementary single-byte increment fixes nine native test functions and eight data/provenance controls. The Chinese/Korean increment fixes ten native API test functions, eight exhaustive pure-core test functions with fixed byte-pair/four-byte-pointer selections and twelve data/provenance controls in the named source files before execution. Both use Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c; no runtime output selects or drops a case. Full-package required browser, remaining decoder/encoder and loader selections remain to be frozen before their execution.",
       "open_after_single_byte_increment": [
         "Legacy multibyte decoders and stateful error/EOF behavior",
+        "Applicable legacy encoders",
+        "Document transport/meta charset selection, confidence, sniff and restart",
+        "Complete MIME and local/network/DOMParser routing",
+        "Required unchanged browser evidence and Windows App integration"
+      ],
+      "open_after_chinese_korean_increment": [
+        "Big5, EUC-JP, ISO-2022-JP and Shift_JIS decoders, with stateful error/EOF behavior",
+        "Replacement decoder where required outside the TextDecoder constructor",
         "Applicable legacy encoders",
         "Document transport/meta charset selection, confidence, sniff and restart",
         "Complete MIME and local/network/DOMParser routing",
@@ -3741,18 +3756,22 @@
         "iso-ir-58",
         "x-gbk"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs and src/text_encoding_multibyte_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "gb18030",
       "labels": [
         "gb18030"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs and src/text_encoding_multibyte_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "Big5",
@@ -3818,9 +3837,11 @@
         "ksc_5601",
         "windows-949"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and fixed original witnesses: src/text_encoding_multibyte_core_tests.rs and src/text_encoding_multibyte_tests.rs; pinned normative inputs: tools/reference/multibyte-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "replacement",
