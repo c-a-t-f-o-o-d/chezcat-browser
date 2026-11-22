@@ -1,7 +1,7 @@
 //! Original bounded text/binary conversion. Unicode, legacy single-byte,
-//! x-user-defined and legacy multibyte decoding includes streaming, BOM handling
-//! and fatal errors. No platform codec, network, filesystem or device capability
-//! is used here.
+//! x-user-defined, legacy multibyte and internal replacement decoding include
+//! streaming, BOM handling and fatal errors. No platform codec, network,
+//! filesystem or device capability is used here.
 
 #[path = "text_encoding_single_byte.rs"]
 mod single_byte;
@@ -18,6 +18,9 @@ mod east_asian_tests;
 #[cfg(test)]
 #[path = "text_encoding_multibyte_tests.rs"]
 mod multibyte_tests;
+#[cfg(test)]
+#[path = "text_encoding_replacement_tests.rs"]
+mod replacement_tests;
 
 use super::{
     binary_data::Kind as BinaryKind, Builtin, Declaration, Fault, Host, NativeGetter, Ordinary,
@@ -32,6 +35,7 @@ enum Encoding {
     SingleByte(single_byte::SingleByte),
     Multibyte(multibyte::Encoding),
     UserDefined,
+    Replacement,
 }
 impl Encoding {
     fn name(self) -> &'static str {
@@ -42,19 +46,25 @@ impl Encoding {
             Self::SingleByte(encoding) => encoding.name(),
             Self::Multibyte(encoding) => encoding.name(),
             Self::UserDefined => "x-user-defined",
+            Self::Replacement => "replacement",
         }
     }
     fn label(label: &str) -> Option<Self> {
-        match label {
+        let label = label
+            .trim_matches(|ch| matches!(ch, '\t' | '\n' | '\u{c}' | '\r' | ' '))
+            .to_ascii_lowercase();
+        match label.as_str() {
             "unicode-1-1-utf-8" | "unicode11utf8" | "unicode20utf8" | "utf-8" | "utf8"
             | "x-unicode20utf8" => Some(Self::Utf8),
             "unicodefffe" | "utf-16be" => Some(Self::Utf16Be),
             "csunicode" | "iso-10646-ucs-2" | "ucs-2" | "unicode" | "unicodefeff" | "utf-16"
             | "utf-16le" => Some(Self::Utf16Le),
             "x-user-defined" => Some(Self::UserDefined),
-            _ => single_byte::SingleByte::from_label(label)
+            "csiso2022kr" | "hz-gb-2312" | "iso-2022-cn" | "iso-2022-cn-ext"
+            | "iso-2022-kr" | "replacement" => Some(Self::Replacement),
+            _ => single_byte::SingleByte::from_label(&label)
                 .map(Self::SingleByte)
-                .or_else(|| multibyte::Encoding::from_label(label).map(Self::Multibyte)),
+                .or_else(|| multibyte::Encoding::from_label(&label).map(Self::Multibyte)),
         }
     }
 }
@@ -68,6 +78,7 @@ pub(super) struct Decoder {
     pending: [u8; 4],
     pending_len: usize,
     iso2022jp: iso2022jp::Decoder,
+    replacement_error_returned: bool,
 }
 #[derive(Clone, Copy)]
 pub(super) enum Data {
@@ -336,12 +347,11 @@ impl Runtime {
                 // WebIDL dictionary members are converted before constructor
                 // steps validate the already-converted encoding label.
                 let options = self.text_options(args.get(1), &["fatal", "ignoreBOM"], host)?;
-                let label = label
-                    .trim_matches(|ch| matches!(ch, '\t' | '\n' | '\u{c}' | '\r' | ' '))
-                    .to_ascii_lowercase();
-                let encoding = Encoding::label(&label).ok_or_else(|| {
-                    Fault::exception("RangeError", "TextDecoder does not support this encoding label.")
-                })?;
+                let encoding = Encoding::label(&label)
+                    .filter(|encoding| *encoding != Encoding::Replacement)
+                    .ok_or_else(|| {
+                        Fault::exception("RangeError", "TextDecoder does not support this encoding label.")
+                    })?;
                 Data::Decoder(Decoder {
                     encoding,
                     fatal: options[0],
@@ -351,6 +361,7 @@ impl Runtime {
                     pending: [0; 4],
                     pending_len: 0,
                     iso2022jp: iso2022jp::Decoder::new(),
+                    replacement_error_returned: false,
                 })
             };
             let id = self.new_object(None)?;
@@ -470,6 +481,7 @@ impl Runtime {
                     decoder.pending_len = 0;
                     decoder.bom_seen = false;
                     decoder.iso2022jp = iso2022jp::Decoder::new();
+                    decoder.replacement_error_returned = false;
                 }
                 decoder.streaming = stream;
                 let length = range.map_or(0, |(_, _, length)| length);
@@ -539,6 +551,18 @@ impl Runtime {
                     };
                     Scalar::Character(char::from_u32(value).unwrap(), 1)
                 }
+                Encoding::Replacement => {
+                    // Encoding's replacement decoder emits exactly one error
+                    // for a nonempty stream, then finishes without exposing
+                    // any following bytes. The flag belongs to this decoder,
+                    // including across empty or subsequent streaming chunks.
+                    if decoder.replacement_error_returned {
+                        Scalar::Continue(bytes.len() - at)
+                    } else {
+                        decoder.replacement_error_returned = true;
+                        Scalar::Invalid(1)
+                    }
+                }
             };
             let (character, second, consumed) = match scalar {
                 Scalar::Incomplete => {
@@ -597,16 +621,39 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Resolve Encoding's complete label set for native request algorithms.
+    /// Unknown labels remain distinct from the recognized replacement decoder;
+    /// the caller, rather than the codec, owns its default-encoding policy.
+    pub(crate) fn request_text_encoding_label(label: &str) -> Option<&'static str> {
+        Encoding::label(label).map(Encoding::name)
+    }
+
     /// Original decoder shared with document-owned request adapters. This does
     /// not expose a new JS API or bypass the active job's work/string budgets.
-    pub(crate) fn decode_request_text(&mut self,bytes:&[u8],label:&str)->Result<String,String> {
-        // Request adapters lowercase MIME charset labels. Quoted parameter
-        // values can still contain Encoding's surrounding ASCII whitespace.
-        let label = label.trim_matches(|c| matches!(c, '\t' | '\n' | '\x0c' | '\r' | ' '));
-        let encoding=if bytes.starts_with(&[0xef,0xbb,0xbf]) {Encoding::Utf8}else if bytes.starts_with(&[0xff,0xfe]) {Encoding::Utf16Le}else if bytes.starts_with(&[0xfe,0xff]) {Encoding::Utf16Be}else{Encoding::label(label).ok_or_else(||format!("Request text encoding {label} is not implemented."))?};
+    pub(crate) fn decode_request_text(&mut self, bytes: &[u8], label: &str) -> Result<String, String> {
+        let encoding = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+            Encoding::Utf8
+        } else if bytes.starts_with(&[0xff, 0xfe]) {
+            Encoding::Utf16Le
+        } else if bytes.starts_with(&[0xfe, 0xff]) {
+            Encoding::Utf16Be
+        } else {
+            Encoding::label(label)
+                .ok_or_else(|| format!("Request text encoding {label} is not implemented."))?
+        };
         self.work(bytes.len()).map_err(Fault::display)?;
-        let mut decoder=Decoder{encoding,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0,iso2022jp:iso2022jp::Decoder::new()};
-        self.decode_text_bytes(&mut decoder,bytes,false).map_err(Fault::display)
+        let mut decoder = Decoder {
+            encoding,
+            fatal: false,
+            ignore_bom: false,
+            bom_seen: false,
+            streaming: false,
+            pending: [0; 4],
+            pending_len: 0,
+            iso2022jp: iso2022jp::Decoder::new(),
+            replacement_error_returned: false,
+        };
+        self.decode_text_bytes(&mut decoder, bytes, false).map_err(Fault::display)
     }
 }
 
@@ -614,7 +661,7 @@ impl Runtime {
     /// Fetch Body always decodes UTF-8 (with its BOM), never XHR MIME sniffing.
     pub(super) fn decode_body_utf8(&mut self,bytes:&[u8])->Result<String,Fault> {
         self.work(bytes.len())?;
-        let mut decoder=Decoder{encoding:Encoding::Utf8,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0,iso2022jp:iso2022jp::Decoder::new()};
+        let mut decoder=Decoder{encoding:Encoding::Utf8,fatal:false,ignore_bom:false,bom_seen:false,streaming:false,pending:[0;4],pending_len:0,iso2022jp:iso2022jp::Decoder::new(),replacement_error_returned:false};
         self.decode_text_bytes(&mut decoder,bytes,false)
     }
 }

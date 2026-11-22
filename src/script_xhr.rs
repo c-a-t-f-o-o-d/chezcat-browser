@@ -1095,15 +1095,18 @@ impl State {
         self.pending.clear();
     }
 }
-fn response_encoding(record: &Record, response: &crate::http::Response) -> Result<String, String> {
-    let value = if record.mime.is_empty() {
-        response.header("content-type").unwrap_or("")
-    } else {
-        &record.mime
-    };
-    Ok(mime::parse(value)?
-        .and_then(|mime| mime.charset().map(str::to_ascii_lowercase))
-        .unwrap_or_else(|| "utf-8".into()))
+fn response_encoding(record: &Record, response: &crate::http::Response) -> Result<&'static str, String> {
+    let response_mime = mime::parse(response.header("content-type").unwrap_or(""))?;
+    let override_mime = mime::parse(&record.mime)?;
+    // Charset selection is separate from the final MIME type: an override
+    // without a charset preserves the response's charset parameter.
+    let label = override_mime
+        .as_ref()
+        .and_then(|mime| mime.charset())
+        .or_else(|| response_mime.as_ref().and_then(|mime| mime.charset()));
+    Ok(label
+        .and_then(Runtime::request_text_encoding_label)
+        .unwrap_or("utf-8"))
 }
 
 impl Page {
@@ -1209,7 +1212,7 @@ impl Page {
                 ));
                 let label = response_encoding(&self.state.xhr.records[id], &response);
                 match label
-                    .and_then(|label| self.runtime.decode_request_text(&response.body, &label))
+                    .and_then(|label| self.runtime.decode_request_text(&response.body, label))
                 {
                     Ok(text) if text.len() <= self.state.limits.host.string_bytes => {
                         match completion._storage.take() {
