@@ -45,6 +45,10 @@ const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 #[cfg(test)]
 #[path = "script_inert_attributes_tests.rs"]
 mod attribute_tests;
+
+#[cfg(test)]
+#[path="script_inert_attribute_units_storage_tests.rs"]
+mod attribute_units_storage_tests;
 #[cfg(test)]
 #[path="script_element_name_storage_tests.rs"]
 mod element_name_storage_tests;
@@ -386,7 +390,6 @@ impl Bridge<'_> {
     pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded,false)}
     pub(in crate::scripting) fn write_inert_attribute_node_value(&mut self,object:u32,name:crate::html::AttributeName,value:DomString)->Result<(),String>{self.write_inert_attribute_mode(object,name,Some(value),true,false,true)}
     fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool,replace_name:bool)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (!name.namespace.is_empty()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let (source,initial_template)=match inert.kind{
             Kind::Parsed{source,initial_template}=>(Some(source),initial_template),
@@ -1789,7 +1792,7 @@ impl Bridge<'_> {
                     _ => {}
                 }
             }
-            if let NodeKind::Element { tag, id, .. } = &parsed.kind {
+            if let NodeKind::Element { tag, attrs, .. } = &parsed.kind {
                 match property {
                     "localName" | "nodeName" | "tagName" => {
                         self.state.copies(tag.len())?;
@@ -1802,10 +1805,8 @@ impl Bridge<'_> {
                     "namespaceURI" => return Ok(parsed.namespace.element_uri()
                         .map_or(Value::Null, |ns| Value::String(ns.into()))),
                     "id" => {
-                        let id = id.as_deref().unwrap_or_default();
-                        self.state.copies(id.len())?;
-                        let NodeKind::Element { id, .. } = &self.parsed_source(source).unwrap().0.kind else { unreachable!() };
-                        return Ok(Value::String(id.as_deref().unwrap_or_default().into()));
+                        let work=attrs.iter().try_fold(attrs.len(),|n,a|n.checked_add(a.name.bytes()).ok_or("Inert id lookup work overflow."))?;self.state.work(work)?;
+                        let NodeKind::Element{attrs,..}=&self.parsed_source(source).unwrap().0.kind else{unreachable!()};let Some(at)=attrs.iter().position(|a|a.name.html_is("id"))else{return Ok(Value::String(String::new()));};let bytes=attrs[at].value.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("Inert id exceeds the host string allowance.".into());}self.state.copies(bytes)?;let NodeKind::Element{attrs,..}=&self.parsed_source(source).unwrap().0.kind else{unreachable!()};return Self::dom_string_copy(&attrs[at].value);
                     }
                     _ => {}
                 }
@@ -1923,12 +1924,12 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction{..} => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
-        NodeKind::Element { .. } if node.namespace == crate::html::Namespace::Svg => crate::html::svg_dom_transfer(node),
+        NodeKind::Element { attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(script_attr::materializable_value)&&crate::html::svg_dom_transfer(node),
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
-                && !attrs.iter().any(|attr| !attr.name.namespace.is_empty()
+                && !attrs.iter().any(|attr| !script_attr::materializable_value(attr)||!attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.
