@@ -83,6 +83,7 @@ def approve_license(approved,tag,commit=None):
     commit=commit or git('rev-parse','HEAD').decode().strip();entries=tree(commit)
     publication.check_tree(entries)
     publication.check_receipts(commit)
+    publication.check_assets(commit)
     publication.check_metadata(commit)
     if 'LICENSE' not in entries or entries['LICENSE'][0] not in [b'100644',b'100755'] or entries['LICENSE'][1]!=b'blob':raise ValueError('Approved LICENSE must be a tracked regular file.')
     if blob(entries['LICENSE'][2])!=data:raise ValueError('Approved license must match exact committed bytes.')
@@ -125,7 +126,9 @@ def main():
     review=args.review_source
     if review and 'review' not in out.name.lower():raise ValueError('Unapproved review archives must be named explicitly as review material.')
     if args.source or review:
-        if review:publication.check_receipts(commit)
+        if review:
+            publication.check_receipts(commit)
+            publication.check_assets(commit)
         else:approve_license(args.approved_license_sha256,args.tag,commit)
         out.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(['git','archive','--format=zip','--prefix=ChezCat-source/','--output',str(out),commit],cwd=ROOT,check=True)

@@ -16,5 +16,6 @@ before maintained product/test inclusion. Do not attach signed/private records.
 ## Verification
 
 Record the focused checks actually run and the exact source identity.
-Identify self/agent review honestly, trust boundaries, errors/lifecycle coverage
-and remaining limits. A green CI run is not an assignment or security audit.
+State the reviews actually performed, their scope, trust boundaries,
+errors/lifecycle coverage and remaining limits. A green CI run is not an assignment
+or security audit.

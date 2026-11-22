@@ -66,7 +66,7 @@ tagged candidate; their exact scope is recorded in [capabilities](CAPABILITIES.m
 
 | Question | Read next |
 | :--- | :--- |
-| **What should become usable next?** | The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md), before resuming the saved YouTube shell/search/navigation/playback journey. |
+| **What should become usable next?** | The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md), followed by the YouTube shell/search/navigation/playback milestones. |
 | **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha2) for the release-line summary. |
 | **What has actually worked on a page?** | The [latest homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recent original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
 | **Which build should I run?** | [Build instructions](BUILDING.md) for local development; [release history](RELEASING.md#published-baseline) for verified downloads and exact source identities. |
@@ -75,5 +75,5 @@ The current YouTube observation remains a skeleton. Merged engine changes and
 passing original fixtures are useful progress, but they do not establish a
 working homepage, search journey or playback.
 
-Named releases require an explicit owner request. The development agent owns
-failure diagnosis for ordinary PRs and releases.
+Named releases require an explicit owner request and the checks in the
+[release procedure](RELEASING.md).

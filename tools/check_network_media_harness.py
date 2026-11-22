@@ -178,7 +178,7 @@ def run_case(transport, folder, fixture_stem=None, display_profile=None, *,
 
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-network-media-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)

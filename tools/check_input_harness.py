@@ -39,7 +39,7 @@ button.setAttributeNode(disabled);if(!button.disabled)throw 'native disabled';bu
 var style=document.createAttribute('style');style.value='display:block;width:133px;color:#445566';target.setAttributeNode(style);
 if(target.clientWidth!==133)throw 'applied geometry';target.textContent='Attribute nodes ready';
 })();</script>'''
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (
         datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ") + "-input-fixture-" + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     seen = []

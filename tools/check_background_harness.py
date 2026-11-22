@@ -221,7 +221,7 @@ def main():
         help='existing product executable; never built by this driver')
     args = parser.parse_args()
     exe = args.exe.resolve()
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
         + '-background-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)

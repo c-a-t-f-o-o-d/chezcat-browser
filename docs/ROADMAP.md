@@ -8,7 +8,7 @@
 
 *Delivering repeatable web page improvements through shared, spec-aligned browser capabilities.*
 
-[Release horizon](#release-horizon) · [Active work](#active--upcoming-milestones) · [Foundation plan](HTML_FOUNDATION_PLAN.md) · [Architecture](#performance--architecture) · [Development protocol](#agent-execution-protocol) · [Backlog](#reference--backlog)
+[Release horizon](#release-horizon) · [Active work](#active--upcoming-milestones) · [Foundation plan](HTML_FOUNDATION_PLAN.md) · [Architecture](#performance--architecture) · [Verification](#verification-and-documentation) · [Backlog](#reference--backlog)
 
 </div>
 
@@ -34,23 +34,22 @@ flowchart TD
     CORE["HTML and XML parsing + shared DOM"] --> DOCS["Elements, controls and document lifecycle"]
     DOCS --> COMPONENTS["Native components + default presentation"]
     COMPONENTS --> GATE["Verified document foundation"]
-    GATE --> SHELL["Saved YouTube shell and input"]
+    GATE --> SHELL["YouTube shell and input"]
     SHELL --> JOURNEY["Search, results, watch and Back"]
     JOURNEY --> MEDIA["Streaming and original playback"]
 ```
 
 This is a dependency map, **not a calendar**. The [foundation plan](HTML_FOUNDATION_PLAN.md)
-owns the active package order, integration dependencies and closure evidence.
+defines the active package order, integration dependencies and closure evidence.
 Full CSS, ECMAScript, media and the wider HTML application platform remain
 explicit related programs; required dependencies cannot be counted as passes.
 Isolation and GPU work keep their separate readiness gates.
 
 > [!IMPORTANT]
 > **Owner-gated releases.** Completing a feature, merging a PR, or passing CI does
-> not trigger a release. An explicit request is queued after the current coherent
-> development task. Keep the existing verification workflow: the agent investigates
-> failed checks and fixes affected work. A failed gate blocks promotion or
-> publication; unrelated authorized coding can continue.
+> not trigger a release. Named releases require an explicit owner request and the
+> existing validation and publication procedure. A failed required gate blocks
+> the corresponding promotion or publication.
 
 ---
 
@@ -118,14 +117,14 @@ and video/audio playback each require their own observed outcome.
 | **F14 · Closure** | Required fixed cohorts and Windows App journeys pass; remaining wider-platform work is explicit before product resumption |
 
 This is the default start order. Core implementation and integration closure are
-separate: a missing later dependency keeps the consumer open while the agent
-implements that known prerequisite. Focused checks continue during coding;
-full-site runs do not schedule the next missing operation.
+separate: a missing later dependency keeps its consumer open until that
+prerequisite and its integration are implemented. Focused checks establish each
+increment; full-site results require their own evidence.
 
 ### Current product sequence
 
-**Preserved for resumption after foundation acceptance.** These P1–P6 packages
-are not the active implementation queue during the foundation program.
+**Planned after foundation acceptance.** These P1–P6 packages follow the
+document-foundation program.
 
 The packages below connect the existing foundations to observable page behavior.
 They are **not percentages of a complete browser**, and an implemented API family
@@ -276,46 +275,34 @@ Neither depends on supporting every website first.
 ## Delivery — Frequent Source, Verified Builds
 
 Development PRs use focused checks. Trusted pushes run source privacy and
-configuration checks. The agent owns failure diagnosis and repair. Full regression,
-offline journeys and package verification belong to owner-requested releases.
+configuration checks. Full regression, offline journeys and package verification
+belong to owner-requested releases.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
-| 🧊&nbsp;Deferred | <code>DX&#8209;01</code> | **Asynchronous CI/CD handoff** | Retain the current agent-owned failure diagnosis and repair. Revisit handoff only by a later owner decision; do not transfer routine failed-build triage to the maintainer or weaken integration gates. |
 | ◻️&nbsp;Planned | <code>DX&#8209;02</code> | **Commit-identified development artifacts** | Successful trusted CI exposes a complete, clearly labeled development payload with its real source identity, required notices/data, no private material, and bounded retention. It is not a release, tag, or version bump. |
 | ◻️&nbsp;Proposed | <code>DX&#8209;03</code> | **Lightweight public `dev` integration channel** | Adopt only with explicit triggers, protected promotion, trusted identities, and no duplicate validation for unchanged inputs. Keep `main` current with promoted known-good work. Do not create another manually supervised release stage. |
 
 For requested releases, preserve the selected source identity and use the existing
-validation and publication procedure. The agent remains responsible for analyzing
-and correcting failures. Continue safe independent work without modifying inputs
-under verification; do not claim failed delivery succeeded. See
-[RELEASING.md](RELEASING.md).
+validation and publication procedure. Failed checks leave the corresponding
+delivery incomplete. See [RELEASING.md](RELEASING.md).
 
 ---
 
-## Agent Execution Protocol
+## Verification and documentation
 
-> [!NOTE]
-> **One practical development cycle:** select a known missing contract in the
-> current package, implement its shared behavior, run focused affected and
-> security-negative checks, then submit and merge one coherent PR. Continue the
-> remaining package from updated main.
+Implementation checks cover the changed contract, directly affected regressions
+and relevant security negatives. Connected original App checks validate package
+boundaries. Live-site checks need the selected milestone's prerequisites or a
+specific runtime question that source and focused fixtures cannot resolve.
+A source merge does not establish a new live-site result.
 
-A confirmed source gap can schedule implementation without waiting for a live
-exception. Keep the dependency queue explicit and skip already integrated work.
-Connected original App checks validate package boundaries. Run the live site when
-those prerequisites make the selected milestone plausibly ready, or to answer a
-specific runtime question that retained source and focused fixtures cannot resolve.
-Merging a PR does not by itself trigger another site run.
+Changed source, merged revisions and published binaries have distinct identities
+and validation records. A named release follows the separate delivery procedure.
 
-Public feature branches should receive coherent, reviewable progress frequently.
-A named release is not required for a commit, PR, CI run, or development build.
-Keep changed source distinct from merged source, and merged source distinct from
-published binaries. A completed PR is a checkpoint, not the end of the task queue.
+Documentation separates these concerns:
 
-Documentation has one owner per concern:
-
-| Document | Responsibility |
+| Document | Scope |
 | :--- | :--- |
 | **This roadmap** | Order, milestones, dependencies, and backlog |
 | [HTML_FOUNDATION_PLAN.md](HTML_FOUNDATION_PLAN.md) + [register](HTML_FOUNDATION_COVERAGE.json) | Active document-foundation scope, normative coverage, packages and closure evidence |
@@ -325,9 +312,8 @@ Documentation has one owner per concern:
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current system boundaries |
 | [RELEASING.md](RELEASING.md) | Owner-requested delivery procedure |
 
-Update only documents whose facts change in the same coherent implementation PR.
-Do not turn routine synchronization into a fresh audit of every document. Keep
-production original Rust/std-only, preserve security boundaries, and retain
+Documentation updates describe changed behavior and its limits. Keep production
+original Rust/std-only, preserve security boundaries, and retain
 unmodified upstream workloads with appropriate notices. Test counts alone do
 not establish browser compatibility.
 
@@ -361,7 +347,6 @@ for exclusions and the [changelog](../CHANGELOG.md) for source history.
 | **Additional media profiles** | The selected service-playback path remains P6 in the active dependency sequence. Further codecs, containers and media interfaces beyond that evidenced path remain unscheduled; existing finite playback is preserved. |
 | **Extended web platform** | Wider Unicode, ES modules, networking APIs, storage, workers, frames, accessibility, DOM interfaces, and font/layout coverage are selected by demonstrated shared dependencies. |
 | **Additional element APIs** | VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation, and other interfaces remain distinct contracts rather than implied framework support. |
-| **Agent status automation** | Deferred; no new screenshot watcher, heartbeat service, or restart supervisor in the compatibility phase. |
 
 </details>
 

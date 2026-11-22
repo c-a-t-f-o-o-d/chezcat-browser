@@ -13,9 +13,9 @@
 ## Release policy
 
 > [!IMPORTANT]
-> **Named releases require an explicit owner request.** Queue it after the current
-> coherent implementation checkpoint. A merged PR, passing CI or completed feature
-> does not authorize a version bump, release tag, package or publication.
+> **Named releases require an explicit owner request.** A merged PR, passing CI
+> or completed feature does not authorize a version bump, release tag, package
+> or publication.
 
 | Activity | Normal path | Release required? |
 | :--- | :--- | :--- |
@@ -24,19 +24,14 @@
 | **Development artifacts / dev channel** | Proposed roadmap work; not assumed operational | No |
 | **Named release** | Owner request → final source → immutable tag → exact delivery gates | Yes: explicit authorization |
 
-Keep one product PR open at a time. The agent investigates failed checks and
-fixes the affected work. After a merge, start the next PR from updated main.
-
 [Routine verification](#contribution-and-routine-verification) · [Tagged delivery](#exact-tagged-delivery)
 · [Payloads](#payloads-and-identity) · [Failures](#when-a-check-fails)
 
 ## Development discipline
 
 Use tested main and short-lived branches with PR integration and recorded checks.
-Identify solo maintainer/agent review honestly; do not invent a second reviewer.
-Keep one primary finite feature contract active. `release/` branches serve genuinely
-maintained parallel lines only. Never import pre-transition private ancestry or
-recovery refs into the public graph.
+Review records identify the checks and reviews actually performed, their scope
+and any remaining limits. `release/` branches serve maintained parallel lines.
 
 Ordinary commits retain the product version. Product and CSAPUL license versions
 are independent. During 0.x, minor versions can change a stated interface; patch
@@ -44,9 +39,8 @@ versions preserve its contract except documented security necessities. Alpha/RC
 contracts remain unstable. Persisted-data changes require migration/recovery
 checks. See [feature contracts](FEATURE_CONTRACTS.md) and [capabilities](CAPABILITIES.md).
 
-A completed PR is a checkpoint, not a requirement to stop development or issue a
-release. Source integration, green CI, development-runtime delivery and publication
-are different states. Report only the state actually reached.
+Source integration, green CI, development-runtime delivery and publication are
+different states. Report only the state actually reached.
 
 ## Current release candidate
 
@@ -191,14 +185,13 @@ security or cross-SDK/linker bit-for-bit reproducibility.
 
 ## When a check fails
 
-Record the failed stage and its concrete evidence. The agent investigates and
-repairs the affected work without hiding failure, reducing assertions or treating
-a diagnostic serial pass as the required normal result.
+Record the failed stage, its concrete evidence and the resulting correction.
+Preserve failed results and assertions; a diagnostic serial pass does not replace
+the required normal result.
 
 Release blockers include failed exact-source checks, missing required acceptance,
 an unresolved exposed high/critical runtime defect, unavailable publication access,
-or package/download failure. Keep the checkpoint and continue safe independent
-work; repeated release retries must not consume the browser-development queue.
+or package/download failure.
 A no-source-change service rerun is recorded. Changed source needs a new unused
 release version/tag, not replacement bytes under an old identity.
 

@@ -11,9 +11,8 @@
 ---
 
 Adam Maddox (c-a-t-f-o-o-d) maintains ChezCat. The snapshot preserves existing
-product work and appropriate credit; earlier author metadata is not retained
-as this lineage's commit graph. Automated coding assistance was used. No executed
-external assignment or accepted external contribution is represented by this record.
+product work and appropriate contributor credit. This record does not represent
+an executed external assignment or an accepted external contribution.
 
 For accepted outside work, preserve the contributor's authorized public credit
 and precise scope. Signed agreements, Schedule A, identity, authority and C2

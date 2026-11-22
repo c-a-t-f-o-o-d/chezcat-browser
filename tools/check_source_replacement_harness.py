@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main(source=None, reference_paths=None):
-    folder = capture_tests.verification_root(ROOT) / 'autonomy' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-source-replacement-journey-' + uuid.uuid4().hex[:8])
+    folder = capture_tests.verification_root(ROOT) / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ') + '-source-replacement-journey-' + uuid.uuid4().hex[:8])
     folder.mkdir(parents=True)
     script = folder / 'input.tsv'
     script.write_text('snapshot\tinitial\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\toldpaused\nclick\treplace\nsnapshot\treplaced\nwait\t400\nsnapshot\tfrozen\nmedia\tPlay\nwait\t650\nmedia\tPause\nsnapshot\tnewpaused\nclick\trestore\nsnapshot\trestored\nclick\tclear\nsnapshot\tempty\nclick\tmissing\nsnapshot\tmissing\nclick\treplace\nsnapshot\trecovered\nlink\tLeave\nsnapshot\tnavigated\n', encoding='utf-8', newline='\n')

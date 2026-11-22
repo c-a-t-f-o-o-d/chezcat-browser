@@ -14,12 +14,9 @@ The ChezCat icon is a C-cat monogram: a cream C with two feline ears and a teal 
 
 ## Included assets
 
-- `chezcat-icon-source.png`: the untouched selected generated artwork, 1254 by 1254 pixels, with alpha.
-- `chezcat-icon.png`: the same artwork normalized to a 512 by 512 transparent canvas for the home page and reuse.
+- `chezcat-icon.png`: the project icon on a 512 by 512 transparent canvas for the home page and reuse.
 - `chezcat.ico`: Windows icon containing 16, 24, 32, 48, 64, 128 and 256 pixel images.
 - The home-page copy at `pages/images/chezcat-icon.png` matches the normalized asset. Keeping it within the page content root preserves local-file resource boundaries.
-
-The icon was created using the built-in image generation tool from an original project brief. No input artwork, stock icon, existing logo or branded character was supplied. These files contain only the chosen direction.
 
 The home page uses navy `#0b153c`, cream `#fff3dc` and teal `#42c7bc` to accompany the icon.
 
@@ -33,10 +30,10 @@ artwork, icon font, imported symbol set or additional runtime dependency.
 
 ## Format preparation
 
-Only empty surrounding space was trimmed before scaling and padding; the selected design was not redrawn. From the project folder, ImageMagick can reproduce the prepared formats:
+The checked-in PNG and ICO are the inputs for the home page and Windows resources. For an approved artwork update, an optional ImageMagick conversion trims empty surrounding space, scales and pads the image, and prepares the required icon sizes:
 
 ```text
-magick assets/chezcat-icon-source.png -trim +repage -resize 464x464 -background none -gravity center -extent 512x512 -depth 8 -interlace none -define png:color-type=6 -strip assets/chezcat-icon.png
+magick path/to/artwork.png -trim +repage -resize 464x464 -background none -gravity center -extent 512x512 -depth 8 -interlace none -define png:color-type=6 -strip assets/chezcat-icon.png
 magick assets/chezcat-icon.png -define icon:auto-resize=256,128,64,48,32,24,16 assets/chezcat.ico
 ```
 

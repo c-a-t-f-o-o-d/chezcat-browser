@@ -28,6 +28,7 @@ jobs:
           paths = publication.git('ls-tree', '-rz', '--name-only', 'HEAD').decode('utf-8').split('\0')
           publication.check_tree(path for path in paths if path)
           publication.check_receipts('HEAD')
+          publication.check_assets('HEAD')
           print('Package version:', package_version()[0])
       - name: Public summary safety controls
         run: python tools/check_public_ci_summary.py

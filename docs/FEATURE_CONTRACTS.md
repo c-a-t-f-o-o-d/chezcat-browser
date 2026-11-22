@@ -293,6 +293,6 @@ index only when its navigation or summary changes. Preserve code-level negatives
 limits, source identities and original evidence. Do not treat planned installer,
 update, GPU or isolation work as implemented because it has a roadmap entry.
 
-The current CI approach stays in place. The agent diagnoses failed checks and
-repairs affected work. Completing a contract or PR does not trigger a release or
-end the remaining development queue.
+Contract changes retain the existing focused development checks and applicable
+release gates. Completing a contract or PR does not trigger a release or establish
+that the remaining contracts are complete.

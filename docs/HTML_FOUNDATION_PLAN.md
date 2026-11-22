@@ -52,9 +52,9 @@ visible. An external dependency needed by an included contract is a **blocker**
 until implemented; it is not a reason to report that contract complete.
 
 The final review must distinguish **document foundation complete**, **HTML
-Standard coverage still open**, and **YouTube journey still unverified**. Changing
-the scope to hide a failed required contract requires an explicit owner decision;
-an agent cannot silently move it to the backlog.
+Standard coverage still open**, and **YouTube journey still unverified**. Changes
+to the agreed scope require an explicit owner decision. Required failed or
+blocked contracts remain visible in the acceptance register.
 
 ## Standards and design decisions
 
@@ -222,20 +222,18 @@ core implementation and named integration contracts where needed: F01's serializ
 come from F07/F08; F02's restart integration uses F05/F10; F06 observer delivery
 uses F10 scheduling; F07 shadow parsing uses F12; F08 actual controls and lifecycle
 use F09–F13. Mark these contracts partial or blocked, implement the known
-prerequisite, then return for closure. Never idle on a dependency already
-authorized here, and never mark a package complete because its core passed.
+prerequisite, then verify the integration before closure. A passing core does not
+complete a package whose required integrations remain open.
 
 XML grammar/namespace work can start after F01/F02 once the shared node model is
 ready; complete API/App acceptance still uses F06/F07 and later consumers.
-Independent data work requires explicit file ownership and serial integration.
-Keep one active implementation writer and one public product PR.
 
 ### F00 — Freeze requirements and make the baseline executable
 
 **Deliverables**
 
-1. Reconcile the current main and actual preserved work once. Import no obsolete
-   "next task" from a stale handoff.
+1. Establish the current main's source-bound baseline, including already
+   integrated behavior and remaining requirements.
 2. Freeze the supplied complete family inventory and expand the first selected
    package into requirement-level rows: normative anchor/revision, affected entry
    paths, current code, expected behavior, dependencies, fixture IDs/modes, current
@@ -244,7 +242,7 @@ Keep one active implementation writer and one public product PR.
 3. Pin the listed corpora and data with licenses, hashes and stable case IDs.
    Inventory the relevant pinned corpus independently of which tests pass.
    Freeze required versus supplementary evidence before results. Each required
-   browser test has an owned harness dependency; availability cannot later turn
+   browser test records its harness dependency; availability cannot later turn
    it into a supplementary case.
 4. Add a small original native adapter for tokenizer and tree-construction data,
    reusing existing confined results, hashing and process handling. Do not wait
@@ -639,8 +637,8 @@ conformance remains a separate program.
 **Deliverables and gate**
 
 1. Every required row has implemented source, applicable passing evidence and
-   no unowned/hidden dependency. Complete all required entry paths; a standalone
-   parser pass cannot close the loaded-browser path.
+   no unresolved or hidden required dependency. Complete all required entry
+   paths; a standalone parser pass cannot close the loaded-browser path.
 2. Run the frozen package-level aggregate cohorts once on the integration
    revision, accounting for every selected case/mode and diagnostic requirement.
    Required failed, skipped, blocked, crashed, timed-out or unrun rows block
@@ -654,11 +652,10 @@ conformance remains a separate program.
 5. Reconcile CAPABILITIES, the coverage register, compatibility source-review
    records and roadmap. Keep historical results historical. Record remaining
    whole-HTML, CSS, ECMAScript, media and platform work.
-6. Review the saved YouTube requirements against the new implementation, skip
-   already closed contracts, and choose the next product checkpoint. YouTube
-   may still expose missing CSS/JS/data/media work. Perform a similarly scoped
-   CSS/JavaScript plan if the owner chooses that next; do not automatically
-   start either an endless standards sweep or media work.
+6. Record which YouTube shell/search/navigation/playback requirements the
+   completed foundation satisfies and which need further CSS, JavaScript, data
+   or media implementation. Site milestones and wider standards programs retain
+   their separate scope and acceptance evidence.
 
 The final report must say exactly which baseline was completed and which wider
 areas remain. It must not say that all websites, all HTML, or YouTube now work
@@ -698,7 +695,7 @@ reported separately. The coverage register uses reviewed/planned/partial/blocked
 implemented/verified distinctions. No whole-project percentage follows from a
 test total, API count, lines of code or PR count.
 
-### Keep implementation moving
+### Verification scope
 
 - During an increment: run the reproduction or newly implemented contract,
   directly affected regressions and relevant negative/security checks.
@@ -706,12 +703,11 @@ test total, API count, lines of code or PR count.
   connected App integration. Broaden only for a concrete remaining risk.
 - At foundation closure: aggregate the fixed baseline and required Windows
   journeys. Ordinary PRs do not gain a full release/whole-WPT gate.
-- Use build_dev and existing incremental caches; one heavy job and one writer
-  per build output. Keep one public product PR open and integrate serially.
-- Source-confirmed omissions schedule implementation immediately. A new merge,
-  passing test or newly exposed site exception does not mandate another live
-  site run. A diagnostic site probe needs a specific unresolved runtime question
-  that retained source and original fixtures cannot answer.
+- Development builds use build_dev and existing incremental caches without
+  changing the source/configuration identity requirements.
+- A new merge or passing test does not establish another live-site result.
+  A diagnostic site probe needs a specific unresolved runtime question that
+  source and original fixtures cannot answer.
 
 ## Migration invariants
 
@@ -753,38 +749,14 @@ test total, API count, lines of code or PR count.
    Cross-browser comparisons help resolve ambiguity but do not supersede the
    standard or justify copying another implementation.
 
-## Safe agent transition and durable progress
+## Related programs
 
-The live agent must adopt this plan only after it is reviewed and published.
-
-1. At the next existing instruction check, inspect the actual command, branch,
-   HEAD, dirty/untracked files and open PR. Let an in-flight command settle.
-2. Preserve the actual already-started increment. The last observed work during
-   planning is tabindex/HTML reflection after PR #439; the Event author-prototype
-   correction has already merged and must not be restored or repeated. If close
-   to integration, finish only the current coherent increment and affected
-   checks. Otherwise save exact WIP, new files, output and next command to the
-   existing recoverable private backup. No destructive reset.
-3. Do not start another YouTube-specific implementation/probe chain after that
-   boundary. Begin F00 and then the known foundation contracts.
-4. Reconcile STATUS/handoff from actual state. Older handoff instructions about
-   already-merged clone/import work are not authority to restore old code.
-5. Use the existing control polling/apply mechanism. A coordinator control
-   commit is pending until the agent's observed/applied revision acknowledges
-   it. RUN intent alone is not proof of activity.
-6. Each meaningful update records current package/subcontract, merged versus
-   active work, exact focused result, blockers, next known implementation and
-   next package checkpoint. Keep last actual YouTube build/outcome separately.
-7. Continue across PRs and context windows with the concise durable queue. If
-   truly idle or unable to continue, record the actual reason and recovery point;
-   never imply ongoing work merely because requested mode remains RUN.
-
-Named releases remain manual. Architecture and broad capacity inventory remain
-parked except the local changes explicitly required by this foundation plan.
+The foundation includes local architecture and capacity changes needed by its
+required contracts. Broader architecture and capacity programs remain deferred.
 
 XPath, XSLT, XML Schema, XML 1.1 and validating XML processing are an explicit
 XML-tools program. XML 1.0 nonvalidating parsing and XHTML do not imply those
-features. Existing intentional owner-policy restrictions remain visible: if one
+features. Existing intentional policy restrictions remain visible: if one
 prevents an included conformance requirement, report it as blocked rather than
 weaken the policy or claim a pass.
 

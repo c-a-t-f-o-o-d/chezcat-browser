@@ -782,7 +782,7 @@ def custom_event_interface_http_case(exe, folder):
     return base
 
 def main():
-    folder=capture_tests.verification_root(ROOT) / 'autonomy'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-dispatch-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
+    folder=capture_tests.verification_root(ROOT) / 'runs'/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')+'-dispatch-journey-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
     script=folder/'input.tsv';script.write_text('click\tinterface\nsnapshot\tinterface\nclick\ttarget\nsnapshot\ttarget\nclick\tdeep\nsnapshot\tguarded\nclick\trecover\nsnapshot\trecovered\n',encoding='utf-8');out=folder/'journey'
     before=capture_tests.source_identity(ROOT);exe=ROOT/'ChezCat.exe';executable_before=capture_tests.sha256(exe);data=exe.read_bytes();pe=struct.unpack_from('<I',data,60)[0];reserve,commit=struct.unpack_from('<QQ',data,pe+24+72)
     row=capture_tests.execute([str(exe),str(ROOT/'tools/fixtures/dispatch-stack.html'),'--dev-input-script',str(script),'--dev-input-output',str(out),'--javascript','--no-profile'],folder/'command.log',ROOT,120)

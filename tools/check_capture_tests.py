@@ -290,9 +290,9 @@ class CaptureTests(unittest.TestCase):
         with patch.dict(runner.os.environ, {'CHEZCAT_VERIFICATION_ROOT': str(external), 'CARGO_TARGET_DIR': str(target)}):
             self.assertEqual(runner.verification_root(self.root), external.resolve())
             self.assertEqual(runner.cargo_target_dir(self.root), target.resolve())
-            destination = external / 'autonomy/owned/manifest.json'
+            destination = external / 'runs/owned/manifest.json'
             reference = runner.evidence_reference(destination, self.root)
-            self.assertEqual(reference, 'verification:autonomy/owned/manifest.json')
+            self.assertEqual(reference, 'verification:runs/owned/manifest.json')
             self.assertEqual(runner.evidence_path(reference, self.root), destination.resolve())
             self.assertEqual(runner.evidence_path('results/old.json', self.root), (self.root / 'results/old.json').resolve())
             for invalid in ('verification:../outside.json', 'verification:/outside.json', str(Path(self.temp.name) / 'outside.json')):

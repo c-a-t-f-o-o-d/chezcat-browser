@@ -14,6 +14,7 @@ from unittest.mock import patch
 import build_release_bundle as package
 import check_distribution as distribution
 import verify_offline as verification
+from check_publication_controls import original_png, original_icon
 
 class Guards(unittest.TestCase):
     def cleanup_fixture(self):
@@ -91,7 +92,7 @@ class Guards(unittest.TestCase):
           '.gitattributes':b'*.cmd text eol=crlf\nSOURCE_REVISION export-subst\n',
           'SOURCE_REVISION':b'$Format:%H$\n',
           'README.md':b'Controlled fixture', 'THIRD_PARTY_NOTICES.md':b'Controlled fixture',
-          'assets/chezcat.ico':b'controlled', 'assets/chezcat-icon.png':b'controlled',
+          'assets/chezcat.ico':original_icon(), 'assets/chezcat-icon.png':original_png(),
           'pages/start.html':b'<p>controlled</p>', 'trust/roots.pem':b'controlled',
           'notices/fixture.txt':b'controlled','data/public_suffix/fixture.txt':b'controlled'}
         for name in package.MANDATORY-{'LICENSE_SCOPE.md'}:
@@ -202,13 +203,13 @@ class Guards(unittest.TestCase):
         self.assertNotIn('notices/__pycache__/private.pyc',source_payload)
         self.assertEqual(package.git('status','--porcelain'),b'')
     def test_private_tracked_report_is_refused_before_packaging(self):
-        files,_=self.fixture(private_path='docs/SESSION.md')
-        with self.assertRaisesRegex(ValueError,'Private working material'):
+        files,_=self.fixture(private_path='docs/LOCAL_NOTES.md')
+        with self.assertRaisesRegex(ValueError,'Unapproved publication path'):
             package.runtime_files(hashlib.sha256(files['LICENSE']).hexdigest(),'v0.78.0')
     def test_tracked_acceptance_receipt_is_refused_before_runtime_and_source_zip(self):
         receipt=json.dumps({'schema_version':1,'license_version':'1.1','license_sha256':'0'*64,'accepted_scope':'personal','accepted_at_utc':100}).encode()
         annotated=json.dumps({**json.loads(receipt),'context':'Controlled additional-context trap'}).encode()
-        for name,payload in [('docs/local-state.json',receipt),('assets/local-state.dat',annotated)]:
+        for name,payload in [('pages/local-state.json',receipt),('tools/reference/synthetic/local-state.dat',annotated)]:
             with self.subTest(path=name):
                 previous=self.root
                 # Each subtest owns a separate repository. The parent fixture
@@ -230,16 +231,16 @@ class Guards(unittest.TestCase):
     def test_original_reference_json_and_generated_receipt_source_remain_packagable(self):
         reference=json.dumps({'schema_version':1,'kind':'original-reference','license_sha256':'example','accepted_at_utc':0}).encode()
         generated=b'def make_controlled_fixture():\n    return {"schema_version":1,"license_version":"1.1","license_sha256":"controlled","accepted_scope":"personal","accepted_at_utc":100}\n'
-        files,commit=self.fixture(extra_files={'docs/reference.json':reference,'assets/receipt.json':b'{"kind":"original-fixture","pixels":[1,2,3]}','tools/receipt_fixture.py':generated})
+        files,commit=self.fixture(extra_files={'pages/reference.json':reference,'tools/reference/synthetic/receipt.json':b'{"kind":"original-fixture","pixels":[1,2,3]}','tools/receipt_fixture.py':generated})
         self.assertTrue(package.publication.check_receipts(commit))
         for label,args,prefix in [('runtime',[],'ChezCat'),('source',['--source'],'ChezCat-source')]:
             output=self.root/'results'/('public-reference-'+label+'.zip')
             argv=['build_release_bundle.py',*args,'--output',str(output),'--tag','v0.78.0','--approved-license-sha256',hashlib.sha256(files['LICENSE']).hexdigest()]
             with patch('sys.argv',argv),contextlib.redirect_stdout(io.StringIO()):self.assertEqual(package.main(),0)
             with zipfile.ZipFile(output) as archive:
-                self.assertEqual(archive.read(prefix+'/docs/reference.json'),reference)
+                self.assertEqual(archive.read(prefix+'/pages/reference.json'),reference)
                 if label=='source':
-                    self.assertEqual(archive.read(prefix+'/assets/receipt.json'),files['assets/receipt.json'])
+                    self.assertEqual(archive.read(prefix+'/tools/reference/synthetic/receipt.json'),files['tools/reference/synthetic/receipt.json'])
                     self.assertEqual(archive.read(prefix+'/tools/receipt_fixture.py'),generated)
     def test_receipt_content_detection_handles_encoding_and_stale_values(self):
         value={'schema_version':0,'license_version':'1.0','license_sha256':'stale','accepted_scope':'unknown','accepted_at_utc':None}
