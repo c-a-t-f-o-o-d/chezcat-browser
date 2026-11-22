@@ -8708,3 +8708,7 @@ mod attribute_clone_tests;
 #[cfg(test)]
 #[path="script_element_name_units_tests.rs"]
 mod element_name_units_tests;
+
+#[cfg(test)]
+#[path="script_attribute_filter_units_tests.rs"]
+mod attribute_filter_units_tests;
