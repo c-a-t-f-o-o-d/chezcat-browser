@@ -37,11 +37,12 @@ if(observer.takeRecords().length||shape.getAttribute('fill')!=='red'||shape.id!=
     let out = page.console_eval(
         &mut doc,
         &mut forms,
-        "shape.bindingValue='url(https://external-svg-properties.test/paint.svg#p)';",
+        "shape.bindingValue='url(https://external-svg-properties.test/paint.svg#p)';var records=observer.takeRecords();if(hits!==2||shape.getAttribute('fill')!=='url(https://external-svg-properties.test/paint.svg#p)'||records.length!==1||records[0].oldValue!=='blue')throw 'real inert SVG data';",
     );
-    assert_eq!(out.errors, 1, "{}", page.report());
-    assert_eq!(page.state.dom_commits, commits);
-    run(&mut doc,&mut forms,&mut page,"if(hits!==2||shape.getAttribute('fill')!=='blue'||observer.takeRecords().length)throw 'author setter preserves SVG resource refusal';");
+    assert_eq!(out.errors, 0, "{}", page.report());
+    assert_eq!(page.state.dom_commits, commits.map(|n|n+1));
+    run(&mut doc,&mut forms,&mut page,"var caught=false;try{document.getElementById('mount').appendChild(template.content);}catch(e){caught=e instanceof DOMException&&e.name==='NotSupportedError';}if(!caught||root.parentNode!==template.content||shape.ownerDocument!==owner||observer.takeRecords().length||document.getElementById('mount').childNodes.length)throw 'native activation remains refused';shape.bindingValue='blue';document.getElementById('mount').appendChild(template.content);if(hits!==3||shape.getAttribute('fill')!=='blue'||shape.ownerDocument!==document)throw 'safe activation recovers with same author binding';");
+    assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());let(a,b,c)=page.take_image_changes();assert!(a.is_empty()&&b.is_empty()&&c.is_empty());
 }
 #[test]
 fn svg_author_properties_clone_import_and_supported_promotion_keep_independent_state() {

@@ -742,6 +742,13 @@ impl Bridge<'_> {
                 _ => return Err(("TypeError", "insertBefore requires a node or null reference.".into())),
             }
         }
+        // A fragment can have changed since its native slots were reserved.
+        // Reuse the direct sink's current subtree/activation validation before
+        // the host transaction, so refusal is typed and publishes no prefix.
+        if let Some(Value::Host(source))=args.first(){
+            let children=self.inert_children(*source).ok_or(("NotSupportedError","Inert fragment source is unavailable.".into()))?;
+            for &child in children{self.validate_inert_direct_insertion(object,child,method,args)?;}
+        }
         Ok(())
     }
 
