@@ -291,7 +291,7 @@ fn single_byte_request_text_uses_the_same_indexes_and_retains_bom_override() {
             .unwrap(),
         "é"
     );
-    assert!(engine.decode_request_text(&[65], "replacement").is_err());
+    assert_eq!(engine.decode_request_text(&[65], "replacement").unwrap(), "\u{fffd}");
 }
 
 #[test]

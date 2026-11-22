@@ -285,3 +285,155 @@ var r=new XMLHttpRequest(),calls=0;r.overrideMimeType('text/plain; charset="wind
         "text/plain;charset=windows-1252"
     );
 }
+
+fn charset_js_string(value: &str) -> String {
+    use std::fmt::Write;
+    let mut source = String::from("\"");
+    for unit in value.encode_utf16() {
+        write!(&mut source, "\\u{unit:04x}").unwrap();
+    }
+    source.push('"');
+    source
+}
+
+fn start_charset_request(
+    doc: &mut Document,
+    forms: &mut Forms,
+    page: &mut Page,
+    override_mime: Option<&str>,
+) {
+    let override_source = override_mime
+        .map(|mime| format!("r.overrideMimeType({});", charset_js_string(mime)))
+        .unwrap_or_default();
+    run(doc, forms, page, &format!(r#"
+var r=new XMLHttpRequest(),charsetTrace='',charsetLoads=0,charsetErrors=0,charsetEnds=0,charsetLoaded=-1,charsetTotal=-1,charsetComputable=false;
+r.onreadystatechange=function(e){{if(!e.isTrusted||e.target!==r)throw 'native charset state event';charsetTrace+=r.readyState+';';}};
+r.onload=function(e){{if(!e.isTrusted||!(e instanceof ProgressEvent))throw 'native charset load';charsetLoads++;charsetLoaded=e.loaded;charsetTotal=e.total;charsetComputable=e.lengthComputable;charsetTrace+='load;';}};
+r.onerror=function(){{charsetErrors++;charsetTrace+='error;';}};
+r.onloadend=function(){{charsetEnds++;charsetTrace+='end;';}};
+r.open('GET','/charset');r.responseType='text';{override_source}r.send();
+"#));
+}
+
+fn complete_charset_response(
+    doc: &mut Document,
+    forms: &mut Forms,
+    page: &mut Page,
+    content_type: &str,
+    bytes: &[u8],
+) -> Outcome {
+    let request = page.take_native_request().expect("real queued charset request");
+    let response = crate::http::Response {
+        document_timing: None,
+        url: request.target.clone(),
+        redirected: false,
+        fragment: None,
+        status: 200,
+        status_text: "Original".into(),
+        encoded_body_bytes: bytes.len(),
+        protocol: Some("HTTP/1.1"),
+        request_is_post: false,
+        cookie_same_site: true,
+        headers: vec![
+            ("Content-Type".into(), content_type.into()),
+            ("Content-Length".into(), bytes.len().to_string()),
+        ],
+        body: bytes.to_vec(),
+        events: Vec::new(),
+    };
+    let retained = response.status_text.capacity()
+        + response.body.capacity()
+        + response.headers.capacity() * std::mem::size_of::<(String, String)>()
+        + response.headers.iter().map(|(name, value)| name.capacity() + value.capacity()).sum::<usize>()
+        + response.url.host.capacity()
+        + response.url.path.capacity()
+        + response.url.query.as_ref().map_or(0, String::capacity);
+    let (used, limit) = page.native_request_storage();
+    let storage = crate::script_storage::Lease::new(used, retained, limit).unwrap();
+    page.complete_native_request(doc, forms, crate::script_request_core::Completion {
+        epoch: 0,
+        request,
+        result: Ok(response),
+        _storage: Some(storage),
+    })
+}
+
+#[test]
+fn xhr_charset_response_and_override_precedence_reach_native_completion() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    let cases: &[(&str, Option<&str>, &[u8], &str)] = &[
+        ("text/plain;charset=windows-1252", None, &[65, 0x80], "A€"),
+        ("text/plain;charset=windows-1252", Some("text/plain"), &[65, 0x80], "A€"),
+        ("text/plain;charset=windows-1252", Some("not a MIME type"), &[65, 0x80], "A€"),
+        ("text/plain;charset=utf-8", Some("text/plain;charset=windows-1252"), &[65, 0x80], "A€"),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=utf-8"), &[0xc3, 0xa9], "é"),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=replacement"), b"no source text", "\u{fffd}"),
+        ("text/plain;charset=utf-8", Some("text/plain;charset=\" \tSHIFT_JIS \""), &[0x82, 0xa0], "あ"),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=unknown"), &[0xc3, 0xa9], "é"),
+        ("text/plain;charset=windows-1252", Some("text/plain;charset=\"\""), &[0xc3, 0xa9], "é"),
+        ("text/plain;charset=unknown", None, &[0xc3, 0xa9], "é"),
+        ("text/plain;charset=unknown", None, &[0x80, 65], "\u{fffd}A"),
+        ("text/plain;charset=\"\u{a0}windows-1252\"", None, &[0xc3, 0xa9], "é"),
+        ("not a MIME type", None, &[0xc3, 0xa9], "é"),
+        ("application/xml;charset=unknown", None, &[0xc3, 0xa9], "é"),
+    ];
+    for &(content_type, override_mime, bytes, expected) in cases {
+        start_charset_request(&mut doc, &mut forms, &mut page, override_mime);
+        let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, content_type, bytes);
+        assert_eq!(outcome.errors, 0, "{content_type}, {override_mime:?}: {}", page.report());
+        run(&mut doc, &mut forms, &mut page, &format!(r#"
+if(r.responseText!=={expected}||r.response!==r.responseText||r.status!==200||r.statusText!=='Original'||r.readyState!==4)throw 'charset native response';
+if(r.getResponseHeader('Content-Type')!=={content_type})throw 'override changed response header';
+if(charsetTrace!=='1;2;3;4;load;end;'||charsetLoads!==1||charsetErrors!==0||charsetEnds!==1)throw charsetTrace;
+if(charsetLoaded!=={length}||charsetTotal!=={length}||!charsetComputable)throw 'charset byte progress';
+"#, expected=charset_js_string(expected), content_type=charset_js_string(content_type), length=bytes.len()));
+        assert_eq!(page.native_request_pending_count(), 0);
+    }
+}
+
+#[test]
+fn xhr_charset_replacement_and_bom_preserve_response_bytes_events_and_empty_body() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    for label in ["csiso2022kr", "hz-gb-2312", "iso-2022-cn", "iso-2022-cn-ext", "iso-2022-kr", "replacement"] {
+        for &(bytes, expected) in &[
+            (&b"<script>not decoded</script>"[..], "\u{fffd}"),
+            (&b""[..], ""),
+            (&[0xef, 0xbb, 0xbf, 0xc3, 0xa9][..], "é"),
+            (&[0xff, 0xfe, 65, 0][..], "A"),
+            (&[0xfe, 0xff, 0, 65][..], "A"),
+        ] {
+            start_charset_request(&mut doc, &mut forms, &mut page, None);
+            let content_type = format!("text/plain;charset={label}");
+            let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, &content_type, bytes);
+            assert_eq!(outcome.errors, 0, "{label}: {}", page.report());
+            let trace = if bytes.is_empty() { "1;2;4;load;end;" } else { "1;2;3;4;load;end;" };
+            run(&mut doc, &mut forms, &mut page, &format!(r#"
+if(r.responseText!=={expected}||r.response!==r.responseText||r.status!==200)throw 'replacement native response';
+if(charsetTrace!=={trace:?}||charsetLoads!==1||charsetErrors!==0||charsetEnds!==1)throw charsetTrace;
+if(charsetLoaded!=={length}||charsetTotal!=={length}||charsetComputable!=={computable})throw 'replacement progress counts bytes';
+"#, expected=charset_js_string(expected), length=bytes.len(), computable=!bytes.is_empty()));
+            let received = page.state.xhr.records.last().unwrap().response.as_ref().unwrap();
+            assert_eq!(received.received_bytes, bytes.len() as u64);
+            assert_eq!(received.text, expected);
+            assert!(received.response.body.is_empty());
+        }
+    }
+}
+
+#[test]
+fn xhr_charset_output_refusal_never_delivers_success_and_fresh_request_recovers() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    start_charset_request(&mut doc, &mut forms, &mut page, None);
+    let limit = page.state.limits.host.string_bytes;
+    page.state.limits.host.string_bytes = 2;
+    let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, "text/plain;charset=replacement", b"unpublished");
+    page.state.limits.host.string_bytes = limit;
+    assert!(outcome.errors > 0, "output refusal must remain recorded");
+    assert!(page.report().contains("Native request response storage was refused."));
+    assert!(page.state.xhr.records.last().unwrap().response.is_none());
+    run(&mut doc, &mut forms, &mut page, "if(charsetLoads!==0||r.status!==0||r.responseText!==''||r.readyState!==4)throw 'refused charset published success';");
+    start_charset_request(&mut doc, &mut forms, &mut page, Some("text/plain"));
+    let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, "text/plain;charset=windows-1252", &[65, 0x80]);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    run(&mut doc, &mut forms, &mut page, "if(r.responseText!=='A\\u20ac'||charsetLoads!==1||charsetErrors!==0||charsetEnds!==1)throw 'fresh charset recovery';");
+}

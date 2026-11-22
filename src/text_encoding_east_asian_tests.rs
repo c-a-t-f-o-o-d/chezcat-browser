@@ -254,7 +254,7 @@ fn east_asian_shared_request_decoding_retains_bom_override_and_fetch_utf8() {
     assert_eq!(engine.decode_request_text(&[129, 34], "big5").unwrap(), "\u{fffd}\"");
     assert_eq!(engine.decode_body_utf8(&[164, 164]).unwrap(), "\u{fffd}\u{fffd}");
     assert_eq!(engine.decode_body_utf8(&[27, 36, 66, 36, 34]).unwrap(), "\u{1b}$B$\"");
-    assert!(engine.decode_request_text(&[65], "replacement").is_err());
+    assert_eq!(engine.decode_request_text(&[65], "replacement").unwrap(), "\u{fffd}");
 }
 
 #[test]
