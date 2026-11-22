@@ -58,11 +58,8 @@ var fragment=document.createDocumentFragment();fragment.appendChild(copy);docume
 fn dynamic_svg_resource_namespace_and_hierarchy_refusals_are_atomic() {
     let (mut doc, mut forms, mut page) = fixture();
     run(&mut doc,&mut forms,&mut page,"var ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),path=document.createElementNS(ns,'path'),use=document.createElementNS(ns,'use');path.setAttribute('d','M0 0 H1 V1 Z');use.setAttribute('href','#safe');");
+    run(&mut doc,&mut forms,&mut page,"for(var name of ['script','foreignObject','image','animate']){var data=document.createElementNS(ns,name),before=document.getElementById('target').childNodes.length;if(!(data instanceof SVGElement)||data.localName!==name||data.namespaceURI!==ns||data.ownerDocument!==document||data.parentNode!==null||data.isConnected)throw 'genuine opaque SVG data';var refused=false;try{document.getElementById('target').appendChild(data);}catch(e){refused=e instanceof DOMException&&e.name==='NotSupportedError';}if(!refused||data.parentNode!==null||data.ownerDocument!==document||document.getElementById('target').childNodes.length!==before)throw 'opaque SVG data does not grant native activation';}");
     for code in [
-        "document.createElementNS(ns,'script');",
-        "document.createElementNS(ns,'foreignObject');",
-        "document.createElementNS(ns,'image');",
-        "document.createElementNS(ns,'animate');",
         "document.createElementNS('urn:unrelated','xml:svg');",
         "path.setAttribute('onclick','forbidden()');",
         "use.setAttribute('href','https://unrequested.test/icon.svg#x');",

@@ -1954,11 +1954,13 @@ document.title='conversions-ok';
     fn namespaced_creation_unsupported_slices_do_not_allocate_or_queue_resources() {
         let(mut doc,mut forms,mut page,result)=start("var ns='http://www.w3.org/1999/xhtml';");assert_eq!(result.errors,0);
         let nodes=doc.nodes.len();let created=page.state.dom.created.clone();
-        for operation in ["document.createElementNS(null,'p:div');","document.createElementNS('','p:div');","document.createElementNS('http://www.w3.org/2000/svg','script');","document.createElementNS('urn:original','xml:img');","document.createElementNS(ns,'xmlns:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});"] {
+        for operation in ["document.createElementNS(null,'p:div');","document.createElementNS('','p:div');","document.createElementNS('urn:original','xml:img');","document.createElementNS(ns,'xmlns:div');","document.createElementNS(ns,'div',{});","document.createElementNS(ns,'div',{is:'original-custom'});"] {
             let result=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(result.errors,1,"{operation}: {}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
         }
+        let out=page.console_eval(&mut doc,&mut forms,"var inertScript=document.createElementNS('http://www.w3.org/2000/svg','script');if(!(inertScript instanceof SVGElement)||inertScript.localName!=='script'||inertScript.namespaceURI!=='http://www.w3.org/2000/svg'||inertScript.parentNode!==null||inertScript.isConnected)throw 'actual inert SVG data';var refused=false;try{document.body.appendChild(inertScript);}catch(e){refused=e instanceof DOMException&&e.name==='NotSupportedError';}if(!refused||inertScript.parentNode!==null||inertScript.ownerDocument!==document)throw 'SVG script data cannot activate';");
+        assert_eq!(out.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),nodes);assert_eq!(page.state.dom.created,created);assert!(!page.has_host_tasks());
         // Names valid under the current element rule now have real native data.
-        // Namespace/registry/resource refusals above still publish no nodes.
+        // Namespace/registry/activation refusals above still publish no native nodes.
         let out=page.console_eval(&mut doc,&mut forms,"var first=document.createElementNS(ns,'div=valid'),second=document.createElementNS(ns,'élement');if(first.localName!=='div=valid'||second.localName!=='élement'||first.namespaceURI!==ns||second.cloneNode().localName!=='élement')throw 'actual valid names';");
         assert_eq!(out.errors,0,"{}",page.report());
         assert!(super::super::script_attribute_names::validate_element_namespace(Some("urn:original"),"div=valid").is_ok());
