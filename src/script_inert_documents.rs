@@ -93,6 +93,7 @@ struct TemplateIndexGrowth {
 }
 
 struct DocumentNodes {
+    xml_interface:bool,
     kind:crate::html::DocumentKind,
     mode:crate::html::DocumentMode,
     content_type:&'static str,
@@ -301,7 +302,7 @@ impl Bridge<'_> {
         }
         if self.inert_parser(object) { return Some("DOMParser"); }
         Some(match &self.state.inert_documents.node(object)?.kind {
-            Kind::Document(doc)=>if doc.kind==crate::html::DocumentKind::Xml{"XMLDocument"}else{"Document"},
+            Kind::Document(doc)=>if doc.xml_interface{"XMLDocument"}else{"Document"},
             Kind::TemplateDocument { .. }=>"Document",
             Kind::Fragment { .. } => "DocumentFragment",
             Kind::Parsed { source, .. } => {
@@ -1208,7 +1209,7 @@ impl Bridge<'_> {
 
     pub(super) fn inert_clone_receiver(&self, object: u32) -> bool {
         self.state.inert_documents.node(object).is_some_and(|node| matches!(node.kind,
-            Kind::Document(_) | Kind::Fragment { .. } | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
+            Kind::Document(_) | Kind::TemplateDocument{..} | Kind::Fragment { .. } | Kind::Parsed { .. } | Kind::Element(_) | Kind::Text(_)
                 | Kind::ProcessingInstruction { .. } | Kind::Doctype(_)))
     }
 
@@ -1217,7 +1218,7 @@ impl Bridge<'_> {
     }
 
     fn clone_inert_tree_with_slots(&mut self, object: u32, deep: bool, reserve_slots: bool) -> Result<Value, String> {
-        if self.inert_document_children_receiver(object){return self.clone_inert_document(object,deep,reserve_slots);}
+        if self.inert_document(object){return self.clone_inert_document(object,deep,reserve_slots);}
         if let Some(data) = self.inert_text_value(object).filter(|_| reserve_slots && self.inert_node_type(object)==Some(3)) {
             let size = data.used_bytes();
             self.state.copies(size)?;
@@ -1554,6 +1555,9 @@ impl Bridge<'_> {
         Ok(handle)
     }
 
+    pub(in crate::scripting) fn create_generic_document(&mut self)->Result<Value,String>{
+        let first=FIRST_ENTRY.checked_add(u32::try_from(self.state.inert_documents.entries.len()).map_err(|_|"Document identity count overflow.")?).ok_or("Document identity overflow.")?;let url=script_clone_node::copy_text("about:blank")?;self.state.copies(url.len())?;let payload=url.capacity();let mut entries=Vec::new();entries.try_reserve_exact(2).map_err(|_|"Cannot stage generic Document.")?;entries.push(Entry::Node(InertNode{kind:Kind::Document(DocumentNodes{xml_interface:false,kind:crate::html::DocumentKind::Xml,mode:crate::html::DocumentMode::NoQuirks,content_type:"application/xml",url,base_url_override:None,implementation:first+1,doctype:None,html:None,head:None,body:None,title:String::new()}),owner:first,parent:None,children:Vec::new()}));entries.push(Entry::Implementation);let committed=self.reserve_inert_entries(2,payload,0)?;debug_assert_eq!(committed,first);self.state.inert_documents.entries.extend(entries);Ok(Value::Host(first))
+    }
     pub(super) fn create_inert_document(&mut self, args: &[Value]) -> Result<Value, String> {
         let title = match args.first() {
             None | Some(Value::Undefined) => None,
@@ -1593,7 +1597,7 @@ impl Bridge<'_> {
         entries.try_reserve_exact(count).map_err(|_| "Cannot stage inert document entries.")?;
         entries.extend([
             node(Kind::Document(DocumentNodes {
-                kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,content_type:"text/html",
+                xml_interface:false,kind:crate::html::DocumentKind::Html,mode:crate::html::DocumentMode::NoQuirks,content_type:"text/html",
                 implementation, doctype: Some(doctype), url: text_copy("about:blank")?, base_url_override:None, html:Some(html), head:Some(head), body:Some(body), title: normalized,
             }), None, links(&[doctype, html])?),
             Entry::Implementation,
@@ -1944,3 +1948,7 @@ fn template_node_can_park(node: &Node) -> bool {
 
 #[path="script_inert_replace.rs"]
 mod replacement;
+
+#[cfg(test)]
+#[path="script_generic_document_storage_tests.rs"]
+mod generic_document_storage_tests;

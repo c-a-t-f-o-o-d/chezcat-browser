@@ -239,7 +239,7 @@ impl Bridge<'_> {
         payload = payload.saturating_add(document_children.capacity() * size_of::<u32>());
         entries.push(node(
             Kind::Document(DocumentNodes {
-                kind:parsed.kind,mode:parsed.mode,content_type:"text/html",
+                xml_interface:false,kind:parsed.kind,mode:parsed.mode,content_type:"text/html",
                 implementation,
                 doctype,
                 url,base_url_override:None,
