@@ -17,6 +17,8 @@
 > HTTP 200, successful parsing, zero startup errors, or one green test does not
 > establish a working website or support for every version of a framework.
 
+[Homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Recent shared increments](#recent-shared-increments) · [Current scorecard](#current-scorecard) · [Measurement method](#measurement-method)
+
 ### Latest reviewed signed-out homepage checkpoint
 
 The latest reported signed-out homepage check used
@@ -28,10 +30,40 @@ PR #430 subsequently integrated at
 [`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c);
 no post-PR #430 live acceptance result is recorded.
 
-**Release candidate 0.82.0-alpha.2** includes integrated changes through
-`1de1f24`. Exact tagged checks, publication and downloaded-asset verification
-remain pending. The source changes and original fixtures do not convert the
-failed homepage checkpoint into a passing site result.
+**Tagged candidate 0.82.0-alpha.2** identifies source
+[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
+including integrated changes through PR #430 and release preparation in PR #431.
+Its [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+failed at the normal native-test stage; packages and publication were not reached.
+No alpha.2 release assets were published. The source changes and
+original fixtures do not convert the failed homepage checkpoint into a passing
+site result.
+
+### Recent shared increments
+
+| Integrated source | What was actually exercised | Evidence boundary |
+| :--- | :--- | :--- |
+| **Selected component path · PR #416** | Original App composition covers nested inert ownership, attribute preparation/import, styles, author/native ARIA forwarding, deferred observer/Promise jobs, icons, events, focus, typing and a native link. | This fixture models required calls for the selected noPatch path. It does not execute the matching deployed polyfill or demonstrate full native Custom Elements/Shadow DOM. [PR #416](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416) |
+| **Native base URLs · PR #429** | An original loopback App checks admitted and CSP-blocked bases, actual relative-image requests and pixels, preserved edited input and native link activation. | Existing HTTP(S) URL projection and 16 KiB bounds remain. Live main-document base mutation and wider schemes are outside this increment. [PR #429](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429) |
+| **DOM traversal bookkeeping · PR #430** | One original depth-16 fixture using an unmodified pinned polyfill completes the same 17 constructors/connections and 2,033,391 script entries. The single development timing pair is 24.583 s before and 22.595 s after the change. | Preliminary fixture evidence, without a performance guarantee or a new live-site pass. Script deadlines, upstream code and page configuration were unchanged. [PR #430](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/430) |
+| **Passive HTML/custom-host content · PR #433** | The PR records 49 focused affected checks, including an original App click → Promise → observer/Range/pixel update with neighboring editor and link checks; production compile and publication controls also passed. | Integrated at `ce464a4` after the alpha.2 tag. Newly created inert-leaf promotion was still incomplete at that revision; the Text increment below follows it. This is not a new website result. [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433) |
+| **New inert Text identities · PR #434** | The PR records 8 focused checks covering direct App activation, refusal/recovery, observers, Range, pixels and neighboring editor/link behavior. The affected selection retains 75 passes and corrects its 70,000-identity assertion for the two identity domains; production compile and publication controls pass. | Integrated at `117bbb5` after the alpha.2 tag. Native quota exhaustion retains atomic promotion refusal. General inert element creation and subtree clones remain outside this increment; no actual-site usability is claimed. [PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434) |
+| **Constructed inert HTML/SVG identities · PR #435** | The PR records 84 focused affected checks, including created HTML/style/SVG App pixels, a Promise-driven trusted click, preserved editor state and link hits, refusal/recovery, production compile and publication controls. | Integrated at `ad58c9a` after the alpha.2 tag. General inert subtree cloning remains incomplete; protected controls, late handlers and resource rules retain their checks. No new actual-site result is claimed. [PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435) |
+
+The current implementation priority is the **first usable signed-out shell**:
+complete known shared template/import, identity/ownership, mutation/observation,
+styling and input contracts in dependency order. A connected original App checks
+package integration; a site checkpoint checks the actual header, guide and search
+field when the known prerequisites are plausibly ready. Search/results, watch
+navigation/Back and playback remain later, separately measured stages. The
+[roadmap](ROADMAP.md) owns their order and [capabilities](CAPABILITIES.md) records
+what is implemented or still guarded.
+
+<details>
+<summary><strong>🧭 Earlier signed-out homepage observations</strong></summary>
+
+These records retain their original builds, inputs and first failures. They are
+not current-source failures unless a later measurement reproduces them.
 
 **Previous isolated development run.**
 
@@ -296,6 +328,8 @@ build and input identity. The selected page supplies `webcomponents-all-noPatch`
 with forced ShadyDOM/noPatch behavior, so native custom elements and complete
 Shadow DOM are not established prerequisites for this measured path.
 
+</details>
+
 **Earlier source snapshots (November 17–18, 2026).**
 
 This page retains the earlier evidence snapshot through source `a65d37c` on
@@ -320,20 +354,29 @@ retains its exact source-bound records and classification of 44 named families
 and formats; older records are not silently relabeled as newer runs. Source
 changes after this snapshot require their own rechecks.
 
-[Latest owner checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Current scorecard](#current-scorecard) · [Progression](#measured-progression)
+[Latest homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Current scorecard](#current-scorecard) · [Progression](#measured-progression)
 · [Method](#measurement-method) · [Historical evidence](#historical-evidence)
 
 ## Current scorecard
 
-The verified published baseline remains 0.82.0-alpha.1, tagged at `f2e1823`. The downloaded archives, publication metadata and extracted runtime passed their release checks. Candidate 0.82.0-alpha.2 awaits its own delivery checks. The framework results below come from development builds of the identified revisions; they have not been relabeled as alpha.2 results. The combined run used `067ac5e` and the integration baseline was `6089546`. [Release downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) · [Machine-readable records](compatibility.json)
+The verified downloadable baseline remains **0.82.0-alpha.1**, tagged at
+`f2e1823`; its downloaded archives, publication metadata and extracted runtime
+passed their release checks. Tagged candidate **0.82.0-alpha.2** at `14134ab`
+failed normal Windows qualification before publication and has no release assets.
+[Release history](RELEASING.md#published-baseline)
+
+The framework results below are the latest recorded results for each named
+workload, from the identified development revisions. They have not been rerun or
+relabeled as alpha.2 results. The combined run used `067ac5e`, and its integration
+baseline was `6089546`. See the [machine-readable records](compatibility.json).
 
 | Workload | Observed progress | Remaining boundary | Evidence |
 | :--- | :--- | :--- | :--- |
 | **Historical dev137 homepage and original script probes** | On clean dev137 (`1aeef14`), the main script decoded to 10,883,200 bytes and entered the engine. The homepage still showed two lines and three gray placeholders without a site header or search box. Forty of 43 scripts completed. On the earlier `ed0491f` offline App, computed opacity, substring selectors and escaped property names passed alongside seven controls. | On that build the application script stopped on a UTF-16 surrogate escape; two other scripts stopped on detached STYLE text assignment and the CSS work limit during an opacity read. These are historical failures; see the newer owner checkpoint above. | [Tested dev137 source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1aeef14cea5383b0bb8c894720b99a50ec05b836) |
-| **Web Components polyfills 2.8.1** | At `84274f5`, the pinned bundle assigns CSS text to a fresh detached STYLE element. All eleven independent offline controls pass. | The bundle stops at 125:228 when it calls `document.head.insertBefore` with that element. Component startup and its search control remain unverified on this build. | [Tested source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/84274f54738031a57003901caed0e35240975bcc) |
+| **Earlier Web Components polyfills 2.8.1 checkpoint** | At `84274f5`, the pinned bundle assigns CSS text to a fresh detached STYLE element. All eleven independent offline controls pass. | The bundle stops at 125:228 when it calls `document.head.insertBefore` with that element. Component startup and its search control remain unverified on this build. The later original component and traversal fixtures are recorded [above](#recent-shared-increments). | [Tested source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/84274f54738031a57003901caed0e35240975bcc) |
 | **Web Animations 2.3.2** | In the standard build, a trusted seek to 500 ms paints all 576 tested pixels with the expected midpoint color. The next-lite build changes all 3,456 opacity-tile pixels from white to gray to near-black at 0, 500 and 1,000 ms. The edited input survives both workflows. | Offline measurements used `a965b2b`. Public main at `e2dabcf` has the same tracked tree. Live signed-out behavior still needs a retest. | [Functional background colors, PR #141](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/141) · [Group opacity, PR #142](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/142) |
 | **Original compressed-script and Document probes** | On `e66b0ad`, an 8 MiB + 1 byte gzip script compiles and paints its marker. The 27-case script policy suite includes two exact 16 MiB cases covering parser and dynamic TLS loading. On `1ff9c51`, all six Document interface stages and seven App controls pass, including distinct main/child constructors and borrowed getters. | On that tested revision, a 16 MiB + 1 byte script was refused. This is not the current source allowance; see [current capacities](CAPABILITIES.md) and [execution limits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c/src/execution_limits.rs). These probes did not establish live shell, search or playback. | [Document, PR #121](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/121) and [script allowance, PR #122](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/122), merged into `main` at `83385ca`. |
-| **Original canvas rectangles and colors** | On `f53ab3e`, the 80×48 App passes all five drawing stages and nine controls for stable `getContext('2d')`, default-black `fillRect`, transparent `clearRect`, same-width reset and saved-context repaint. App pixel controls cover `object-fit: none` and `scale-down`. On `124686e`, all three color App stages pass, including trusted paint, the `#704040` alpha blend and reset. | The same binary's independent App paints and preserves its edited field, then stops at undefined `getImageData` at 28:18. Paths, transforms and export remain outside these measurements. The later signed-out homepage observation is recorded above. | [Rectangles, PR #125](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/125), integrated at `ca845b4`, and [solid colors, `124686e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/124686ee77f4a972a288aa46178cc2553e009dfe), integrated in `main` at `9610baf`. |
+| **Original canvas rectangles and colors** | On `f53ab3e`, the 80×48 App passes all five drawing stages and nine controls for stable `getContext('2d')`, default-black `fillRect`, transparent `clearRect`, same-width reset and saved-context repaint. App pixel controls cover `object-fit: none` and `scale-down`. On `124686e`, all three color App stages pass, including trusted paint, the `#704040` alpha blend and reset. | The same binary's independent App paints and preserves its edited field, then stops at undefined `getImageData` at 28:18. That older failure is preserved here; current source includes finite [RGBA pixel readback](CAPABILITIES.md). Paths, transforms and export remain outside these measurements. | [Rectangles, PR #125](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/125), integrated at `ca845b4`, and [solid colors, `124686e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/124686ee77f4a972a288aa46178cc2553e009dfe), integrated in `main` at `9610baf`. |
 | **Bootstrap 5.3.9 progress meter and action stack** | At 640 and 1280 px on `5298918`, the 240×16 meter matches the literal fill at 25% and 75%, with its caption on one line. At 640 px on `067ac5e`, the two 160×40 action links form one column. A trusted click changes the gap from 8 to 16 px. The second link receives its own trusted click. | In the separate 192 px column on `e11acce`, the fixed 64 px link stayed at the start for center and end. On `b4f35e4`, the focused grid fixture places start, center and end actions at their expected painted and clickable positions. Authored grid tracks and RTL alignment remain open. | [Implicit grid rows, PR #112](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/112) |
 | **jQuery 1.12.4 + Bootstrap 3.4.1** | At 1280×800 on `7608f4c`, W2 loads its pinned assets, paints the initial control and passes the deep radio-clone step. | Both `7608f4c` and `f2e1823` stop during initialization at 4743:4 while assigning the raw `onfocusin` attribute on a DIV. The dropdown, form and async stages remain blocked. | [Native radio clones, PR #115](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/115) |
 | **jQuery 4.0.0, separate input app** | At 1280×800 on integrated `067ac5e`, the application initializes, handles trusted input and displays its asynchronous timer update. | This case exercises the pinned input app. AJAX and Deferred have separate requirements. | [Workflow record](compatibility.json) |
@@ -361,7 +404,7 @@ The following rows preserve the initial measurements and carry their original re
 | **Bootstrap 5.3.9 + Popper 2.11.8, selector checkpoint** | The unchanged sample initializes and renders responsive cards at 1280/640 on selector candidate `02cd0f8`. | The first trusted click reaches missing `getComputedStyle` at 3734:21 before a menu choice. | [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) integrated in `main` at `991cba3`. The measurement retains candidate identity `02cd0f8`. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, computed-style checkpoint** | Measured feature build `63a2259` passes initialization, initial rendering and responsive layout at both widths. Its local and CI gates pass 2,657 normal tests and 25 journeys. | The first trusted click fails Popper's `node.toString()` at 1736:9 before a menu choice. | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrated in `main` at `5c21400`. Earlier source-bound observations remain in the catalogue. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, overflow checkpoint** | Measured `7b8a5fb` passes initialization, initial rendering and responsive layout at 1280/640. | The first trusted click reaches unsupported `assignedSlot` at 1979:7. The menu remains closed and the choice snapshot is absent. | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrated at `bf0c737`. The preceding `a82267e` observation is retained separately. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, Slottable/container checkpoint** | At 1280/640 on `13d7dae`, initialization/render/responsive layout pass, the menu visibly paints open, and its trusted amber-choice callback runs. | The menu stays visibly open after selection. The first microtask fault is computed `position` at 1990:5. Input remains failed, with 0/2 configurations passing. | [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) measurement `a6a2619` first reached `node.toString()` at 1736:9. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68)'s later candidate `13d7dae` supplies the partial interaction evidence, distinct from integrated `main` `5309a68` CI and published alpha.2. |
+| **Bootstrap 5.3.9 + Popper 2.11.8, Slottable/container checkpoint** | At 1280/640 on `13d7dae`, initialization/render/responsive layout pass, the menu visibly paints open, and its trusted amber-choice callback runs. | The menu stays visibly open after selection. The first microtask fault is computed `position` at 1990:5. Input remains failed, with 0/2 configurations passing. | [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) measurement `a6a2619` first reached `node.toString()` at 1736:9. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68)'s later candidate `13d7dae` supplies the partial interaction evidence, distinct from integrated `main` `5309a68` CI and published 0.81.0-alpha.2. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, computed-position checkpoint** | On measured `c74503c` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `offsetParent` at 1994:12. Input remains failed at both widths. | [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) integrates live computed `position` reads from the rendering cascade. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, offset-parent checkpoint** | On measured `96666d3` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `scrollLeft` at 3154:19. Input remains failed at both widths. | [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) integrates layout-backed `offsetParent` identities. |
 | **Bootstrap 5.3.9 + Popper 2.11.8, scroll-offset checkpoint** | Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. At 1280/640 the unchanged sample initializes, renders responsively, opens its menu and runs the trusted Amber choice. | The chosen menu remains visible. The first microtask fault is `offsetLeft` at 1927:10. Input remains failed at both widths. | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72) integrates at `main` `13f5cd4`. These captures retain feature source `e7be7cd`. Relative offset coordinates are the next capability after PR #71's offset-parent identities. |
@@ -371,10 +414,15 @@ The following rows preserve the initial measurements and carry their original re
 | **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
 
 **Status of a PR is not a new measurement.** The linked observations retain their
-actual source and executable identity even after integration. Published alpha.2
-is older than the later DOM/string/anchor/text-input/Event/CSS-variable changes.
+actual source and executable identity even after integration. The earlier
+published **0.81.0-alpha.2** predates the later DOM/string/anchor/text-input/Event/
+CSS-variable changes; it is distinct from the 0.82.0 release line.
 
 ## Measured progression
+
+This progression preserves earlier capability checkpoints. Its boundary column
+describes what each increment established at the time, rather than a current
+feature inventory; consult [capabilities](CAPABILITIES.md) for later coverage.
 
 | Shared capability | What changed | What it does not prove |
 | :--- | :--- | :--- |

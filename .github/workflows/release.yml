@@ -83,7 +83,7 @@ jobs:
         run: python tools/verify_offline.py
       - name: Public-safe native failure summary
         if: failure() && steps.normal.outcome == 'failure'
-        run: python tools/public_ci_summary.py --output results/verification/release-failure-summary.json --print
+        run: python tools/public_ci_summary.py --print
       - name: Package this exact tagged source and executable
         shell: pwsh
         run: |

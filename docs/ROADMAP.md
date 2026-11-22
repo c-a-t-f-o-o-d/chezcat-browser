@@ -22,28 +22,29 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
-| **Release candidate** | `0.82.0-alpha.2` includes integrated changes through [`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c). See the [change summary](../CHANGELOG.md). | Owner-requested preparation; exact tagged checks, publication and downloaded-asset verification remain pending |
+| **Failed validation candidate** | `0.82.0-alpha.2` identifies [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400), including integrated feature changes through `1de1f24` and release preparation. See the [change summary](../CHANGELOG.md). | [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) failed at normal native tests; no packages or release assets were published |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
-| **Public `main`** | Integrated development source beyond alpha.1; see [recent commits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commits/main/) and the [current capability boundaries](CAPABILITIES.md). A source change does not update a published binary or establish a new site result. | Coherent PRs after applicable development checks |
+| **Public `main`** | Integrated source beyond the alpha.2 tag includes passive HTML/custom-host content replacement in PR #433 (`ce464a4`) stable newly created inert Text identities in PR #434 (`117bbb5`), and supported inert HTML/SVG constructor identities in PR #435 (`ad58c9a`). See [recent commits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commits/main/) and [capability boundaries](CAPABILITIES.md). A source merge does not establish a new site result or update an old binary. | Coherent PRs after applicable development checks |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
 ```mermaid
-flowchart LR
-    BASE["Published 0.82.0-alpha.1"] --> DOM["DOM and resource loading"]
-    DOM --> URL["Shared browser capabilities"]
-    URL --> INPUT["Compressed scripts, Document and canvas rectangles"]
-    URL --> CSS["CSS variables and implicit grid rows"]
-    INPUT --> APPS["Signed-out video search and playback goal<br/>Existing framework checks"]
-    CSS --> APPS
-    APPS --> ISO["Sandboxed content processes<br/>Later readiness gate"]
-    APPS --> GPU["Measured GPU acceleration<br/>Later readiness gate"]
+flowchart TD
+    DOM["P1: shared component and DOM behavior"] --> SHELL["P2: visible shell and input"]
+    DOM --> DATA["P3: requests and response bodies"]
+    SHELL --> ROUTES["P4: query and route state"]
+    DATA --> ROUTES
+    SHELL --> RESULTS["P5: result resources and scrolling"]
+    ROUTES --> RESULTS
+    DATA --> MEDIA["P6: streaming and original decoders"]
+    ROUTES --> MEDIA
 ```
 
-This is a dependency and progress map, **not a calendar**. CSS and language/DOM
-work proceed alongside one another. The diagram does not require isolation to
-wait for complete framework or video support.
+This is a dependency and progress map, **not a calendar**. Shared prerequisites
+can move forward when the selected component path needs them. Isolation and GPU
+work keep their separate readiness gates; this diagram does not require either
+to wait for complete website or video support.
 
 > [!IMPORTANT]
 > **Owner-gated releases.** Completing a feature, merging a PR, or passing CI does
@@ -56,7 +57,7 @@ wait for complete framework or video support.
 
 ## Active & Upcoming Milestones
 
-**Legend:** ✅ **Merged** · 🟡 **Under review** · ◻️ **Next / planned** · 🧊 **Deferred**
+**Legend:** ✅ **Merged / verified scope** · 🟡 **Partial / active** · ◻️ **Next / planned** · 🧊 **Deferred**
 
 The next milestone is a usable signed-out YouTube header, guide and search field.
 The P1 package has integrated nested template content, live ParentNode views,
@@ -74,6 +75,9 @@ after PR #429. The page still showed the skeleton and the DOM walker reached its
 live acceptance result is recorded. A usable header, guide and search field
 remain unproved.
 
+<details>
+<summary><strong>Earlier homepage checkpoints</strong> — historical observations</summary>
+
 An earlier clean `fff35f8` run at November 21, 04:13 UTC completed all 43
 script executions and 61 callbacks without escaped errors but still rendered the
 skeleton and logged an opaque error object. No usable shell is demonstrated.
@@ -85,15 +89,46 @@ The November 20 owner checkpoint on clean development source `cffb9d1` decoded
 the main application script and completed 42 of 43 script executions, then stopped
 on missing `Range`; the page remained a skeleton. [PR #359](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/359)
 subsequently integrated a displayed-document Range subset. Its implementation
-checks are separate from a new live-site result. Continue the connected component,
-DOM, layout and input work, using the next measured first cause. The older dev137
+checks are separate from a new live-site result. The connected component,
+DOM, layout and input queue below supersedes those historical missing APIs. The older dev137
 surrogate/STYLE/CSS failures are historical observations. [Latest reviewed owner checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint)
+
+</details>
 
 The selected page uses its supplied Web Components polyfill. Native custom
 elements and complete Shadow DOM are broader capabilities, not established
 prerequisites for this selected first-shell path. Keep genuine DOM semantics and
 truthful feature detection. Search submission, results, watch navigation/Back
 and video/audio playback each require their own observed outcome.
+
+### Current product sequence
+
+The packages below connect the existing foundations to observable page behavior.
+They are **not percentages of a complete browser**, and an implemented API family
+does not close its corresponding site checkpoint.
+
+| State | Package | Integrated foundation | Remaining scope and completion criterion |
+| :--- | :--- | :--- | :--- |
+| ✅ / 🧊 | **P0 · Capacity stabilization** | Iterative flattening and selected compiler/runtime/DOM, compression, image, font, HTTP and media storage/count corrections are integrated. | The broad inventory remains deferred. Re-enter a related family for a demonstrated limit or correctness problem; [remaining policies](CAPABILITIES.md#remaining-capacity-correction) stay recorded rather than being declared unlimited. |
+| 🟡 Active | **P1 · Template preparation and stamping** | Nested inert templates, queries/attributes, supported clone/import/mutations, real observers, author properties, native focus and selected component fixtures. PR #433 adds passive HTML/custom-host content replacement; PR #434 preserves newly created inert Text identities, and PR #435 extends reservation to supported inert HTML/custom/style and SVG constructors. These are after the alpha.2 tag. | Finish remaining identity support for inert subtree cloning, inert-content/owner transitions and connected lifecycle/job behavior. Native quota exhaustion retains guarded direct-promotion refusal. A connected original App must create/update genuine controls and icons with preserved input, focus, observers and resource policy. |
+| 🟡 Partial | **P2 · Shell layout, CSSOM and interaction** | Shared sizing math, variables, viewport lengths, focus/hover/visibility/stacking, supported SVG geometry/paint and real CSSOM readback. | Finish the selected shell's remaining layout, measurement and input contracts. Demonstrate the actual signed-out header, guide and search field with usable keyboard/focus/click behavior and matching pixels/hit targets. |
+| 🟡 Partial | **P3 · Async requests and response bodies** | Real finite main-document text XHR, cancellation/progress, Headers and buffered Response values. | Implement the required Fetch/request/body/stream, response-type and CORS cases. Original App JSON/binary/cancel/policy checks and a selected site request must return actual data. |
+| 🟡 Partial | **P4 · History and route traversal** | Native primitive-state pushState/replaceState and same-document history share the App's real entries and URL. | Add the required object-state serialization, traversal/event behavior and route integration. Demonstrate query/results → watch → Back → a different query, with state and URL agreeing. |
+| ◻️ Planned | **P5 · Result resources, geometry and scrolling** | Existing original image/font decoders, supported responsive image selection, SVG and finite viewport geometry. | Combine actual result DOM/data with titles, supported thumbnails/icons, usable scrolling, hit targets and result selection. Broader image/font policy or formats are selected by that requirement. |
+| ◻️ Planned | **P6 · Media APIs and an original playback path** | Finite authored IVF/VP8 and Matroska/PCM playback, native controls and selected media interfaces. | Build the required object-URL/streaming/MSE behavior and one genuinely offered container/video/audio combination. Observe advancing organic video, audible synchronized output and pause/resume/seek with measured player/decode cost. |
+
+Within P1, complete the known related operation families before another ordinary
+first-shell run. Importing a copy and promoting an existing inert node are distinct
+contracts: neither can substitute for preserving the identities, observers, live
+Range boundaries and native resource authority required by the selected operation.
+Full native Custom Elements and Shadow DOM remain broader unfinished features,
+not prerequisites imposed on this polyfill-based checkpoint.
+
+Requests or history operations required during initialization can be brought
+forward from P3/P4 without abandoning first-shell priority. Focused development
+checks remain necessary throughout; connected App checks validate package
+composition, and live-site checks follow plausible milestone readiness or answer
+a specific unresolved runtime question.
 
 **Compression and fonts:** Brotli and WOFF2 remain shared compatibility work.
 All 15 responses in the reviewed run used gzip, so missing Brotli did not block
@@ -112,6 +147,9 @@ The original-code policy already applies to software decoding; the separate
 hardware-delegation decision below does not block that work.
 
 The parked framework records retain the raw `onfocusin` failure in legacy jQuery and the `contentEditable` read before ReactDOM mounted on their measured sources. ContentEditable reflection and finite grid item inline alignment have since merged; those implementation changes do not establish a new framework workflow result. [Source-bound scorecard](COMPATIBILITY.md)
+
+<details>
+<summary><strong>Earlier framework checkpoints</strong> — source-bound history</summary>
 
 Earlier snapshot: November 17, 2026, using public `main` at `e97dc85` and the linked PRs.
 DOM-06 includes measurements on `3456e67`, `5c89eea` and `5c22afd`. These changes
@@ -132,6 +170,8 @@ with paired DOM/pixels, responsive cards and zero script errors. A separate
 original native App probe on this source reaches missing `WeakMap` at 11:92.
 PR pages carry changing review and CI status. Branch-only results are not results
 for `main` or for the published 0.81.0-alpha.2 binary.
+
+</details>
 
 ### DOM — Shared page behavior
 
@@ -231,10 +271,17 @@ under verification; do not claim failed delivery succeeded. See
 ## Agent Execution Protocol
 
 > [!NOTE]
-> **One practical development cycle:** reproduce a concrete failure, implement
-> the shared fix, run focused affected and security-negative checks, inspect the
-> changed workflow, then submit and merge one PR. Start the next change from
-> updated main.
+> **One practical development cycle:** select a known missing contract in the
+> current package, implement its shared behavior, run focused affected and
+> security-negative checks, then submit and merge one coherent PR. Continue the
+> remaining package from updated main.
+
+A confirmed source gap can schedule implementation without waiting for a live
+exception. Keep the dependency queue explicit and skip already integrated work.
+Connected original App checks validate package boundaries. Run the live site when
+those prerequisites make the selected milestone plausibly ready, or to answer a
+specific runtime question that retained source and focused fixtures cannot resolve.
+Merging a PR does not by itself trigger another site run.
 
 Public feature branches should receive coherent, reviewable progress frequently.
 A named release is not required for a commit, PR, CI run, or development build.
@@ -285,7 +332,7 @@ for exclusions and the [changelog](../CHANGELOG.md) for source history.
 | Area | State & trigger |
 | :--- | :--- |
 | **Windows installation and updates** | Preserve one installer, About/license access, optional startup update check, “Check now,” and explicitly approved upgrade contracts. Portable ZIP remains the baseline; schedule after current browser foundations. |
-| **Broader media and service playback** | Preserve working finite media slices. Streaming, wider codecs, ordinary YouTube playback, and broader media interfaces remain separate unproved work. |
+| **Additional media profiles** | The selected service-playback path remains P6 in the active dependency sequence. Further codecs, containers and media interfaces beyond that evidenced path remain unscheduled; existing finite playback is preserved. |
 | **Extended web platform** | Wider Unicode, ES modules, networking APIs, storage, workers, frames, accessibility, DOM interfaces, and font/layout coverage are selected by demonstrated shared dependencies. |
 | **Additional element APIs** | VIDEO dimensions, Element.toggleAttribute, NamedNodeMap mutation, and other interfaces remain distinct contracts rather than implied framework support. |
 | **Agent status automation** | Deferred; no new screenshot watcher, heartbeat service, or restart supervisor in the compatibility phase. |

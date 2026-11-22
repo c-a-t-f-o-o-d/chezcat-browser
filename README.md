@@ -9,13 +9,13 @@
 *From network bytes to page pixels—networking, JavaScript, DOM, layout,
 rendering, and selected media decoding.*
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.2&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.2)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
 [![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
 [![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
 [![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 [![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
 
-**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.2)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
+**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
 
 </div>
 
@@ -47,6 +47,7 @@ tools still have their own roles and licensing obligations. See
 | 🖥️ **Native browser shell** | Tabs, multiple windows, link context actions, address search, bookmarks, settings, optional history, downloads, and About/build identity. |
 | 🧩 **Web platform** | Original HTML/DOM, a bounded JavaScript interpreter, events, CSS layout, and software painting. Compatibility is growing through shared fixes. |
 | 🔐 **Networking and trust** | Original HTTP(S), TLS/certificate handling, memory-only session cookies, redirects, and explicit resource/CSP boundaries. |
+| 🖼️ **Images and fonts** | Original raster decoders, supported GIF/APNG/WebP animation, static/inline SVG slices and TrueType/WOFF1 fonts. The [format matrix](docs/CAPABILITIES.md#image-and-font-formats) records supported families and exclusions. |
 | 🎞️ **Selected media** | Original constrained VP8, PCM audio, and Matroska paths with finite playback interfaces—not general streaming or working YouTube playback. |
 | 🧪 **Compatibility workloads** | Original regressions plus separate, unmodified legacy and modern framework fixtures. Loading, startup, rendering, input, and async results remain distinct. |
 
@@ -60,7 +61,8 @@ These are **implemented slices, not complete standards support**. The
 
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.2](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.2) | A published prerelease with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **The tagged alpha.2 attempt** | [🔬 Validation record](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) | Exact source `14134ab`; the normal Windows test stage failed. No alpha.2 release assets were published. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
@@ -69,14 +71,19 @@ These are **implemented slices, not complete standards support**. The
 > unchanged. Named releases are created only on explicit owner request; ordinary
 > commits, PRs, CI runs, and development builds do not require a release.
 
-**`0.82.0-alpha.2` is available for download.** All four published files match
+**`0.82.0-alpha.1` is the verified download.** All four published files match
 their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da62053c`.
 [Download and runtime checks](docs/RELEASING.md#published-baseline)
 
-**Release candidate `0.82.0-alpha.2`** consolidates the integrated changes through
-`1de1f24`. Its [source notes](CHANGELOG.md#0820-alpha2) describe the new scope;
-Windows release validation and verified publication are still pending. The
-published download above remains the verified baseline until delivery completes.
+**Tagged candidate `0.82.0-alpha.2`** identifies source
+`14134aba8ac2ab001c8ec13db77f68fa220b1400`, including the integrated changes through
+PR #430 and release preparation in PR #431. Its
+[source notes](CHANGELOG.md#0820-alpha2) describe the scope. The
+[Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
+stopped at the normal test stage; packaging and publication were not reached.
+**Alpha.2 is not a published download.** The tag remains fixed, and alpha.1 remains
+the verified downloadable baseline. See the [release record](docs/RELEASING.md#current-release-candidate)
+for the unresolved failure and recovery rules.
 
 Commit-identified development downloads and a possible `dev` channel remain
 roadmap items, not advertised delivery options. The CI badge reports source
@@ -84,7 +91,7 @@ privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
 
-*Snapshot: November 21, 2026 · integrated source `1de1f24`; release candidate
+*Snapshot: November 21, 2026 · tagged source `14134ab`; release candidate
 `0.82.0-alpha.2`.*
 
 | State | Improvement | Evidence and boundary |
@@ -98,6 +105,17 @@ privacy and configuration checks on the latest trusted push to main.
 | ✅ **Merged** | **Capacity and storage corrections** | Iterative flattening and checked compiler/runtime/DOM/resource storage remove selected independent count ceilings. Image, font, HTTP and media paths retain real format/output/work guards. |
 | ✅ **Merged** | **Faster development builds and test pages** | `build_dev.cmd` reuses incremental development artifacts; the home page adds test websites and original scenarios. Normal release optimization is preserved. |
 
+**After the alpha.2 tag:** [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433),
+integrated at `ce464a4`, adds passive HTML/custom-host `textContent` replacement
+with real mutation records, saved identities and native-control boundaries.
+[PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434), integrated at
+`117bbb5`, preserves newly created inert Text identities through direct promotion
+when native backing is available. [PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435)
+at `ad58c9a` extends reservation to supported inert HTML/custom/style and SVG
+constructors; general inert subtree cloning remains open. These increments require
+a newer development build. They are outside the alpha.2 candidate and do not
+establish a new website result.
+
 Earlier recorded **jQuery 4.0.0** app checks pass startup, trusted input and a timer update.
 Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
 updates. The pinned Bootstrap 5.3.9 dropdown passes trusted open, choice and close
@@ -109,11 +127,15 @@ The latest recorded signed-out YouTube check on `cad5f7c` still shows a skeleton
 and reaches a script deadline during DOM traversal. PR #430 improves one original
 traversal fixture; a usable YouTube homepage or playback has not been demonstrated.
 
-### Next: useful pages, then measured speed and stronger isolation
+### Next: a usable homepage, then search and playback
 
 | Now | Next foundations | Later, when ready |
 | :--- | :--- | :--- |
-| Shared DOM/events, JavaScript semantics, CSS variables/colors, and image/font/layout correctness. | Broader representative framework interactions and lightweight performance baselines. | Sandboxed content processes and measured GPU rendering with a software fallback. |
+| Complete the known template, DOM, component-activation and input contracts needed for a usable signed-out YouTube homepage. | Real query/results, watch navigation and Back, then advancing decoded video and audio through shared platform behavior. | Broader compatibility, measured performance, sandboxed content processes and GPU rendering with a software fallback. |
+
+Implement known missing contracts in dependency order, using focused checks during
+development and connected App fixtures at package boundaries. Live-site checks
+measure a plausibly ready milestone; a successful PR alone is not site acceptance.
 
 **[Explore the full roadmap →](docs/ROADMAP.md)** for milestone IDs, dependencies,
 completion evidence, and deferred work. Isolation and GPU acceleration are planned,
@@ -124,7 +146,7 @@ not implemented; they do not block the current compatibility work.
 ## Inside the engine
 
 ```mermaid
-flowchart LR
+flowchart TD
     INPUT["Network / local bytes"] --> PARSE["HTML + CSS parsing"]
     PARSE --> DOM["Document + styles"]
     JS["Original JavaScript + DOM APIs"] <--> DOM
@@ -139,6 +161,22 @@ boundaries. The implementation currently uses **one Windows process with worker
 threads**. See [architecture and boundaries](docs/ARCHITECTURE.md).
 
 ## Scope
+
+<details>
+<summary><strong>🖼️ Image formats and fonts</strong></summary>
+
+Supported decoder families include PNG/APNG, GIF, JPEG, WebP, TIFF, BMP,
+ICO/CUR, TGA, PCX, QOI and Netpbm, with format-specific boundaries and checked
+resource limits. The [image workshop](pages/image-workshop.html) demonstrates
+selected static and animated cases. Higher-depth samples convert to the browser's
+eight-bit RGBA output; this is not complete color-profile or HDR support.
+
+TrueType outlines and WOFF1 fonts have original parsing and rasterization.
+WOFF2/Brotli, CFF outlines and full text shaping remain gaps. AVIF, HEIF/HEIC and
+JPEG XL are not implemented. See the [format matrix](docs/CAPABILITIES.md#image-and-font-formats)
+for the supported variants and current limits.
+
+</details>
 
 <details>
 <summary><strong>🖥️ Browser, navigation, and resources</strong></summary>
@@ -225,11 +263,22 @@ Use `--license-scope organization` only with the required organizational authori
 Missing or changed-text acceptance blocks builds and ordinary execution; help and
 license viewing remain available.
 
+For repeated local development, use **`.\build_dev.cmd`** to reuse the incremental
+development cache. Use **`.\Build.cmd`** for normal optimization; the release
+workflow runs the complete qualification gates. Both write `ChezCat.exe`; run
+them sequentially. See the
+[development build settings](docs/BUILDING.md#faster-local-iteration).
+
 ### 3 · Run with the matching resources
 
 `Build.cmd` writes **`ChezCat.exe`** beside the project. Keep its accompanying
 pages, assets, trust data, and notices together. Rust and Python are development
 tools, not application runtime dependencies.
+
+When reporting a result, copy the full About/build information. The `dev` ordinal
+is derived from public Git history, so it can differ from the latest PR number;
+record the full source revision and clean/dirty state. Preserve any local changes
+and the executable identity when a dirty build needs exact reproduction.
 
 <details>
 <summary><strong>🧪 Verification and development checks</strong></summary>
