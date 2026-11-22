@@ -30,6 +30,16 @@ pub(super) struct Allocation { pub(super) id: usize, appended: bool }
 
 impl Runtime {
     #[cfg(test)]
+    pub(crate) fn leave_host_function_slots_for_test(&mut self, remaining: usize) {
+        assert!(self.limits.test_entry_arenas);
+        let target = self.limits.capacity.functions.checked_sub(remaining).unwrap();
+        assert!(self.function_arena.occupied <= target);
+        while self.function_arena.occupied < target {
+            self.allocate_host_function(0, "reservedForTest").unwrap();
+        }
+    }
+
+    #[cfg(test)]
     pub(super) fn retained_arena_bytes(&self) -> usize {
         fn bytes<T>(values: &Vec<T>) -> usize { values.capacity() * std::mem::size_of::<T>() }
         self.programs.iter().map(|program|program.retained_bytes.get()).sum::<usize>() + bytes(&self.programs) + bytes(&self.functions) + bytes(&self.function_properties) + bytes(&self.function_realms)

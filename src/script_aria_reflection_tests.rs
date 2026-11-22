@@ -148,7 +148,13 @@ fn aria_reflection_small_adversarial_function_profile_refuses_intrinsic_bootstra
     page.set_location(&origin);
     page.set_resource_base(&origin);
     assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
-    let result=page.console_eval(&mut doc,&mut forms,"var target=document.getElementById('target');target.ariaLabel='before';var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var rejectedConstructor=frame.contentWindow.Object;");
+    let setup = page.console_eval(&mut doc, &mut forms,
+        "var target=document.getElementById('target');target.ariaLabel='before';if(target.ariaLabel!=='before')throw 'main reflection';var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);");
+    assert_eq!(setup.errors, 0, "{}", page.report());
+    // Exercise a nearly full real arena regardless of how many unobserved
+    // prototype functions are still deferred. Keep the original 1,024 limit.
+    page.runtime.leave_host_function_slots_for_test(8);
+    let result = page.console_eval(&mut doc, &mut forms, "var rejectedConstructor=frame.contentWindow.Object;");
     assert_eq!(result.errors, 1, "{}", page.report());
     assert!(
         page.report().contains("Function limit reached (1024)"),
