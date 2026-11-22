@@ -44,17 +44,37 @@ fn custom_host_content_inert_import_promotion_and_ordinary_parent_remove_passive
 var template=document.createElement('template');template.innerHTML='<staged-card><nested-card>staged</nested-card></staged-card>';var staged=template.content.firstChild,owner=staged.ownerDocument;staged.textContent='inert';if(staged.textContent!=='inert'||staged.ownerDocument!==owner)throw 'inert native';var imported=document.importNode(template.content,true),copy=imported.firstChild;copy.textContent='imported';document.getElementById('ordinary').appendChild(imported);if(copy.ownerDocument!==document||copy.textContent!=='imported')throw 'import owner';var reservable=document.createElement('template');reservable.innerHTML='<promoted-card>reserved</promoted-card>';var promoted=reservable.content.firstChild;document.body.appendChild(reservable.content);promoted.textContent='promoted';if(promoted.ownerDocument!==document||promoted.firstChild.data!=='promoted')throw 'promoted alias';var old=copy;document.getElementById('ordinary').textContent='replacement';if(old.parentNode!==null||old.textContent!=='imported'||document.getElementById('ordinary').firstChild.data!=='replacement')throw 'ordinary parent passive custom retirement';
 "#,
     );
-    // Newly constructed inert leaf identities still require a separate genuine
-    // materialization increment. A refusal must not publish a partial tree.
+    run(&mut doc,&mut forms,&mut page,"var savedLeaf=staged.firstChild;document.body.appendChild(template.content);if(staged.ownerDocument!==document||staged.firstChild!==savedLeaf||savedLeaf.ownerDocument!==document||savedLeaf.data!=='inert'||!savedLeaf.isConnected||template.content.firstChild!==null)throw 'stable new leaf promotion';");
+}
+
+#[test]
+fn inert_leaf_identity_replacement_creation_clone_observers_and_range() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var template=document.createElement('template');template.innerHTML='<leaf-card>old</leaf-card>';var root=template.content.firstChild,owner=root.ownerDocument,old=root.firstChild,list=root.childNodes,obs=new MutationObserver(function(){});obs.observe(root,{childList:true,subtree:true,characterData:true,characterDataOldValue:true});root.textContent='new';var leaf=root.firstChild;leaf.authorMarker=17;var records=obs.takeRecords();if(records.length!==1||records[0].addedNodes[0]!==leaf||records[0].removedNodes[0]!==old||leaf.ownerDocument!==owner||list[0]!==leaf)throw 'inert record identity';leaf.data='new text';var made=owner.createTextNode('made'),copy=made.cloneNode(true);if(made===copy||copy.data!=='made'||copy.ownerDocument!==owner)throw 'new inert clone';root.appendChild(made);root.appendChild(copy);obs.takeRecords();var dest=document.getElementById('ordinary'),range=new Range();range.selectNodeContents(dest);range.collapse(false);var destObs=new MutationObserver(function(){});destObs.observe(dest,{childList:true});dest.appendChild(template.content);var added=destObs.takeRecords();if(added.length!==1||added[0].addedNodes[0]!==root||root.firstChild!==leaf||leaf.authorMarker!==17||list[0]!==leaf||list[1]!==made||list[2]!==copy||leaf.ownerDocument!==document||made.ownerDocument!==document||copy.ownerDocument!==document||!leaf.isConnected||old.parentNode!==null||old.ownerDocument!==owner||range.startContainer!==dest||range.startOffset!==0)throw 'native identity activation';leaf.data='live';var changed=obs.takeRecords();if(changed.length!==1||changed[0].target!==leaf||changed[0].oldValue!=='new text'||root.textContent!=='livemademade')throw 'promoted observer';range.selectNodeContents(leaf);range.setStart(leaf,2);leaf.data='li';if(range.startContainer!==leaf||range.startOffset!==0||range.endOffset!==0)throw 'promoted range';
+"#);
+}
+
+#[test]
+fn inert_leaf_identity_native_quota_fallback_and_retained_refusal_are_atomic() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc,&mut forms,&mut page,"var t=document.createElement('template');t.innerHTML='<fallback-card>old</fallback-card>';var root=t.content.firstChild,old=root.firstChild,obs=new MutationObserver(function(){});obs.observe(root,{childList:true});");
+    let limit = page.state.retained_limit;
     let before = (doc.nodes.len(), page.state.dom_commits);
-    let out = page.console_eval(
-        &mut doc,
-        &mut forms,
-        "document.body.appendChild(template.content);",
-    );
-    assert_eq!(out.errors, 1, "{}", page.report());
-    assert_eq!((doc.nodes.len(), page.state.dom_commits), before);
-    run(&mut doc,&mut forms,&mut page,"if(staged.ownerDocument!==owner||staged.textContent!=='inert'||template.content.firstChild!==staged)throw 'unreserved leaf promotion changed tree';");
+    page.state.retained_limit = page.state.retained;
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"root.textContent='blocked';").errors,1);
+    assert_eq!((doc.nodes.len(), page.state.dom_commits),before);
+    page.state.retained_limit = limit;
+    run(&mut doc,&mut forms,&mut page,"if(root.firstChild!==old||old.parentNode!==root||obs.takeRecords().length)throw 'failed replacement publication';");
+    let node_limit = page.state.node_limit;
+    page.state.node_limit = doc.nodes.len();
+    run(&mut doc,&mut forms,&mut page,"root.textContent='staged';var saved=root.firstChild,owner=saved.ownerDocument,records=obs.takeRecords();if(records.length!==1||records[0].addedNodes[0]!==saved||records[0].removedNodes[0]!==old)throw 'fallback observer identity';");
+    assert_eq!(doc.nodes.len(),before.0);
+    page.state.node_limit = node_limit;
+    let before = (doc.nodes.len(), page.state.dom_commits);
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"document.body.appendChild(t.content);").errors,1);
+    assert_eq!((doc.nodes.len(), page.state.dom_commits),before);
+    run(&mut doc,&mut forms,&mut page,"if(root.firstChild!==saved||saved.ownerDocument!==owner||saved.data!=='staged'||obs.takeRecords().length)throw 'fallback promotion remapped';root.textContent='recovered';var fresh=root.firstChild;document.body.appendChild(t.content);if(root.firstChild!==fresh||fresh.ownerDocument!==document||fresh.data!=='recovered'||saved.parentNode!==null||saved.ownerDocument!==owner)throw 'fresh job recovery';");
 }
 #[test]
 fn custom_host_content_protected_controls_and_resources_refuse_without_publication() {

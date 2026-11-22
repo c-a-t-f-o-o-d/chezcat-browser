@@ -14,6 +14,40 @@ fn backing(arena: &Arena) -> usize {
 }
 
 #[test]
+fn inert_leaf_identity_joint_storage_copy_refusal_and_paid_native_slot() {
+    let (mut doc, mut forms, mut page) = page("<html><body></body></html>");
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let Value::Host(owner) = bridge.create_inert_document(&[]).unwrap() else { panic!("owner") };
+    let snapshot = |bridge: &Bridge<'_>| (
+        bridge.state.retained, bridge.doc.nodes.len(), bridge.doc.nodes.capacity(),
+        bridge.state.inert_documents.backing_bytes(), bridge.state.node_state_bytes(),
+        bridge.state.node_sets_storage_bytes(), bridge.state.inert_documents.entries.len(),
+        bridge.state.inert_documents.generated.len(), bridge.state.inert_documents.adopted.len(),
+    );
+    let before = snapshot(&bridge);
+    let limit = bridge.state.retained_limit;
+    bridge.state.retained_limit = bridge.state.retained;
+    assert!(bridge.append_inert_text(owner, None, "payload".into(), 0).is_err());
+    assert_eq!(snapshot(&bridge), before);
+    bridge.state.retained_limit = limit;
+    bridge.state.copy_work = 0;
+    assert!(bridge.append_inert_text(owner, None, "payload".into(), 0).is_err());
+    assert_eq!(snapshot(&bridge), before);
+    bridge.state.copy_work = bridge.state.limits.copy_bytes;
+    let text = String::from("payload");
+    let payload = text.capacity() + size_of::<Node>() + 2 * size_of::<usize>();
+    let handle = bridge.append_inert_text(owner, None, text, 0).unwrap();
+    let after = snapshot(&bridge);
+    assert_eq!(node_index(handle), Some(before.1));
+    assert_eq!(after.1, before.1 + 1);
+    assert_eq!(after.0 - before.0, payload + (after.2-before.2)*size_of::<Node>()
+        + after.3-before.3 + after.4-before.4 + after.5-before.5);
+    assert_eq!(bridge.state.inert_documents.node(handle).unwrap().owner, owner);
+    assert_eq!(bridge.inert_text_value(handle), Some("payload"));
+    assert!(!bridge.state.dom.connected[before.1]);
+}
+
+#[test]
 fn browser_inert_storage_seventy_thousand_parsers_and_leaf_identities_keep_owners() {
     for parsers in [true, false] {
         let (mut doc, mut forms, mut page) = page("<html><body></body></html>");
@@ -26,14 +60,23 @@ fn browser_inert_storage_seventy_thousand_parsers_and_leaf_identities_keep_owner
         let initial = bridge.state.inert_documents.entries.len();
         let mut first = None;
         let mut last = 0;
+        let mut identities = std::collections::HashSet::new();
+        let mut native_previous = None;
+        let mut inert_previous = None;
         for _ in 0..70_000 {
             let Value::Host(handle) = (if let Some(owner) = owner {
                 bridge.inert_create_node(owner, "createTextNode", &[Value::String("x".into())])
             } else { bridge.create_dom_parser() }).unwrap() else { panic!("native handle") };
             first.get_or_insert(handle);
             last = handle;
+            assert!(identities.insert(handle), "new leaf reused an identity");
+            let previous = if handle < FIRST_ENTRY { &mut native_previous } else { &mut inert_previous };
+            if let Some(old) = *previous { assert_eq!(handle, old + 1); }
+            *previous = Some(handle);
         }
-        assert_eq!(last - first.unwrap(), 69_999);
+        assert_eq!(identities.len(), 70_000);
+        if parsers { assert_eq!(last - first.unwrap(), 69_999); }
+        else { assert!(native_previous.is_some(), "available native slots were not reserved"); }
         assert!(last < ENTRY_END);
         assert_eq!(bridge.state.inert_documents.entries.len(), initial + 70_000);
         assert!(bridge.state.retained >= before + backing(&bridge.state.inert_documents));
