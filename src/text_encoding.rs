@@ -1,6 +1,12 @@
-//! Original bounded text/binary conversion. UTF-8, UTF-16LE/BE and Windows-1252
-//! decoding includes streaming fragments, BOM handling and fatal errors. No
+//! Original bounded text/binary conversion. Unicode, legacy single-byte and
+//! x-user-defined decoding includes streaming, BOM handling and fatal errors. No
 //! platform codec, network, filesystem or device capability is used here.
+
+#[path = "text_encoding_single_byte.rs"]
+mod single_byte;
+#[cfg(test)]
+#[path = "text_encoding_single_byte_tests.rs"]
+mod single_byte_tests;
 
 use super::{
     binary_data::Kind as BinaryKind, Builtin, Declaration, Fault, Host, NativeGetter, Ordinary,
@@ -12,7 +18,8 @@ enum Encoding {
     Utf8,
     Utf16Le,
     Utf16Be,
-    Windows1252,
+    SingleByte(single_byte::SingleByte),
+    UserDefined,
 }
 impl Encoding {
     fn name(self) -> &'static str {
@@ -20,7 +27,8 @@ impl Encoding {
             Self::Utf8 => "utf-8",
             Self::Utf16Le => "utf-16le",
             Self::Utf16Be => "utf-16be",
-            Self::Windows1252 => "windows-1252",
+            Self::SingleByte(encoding) => encoding.name(),
+            Self::UserDefined => "x-user-defined",
         }
     }
     fn label(label: &str) -> Option<Self> {
@@ -30,12 +38,8 @@ impl Encoding {
             "unicodefffe" | "utf-16be" => Some(Self::Utf16Be),
             "csunicode" | "iso-10646-ucs-2" | "ucs-2" | "unicode" | "unicodefeff" | "utf-16"
             | "utf-16le" => Some(Self::Utf16Le),
-            "ansi_x3.4-1968" | "ascii" | "cp1252" | "cp819" | "csisolatin1" | "ibm819"
-            | "iso-8859-1" | "iso-ir-100" | "iso8859-1" | "iso88591" | "iso_8859-1"
-            | "iso_8859-1:1987" | "l1" | "latin1" | "us-ascii" | "windows-1252" | "x-cp1252" => {
-                Some(Self::Windows1252)
-            }
-            _ => None,
+            "x-user-defined" => Some(Self::UserDefined),
+            _ => single_byte::SingleByte::from_label(label).map(Self::SingleByte),
         }
     }
 }
@@ -97,14 +101,6 @@ impl Roots {
         for id in [self.encoder, self.decoder].into_iter().flatten() { add(super::function_reachability::Edge::Object(id)); }
     }
 }
-
-// The Windows-1252 C1 table is normative code-point data, not implementation
-// code. Its five legacy undefined positions decode to their control values.
-const WINDOWS_C1: [u16; 32] = [
-    0x20ac, 0x0081, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039,
-    0x0152, 0x008d, 0x017d, 0x008f, 0x0090, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
-    0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x009d, 0x017e, 0x0178,
-];
 
 enum Scalar {
     Character(char, usize),
@@ -325,8 +321,9 @@ impl Runtime {
                 let label = label
                     .trim_matches(|ch| matches!(ch, '\t' | '\n' | '\u{c}' | '\r' | ' '))
                     .to_ascii_lowercase();
-                let encoding = Encoding::label(&label).ok_or_else(|| Fault::exception("RangeError",
-                    "TextDecoder supports UTF-8, UTF-16LE/BE and Windows-1252 labels in this subset."))?;
+                let encoding = Encoding::label(&label).ok_or_else(|| {
+                    Fault::exception("RangeError", "TextDecoder does not support this encoding label.")
+                })?;
                 Data::Decoder(Decoder {
                     encoding,
                     fatal: options[0],
@@ -486,14 +483,18 @@ impl Runtime {
                 Encoding::Utf16Le | Encoding::Utf16Be => {
                     utf16_scalar(&bytes[at..], decoder.encoding == Encoding::Utf16Le, stream)
                 }
-                Encoding::Windows1252 => {
+                Encoding::SingleByte(encoding) => match encoding.decode(bytes[at]) {
+                    Some(character) => Scalar::Character(character, 1),
+                    None => Scalar::Invalid(1),
+                },
+                Encoding::UserDefined => {
                     let byte = bytes[at];
-                    let value = if (128..160).contains(&byte) {
-                        WINDOWS_C1[usize::from(byte - 128)]
+                    let value = if byte < 0x80 {
+                        u32::from(byte)
                     } else {
-                        u16::from(byte)
+                        0xf780 + u32::from(byte - 0x80)
                     };
-                    Scalar::Character(char::from_u32(u32::from(value)).unwrap(), 1)
+                    Scalar::Character(char::from_u32(value).unwrap(), 1)
                 }
             };
             let (character, consumed) = match scalar {
@@ -522,7 +523,11 @@ impl Runtime {
                 }
             };
             at += consumed;
-            if decoder.encoding != Encoding::Windows1252 && !decoder.ignore_bom && !decoder.bom_seen
+            if matches!(
+                decoder.encoding,
+                Encoding::Utf8 | Encoding::Utf16Le | Encoding::Utf16Be
+            ) && !decoder.ignore_bom
+                && !decoder.bom_seen
             {
                 decoder.bom_seen = true;
                 if character == '\u{feff}' {
