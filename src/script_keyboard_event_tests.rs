@@ -1,8 +1,11 @@
 //! Original native/constructed keyboard identity, conversion and dispatch controls.
 use super::*;
 fn fixture(source:&str)->(Document,Forms,Page){
+    fixture_with_limits(source,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+fn fixture_with_limits(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page){
     let mut doc=crate::html::parse("<html><body><div id=parent><input id=field value=original></div></body></html>");
-    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::for_test();
+    doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::with_limits(limits);
     page.set_location(&crate::navigation::address("https://keyboard-event.test/control",&crate::navigation::Location::home()).unwrap());
     assert_eq!(page.start(&mut doc,&mut forms,&[Script{node:0,label:"Original genuine KeyboardEvent".into(),source:source.into()}]).errors,0,"{}",page.report());(doc,forms,page)
 }
@@ -71,7 +74,7 @@ var e=new KeyboardEvent('separate',{key:'real',ctrlKey:true});if(rejected!==2||c
 
 #[test]
 fn keyboard_event_owner_realms_saved_constructor_and_origin_guards(){
-    let(mut doc,mut forms,mut page)=fixture(r#"
+    let(mut doc,mut forms,mut page)=fixture_with_limits(r#"
 var C=KeyboardEvent,P=C.prototype,rootGet=Object.getOwnPropertyDescriptor(P,'key').get;
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,Child=w.KeyboardEvent,ChildP=Child.prototype,ChildFunction=w.Function;
 var make=ChildFunction('return new KeyboardEvent("child",{key:"child",view:window});'),read=ChildFunction('e','return e.key;');
@@ -82,7 +85,7 @@ if(rootGet.call(saved)!=='saved'||Object.getPrototypeOf(saved)!==P||saved.constr
 window.KeyboardEvent=C;
 var touched=0,foreignType={toString:function(){touched++;return 'foreign';}},options={get key(){touched++;return 'foreign';}};
 var own=ChildFunction('var e=new KeyboardEvent("own",{key:"child",view:window});return e.key==="child"&&e.view===window;');
-"#);
+"#,crate::javascript::limits::BROWSER);
     page.set_location(&crate::navigation::address("https://different-keyboard.test/changed",&crate::navigation::Location::home()).unwrap());
     for source in ["new w.KeyboardEvent(foreignType,options);","new Child(foreignType,options);","read(root);","get.call(root);","rootGet.call(child);"]{
         page.clear_console();let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}\n{}",page.report());assert!(page.report().contains("same-origin"),"{source}\n{}",page.report());

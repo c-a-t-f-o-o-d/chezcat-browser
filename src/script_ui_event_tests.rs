@@ -21,10 +21,13 @@ fn ui_event_shared_registry_work_refusal_is_prepublication_and_recovers() {
 }
 
 fn fixture(source:&str)->(Document,Forms,Page) {
+    fixture_with_limits(source,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+fn fixture_with_limits(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page){
     let mut doc=crate::html::parse("<html><head></head><body><div id=parent><button id=button type=button>Run</button></div></body></html>");
     doc.scripting_enabled=true;
     let mut forms=Forms::new(&doc);
-    let mut page=Page::for_test();
+    let mut page=Page::with_limits(limits);
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://example.test/page").unwrap().0),path:None,root:None,fragment:String::new()});
     let outcome=page.start(&mut doc,&mut forms,&[Script {node:0,label:"Original genuine UIEvent control".into(),source:source.into()}]);
     assert_eq!(outcome.errors,0,"{}",page.report());
@@ -130,7 +133,7 @@ var converted=0,foreignInit={get detail(){converted++;return {valueOf:function()
 
 #[test]
 fn ui_event_canonical_owner_realms_saved_globals_and_child_clock_are_genuine() {
-    let (mut doc,mut forms,mut page)=fixture("");
+    let (mut doc,mut forms,mut page)=fixture_with_limits("",crate::javascript::limits::BROWSER);
     page.state.clock_origin=Instant::now().checked_sub(Duration::from_secs(3600)).unwrap();
     evaluate(&mut page,&mut doc,&mut forms,r#"
 var C=UIEvent,P=C.prototype,RootFunction=Function,frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
@@ -153,14 +156,14 @@ delete window.UIEvent;if(typeof UIEvent!=='undefined'||Object.getPrototypeOf(new
 
 #[test]
 fn ui_event_foreign_fresh_cached_constructors_getters_and_methods_stop_before_coercion() {
-    let (mut doc,mut forms,mut page)=fixture(r#"
+    let (mut doc,mut forms,mut page)=fixture_with_limits(r#"
 var main=new UIEvent('kept',{detail:29,view:window}),get=Object.getOwnPropertyDescriptor(UIEvent.prototype,'detail').get,init=main.initUIEvent;
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,ChildC=w.UIEvent,ChildP=ChildC.prototype,ChildFunction=w.Function;
 var read=ChildFunction('e','return e.initUIEvent;'),getSaved=ChildFunction('e','g','return g.call(e);'),initSaved=ChildFunction('e','f','t','return f.call(e,t);');
 var childOwn=ChildFunction('childView','var event=new UIEvent("child-owned",{detail:37,view:childView});return event.detail===37&&event.view===childView&&event instanceof UIEvent;');
 if(read(main)!==init||getSaved(main,get)!==29)throw 'same-origin real cached access';
 var converted=0,type={toString:function(){converted++;return 'converted';}},options={get detail(){return {valueOf:function(){converted++;return 31;}};},get view(){converted++;return window;}};
-"#);
+"#,crate::javascript::limits::BROWSER);
     let count=page.state.created_events.len();
     page.set_location(&crate::navigation::Location {url:Some(crate::url::parse("https://other.test/").unwrap().0),path:None,root:None,fragment:String::new()});
     for source in ["new w.UIEvent(type,options);","new ChildC(type,options);","read(main);","getSaved(main,get);","initSaved(main,init,type);"] {

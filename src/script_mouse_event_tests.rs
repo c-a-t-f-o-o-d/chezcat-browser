@@ -2,10 +2,13 @@
 use super::*;
 
 fn fixture(source: &str) -> (Document, Forms, Page) {
+    fixture_with_limits(source,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+fn fixture_with_limits(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page){
     let mut doc = crate::html::parse("<html><head></head><body><div id=parent><button id=button type=button>Run</button></div></body></html>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
+    let mut page = Page::with_limits(limits);
     page.set_location(&crate::navigation::Location {
         url: Some(crate::url::parse("https://example.test/page").unwrap().0),
         path: None, root: None, fragment: String::new(),
@@ -115,7 +118,7 @@ reads='';denied=false;try{new MouseEvent('foreign-view',{get detail(){reads+='D'
 
 #[test]
 fn mouse_event_canonical_owner_realms_saved_foreign_operations_and_owner_clock_are_real() {
-    let (mut doc, mut forms, mut page) = fixture("");
+    let (mut doc, mut forms, mut page) = fixture_with_limits("",crate::javascript::limits::BROWSER);
     page.state.clock_origin = Instant::now().checked_sub(Duration::from_secs(3600)).unwrap();
     evaluate(&mut page, &mut doc, &mut forms, r#"
 var C=MouseEvent,P=C.prototype,RootFunction=Function;

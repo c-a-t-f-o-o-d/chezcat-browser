@@ -123,7 +123,7 @@ fn dispatched_base_event_fresh_and_cached_foreign_reads_deny_before_author_gette
     for cached in [false, true] {
         let prefix = if cached { "e.marker='cached';" } else { "" };
         let source = format!("var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,read=w.Function('e','return e.probe;'),observed=0;Object.defineProperty(Event.prototype,'probe',{{get:function(){{observed++;return 7;}}}});document.getElementById('button').onclick=function(e){{{prefix}read(e);document.title='foreign leaked';}};");
-        let (mut doc, mut forms, mut page) = fixture(&source);
+        let (mut doc, mut forms, mut page) = fixture_with_limits(&source,crate::javascript::limits::BROWSER);
         page.set_location(&crate::navigation::Location {
             url: Some(crate::url::parse("https://other.test/").unwrap().0),
             path: None, root: None, fragment: String::new(),

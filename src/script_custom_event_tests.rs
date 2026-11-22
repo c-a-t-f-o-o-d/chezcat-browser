@@ -2,10 +2,13 @@
 use super::*;
 
 fn page(source: &str) -> (Document, Forms, Page) {
+    page_with_limits(source,crate::javascript::limits::CAPACITY_REGRESSION)
+}
+fn page_with_limits(source:&str,limits:crate::javascript::limits::Limits)->(Document,Forms,Page){
     let mut doc = crate::html::parse("<html><head></head><body><div id=parent><button id=button type=button>Run</button></div></body></html>");
     doc.scripting_enabled = true;
     let mut forms = Forms::new(&doc);
-    let mut page = Page::for_test();
+    let mut page = Page::with_limits(limits);
     let location = crate::navigation::Location {
         url: Some(crate::url::parse("https://example.test/page").unwrap().0),
         path: None,
@@ -104,7 +107,7 @@ if(b.dispatchEvent(e)!==false||e.detail!==detail||log!=='type;')throw 'guard dis
 
 #[test]
 fn legacy_custom_event_first_child_read_uses_owner_method_and_preserves_child_detail_realm() {
-    let (mut doc, mut forms, mut page) = page(
+    let (mut doc, mut forms, mut page) = page_with_limits(
         r#"
 var e=document.createEvent('CustomEvent'),other=document.createEvent('CustomEvent'),base=document.createEvent('Event'),ui=document.createEvent('UIEvent'),mouse=document.createEvent('MouseEvent');
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow;
@@ -118,7 +121,7 @@ for(var item of [[base,'initEvent'],[ui,'initUIEvent'],[mouse,'initMouseEvent']]
 invoke(init,other,childPayload);
 if(other.detail!==childPayload||Object.getPrototypeOf(other.detail)!==ChildObject.prototype||other.detail.run()!==43)throw 'real child detail identity';
 (function(){var only={run:function(){return 47;}};e.initCustomEvent('retained',false,false,only);})();
-"#,
+"#,crate::javascript::limits::BROWSER,
     );
     evaluate(&mut page, &mut doc, &mut forms, "if(e.detail.run()!==47||other.detail!==childPayload||other.detail.run()!==43)throw 'exported detail graph survived entry';");
     let events = page.state.created_events.len();
@@ -137,7 +140,7 @@ if(other.detail!==childPayload||Object.getPrototypeOf(other.detail)!==ChildObjec
 
 #[test]
 fn legacy_custom_event_initializer_family_cached_and_fresh_child_reads_both_enforce_owner_origin() {
-    let (mut doc, mut forms, mut page) = page(
+    let (mut doc, mut forms, mut page) = page_with_limits(
         r#"
 var cases=[
  [document.createEvent('Event'),document.createEvent('Event'),'initEvent'],
@@ -149,7 +152,7 @@ for(var item of cases){var method=item[1][item[2]];if(Object.getPrototypeOf(meth
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow;
 var read=w.Function('probe','event','name','probe.entered++;var method=event[name];probe.escaped++;return method;');
 var probe={entered:0,escaped:0};
-"#,
+"#,crate::javascript::limits::BROWSER,
     );
     let count = page.state.created_events.len();
     page.set_location(&crate::navigation::Location {
