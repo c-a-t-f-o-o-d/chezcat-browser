@@ -1247,7 +1247,6 @@ impl Page {
             (HISTORY, "replaceState"),
             (HISTORY, "pushState"),
             (PERFORMANCE, "now"),
-            (DOCUMENT, "getElementById"),
             (DOCUMENT, "getElementsByTagName"),
             (DOCUMENT, "querySelector"),
             (DOCUMENT, "querySelectorAll"),
@@ -3590,6 +3589,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
         index==0&&dom_collections::operation(method).is_some_and(|(name,_)|name=="getElementsByTagName")
             ||index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
@@ -3618,6 +3618,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
         if method==text_split_interface::METHOD{return &[(0,false)];}
         if let Some(edit)=character_data_interface::operation(method){return edit.conversions();}
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
@@ -3747,6 +3748,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(1);}
         if script_attr::node_method(method){return Some(if method=="getAttributeNodeNS"{2}else{1});}
         if let Some(ns)=script_attr::factory_operation(method){return Some(if ns{2}else{1});}
         if dom_collections::operation(method).is_some(){return Some(1);}
@@ -3790,6 +3792,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(object);}
         if self.event_target_interface(object)&&method==script_position::METHOD{return Some(object);}
         if self.event_target_interface(object)&&script_inert_documents::node_equality::operation(method){return Some(object);}
         if script_attr::node_method(method)&&self.event_target_interface(object){return Some(object);}
@@ -3935,6 +3938,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
         if method==script_position::METHOD{return 1;}
         if script_inert_documents::node_equality::operation(method){return 1;}
         if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
@@ -4154,6 +4158,7 @@ impl Host for Bridge<'_> {
         if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
         if method==node_normalize_interface::METHOD{return if self.normalize_receiver(object){Ok(())}else{Err(("TypeError","normalize requires a genuine supported Node.".into()))};}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
+        if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.validate_identifier_lookup(object,document);}
         if method==script_position::METHOD{return self.validate_node_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.validate_node_equality(object,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
@@ -4583,6 +4588,7 @@ impl Host for Bridge<'_> {
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
             if parent(object) {return parent(receiver);}
         }
+        if self.event_target_interface(object){if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.identifier_lookup_receiver(receiver,Some(document));}}
         if self.event_target_interface(object)&&(script_inert_documents::node_equality::operation(method)||method==script_position::METHOD){return self.namespace_receiver(receiver);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.get_root_receiver(receiver);}
         if self.event_target_interface(object) && method == script_clone_node::CLONE_METHOD { return self.clone_node_receiver(receiver); }
@@ -6197,6 +6203,7 @@ impl Host for Bridge<'_> {
                 Value::Null
             });
         }
+        if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.native_identifier_lookup(object,args,document);}
         if method==script_position::METHOD{return self.compare_document_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.node_equality(object,args,method==script_inert_documents::node_equality::SAME);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,None);}
@@ -6428,13 +6435,7 @@ impl Host for Bridge<'_> {
             return self.event_listener(object, method, args, None);
         }
         if object == DOCUMENT && method == "getElementById" {
-            if args.is_empty() {
-                return Err("getElementById needs one id.".into());
-            }
-            let id = self.text(&args[0])?;
-            self.state.rebuild(self.doc)?;
-            return Ok(self.state.document_id(self.doc, &id)?
-                .map_or(Value::Null, |node| Value::Host(node_handle(node))));
+            return self.native_identifier_lookup(object,args,true);
         }
         if object >= STYLE_BASE {
             let node = self.style_node(object)?;
@@ -8826,3 +8827,7 @@ mod inert_position_tests;
 #[cfg(test)]
 #[path="script_inert_attribute_units_tests.rs"]
 mod inert_attribute_units_tests;
+
+#[cfg(test)]
+#[path="script_identifier_lookup_tests.rs"]
+mod identifier_lookup_tests;

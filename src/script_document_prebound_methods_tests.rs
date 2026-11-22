@@ -55,12 +55,12 @@ var element=saved.createElement.call(document,'div'),namespaced=saved.createElem
 if(element.nodeName!=='DIV'||namespaced.nodeName!=='SPAN'||namespaced.namespaceURI!=='http://www.w3.org/1999/xhtml'||text.nodeType!==3||text.nodeValue!=='literal'||comment.nodeType!==8||comment.nodeValue!=='original comment'||fragment.nodeType!==11||fragment.ownerDocument!==document||fragment.childNodes.length!==0)throw 'genuine prebound creation operations';
 document.ordinaryMethodState={kept:41};
 var replacementCalls=0,replacement=function(){replacementCalls++;throw 'replacement callback must not run';},replacementDescriptor={value:replacement,writable:true,enumerable:true,configurable:true};
-for(var collectionName of ['getElementsByTagName','getElementsByClassName']){
- var canonical=Document.prototype[collectionName];if(document[collectionName]!==canonical)throw 'canonical inherited collection method';
- document[collectionName]=replacement;if(document[collectionName]!==replacement)throw 'ordinary collection method override';
- if(!delete document[collectionName]||document[collectionName]!==canonical)throw 'collection deletion restores prototype method';
- Object.defineProperty(document,collectionName,replacementDescriptor);if(document[collectionName]!==replacement)throw 'ordinary collection descriptor';
- if(!delete document[collectionName]||document[collectionName]!==canonical)throw 'collection descriptor deletion restores prototype';
+for(var methodName of ['getElementById','getElementsByTagName','getElementsByClassName']){
+ var canonical=Document.prototype[methodName];if(document[methodName]!==canonical)throw 'canonical inherited Document method';
+ document[methodName]=replacement;if(document[methodName]!==replacement)throw 'ordinary inherited method override';
+ if(!delete document[methodName]||document[methodName]!==canonical)throw 'deletion restores prototype method';
+ Object.defineProperty(document,methodName,replacementDescriptor);if(document[methodName]!==replacement)throw 'ordinary inherited method descriptor';
+ if(!delete document[methodName]||document[methodName]!==canonical)throw 'descriptor deletion restores prototype';
 }
 // These existing Node/EventTarget methods remain ordinary inherited methods.
 for(var eventName of ['addEventListener','removeEventListener','dispatchEvent']){
@@ -72,7 +72,7 @@ if(replacementCalls||neighbor.value!=='edited neighbor'||neighbor.defaultValue!=
 "#);
     let nodes = format!("{:?}", doc.nodes);
     assert_eq!(editor(&forms, neighbor), preserved);
-    for name in ["getElementById", "querySelector", "querySelectorAll", "createElement", "createElementNS", "createTextNode", "createComment", "createDocumentFragment"] {
+    for name in ["querySelector", "querySelectorAll", "createElement", "createElementNS", "createTextNode", "createComment", "createDocumentFragment"] {
         for source in [
             format!("document.{name}=replacement;"),
             format!("Object.defineProperty(document,'{name}',replacementDescriptor);"),

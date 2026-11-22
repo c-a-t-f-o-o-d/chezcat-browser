@@ -44,7 +44,7 @@ impl Bridge<'_>{
   if let Some((owner,node))=self.frame_contains_node(object){if node==0{return Ok(View::Document(false));}return parsed(self.contains_child_document(owner)?.nodes.get(node).ok_or("Missing equality child Node.")?);}
   parsed(self.doc.nodes.get(node_index(object).ok_or("Missing equality Node.")?).ok_or("Missing equality Node index.")?)
  }
- fn equality_children(&mut self,object:u32)->Result<Vec<u32>,String>{
+ pub(in crate::scripting) fn equality_children(&mut self,object:u32)->Result<Vec<u32>,String>{
   if let Some((owner,node))=self.frame_contains_node(object){let count=self.contains_child_document(owner)?.nodes[node].children.len();self.state.work(count+1)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Node equality child metadata overflow.")?)?;let mut result=Vec::new();result.try_reserve_exact(count).map_err(|_|"Cannot reserve equality child links.")?;for &child in &self.contains_child_document(owner)?.nodes[node].children{result.push(self.frame_child_node_handle(owner,child)?);}return Ok(result);}
   self.normalize_children(object)
  }

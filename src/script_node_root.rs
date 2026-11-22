@@ -15,6 +15,7 @@ impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
             "getRootNode" => self.get_root_receiver(object),
+            "getElementById"=>self.identifier_lookup_receiver(object,None),
             "normalize"=>self.normalize_receiver(object),
             "isSameNode"|"isEqualNode"|"compareDocumentPosition"=>self.namespace_receiver(object),
             "wholeText"|"splitText"=>self.text_node_receiver(object),

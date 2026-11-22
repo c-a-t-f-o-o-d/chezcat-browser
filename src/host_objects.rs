@@ -457,7 +457,7 @@ impl Runtime {
                 for (property,operation) in PARENT_NODE_GETTERS {
                     self.define_readonly_node_getter(prototype,window,property,operation)?;
                 }
-                let queries=if name=="Document" {[("querySelector","\0Document.querySelector"),("querySelectorAll","\0Document.querySelectorAll")]}else{[("querySelector","\0DocumentFragment.querySelector"),("querySelectorAll","\0DocumentFragment.querySelectorAll")]};
+                let queries=if name=="Document" {[("querySelector","\0Document.querySelector"),("querySelectorAll","\0Document.querySelectorAll"),("getElementById","\0Document.getElementById")]}else{[("querySelector","\0DocumentFragment.querySelector"),("querySelectorAll","\0DocumentFragment.querySelectorAll"),("getElementById","\0DocumentFragment.getElementById")]};
                 for (key,operation) in queries {
                     let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
                     if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
