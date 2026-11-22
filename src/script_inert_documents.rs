@@ -1956,3 +1956,6 @@ pub(super) mod text_whole;
 
 #[path="script_text_split.rs"]
 pub(super) mod text_split;
+
+#[path="script_shared_normalize.rs"]
+pub(super) mod shared_normalize;

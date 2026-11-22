@@ -184,6 +184,7 @@ mod script_inert_documents;
 use script_inert_documents::character_substring;
 use script_inert_documents::text_whole;
 use crate::javascript::text_split_interface;
+use crate::javascript::node_normalize_interface;
 use crate::javascript::character_data_interface;
 
 #[path = "script_mutation_child_list.rs"]
@@ -518,6 +519,7 @@ struct State {
     blank_frames: Vec<script_blank_frames::BlankFrame>,
     inert_documents: script_inert_documents::Arena,
     text_split_plan:Option<script_inert_documents::text_split::Plan>,
+    normalize_plan:Option<script_inert_documents::shared_normalize::Plan>,
     blank_frame_nodes: usize,
     geometry: Option<crate::script_geometry::Geometry>,
     location: Option<LocationView>,
@@ -610,6 +612,7 @@ impl State {
             blank_frames: Vec::new(),
             inert_documents: script_inert_documents::Arena::default(),
             text_split_plan:None,
+            normalize_plan:None,
             blank_frame_nodes: 0,
             geometry: None,
             location: None,
@@ -3837,7 +3840,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some()) {return Some(object);}
-        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD) {return Some(object);}
+        if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
             return Some(object);
@@ -4142,6 +4145,7 @@ impl Host for Bridge<'_> {
         if method==character_substring::METHOD{return self.validate_substring_data(object,args);}
         if method==text_whole::GETTER{return if self.text_node_receiver(object){Ok(())}else{Err(("TypeError","wholeText requires a genuine Text or CDATA node.".into()))};}
         if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
+        if method==node_normalize_interface::METHOD{return if self.normalize_receiver(object){Ok(())}else{Err(("TypeError","normalize requires a genuine supported Node.".into()))};}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
         if method==script_node_root::ROOT_METHOD {return self.validate_root_node_options(object,args);}
         if method == script_clone_node::CLONE_METHOD { self.validate_clone_receiver(object)?;return self.validate_document_clone(object,args.first().is_some_and(Value::truthy)); }
@@ -4476,6 +4480,7 @@ impl Host for Bridge<'_> {
         if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if method==character_substring::METHOD{return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if method==text_whole::GETTER||method==text_split_interface::METHOD{return self.event_target_interface(object)&&self.text_node_receiver(receiver);}
+        if method==node_normalize_interface::METHOD{return self.event_target_interface(object)&&self.normalize_receiver(receiver);}
         if character_data_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -5747,6 +5752,9 @@ impl Host for Bridge<'_> {
         self.state.navigation_incumbent = window;
     }
 
+    fn prepare_node_normalize(&mut self,target:u32)->Result<crate::javascript::NativeNormalizeInfo,String>{self.prepare_shared_normalize(target)}
+    fn commit_node_normalize(&mut self,target:u32)->Result<(),String>{self.commit_shared_normalize(target)}
+    fn abort_node_normalize(&mut self,target:u32){self.abort_shared_normalize(target);}
     fn prepare_text_split(&mut self,target:u32,args:&[Value])->Result<crate::javascript::NativeTextSplitInfo,(&'static str,String)>{self.prepare_native_text_split(target,args)}
     fn commit_text_split(&mut self,target:u32)->Result<u32,String>{self.commit_native_text_split(target)}
     fn abort_text_split(&mut self,target:u32){self.abort_native_text_split(target);}
@@ -8790,3 +8798,7 @@ mod text_whole_tests;
 #[cfg(test)]
 #[path="script_text_split_tests.rs"]
 mod text_split_tests;
+
+#[cfg(test)]
+#[path="script_shared_normalize_tests.rs"]
+mod shared_normalize_tests;
