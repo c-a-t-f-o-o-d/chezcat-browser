@@ -15,6 +15,7 @@
 | Read | For |
 | :--- | :--- |
 | 🗺️ **[Roadmap](ROADMAP.md)** | Development priorities, milestones and future architecture |
+| 🧱 **[HTML/XHTML foundation](HTML_FOUNDATION_PLAN.md)** | Active standards plan, package gates and [requirement register](HTML_FOUNDATION_COVERAGE.json) |
 | 📋 **[Capabilities](CAPABILITIES.md)** | Implemented slices and explicit gaps |
 | 🧪 **[Compatibility](COMPATIBILITY.md)** | Actual pinned application outcomes, separated by stage |
 | 🏗️ **[Architecture](ARCHITECTURE.md)** | Ownership, processes, resources and rendering boundaries |
@@ -57,14 +58,15 @@ stopped at the normal native-test stage. No alpha.2 packages were published.
 Development source subsequently added passive HTML/custom-host content replacement
 through PR #433 (`ce464a4`) and stable newly created inert Text identities through
 PR #434 (`117bbb5`). PR #435 (`ad58c9a`) extends identity reservation to supported
-inert HTML/custom/style and SVG constructors. These increments are outside the
+inert HTML/custom/style and SVG constructors. PR #437/#438 add clone/import
+identity reservation, and PR #439 adds genuine Event author chains. These are outside the
 tagged candidate; their exact scope is recorded in [capabilities](CAPABILITIES.md).
 
 ### Current reading path
 
 | Question | Read next |
 | :--- | :--- |
-| **What should become usable next?** | The [roadmap](ROADMAP.md): first signed-out shell, followed by search/results, navigation and playback. |
+| **What should become usable next?** | The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md), before resuming the saved YouTube shell/search/navigation/playback journey. |
 | **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha2) for the release-line summary. |
 | **What has actually worked on a page?** | The [latest homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recent original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
 | **Which build should I run?** | [Build instructions](BUILDING.md) for local development; [release history](RELEASING.md#published-baseline) for verified downloads and exact source identities. |

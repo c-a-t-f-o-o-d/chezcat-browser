@@ -45,11 +45,12 @@ failed at the normal Windows test stage, before packages or publication. No
 alpha.2 assets were published. This changes no acceptance requirement or
 historical measurement; the verified downloadable baseline remains `0.82.0-alpha.1`.
 
-The [current P1–P6 dependency sequence](ROADMAP.md#current-product-sequence)
-provides the active product checkpoints. Its first-shell path uses genuine shared
-DOM behavior with the selected authored polyfill; full native Custom Elements
-and Shadow DOM are broader unfinished features. Connected App fixtures and
-actual site acceptance remain separate outcomes. The legacy contract directory
+The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md) and its
+[coverage register](HTML_FOUNDATION_COVERAGE.json) now govern active development.
+They include native Custom Elements and Shadow DOM as foundation work. The
+[P1–P6 sequence](ROADMAP.md#current-product-sequence) is preserved for product
+resumption; its selected polyfill path did not itself require full native
+components. Connected App fixtures and actual site acceptance remain separate. The legacy contract directory
 below preserves foundational requirements rather than listing every newer
 language or DOM increment; those supported slices and exclusions live in
 [CAPABILITIES.md](CAPABILITIES.md).
