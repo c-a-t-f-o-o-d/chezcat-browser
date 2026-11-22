@@ -1747,6 +1747,7 @@ impl Bridge<'_> {
 
         if let Kind::Parsed { source, .. } = node.kind {
             let parsed = self.parsed_source(source).ok_or("Inert parsed node is unavailable.")?.0;
+            if let NodeKind::ProcessingInstruction{target,..}=&parsed.kind{if matches!(property,"target"|"nodeName"){self.state.copies(target.len())?;let NodeKind::ProcessingInstruction{target,..}=&self.parsed_source(source).unwrap().0.kind else{unreachable!()};return Ok(Value::String(script_clone_node::copy_text(target)?));}}
             if let NodeKind::DocumentType(data)=&parsed.kind {
                 let text=match property {"nodeName"|"name"=>Some(&data.name),"publicId"=>Some(&data.public_id),"systemId"=>Some(&data.system_id),_=>None};
                 if let Some(text)=text {

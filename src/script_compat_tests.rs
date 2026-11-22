@@ -1113,7 +1113,7 @@ if(raw.ownerDocument!==other||raw.localName!=='div'||named.localName!=='SPAN'||n
 var guarded=0;
 try {new DOMImplementation();} catch(e){if(e instanceof TypeError)guarded++;}
 try {impl.createHTMLDocument.call({});} catch(e){if(e instanceof TypeError)guarded++;}
-try {document.body.appendChild(other.createElement('script'));} catch(e){if(e instanceof TypeError)guarded++;}
+try {document.body.appendChild(other.createElement('script'));} catch(e){if(e instanceof DOMException&&e.name==='NotSupportedError')guarded++;}
 if(guarded!==3||document.body.firstChild!==null||other.body.firstChild!==null)throw 'native isolation';
 document.title='inert-html-document-ok';
 "#]);
