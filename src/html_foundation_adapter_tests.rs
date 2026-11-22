@@ -18,9 +18,9 @@ fn encode(text:&str)->String {
     for byte in text.bytes(){write!(&mut out,"{byte:02x}").unwrap();}
     out
 }
-fn attribute_name(name:&AttributeName)->String {
-    match name.namespace.as_ref() {
-        None=>name.qualified.clone(),
+fn attribute_name(name:&AttributeName)->Result<String,String> {
+    Ok(match name.namespace.first() {
+        None=>name.qualified.scalar()?.to_owned(),
         Some(ns)=>{
             let prefix=match ns.uri.scalar().unwrap_or("") {
                 "http://www.w3.org/1999/xlink"=>"xlink ",
@@ -28,9 +28,9 @@ fn attribute_name(name:&AttributeName)->String {
                 "http://www.w3.org/2000/xmlns/"=>"xmlns ",
                 _=>"unknown-namespace ",
             };
-            format!("{prefix}{}",ns.local)
+            format!("{prefix}{}",ns.local.scalar()?)
         }
-    }
+    })
 }
 fn dump(doc:&Document)->Result<String,String> {
     let mut output=String::new();
@@ -53,7 +53,7 @@ fn dump(doc:&Document)->Result<String,String> {
                     Namespace::Other=>return Err("F01: arbitrary-namespace native tree dump schema is unavailable.".into()),
                 };
                 writeln!(&mut output,"| {indent}<{namespace}{tag}>").unwrap();
-                let mut attributes:Vec<_>=attrs.iter().map(|attr|(attribute_name(&attr.name),&attr.value)).collect();
+                let mut attributes:Vec<_>=attrs.iter().map(|attr|Ok::<_,String>((attribute_name(&attr.name)?,&attr.value))).collect::<Result<Vec<_>,_>>()?;
                 attributes.sort_by(|a,b|a.0.encode_utf16().cmp(b.0.encode_utf16()));
                 for (name,value) in attributes {writeln!(&mut output,"| {indent}  {name}=\"{value}\"").unwrap();}
             },

@@ -30,7 +30,7 @@ impl Bridge<'_> {
         });
         self.state.copies(
             name.local()
-                .len()
+                .used_bytes()
                 .saturating_add(name.namespace_uri().map_or(0, DomString::used_bytes))
                 .saturating_add(old_length),
         )?;
@@ -40,7 +40,7 @@ impl Bridge<'_> {
             })
             .transpose()?;
         Ok(NativeAttributeChange {
-            local_name: script_clone_node::copy_text(name.local())?,
+            local_name: name.local().try_clone()?,
             namespace: name
                 .namespace_uri()
                 .map(DomString::try_clone)

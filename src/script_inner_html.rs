@@ -39,8 +39,8 @@ pub(super) fn write_open_tag(state: &mut State, out: &mut String, tag: &str, att
             Some("http://www.w3.org/1999/xlink") => Some("xlink:"),
             _ => None,
         };
-        if let Some(prefix) = prefix { append(state, out, prefix)?; append(state, out, attr.name.local())?; }
-        else { append(state, out, &attr.name.qualified)?; }
+        if let Some(prefix) = prefix { append(state, out, prefix)?; append(state, out, attr.name.local().scalar()?)?; }
+        else { append(state, out, attr.name.qualified.scalar()?)?; }
         append(state, out, "=\"")?;
         escaped(state, out, attr.value.scalar()?, true, false)?;
         append(state, out, "\"")?;

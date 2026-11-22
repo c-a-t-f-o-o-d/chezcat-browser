@@ -166,14 +166,14 @@ fn checkbox_fragment_exact_original_mixed_markup_is_positive_detached_and_connec
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot {
     nodes: String, parents: Vec<Option<usize>>, connected: Vec<bool>, created: HashSet<usize>, detached: HashSet<usize>,
-    controls: Vec<String>, attributes: Vec<(Option<usize>, String, String)>, retained: usize, commits: Option<u64>,
+    controls: Vec<String>, attributes: Vec<(Option<usize>, Vec<u16>, String)>, retained: usize, commits: Option<u64>,
 }
 impl Snapshot {
     fn capture(doc: &Document, forms: &Forms, page: &Page) -> Self {
         Self { nodes: format!("{:?}", doc.nodes), parents: page.state.tree.parents.clone(),
             connected: page.state.dom.connected.clone(), created: page.state.dom.created.iter().collect(), detached: page.state.detached_nodes.iter().collect(),
             controls: forms.controls.iter().map(|(&node,c)| format!("{node}:{:?}:{:?}:{:?}:{:?}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}", c.kind,c.owner,c.name,c.value.text(),c.value.cursor,c.value.anchor,c.value.offset,c.dirty_value,c.checked,c.disabled,c.readonly,c.required,c.max_length,c.tab_index)).collect(),
-            attributes: page.state.attributes.iter().map(|attr|(attr.owner.and_then(node_index),attr.name.qualified.clone(),attr.value.scalar().unwrap().to_owned())).collect(),
+            attributes: page.state.attributes.iter().map(|attr|(attr.owner.and_then(node_index),attr.name.qualified.code_units().collect::<Vec<u16>>(),attr.value.scalar().unwrap().to_owned())).collect(),
             retained: page.state.retained, commits: page.state.dom_commits }
     }
 }

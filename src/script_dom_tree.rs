@@ -626,17 +626,9 @@ impl Bridge<'_> {
         if method == "replaceChild" && node_index(object).is_some() {
             return self.validate_replace_child(object, args);
         }
-        if method=="setAttribute" && node_index(object).is_some() {
-            if let Some(Value::String(name))=args.first() {
-                if !super::script_attribute_names::valid_attribute_name(name) {
-                    return Err(("InvalidCharacterError","Invalid attribute local name.".into()));
-                }
-            }
-        }
+        if method=="setAttribute"&&node_index(object).is_some(){if let Some(name)=args.first(){if !super::script_attribute_names::valid_attribute_name_dom(super::script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}}
         if method == "setAttributeNS" && self.attribute_names_receiver(object) {
-            if let (Some(namespace), Some(Value::String(name))) = (args.first(), args.get(1)) {
-                super::script_attribute_names::validate_namespace_value(namespace, name)?;
-            }
+            if let (Some(namespace),Some(name))=(args.first(),args.get(1)){super::script_attribute_names::validate_namespace_dom(namespace,super::script_attribute_names::converted_name(name)?)?;}
         }
         if method == "compareDocumentPosition" {
             if !matches!(args.first(), Some(Value::Host(other)) if self.namespace_receiver(*other)) {

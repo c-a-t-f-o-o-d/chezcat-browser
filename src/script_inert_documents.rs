@@ -365,11 +365,11 @@ impl Bridge<'_> {
     // Writes replace one immutable element source. Clones retain their prior
     // source; node, owner, child and live-map identities do not change.
     pub(super) fn remove_inert_attribute(&mut self,object:u32,argument:&Value)->Result<Value,String>{
-        let name=crate::html::AttributeName::unqualified(self.text(argument)?);
+        let name=crate::html::AttributeName::unqualified_dom(self.dom_text(argument)?);
         self.write_inert_attribute(object,name,None,false)?;Ok(Value::Undefined)
     }
     pub(super) fn set_inert_attribute(&mut self,object:u32,args:&[Value])->Result<Value,String>{
-        let name=crate::html::AttributeName::unqualified(self.text(args.first().ok_or("setAttribute requires a name.")?)?);
+        let name=crate::html::AttributeName::unqualified_dom(self.dom_text(args.first().ok_or("setAttribute requires a name.")?)?);
         let value=self.dom_text(args.get(1).ok_or("setAttribute requires a value.")?)?;
         self.write_inert_dom_attribute(object,name,Some(value),false)?;Ok(Value::Undefined)
     }
@@ -379,7 +379,7 @@ impl Bridge<'_> {
     pub(super) fn write_inert_dom_attribute(&mut self,object:u32,name:crate::html::AttributeName,value:Option<DomString>,expanded:bool)->Result<(),String>{self.write_inert_attribute_mode(object,name,value,expanded,expanded,false)}
     pub(in crate::scripting) fn write_inert_attribute_node_value(&mut self,object:u32,name:crate::html::AttributeName,value:DomString)->Result<(),String>{self.write_inert_attribute_mode(object,name,Some(value),true,false,true)}
     fn write_inert_attribute_mode(&mut self,object:u32,mut name:crate::html::AttributeName,value:Option<DomString>,expanded:bool,require_existing:bool,replace_name:bool)->Result<(),String>{
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (name.namespace.is_some()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && (!name.namespace.is_empty()||!name.qualified.starts_with("data-")){return Err("Unpaired inert attribute DOMString integration currently requires passive data metadata.".into());}
         let inert=self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let (source,initial_template)=match inert.kind{
             Kind::Parsed{source,initial_template}=>(Some(source),initial_template),
@@ -443,7 +443,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn inert_element_attribute(&mut self, object: u32, argument: &Value) -> Result<Value, String> {
-        let name = self.text(argument)?;
+        let mut name = self.dom_text(argument)?;
         let node = self.state.inert_documents.node(object).ok_or("Inert Element is unavailable.")?;
         let source = match node.kind {
             Kind::Element(_) => return Ok(Value::Null),
@@ -459,12 +459,7 @@ impl Bridge<'_> {
         let work = attrs.iter().map(|attr| attr.name.qualified.len()).sum::<usize>();
         self.state.work(count)?;
         self.state.copies(work)?;
-        let name = if html {
-            self.state.copies(name.len())?;
-            name.to_ascii_lowercase()
-        } else {
-            name
-        };
+        if html{name.make_ascii_lowercase();}
         let (node, _) = self.parsed_source(source).ok_or("Inert Element source is unavailable.")?;
         let NodeKind::Element { attrs, .. } = &node.kind else { unreachable!() };
         let Some(index) = attrs.iter().position(|attr| attr.name.qualified == name) else {
@@ -1252,7 +1247,7 @@ impl Bridge<'_> {
             let index = node_index(object).ok_or("Main template has no native node.")?;
             let source = &self.doc.nodes[index];
             let NodeKind::Element { tag, href, attrs, .. } = &source.kind else { unreachable!() };
-            if attrs.iter().any(|attr| attr.name.namespace.is_none()
+            if attrs.iter().any(|attr| attr.name.namespace.is_empty()
                 && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || attr.name.html_is("is"))) {
                 return Err("Template cloning cannot transfer active handlers or customized built-ins.".into());
             }
@@ -1916,7 +1911,7 @@ fn template_node_can_park(node: &Node) -> bool {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
-                && !attrs.iter().any(|attr| attr.name.namespace.is_some()
+                && !attrs.iter().any(|attr| !attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.

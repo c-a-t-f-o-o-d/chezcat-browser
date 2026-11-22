@@ -178,8 +178,9 @@ impl Bridge<'_> {
         self.state.work(attrs.len())?;
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
         let(mut count,mut payload)=(0usize,0usize);
-        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_none()){
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_empty()){
             let Some(raw)=attr.name.qualified.strip_prefix("data-")else{continue};
+            attr.name.qualified.scalar()?;
             self.state.work(raw.len().checked_mul(2).ok_or("Dataset key validation work overflow.")?)?;
             let Some(suffix)=dataset_suffix(&attr.name.qualified)else{continue};
             // Both validation walks are prepaid even for excluded names.
@@ -195,7 +196,7 @@ impl Bridge<'_> {
         let mut keys=Vec::new();keys.try_reserve_exact(count).map_err(|_|"Cannot reserve dataset key records.")?;
         let mut bytes=keys.capacity().checked_mul(size_of::<String>()).filter(|bytes|bytes.checked_add(payload).is_some_and(|total|total<=available)).ok_or("DOM retained dataset key record allowance exhausted.")?;
         let mut remaining=payload;
-        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_none()){
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_empty()){
             let Some(suffix)=dataset_suffix(&attr.name.qualified)else{continue};
             remaining-=dataset_key_size(suffix);
             let spare=available.checked_sub(bytes).and_then(|bytes|bytes.checked_sub(remaining)).ok_or("DOM retained dataset key allowance exhausted.")?;

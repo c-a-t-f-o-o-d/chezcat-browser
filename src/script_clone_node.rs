@@ -26,10 +26,10 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
         NodeKind::Element { tag, id, href, attrs ,expanded_name} => {
             let mut copied=Vec::new();copied.try_reserve_exact(attrs.len()).map_err(|_|"Cannot reserve copied element attributes.")?;
             for attr in attrs {
-                let namespace=attr.name.namespace.as_ref().map(|ns|Ok::<_,String>(crate::html::AttributeNamespace{
-                    uri:ns.uri.try_clone()?,prefix:ns.prefix.as_deref().map(copy_text).transpose()?,local:copy_text(&ns.local)?
+                let namespace=attr.name.namespace.first().map(|ns|Ok::<_,String>(crate::html::AttributeNamespace{
+                    uri:ns.uri.try_clone()?,prefix:ns.prefix.as_ref().map(DomString::try_clone).transpose()?,local:ns.local.try_clone()?
                 })).transpose()?;
-                copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:copy_text(&attr.name.qualified)?,namespace},value:attr.value.try_clone()?});
+                copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:attr.name.qualified.try_clone()?,namespace:crate::html::AttributeName::namespace_storage(namespace)?},value:attr.value.try_clone()?});
             }
             NodeKind::Element{expanded_name:crate::html::element_names::copy(expanded_name)?,tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },
@@ -127,7 +127,7 @@ impl Bridge<'_> {
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
                         if tag=="style"&&self.template_import_children(handle).unwrap().iter().take(count).any(|&child|!matches!(self.inert_node_type(child),Some(3|4))){return Err("Imported STYLE requires plain direct text children.".into());}
-                        if !svg&&attrs.iter().any(|attr| attr.name.namespace.is_some()
+                        if !svg&&attrs.iter().any(|attr| !attr.name.namespace.is_empty()
                             || script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")) {
                             return Err("Import cannot transfer active handlers or unsupported namespaced attributes.".into());
                         }
@@ -244,7 +244,7 @@ impl Bridge<'_> {
                 let radio = tag == "input" && self.owned_native_radio(source);
                 let svg=item.namespace==crate::html::Namespace::Svg;
                 if !svg&&(item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image || style)
-                    || attrs.iter().any(|attr| attr.name.namespace.is_none()
+                    || attrs.iter().any(|attr| attr.name.namespace.is_empty()
                         && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
                 }

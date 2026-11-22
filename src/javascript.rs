@@ -571,7 +571,7 @@ pub struct NativeChildListChange {
 }
 
 pub struct NativeAttributeChange {
-    pub local_name: String,
+    pub local_name: crate::dom_string::DomString,
     pub namespace: Option<crate::dom_string::DomString>,
     pub old_value: Option<Value>,
 }
@@ -812,7 +812,7 @@ pub trait Host {
     fn rollback_unpublished_base_event(&mut self,_event:u32)->Result<(),String>{
         Err("No unpublished Event transaction exists.".into())
     }
-    fn attribute_name_snapshot(&mut self,_object:u32)->Result<Vec<String>,String>{Err("Attribute names are unavailable.".into())}
+    fn attribute_name_snapshot(&mut self,_object:u32)->Result<Vec<crate::dom_string::DomString>,String>{Err("Attribute names are unavailable.".into())}
     fn event_path_snapshot(&mut self,_event:u32)->Result<Vec<u32>,String>{
         Err("Event path access is unavailable.".into())
     }
@@ -9225,7 +9225,7 @@ impl Runtime {
             if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild")&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
-            if method=="setAttributeNS"&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
                 && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
                 || kind == "InvalidCharacterError"
@@ -9243,7 +9243,7 @@ impl Runtime {
             let output=Value::Object(self.new_object(Some(names.len()))?);
             for (index,name) in names.into_iter().enumerate(){
                 self.step()?;
-                self.create_data_property(&output,PropertyKey::String(index.to_string()),Value::String(name),host)?;
+                let(text,units)=name.into_parts();let value=units.map_or_else(||Value::String(text),Value::StringUnits);self.create_data_property(&output,PropertyKey::String(index.to_string()),value,host)?;
             }
             return Ok(output);
         }

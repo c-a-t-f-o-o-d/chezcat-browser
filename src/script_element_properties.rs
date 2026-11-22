@@ -126,6 +126,6 @@ impl Bridge<'_> {
 // Exact native handler names share the interface catalogue. Ordinary attributes
 // whose spelling merely begins with "on" do not acquire event semantics.
 pub(super) fn event_handler_content_attribute(tag:&str,name:&crate::html::AttributeName)->bool {
-    name.namespace.is_none()&&(contains(HANDLERS,&name.qualified)
+    name.namespace.is_empty()&&(contains(HANDLERS,&name.qualified)
         || matches!(tag,"body"|"frameset")&&name.qualified.starts_with("on")&&contains(specific("body"),&name.qualified))
 }

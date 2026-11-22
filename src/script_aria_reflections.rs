@@ -67,7 +67,7 @@ impl Bridge<'_> {
         fn raw<'a>(attrs: &'a [crate::html::Attribute], key: &str) -> Option<&'a str> {
             attrs
                 .iter()
-                .find(|a| a.name.namespace.is_none() && a.name.qualified == key)
+                .find(|a| a.name.namespace.is_empty() && a.name.qualified == key)
                 .map(|a| a.value.as_str())
         }
         let bytes = raw(self.aria_reflection_attributes(object)?, key).map(str::len);

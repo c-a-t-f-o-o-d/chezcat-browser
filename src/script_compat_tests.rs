@@ -2014,6 +2014,8 @@ fn absent_attribute_removal_preserves_lookup_limits_and_foreign_boundaries() {
     assert_eq!(bridge.state.dom_commits, commits);
     assert!(bridge.call(node_handle(foreign), "removeAttribute", &[Value::String("data-absent".into())]).is_ok());
     assert!(bridge.call(node_handle(foreign), "removeAttribute", &[Value::String("TITLE".into())]).is_ok());
+    assert_eq!(bridge.doc.attr(foreign,"title"), Some("old"),"unknown foreign provenance does not prove HTML name folding");
+    assert!(bridge.call(node_handle(foreign), "removeAttribute", &[Value::String("title".into())]).is_ok());
     assert_eq!(bridge.doc.attr(foreign,"title"), None);
 }
 

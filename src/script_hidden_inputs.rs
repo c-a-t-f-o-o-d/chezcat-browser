@@ -41,7 +41,7 @@ impl Bridge<'_> {
         value: &Option<String>) -> Result<bool, String> {
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html || tag(self.doc,node)!="input" { return Ok(false); }
         let key = name.qualified.as_str();
-        if name.namespace.is_some() || !matches!(key,"type"|"name"|"value") { return Ok(false); }
+        if !name.namespace.is_empty() || !matches!(key,"type"|"name"|"value") { return Ok(false); }
         if key == "type" {
             if !value.as_deref().is_some_and(|value| value.eq_ignore_ascii_case("hidden")) {
                 return Err("Supported attributes exclude this native INPUT type transition; no input was changed.".into());

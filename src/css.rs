@@ -2903,7 +2903,7 @@ impl<'a> MatchContext<'a> {
             return None;
         };
         for attr in attrs {
-            if attr.name.namespace.is_none() && self.equal(&attr.name.qualified, name, false, budget) {
+            if attr.name.namespace.is_empty() && self.equal(&attr.name.qualified, name, false, budget) {
                 return Some(&attr.value);
             }
             if *budget == 0 {

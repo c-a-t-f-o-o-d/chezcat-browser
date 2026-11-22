@@ -20,7 +20,7 @@ pub(super) fn compute<'a>(
     };
     if !hints.is_some_and(|attrs| {
         attrs.iter().any(|a| {
-            a.name.namespace.is_none() && crate::image::SvgPaint::property(&a.name.qualified)
+            a.name.namespace.is_empty() && crate::image::SvgPaint::property(&a.name.qualified)
         })
     }) && !declarations
         .clone()
@@ -47,7 +47,7 @@ pub(super) fn compute<'a>(
     let mut value = inherited.clone();
     if let Some(attrs) = hints {
         for attr in attrs {
-            if attr.name.namespace.is_none()
+            if attr.name.namespace.is_empty()
                 && crate::image::SvgPaint::property(&attr.name.qualified)
             {
                 if budget.copy(parse_cost(&attr.value)).is_err() {

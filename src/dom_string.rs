@@ -17,6 +17,9 @@ pub(crate) enum Units<'a> {
 #[derive(Clone,Copy)]
 pub(crate) enum DomStringRef<'a>{Scalar(&'a str),Raw(&'a [u16])}
 impl<'a> DomStringRef<'a>{
+    pub(crate) fn split_colon(self)->(Option<Self>,Self){match self{Self::Scalar(s)=>s.split_once(':').map_or((None,self),|(p,l)|(Some(Self::Scalar(p)),Self::Scalar(l))),Self::Raw(u)=>u.iter().position(|&n|n==0x3a).map_or((None,self),|at|(Some(Self::Raw(&u[..at])),Self::Raw(&u[at+1..])))}}
+    pub(crate) fn is_empty(self)->bool{match self{Self::Scalar(s)=>s.is_empty(),Self::Raw(u)=>u.is_empty()}}
+    pub(crate) fn equals(self,text:&str)->bool{self.code_units().eq(text.encode_utf16())}
     pub(crate) fn code_units(self)->Units<'a>{match self{Self::Scalar(s)=>Units::Scalar(s.encode_utf16()),Self::Raw(u)=>Units::Raw(u.iter().copied())}}
     pub(crate) fn logical_bytes(self)->usize{match self{Self::Scalar(s)=>s.len(),Self::Raw(u)=>u.len()*2}}
     pub(crate) fn copy_bytes(self)->Result<usize,String>{match self{Self::Scalar(s)=>Ok(s.len()),Self::Raw(u)=>{let(p,raw)=DomString::projected_size(u)?;p.checked_add(if raw{u.len().checked_mul(2).ok_or("DOMString view copy overflow.")?}else{0}).ok_or("DOMString view copy overflow.".into())}}}
@@ -30,6 +33,8 @@ impl Iterator for Units<'_> {
 impl DomString {
     pub(crate) fn view(&self)->DomStringRef<'_>{match self.raw_units(){Some(u)=>DomStringRef::Raw(u),None=>DomStringRef::Scalar(&self.projection)}}
     pub(crate) fn new()->Self{Self::default()}
+    pub(crate) fn make_ascii_lowercase(&mut self){self.projection.make_ascii_lowercase();if let Some(units)=&mut self.units{for unit in units{if (0x41..=0x5a).contains(unit){*unit+=0x20;}}}}
+    pub(crate) fn ascii_lowercase_copy(&self)->Result<Self,String>{let mut text=self.try_clone()?;text.make_ascii_lowercase();Ok(text)}
     pub(crate) fn into_parts(self)->(String,Option<Vec<u16>>){(self.projection,self.units)}
     pub(crate) fn storage_bound(logical_bytes:usize)->Result<usize,String>{
         // One UTF-16 unit owns two bytes and needs at most three UTF-8

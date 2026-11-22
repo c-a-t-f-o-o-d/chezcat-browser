@@ -17,9 +17,9 @@ pub(super) fn valid_xml_name(name: &str) -> bool {
             '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'))
 }
 
-pub(super) fn valid_attribute_name(name: &str) -> bool {
-    !name.is_empty() && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '=' | '>'))
-}
+pub(super) fn valid_attribute_name(name:&str)->bool{valid_attribute_name_dom(crate::dom_string::DomStringRef::Scalar(name))}
+pub(super) fn converted_name(value:&crate::javascript::Value)->Result<crate::dom_string::DomStringRef<'_>,(&'static str,String)>{match value{crate::javascript::Value::String(s)=>Ok(crate::dom_string::DomStringRef::Scalar(s)),crate::javascript::Value::StringUnits(u)=>Ok(crate::dom_string::DomStringRef::Raw(u)),_=>Err(("TypeError","Attribute name requires a converted DOMString.".into()))}}
+pub(super) fn valid_attribute_name_dom(name:crate::dom_string::DomStringRef<'_>)->bool{!name.is_empty()&&!name.code_units().any(|u|matches!(u,0|9|10|12|13|32|47|61|62))}
 
 pub(super) fn valid_element_local_name(local:&str)->bool{
     let forbidden=|c:char|matches!(c,'\0'|'\t'|'\n'|'\u{c}'|'\r'|' '|'/'|'>');
@@ -59,27 +59,21 @@ fn validate_element_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&
 pub(super) fn validate_namespace_value(namespace:&crate::javascript::Value,qualified:&str)->Result<(),(&'static str,String)>{
     use crate::javascript::Value;
     let(present,xml,xmlns)=match namespace{Value::String(s)=>(!s.is_empty(),s=="http://www.w3.org/XML/1998/namespace",s=="http://www.w3.org/2000/xmlns/"),Value::StringUnits(u)=>(!u.is_empty(),u.iter().copied().eq("http://www.w3.org/XML/1998/namespace".encode_utf16()),u.iter().copied().eq("http://www.w3.org/2000/xmlns/".encode_utf16())),Value::Null|Value::Undefined=>(false,false,false),_=>return Err(("TypeError","Attribute namespace requires a converted nullable DOMString.".into()))};
-    validate_namespace_flags(present,xml,xmlns,qualified)
+    validate_namespace_flags_dom(present,xml,xmlns,crate::dom_string::DomStringRef::Scalar(qualified))
+}
+pub(super) fn validate_namespace_dom(namespace:&crate::javascript::Value,qualified:crate::dom_string::DomStringRef<'_>)->Result<(),(&'static str,String)>{
+    use crate::javascript::Value;
+    let(present,xml,xmlns)=match namespace{Value::String(s)=>(!s.is_empty(),s=="http://www.w3.org/XML/1998/namespace",s=="http://www.w3.org/2000/xmlns/"),Value::StringUnits(u)=>(!u.is_empty(),u.iter().copied().eq("http://www.w3.org/XML/1998/namespace".encode_utf16()),u.iter().copied().eq("http://www.w3.org/2000/xmlns/".encode_utf16())),Value::Null|Value::Undefined=>(false,false,false),_=>return Err(("TypeError","Attribute namespace requires a converted nullable DOMString.".into()))};
+    validate_namespace_flags_dom(present,xml,xmlns,qualified)
 }
 pub(super) fn validate_namespace(namespace: Option<&str>, qualified: &str)
     -> Result<(), (&'static str, String)> {
     validate_namespace_flags(namespace.is_some(),namespace==Some("http://www.w3.org/XML/1998/namespace"),namespace==Some("http://www.w3.org/2000/xmlns/"),qualified)
 }
-fn validate_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&str)->Result<(),(&'static str,String)>{
-    // All Web IDL conversions precede this validation. The current DOM rules
-    // split at the first colon; local names can themselves contain colons.
-    let (prefix, local) = qualified.split_once(':').map_or((None, qualified), |(p, l)| (Some(p), l));
-    let valid_prefix = |name: &str| !name.is_empty()
-        && !name.chars().any(|c| matches!(c, '\0' | '\t' | '\n' | '\u{c}' | '\r' | ' ' | '/' | '>'));
-    if !valid_attribute_name(local) || prefix.is_some_and(|p| !valid_prefix(p)) {
-        return Err(("InvalidCharacterError", "Invalid attribute local name or namespace prefix.".into()));
-    }
-    let declaration = qualified == "xmlns" || prefix == Some("xmlns");
-    if prefix.is_some() && !present
-        || prefix == Some("xml") && !xml
-        || declaration && !xmlns
-        || xmlns && !declaration {
-        return Err(("NamespaceError", "Attribute prefix and namespace are inconsistent.".into()));
-    }
-    Ok(())
+fn validate_namespace_flags(present:bool,xml:bool,xmlns:bool,qualified:&str)->Result<(),(&'static str,String)>{validate_namespace_flags_dom(present,xml,xmlns,crate::dom_string::DomStringRef::Scalar(qualified))}
+fn validate_namespace_flags_dom(present:bool,xml:bool,xmlns:bool,qualified:crate::dom_string::DomStringRef<'_>)->Result<(),(&'static str,String)>{
+    let(prefix,local)=qualified.split_colon();
+    if !valid_attribute_name_dom(local)||prefix.is_some_and(|p|p.is_empty()||p.code_units().any(|u|matches!(u,0|9|10|12|13|32|47|62))){return Err(("InvalidCharacterError","Invalid attribute local name or namespace prefix.".into()));}
+    let declaration=qualified.equals("xmlns")||prefix.is_some_and(|p|p.equals("xmlns"));
+    if prefix.is_some()&&!present||prefix.is_some_and(|p|p.equals("xml"))&&!xml||declaration&&!xmlns||xmlns&&!declaration{return Err(("NamespaceError","Attribute prefix and namespace are inconsistent.".into()));}Ok(())
 }

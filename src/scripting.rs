@@ -2498,7 +2498,7 @@ impl Bridge<'_> {
             && !media_source && ["src","width","height","poster","autoplay","loop","muted","preload","crossorigin"].iter().any(|key|name.html_is(key)) {
             return Err("Changing parser-authored video source or native media attributes is not implemented; no attribute was changed.".into());
         }
-        if name.namespace.is_none() { self.frame_attribute_guard(node, &name.qualified)?; }
+        if name.namespace.is_empty() { self.frame_attribute_guard(node, &name.qualified)?; }
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             return Err("Not an element.".into());
         };
@@ -3577,7 +3577,11 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
+        (script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
+            ||index==0&&matches!(method,"getAttribute"|"getAttributeNode"|"setAttribute"|"removeAttribute"|"hasAttribute")
+            ||index==1&&matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS")
+            ||script_named_map::operation(method).is_some_and(|name|name=="getNamedItem"&&index==0||name=="getNamedItemNS"&&index==1)
+            ||index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
             ||index==0&&method==CREATE_CDATA_SECTION
             ||index==0&&method==xml_documents::CREATE
             ||index==0&&(method==element_names::DEFAULT_METHOD||method=="isDefaultNamespace"&&self.namespace_receiver(object))
@@ -3849,7 +3853,7 @@ impl Host for Bridge<'_> {
         self.ordinary_event_owner(result)
     }
     fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
-    fn attribute_name_snapshot(&mut self,object:u32)->Result<Vec<String>,String>{self.attribute_names(object)}
+    fn attribute_name_snapshot(&mut self,object:u32)->Result<Vec<DomString>,String>{self.attribute_names(object)}
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
@@ -4091,7 +4095,7 @@ impl Host for Bridge<'_> {
         if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
         if script_named_map::operation(method).is_some()&&!self.named_map_receiver(object){return Err(("TypeError","NamedNodeMap operation requires a genuine map.".into()));}
         if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
-        if method=="setAttribute"&&self.inert_node_type(object)==Some(1){if let Some(Value::String(name))=args.first(){if !script_attribute_names::valid_attribute_name(name){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}}
+        if method=="setAttribute"&&self.inert_node_type(object)==Some(1){if let Some(name)=args.first(){if !script_attribute_names::valid_attribute_name_dom(script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}}
         if parent_children::operation(method).is_some() && !self.parent_node_receiver(object) {
             return Err(("TypeError","ParentNode getter requires a genuine accessible parent node.".into()));
         }
@@ -6427,7 +6431,7 @@ impl Host for Bridge<'_> {
         if matches!(method, "getAttribute" | "hasAttribute" | "setAttribute" | "removeAttribute") {
             let count = if method == "setAttribute" { 2 } else { 1 };
             if args.len() < count { return Err("Wrong number of attribute arguments.".into()); }
-            let text = self.text(&args[0])?;
+            let text = self.dom_text(&args[0])?;
             let namespace = self.doc.nodes[node].namespace;
             let qualified = self.method_qualified_attribute_name(node, method, text)?;
             let slot = self.raw_attribute_slot(node, &qualified)?;
@@ -6446,7 +6450,7 @@ impl Host for Bridge<'_> {
                 return Self::dom_string_copy(value);
             }
             let name = if let Some(slot) = slot { self.copy_attribute_name(node, slot)? }
-                else { crate::html::AttributeName::unqualified(qualified) };
+                else { crate::html::AttributeName::unqualified_dom(qualified) };
             let value = if method == "setAttribute" { Some(self.dom_text(&args[1])?) } else { None };
             self.public_dom_attribute(node,name,value,script_attr::InputPreparation::Pending)?;
             return Ok(Value::Undefined);
@@ -8688,3 +8692,7 @@ mod inert_foreign_attribute_tests;
 #[cfg(test)]
 #[path="script_attribute_namespace_tests.rs"]
 mod attribute_namespace_tests;
+
+#[cfg(test)]
+#[path="script_attribute_name_tests.rs"]
+mod attribute_name_tests;
