@@ -806,25 +806,32 @@
       "prerequisites_for_core": [
         "F01"
       ],
-      "status": "planned",
+      "status": "partial",
       "scope": "required",
       "source_anchors": [
         "src/loader.rs",
-        "src/text_encoding.rs"
+        "src/text_encoding.rs",
+        "src/text_encoding_single_byte.rs",
+        "src/text_encoding_single_byte_tests.rs",
+        "tools/reference/text-encodings/manifest.json"
       ],
       "contracts": [
         {
           "id": "F02.01",
           "requirement": "All normative Encoding labels/decoder families and applicable encoders",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed."
+          ],
           "dependency_details": []
         },
         {
           "id": "F02.02",
           "requirement": "Incremental decode, malformed sequences, BOM and EOF",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "Independent single-byte decoder increment: TextDecoder and shared request-text decoding implement 28 legacy single-byte names (168 labels; 27 indexes) and x-user-defined. Original fixed selection in src/text_encoding_single_byte_tests.rs covers all bytes and labels, undefined-pointer replacement/fatal behavior, streaming/flush, Unicode BOM regression, BufferSource views, conversion/reentry and resource refusal. tools/check_single_byte_encodings.py verifies pinned inputs, generation, notices and rejection controls. Validation results are recorded with the integrating revision; no unchanged browser WPT or full F02 closure is claimed."
+          ],
           "dependency_details": []
         },
         {
@@ -848,7 +855,14 @@
         "F05",
         "F10"
       ],
-      "evidence_selection_status": "Required/supplementary case-level selections and harness owners must be frozen before this package executes; none have been run by this planning change."
+      "evidence_selection_status": "The supplementary single-byte increment fixes nine native test functions and eight data/provenance controls in the named source files, using Encoding revision 7d2e3e08e11f57ba1b080390b490d53648c6f69c. All 28 legacy names and every byte are included; no runtime output selects or drops a case. Full-package required browser and multibyte/loader selections remain to be frozen before their execution.",
+      "open_after_single_byte_increment": [
+        "Legacy multibyte decoders and stateful error/EOF behavior",
+        "Applicable legacy encoders",
+        "Document transport/meta charset selection, confidence, sniff and restart",
+        "Complete MIME and local/network/DOMParser routing",
+        "Required unchanged browser evidence and Windows App integration"
+      ]
     },
     {
       "id": "F03",
@@ -3274,9 +3288,11 @@
         "csibm866",
         "ibm866"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-2",
@@ -3291,9 +3307,11 @@
         "l2",
         "latin2"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-3",
@@ -3308,9 +3326,11 @@
         "l3",
         "latin3"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-4",
@@ -3325,9 +3345,11 @@
         "l4",
         "latin4"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-5",
@@ -3341,9 +3363,11 @@
         "iso_8859-5",
         "iso_8859-5:1988"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-6",
@@ -3363,9 +3387,11 @@
         "iso_8859-6",
         "iso_8859-6:1987"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-7",
@@ -3383,9 +3409,11 @@
         "iso_8859-7:1987",
         "sun_eu_greek"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-8",
@@ -3402,9 +3430,11 @@
         "iso_8859-8:1988",
         "visual"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-8-I",
@@ -3413,9 +3443,11 @@
         "iso-8859-8-i",
         "logical"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-10",
@@ -3428,9 +3460,11 @@
         "l6",
         "latin6"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-13",
@@ -3439,9 +3473,11 @@
         "iso8859-13",
         "iso885913"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-14",
@@ -3450,9 +3486,11 @@
         "iso8859-14",
         "iso885914"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-15",
@@ -3464,18 +3502,22 @@
         "iso_8859-15",
         "l9"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "ISO-8859-16",
       "labels": [
         "iso-8859-16"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "KOI8-R",
@@ -3486,9 +3528,11 @@
         "koi8-r",
         "koi8_r"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "KOI8-U",
@@ -3496,9 +3540,11 @@
         "koi8-ru",
         "koi8-u"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "macintosh",
@@ -3508,9 +3554,11 @@
         "macintosh",
         "x-mac-roman"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-874",
@@ -3522,9 +3570,11 @@
         "tis-620",
         "windows-874"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1250",
@@ -3533,9 +3583,11 @@
         "windows-1250",
         "x-cp1250"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1251",
@@ -3544,9 +3596,11 @@
         "windows-1251",
         "x-cp1251"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1252",
@@ -3569,9 +3623,11 @@
         "windows-1252",
         "x-cp1252"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1253",
@@ -3580,9 +3636,11 @@
         "windows-1253",
         "x-cp1253"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1254",
@@ -3600,9 +3658,11 @@
         "windows-1254",
         "x-cp1254"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1255",
@@ -3611,9 +3671,11 @@
         "windows-1255",
         "x-cp1255"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1256",
@@ -3622,9 +3684,11 @@
         "windows-1256",
         "x-cp1256"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1257",
@@ -3633,9 +3697,11 @@
         "windows-1257",
         "x-cp1257"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "windows-1258",
@@ -3644,9 +3710,11 @@
         "windows-1258",
         "x-cp1258"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "x-mac-cyrillic",
@@ -3654,9 +3722,11 @@
         "x-mac-cyrillic",
         "x-mac-ukrainian"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     },
     {
       "name": "GBK",
@@ -3796,9 +3866,11 @@
       "labels": [
         "x-user-defined"
       ],
-      "status": "unassessed",
+      "status": "partial",
       "package": "F02",
-      "verification": []
+      "verification": [
+        "Decoder/backend implementation and original witnesses: src/text_encoding_single_byte_tests.rs; pinned normative inputs: tools/reference/text-encodings/manifest.json. Applicable encoders, document-loader integration and unchanged browser evidence remain open."
+      ]
     }
   ],
   "legacy_seed": {
