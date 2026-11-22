@@ -338,6 +338,12 @@ impl Runtime {
                         NODE_TEXT_CONTENT_GET, Some(NODE_TEXT_CONTENT_SET))?;
                 }
                 if name=="Element" {
+                    for(key,operation)in[("getElementsByTagName",super::ELEMENT_GET_ELEMENTS_TAG),("getElementsByClassName",super::ELEMENT_GET_ELEMENTS_CLASS)]{
+                        let method=self.allocate_host_function_with_length(window,operation,1).map_err(Fault::new)?;
+                        if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
+                        self.store_property(self.function_properties[method.id],"name".into(),Value::String(key.into()),Some((false,false,true)))?;
+                        self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
+                    }
                     for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_node_attribute(prototype,window,key,get,Some(set))?;}
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;
@@ -450,6 +456,8 @@ impl Runtime {
                         ("createProcessingInstruction", CREATE_PROCESSING_INSTRUCTION, 2),
                         ("importNode", DOCUMENT_IMPORT_NODE, 1),
                         ("adoptNode",DOCUMENT_ADOPT_NODE,1),
+                        ("getElementsByTagName",super::DOCUMENT_GET_ELEMENTS_TAG,1),
+                        ("getElementsByClassName",super::DOCUMENT_GET_ELEMENTS_CLASS,1),
                     ] {
                         let method = self.allocate_host_function_with_length(window, operation, length)
                             .map_err(Fault::new)?;

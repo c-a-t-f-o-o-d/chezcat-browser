@@ -3207,7 +3207,9 @@ impl Host for Bridge<'_> {
         if self.message_instance(object).is_some() { return Some(WINDOW); }
         self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
+        if self.canonical_collection_member(object,property){return false;}
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
+            || matches!(self.inert_node_type(object),Some(1|9))&&matches!(property,"getElementsByTagName"|"getElementsByClassName")
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
@@ -3342,6 +3344,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.canonical_collection_member(object,property){return false;}
         if property=="baseURI" && self.form_named_control(object,property) {return true;}
         if self.node_metadata_property(object,property) {return false;}
         if self.aria_reflection_member(object,property){return false;}
@@ -3587,6 +3590,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if dom_collections::operation(method).is_some(){return &[(0,true)];}
         if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
         if method==element_names::DEFAULT_METHOD{return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
@@ -3710,6 +3714,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
+        if dom_collections::operation(method).is_some(){return Some(1);}
         if method==xml_documents::CREATE{return Some(2);}
         if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
         if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
@@ -3749,6 +3754,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if dom_collections::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.console_message_limit(object,method).is_some(){return Some(WINDOW);}
         if placeholder::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0XHR."){return Some(object);}
@@ -3884,6 +3890,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if dom_collections::operation(method).is_some(){return 1;}
         if method==xml_documents::CREATE{return 2;}
         if method==element_names::DEFAULT_METHOD{return 1;}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
@@ -3978,6 +3985,7 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if let Some((_,document))=dom_collections::operation(method){return if self.collection_interface_receiver(object)==Some(document){Ok(())}else{Err(("TypeError","Live collection method requires its genuine Document or Element receiver.".into()))};}
         if method==xml_documents::CREATE{return self.validate_xml_document_factory(args);}
         if method=="createElement"&&self.inert_document(object){if let Some(Value::String(name))=args.first(){if !script_attribute_names::valid_element_local_name(name){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
 
@@ -4338,6 +4346,8 @@ impl Host for Bridge<'_> {
     }
 
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
+        if matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
+        if self.canonical_collection_member(object,property){return None;}
         if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
 
@@ -4409,6 +4419,7 @@ impl Host for Bridge<'_> {
     }
 
     fn accepts_receiver(&self, object: u32, method: &str, receiver: u32) -> bool {
+        if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if method==element_names::DEFAULT_METHOD{return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -5000,6 +5011,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.canonical_collection_member(object,property){return Ok(false);}
         if self.xhr_index(object).is_some(){return Ok(self.xhr_member(object,property));}
 
         if self.range_owner(object).is_some() {self.state.work(1)?;return Ok(false);}
@@ -5960,6 +5972,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some((name,_))=dom_collections::operation(method){let value=args.first().ok_or("A live collection operation requires one argument.")?;return if name=="getElementsByTagName"{self.create_tag_collection(object,value)}else{self.create_class_collection(object,value)};}
         if let Some((name,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return if setter{Err("ARIA setters require the native conversion transaction.".into())}else{self.aria_reflection_get(object,name)};}
         if let Some((name,setter))=crate::javascript::html_reflection_interface::operation(method){return if setter{Err("HTML reflection setters require the native conversion transaction.".into())}else{self.html_reflection_get(object,name)};}
         if method=="XMLHttpRequest"&&self.event_target_interface(object){return self.xhr_new(object);}

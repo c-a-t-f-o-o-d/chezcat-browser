@@ -7,6 +7,7 @@ use super::*;
 // Independent of adjacent Window/frame/node identities.
 const COLLECTION_BASE:u32=0x8c00_0000;
 const COLLECTION_END:u32=0x8d00_0000;
+pub(super) fn operation(method:&str)->Option<(&'static str,bool)>{use crate::javascript::*;match method{DOCUMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",true)),DOCUMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",true)),ELEMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",false)),ELEMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",false)),_=>None}}
 #[cfg(test)]
 const MAX_COLLECTIONS:usize=128;
 
@@ -47,6 +48,8 @@ pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn collection_interface_receiver(&self,object:u32)->Option<bool>{if object==DOCUMENT||self.inert_node_type(object)==Some(9){Some(true)}else if self.inert_node_type(object)==Some(1)||node_index(object).is_some_and(|index|self.dom_accessible(index)&&matches!(self.doc.nodes[index].kind,NodeKind::Element{..})){Some(false)}else{None}}
+    pub(super) fn canonical_collection_member(&self,object:u32,property:&str)->bool{matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.collection_interface_receiver(object).is_some()&&!self.form_named_control(object,property)}
     fn tag_collection_handles(&mut self,handle:u32)->Result<Vec<u32>,String>{
         let index=collection_handle_index(handle).ok_or("Invalid HTMLCollection handle.")?;let root=self.state.dom.collections.get(index).ok_or("Missing live collection.")?.root;let owner=root;
         if self.inert_node_type(owner).is_none(){let nodes=self.tag_collection_nodes(handle)?;self.state.copies(nodes.len().checked_mul(size_of::<u32>()).ok_or("Collection handle conversion overflow.")?)?;let mut result=Vec::new();result.try_reserve_exact(nodes.len()).map_err(|_|"Cannot reserve live collection handles.")?;result.extend(nodes.into_iter().map(node_handle));return Ok(result);}

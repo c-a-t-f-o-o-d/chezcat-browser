@@ -1,6 +1,22 @@
 //! Checked adoption moves actual records and preserves their public handles.
 use super::*;
 struct Tree{nodes:Vec<u32>,native:bool,old_document:u32,parent:Option<u32>}
+#[cfg(test)]
+mod storage_tests{
+ use super::*;
+ fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body><div id=source><span>data</span><!--marker--></div></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+ #[test]
+ fn node_adoption_native_owner_index_and_real_child_vectors_are_charged_without_payload_copy(){
+  let(mut doc,mut forms,mut page)=fixture();let source=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{id:Some(id),..} if id=="source")).unwrap();let text=doc.nodes[doc.nodes[source].children[0]].children[0];let pointer=doc.nodes[text].kind.character_data().unwrap().as_ptr();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(target)=b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::Null,Value::String(String::new())]).unwrap()else{panic!("target")};let before=(b.state.retained,b.state.inert_documents.backing_bytes(),b.doc.nodes.len());let handles=b.adoption_tree(node_handle(source),target).unwrap().nodes;
+  let result=b.adopt_node(target,&[Value::Host(node_handle(source))]).unwrap();assert!(matches!(result,Value::Host(handle) if handle==node_handle(source)));let payload=handles.iter().map(|handle|b.state.inert_documents.node(*handle).unwrap().children.capacity()*size_of::<u32>()).sum::<usize>();assert_eq!(b.state.retained-before.0,payload+b.state.inert_documents.backing_bytes()-before.1);assert_eq!(b.doc.nodes.len(),before.2);assert_eq!(b.doc.nodes[text].kind.character_data().unwrap().as_ptr(),pointer);for handle in handles{assert_eq!(b.state.inert_documents.node(handle).unwrap().owner,target);}
+ }
+ #[test]
+ fn node_adoption_storage_copy_refusal_and_inert_zero_growth_keep_real_source_then_recover(){
+  let(mut doc,mut forms,mut page)=fixture();let source=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{id:Some(id),..} if id=="source")).unwrap();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};let Value::Host(target)=b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::Null,Value::String(String::new())]).unwrap()else{panic!("target")};let parent=b.state.tree.parents[source].unwrap();let before=(b.state.retained,b.state.inert_documents.backing_bytes(),b.state.dom_commits,b.doc.nodes[parent].children.clone());let limit=b.state.retained_limit;let copies=b.state.copy_work;
+  for storage in [true,false]{if storage{b.state.retained_limit=b.state.retained;}else{b.state.copy_work=0;}assert!(b.adopt_node(target,&[Value::Host(node_handle(source))]).is_err());assert_eq!((b.state.retained,b.state.inert_documents.backing_bytes(),b.state.dom_commits,b.doc.nodes[parent].children.clone()),before);assert_eq!(b.state.tree.parents[source],Some(parent));assert!(b.dom_accessible(source));b.state.retained_limit=limit;b.state.copy_work=copies;}
+  assert!(b.adopt_node(target,&[Value::Host(node_handle(source))]).is_ok());let Value::Host(other)=b.create_xml_document(MAIN_IMPLEMENTATION,&[Value::Null,Value::String(String::new())]).unwrap()else{panic!("other target")};let retained=b.state.retained;b.state.retained_limit=retained;assert!(b.adopt_node(other,&[Value::Host(node_handle(source))]).is_ok());assert_eq!(b.state.retained,retained);assert_eq!(b.state.inert_documents.node(node_handle(source)).unwrap().owner,other);
+ }
+}
 impl Bridge<'_>{
  fn adoption_source(&self,source:u32)->Result<(bool,u32,Option<u32>),(&'static str,String)>{
   if let Some(node)=self.state.inert_documents.node(source){return Ok((false,node.owner,node.parent));}
@@ -48,9 +64,10 @@ impl Bridge<'_>{
   self.adoption_tree(*source,document).map(|_|())
  }
  pub(in crate::scripting) fn adopt_node(&mut self,document:u32,args:&[Value])->Result<Value,String>{
-  self.state.rebuild(self.doc)?;self.validate_node_adoption(document,args).map_err(|(_,message)|message)?;let Value::Host(source)=args[0]else{unreachable!()};
+  self.validate_node_adoption(document,args).map_err(|(_,message)|message)?;let Value::Host(source)=args[0]else{unreachable!()};
   if let Some(id)=script_attr::index(source).filter(|&id|id<self.state.attributes.len()){if self.state.attributes[id].document!=document{self.state.copies(size_of::<u32>())?;self.state.attributes[id].document=document;self.state.dom_committed();}return Ok(Value::Host(source));}
-  let(_,old,parent)=self.adoption_source(source).map_err(|(_,message)|message)?;if old==document&&parent.is_none(){return Ok(Value::Host(source));}
+  let(native,old,parent)=self.adoption_source(source).map_err(|(_,message)|message)?;if old==document&&parent.is_none(){return Ok(Value::Host(source));}
+  if native{self.state.rebuild(self.doc)?;self.validate_node_adoption(document,args).map_err(|(_,message)|message)?;}
   let tree=self.adoption_tree(source,document).map_err(|(_,message)|message)?;
   let count=tree.nodes.len();let lookup=(usize::BITS-count.leading_zeros()) as usize+1;self.state.work(count.checked_mul(3*(lookup+3)).ok_or("Adoption traversal work overflow.")?)?;self.state.copies(count.checked_mul(3*(lookup+6)).and_then(|n|n.checked_mul(size_of::<u32>())).ok_or("Adoption traversal copy overflow.")?)?;
   let mut indices=Vec::new();if tree.native{indices.try_reserve_exact(count).map_err(|_|"Cannot reserve adoption Range node references.")?;self.state.copies(count.checked_mul(size_of::<usize>()).ok_or("Adoption Range references overflow.")?)?;indices.extend(tree.nodes.iter().map(|&handle|node_index(handle).unwrap()));}
@@ -82,7 +99,7 @@ impl Bridge<'_>{
   self.commit_attr_document_rebind(&attr_changes,document);self.state.dom_committed();Ok(Value::Host(source))
  }
  pub(in crate::scripting) fn adoption_changes(&mut self,args:&[Value])->Result<Vec<crate::javascript::NativeChildListChange>,String>{
-  let Some(Value::Host(source))=args.first()else{return Ok(Vec::new());};if self.attr_receiver(*source){return Ok(Vec::new());}self.state.rebuild(self.doc)?;
+  let Some(Value::Host(source))=args.first()else{return Ok(Vec::new());};if self.attr_receiver(*source){return Ok(Vec::new());}if self.state.inert_documents.node(*source).is_none(){self.state.rebuild(self.doc)?;}
   let(native,_,parent)=self.adoption_source(*source).map_err(|(_,message)|message)?;let Some(parent)=parent else{return Ok(Vec::new());};
   let (length,at,previous,next)=if native{let siblings=&self.doc.nodes[if parent==DOCUMENT{0}else{node_index(parent).unwrap()}].children;let at=siblings.iter().position(|&child|node_handle(child)==*source).ok_or("Missing observed adoption link.")?;(siblings.len(),at,at.checked_sub(1).map(|i|node_handle(siblings[i])),siblings.get(at+1).copied().map(node_handle))}else{let siblings=self.inert_children(parent).ok_or("Missing observed inert adoption parent.")?;let at=siblings.iter().position(|child|child==source).ok_or("Missing observed inert adoption link.")?;(siblings.len(),at,at.checked_sub(1).map(|i|siblings[i]),siblings.get(at+1).copied())};let _=at;
   self.state.work(length)?;self.state.copies(size_of::<crate::javascript::NativeChildListChange>()+size_of::<u32>())?;let mut removed=Vec::new();removed.try_reserve_exact(1).map_err(|_|"Cannot reserve adopted removal identity.")?;removed.push(*source);let mut changes=Vec::new();changes.try_reserve_exact(1).map_err(|_|"Cannot reserve adoption removal record.")?;changes.push(crate::javascript::NativeChildListChange{target:parent,added:Vec::new(),removed,previous,next});Ok(changes)

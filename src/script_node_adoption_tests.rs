@@ -1,6 +1,6 @@
 //! Adoption changes native ownership without cloning nodes, Attr or collections.
 use super::*;
-fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body><div id=mount></div><div id=source data-note=original><span id=child>old</span><!--marker--></div><input id=field value=seed></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();page.set_location(&crate::navigation::address("https://node-adoption.test/source",&crate::navigation::Location::home()).unwrap());assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body><div id=mount></div><div id=source data-note=original><span id=child>old</span><!--marker--></div><input id=field value=seed><form id=ownerForm><input id=tagField name=getElementsByTagName><input id=classField name=getElementsByClassName></form></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();page.set_location(&crate::navigation::address("https://node-adoption.test/source",&crate::navigation::Location::home()).unwrap());assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
 fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());}
 #[test]
 fn node_adoption_inert_document_root_preserves_owner_tree_attr_views_author_fields_and_removal_records(){
@@ -39,4 +39,23 @@ caught=false;try{target.adoptNode(document);}catch(e){caught=e.name==='NotSuppor
 var detached=document.createElement('input');if(document.adoptNode(detached)!==detached||detached.ownerDocument!==document||detached.parentNode!==null)throw 'same-owner detached noop';
 var dtype=document.doctype;if(document.adoptNode(dtype)!==dtype||document.doctype!==null||dtype.parentNode!==null||dtype.ownerDocument!==document||dtype.name!=='html')throw 'native same-owner doctype removal';if(target.adoptNode(dtype)!==dtype||dtype.ownerDocument!==target||dtype.parentNode!==null||target.doctype!==null)throw 'native cross-owner doctype';target.appendChild(dtype);if(target.doctype!==dtype||dtype.parentNode!==target)throw 'actual adopted doctype insertion';
 "#);assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());
+}
+#[test]
+fn node_adoption_collection_operations_are_canonical_and_keep_document_element_brands(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var docTag=Document.prototype.getElementsByTagName,elementTag=Element.prototype.getElementsByTagName,docClass=Document.prototype.getElementsByClassName,elementClass=Element.prototype.getElementsByClassName,d=Object.getOwnPropertyDescriptor(Element.prototype,'getElementsByTagName'),source=document.getElementById('source'),calls=0;
+if(docTag===elementTag||docClass===elementClass||docTag.length!==1||elementTag.length!==1||docTag.name!=='getElementsByTagName'||elementClass.name!=='getElementsByClassName'||d.value!==elementTag||!d.writable||!d.enumerable||!d.configurable||source.getElementsByTagName!==elementTag||document.getElementsByTagName!==docTag)throw 'canonical collection descriptors';
+for(var attempt of [function(){docTag.call(source,{toString:function(){calls++;return 'span';}});},function(){elementTag.call(document,{toString:function(){calls++;return 'span';}});},function(){elementClass.call({},'tracked');}]){var caught=false;try{attempt();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'correct collection interface brand';}if(calls)throw 'brand before name conversion';
+var form=document.getElementById('ownerForm');if(form.getElementsByTagName!==document.getElementById('tagField')||form.getElementsByClassName!==document.getElementById('classField')||elementTag.call(form,'input').length!==2)throw 'named form fields precede prototype methods';
+var owner=document.implementation.createDocument('\ud800','q:Root'),view=docTag.call(owner,'q:Root');if(!(view instanceof HTMLCollection)||view.length!==1||view[0]!==owner.documentElement||elementTag.call(owner.documentElement,'q:Root').length!==0||owner.getElementsByTagName!==docTag||owner.documentElement.getElementsByTagName!==elementTag)throw 'actual inert document and element scopes';
+"#);
+}
+#[test]
+fn node_adoption_saved_child_realm_method_revalidates_origin_before_any_owner_change(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var originSource=document.implementation.createDocument(null,''),target=document.implementation.createDocument(null,''),first=originSource.createElement('First'),pending=originSource.createElement('Pending'),frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,saved=w.Document.prototype.adoptNode;if(saved===Document.prototype.adoptNode||Object.getPrototypeOf(saved)!==w.Function.prototype||saved.call(target,first)!==first||first.ownerDocument!==target)throw 'actual saved child realm adoption';
+"#);
+ page.set_location(&crate::navigation::address("https://other-adoption-origin.test/",&crate::navigation::Location::home()).unwrap());let before=(doc.nodes.len(),page.state.dom_commits);
+ assert_eq!(page.console_eval(&mut doc,&mut forms,"saved.call(target,pending);").errors,1,"{}",page.report());assert!(page.report().contains("same-origin")||page.report().contains("Security"),"{}",page.report());assert_eq!((doc.nodes.len(),page.state.dom_commits),before);
+ run(&mut doc,&mut forms,&mut page,"if(pending.ownerDocument!==originSource||pending.parentNode!==null||first.ownerDocument!==target)throw 'denied adoption has no owner prefix';");
 }
