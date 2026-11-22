@@ -8633,3 +8633,6 @@ mod node_adoption_tests;
 #[cfg(test)]
 #[path="script_inert_direct_insertion_tests.rs"]
 mod inert_direct_insertion_tests;
+#[cfg(test)]
+#[path="script_xml_factory_root_identity_tests.rs"]
+mod xml_factory_root_identity_tests;
