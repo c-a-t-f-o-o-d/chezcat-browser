@@ -442,6 +442,7 @@ impl Runtime {
             self.define_character_data_interface(window, character, "ProcessingInstruction")?;
             let text = self.native_constructor_prototypes[&(window, "Text")];
             self.define_readonly_node_getter(text,window,"wholeText","\0Text.get.wholeText")?;
+            let split=self.allocate_host_function_with_length(window,"\0Text.splitText",1).map_err(Fault::new)?;if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(split.id){*receiver_required=true;}self.store_property(self.function_properties[split.id],"name".into(),Value::String("splitText".into()),Some((false,false,true)))?;self.store_property(text,"splitText".into(),Value::Function(split.id),Some((true,true,true)))?;
             self.define_character_data_interface(window, text, "CDATASection")?;
             for name in ["DocumentFragment","Document"] {
                 let allocation=self.allocate_host_function_with_length(window,name,0).map_err(Fault::new)?;

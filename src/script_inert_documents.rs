@@ -1953,3 +1953,6 @@ pub(super) mod character_edit;
 
 #[path="script_text_whole.rs"]
 pub(super) mod text_whole;
+
+#[path="script_text_split.rs"]
+pub(super) mod text_split;

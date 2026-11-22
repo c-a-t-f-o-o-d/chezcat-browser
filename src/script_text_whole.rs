@@ -2,7 +2,7 @@
 use super::*;
 pub(in crate::scripting) const GETTER:&str="\0Text.get.wholeText";
 impl Bridge<'_>{
- pub(in crate::scripting) fn whole_text_receiver(&self,object:u32)->bool{
+ pub(in crate::scripting) fn text_node_receiver(&self,object:u32)->bool{
   if let Some(kind)=self.inert_node_type(object){return matches!(kind,3|4);}
   node_index(object).is_some_and(|node|self.dom_accessible(node)&&matches!(self.doc.nodes[node].kind,NodeKind::Text(_)|NodeKind::Cdata(_)))
  }
@@ -26,12 +26,12 @@ impl Bridge<'_>{
   let mut parts=Vec::new();parts.try_reserve_exact(handles.len()).map_err(|_|"Cannot reserve wholeText references.")?;for &handle in handles{parts.push(self.character_data_source(handle).ok_or("wholeText source disappeared.")?);}Ok(parts)
  }
  pub(in crate::scripting) fn native_whole_text(&mut self,object:u32)->Result<Value,String>{
-  if !self.whole_text_receiver(object){return Err("wholeText requires a genuine Text or CDATA node.".into());}self.state.rebuild(self.doc)?;
+  if !self.text_node_receiver(object){return Err("wholeText requires a genuine Text or CDATA node.".into());}self.state.rebuild(self.doc)?;
   let Some(parent)=self.whole_text_parent(object)?else{return self.whole_text_singleton(object);};let count=self.whole_text_child_count(parent)?;
   let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(2).and_then(|n|n.checked_mul(8)).ok_or("wholeText lookup work overflow.")?;self.state.work(count.checked_mul(lookup).ok_or("wholeText sibling work overflow.")?)?;
   let position=(0..count).find(|&index|self.whole_text_child(parent,index)==Some(object)).ok_or("wholeText parent edge is inconsistent.")?;let mut start=position;let mut end=position+1;
-  while start>0&&self.whole_text_child(parent,start-1).is_some_and(|node|self.whole_text_receiver(node)){start-=1;}
-  while end<count&&self.whole_text_child(parent,end).is_some_and(|node|self.whole_text_receiver(node)){end+=1;}
+  while start>0&&self.whole_text_child(parent,start-1).is_some_and(|node|self.text_node_receiver(node)){start-=1;}
+  while end<count&&self.whole_text_child(parent,end).is_some_and(|node|self.text_node_receiver(node)){end+=1;}
   let count=end-start;if count==1{return self.whole_text_singleton(object);}
   let metadata=count.checked_mul(size_of::<u32>()+2*size_of::<&DomString>()).ok_or("wholeText reference storage overflow.")?;self.state.copies(metadata)?;
   let mut handles=Vec::new();handles.try_reserve_exact(count).map_err(|_|"Cannot reserve wholeText source handles.")?;for index in start..end{handles.push(self.whole_text_child(parent,index).ok_or("wholeText sibling disappeared.")?);}
