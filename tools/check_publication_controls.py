@@ -63,10 +63,10 @@ class PublicationControls(unittest.TestCase):
                       'outputs/run.json','.local/settings.json','src/__pycache__/compiled.pyc']
             for name in admitted+excluded:
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'Owned path fixture.')
-            result=subprocess.run(['git','check-ignore','--no-index','--stdin'],cwd=root,
-                input='\n'.join(admitted+excluded)+'\n',capture_output=True,text=True,check=False)
+            result=subprocess.run(['git','check-ignore','--no-index','-z','--stdin'],cwd=root,
+                input=('\0'.join(admitted+excluded)+'\0').encode('utf-8'),capture_output=True,check=False)
             self.assertEqual(result.returncode,0)
-            self.assertEqual(set(result.stdout.splitlines()),set(excluded))
+            self.assertEqual({name.decode('utf-8') for name in result.stdout.split(b'\0') if name},set(excluded))
             self.assertTrue(publication.check_tree(admitted))
 
     def test_mailmap_cannot_conceal_raw_owner_metadata(self):
