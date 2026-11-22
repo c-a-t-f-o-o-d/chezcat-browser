@@ -11,6 +11,10 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 
+#[cfg(test)]
+#[path = "html_foundation_adapter_tests.rs"]
+mod foundation_adapter;
+
 #[path = "html_svg_namespace.rs"]
 mod svg_namespace;
 

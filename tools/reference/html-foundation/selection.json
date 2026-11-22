@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "selection_id": "html-foundation-f00-20261121-v1",
+  "rule": "All pinned WPT dat cases, both scripting modes when unspecified, all html5lib tokenizer states; pending-spec/XML-infoset cohorts separately supplementary; all original witnesses; fixed F01 browser files with all unchanged assertions",
+  "record_count": 10989,
+  "native_case_count": 10968,
+  "browser_file_count": 21,
+  "browser_subtest_count": null,
+  "case_catalog_sha256": "f3b391339a96b741fdc445ce6104a7b6bee5e47b43e3d774009a01837ebc2b2e",
+  "counts": {
+    "tokenizer": 7050,
+    "browser": 21,
+    "tree": 3911,
+    "page": 7
+  },
+  "cohorts": {
+    "required": 10976,
+    "supplementary-pending-spec": 9,
+    "supplementary-xml-infoset": 4
+  },
+  "inventory_sha256": "fab85750e2b70405ae507a7b4996d634b5efe56814922edf1a7084fa7a28029a",
+  "input_manifest_sha256": "69a7e819f8a2c15cec236e42235196f08acaab0a437662087e7be7ee812b3429",
+  "witnesses_sha256": "2231a6e19905ad3a837a54d8b0b02301db6d068d50dcfd095df2f7458c4537de",
+  "enumerator_sha256": "1387922c92a373609869f0d39088fa4ce07bc6d7bba3390797a8fb567a3e817c",
+  "normative_pins": {
+    "html": {
+      "revision": "0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce",
+      "url": "https://html.spec.whatwg.org/",
+      "parser_inventory_sha256": "a9d8fec58a2cb4d4b7c3dc2350b497ba4619afded8653ea7764642ecb94d1a4e",
+      "parser_inventory_sha256_note": "Digest of the inspected parsing page; the HTML revision pins normative source. Not a fixture-manifest digest."
+    },
+    "dom": {
+      "revision": "e4f4f4f0ace83fe6c52ab68e047351ce7f2dcd69",
+      "url": "https://dom.spec.whatwg.org/"
+    },
+    "webidl": {
+      "revision": "54a5f2de6a34e27a517a49370bc07d8943b0be11",
+      "url": "https://webidl.spec.whatwg.org/"
+    },
+    "encoding": {
+      "revision": "7d2e3e08e11f57ba1b080390b490d53648c6f69c",
+      "url": "https://encoding.spec.whatwg.org/",
+      "labels_inventory_note": "Names and labels are factual inventory from the identified normative input; no decoder or other implementation imported."
+    },
+    "url": {
+      "revision": "4f461b81a748443b235840599cea6290df40329a",
+      "url": "https://url.spec.whatwg.org/"
+    },
+    "mimesniff": {
+      "revision": "ba4b3c385b9765ddfe4a994e2bb89e0ab96068e2",
+      "url": "https://mimesniff.spec.whatwg.org/"
+    },
+    "quirks": {
+      "revision": "5a06deb58ae2644d62c3c2026bbef86e6137b779",
+      "url": "https://quirks.spec.whatwg.org/"
+    },
+    "xml": {
+      "edition": "XML1.0 Fifth Edition",
+      "url": "https://www.w3.org/TR/2008/REC-xml-20081126/",
+      "errata_review": "required in F08"
+    },
+    "xml_namespaces": {
+      "edition": "Namespaces in XML1.0 Third Edition",
+      "url": "https://www.w3.org/TR/2009/REC-xml-names-20091208/",
+      "errata_review": "required in F08"
+    },
+    "wpt": {
+      "revision": "42e27408034f57afe4c726476d1a0bd96b873129",
+      "url": "https://github.com/web-platform-tests/wpt",
+      "tree_data_path": "html/syntax/parsing/resources",
+      "observed_dat_file_count": 62,
+      "case_counts": null,
+      "fixture_manifest": "required in F00"
+    },
+    "html5lib_tests": {
+      "revision": "c5495c539ca8a79c3c5107f5f14010bcff9a35d5",
+      "url": "https://github.com/html5lib/html5lib-tests",
+      "selected_families": [
+        "tokenizer",
+        "encoding",
+        "serializer"
+      ],
+      "fixture_manifest": "required in F00"
+    },
+    "html_build_entities": {
+      "revision": "283a3531a61106d07d9a7d9fb3e6f3b9bfd33d70",
+      "git_blob": "557170b41f47a13a46ec695561eb5fe76da73bdb",
+      "path": "entities/out/entities.json",
+      "name_count": 2231,
+      "multi_codepoint_count": 93,
+      "semicolonless_legacy_count": 106,
+      "fixture_manifest": "required before generation"
+    },
+    "infra": {
+      "repository": "https://github.com/whatwg/infra",
+      "revision": "f0c9a81337e50baf827cf48a73d856ea4bd8b3e0",
+      "reviewed_commit_date": "2026-11-15T09:08:13Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "dom_parsing": {
+      "repository": "https://github.com/w3c/DOM-Parsing",
+      "revision": "aefb90de7f19d7256600d0e7036c2f13089704d1",
+      "reviewed_commit_date": "2026-09-02T22:13:29Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "ui_events": {
+      "repository": "https://github.com/w3c/uievents",
+      "revision": "8c1b80982c16b10f28a210e4541ac799dbe39a51",
+      "reviewed_commit_date": "2026-02-21T11:00:31Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "selection_api": {
+      "repository": "https://github.com/w3c/selection-api",
+      "revision": "b475d4ba72cbe08f5015040dcd9fb4cf9133dd00",
+      "reviewed_commit_date": "2026-06-11T16:03:10Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "input_events": {
+      "repository": "https://github.com/w3c/input-events",
+      "revision": "9758626096bfae9a3181ab370542b576a41e74f1",
+      "reviewed_commit_date": "2026-11-20T04:55:30Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    },
+    "pointer_events": {
+      "repository": "https://github.com/w3c/pointerevents",
+      "revision": "7affe62fa4332543f8b13c56292104e4e9dfa517",
+      "reviewed_commit_date": "2026-10-08T14:39:58Z",
+      "role": "Normative revision reference; executable fixture bytes are separately locked in F00 input manifest."
+    }
+  },
+  "inventory_source_revision": "c07c6123cd7cc610c9757922b18ad68b5143cff3",
+  "inventory_path": "docs/HTML_FOUNDATION_COVERAGE.json",
+  "browser_subtests": "Not enumerated/executed: unchanged browser harness and loaded/API entry dependency owned by F06/F10; every assertion in the pinned file selection remains required.",
+  "supplementary_not_selected": [
+    "html5lib encoding and serializer inputs are pinned but not executed by this initial tokenizer/tree cohort; select case-level cohorts in F02/F07"
+  ],
+  "limitations": [
+    "Native tree output is not browser WPT",
+    "Parse diagnostics and token-stream entry absence remain required harness blocks, never passes",
+    "Scripted parser integration remains owned by F10",
+    "Native scalar parser inputs do not establish DOMString UTF-16 conformance"
+  ]
+}
