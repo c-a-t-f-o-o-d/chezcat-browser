@@ -3,15 +3,18 @@ use super::*;
 
 impl Bridge<'_> {
     pub(super) fn publish_inert_clone(
-        &mut self, first: u32, mut staged: Vec<Entry>, generated: Option<GeneratedNode>,
-        mut payload: usize, mut links: Vec<(u32,u32)>, reserve_slots: bool,
-    ) -> Result<Value,String> {
-        let base = self.doc.nodes.len();
-        let source_base = self.state.inert_documents.generated.len();
-        let mut sources = Vec::new();
-        sources.try_reserve_exact(staged.len().checked_add(1).ok_or("Clone source count overflow.")?)
-            .map_err(|_|"Cannot reserve clone source plan.")?;
-        if let Some(source) = generated { sources.push(source); }
+        &mut self, first:u32, staged:Vec<Entry>, generated:Option<GeneratedNode>, payload:usize, links:Vec<(u32,u32)>, reserve_slots:bool,
+    )->Result<Value,String>{
+        let mut sources=Vec::new();sources.try_reserve_exact(usize::from(generated.is_some())).map_err(|_|"Cannot reserve clone source plan.")?;if let Some(source)=generated{sources.push(source);}
+        self.publish_inert_batch(first,staged,sources,payload,links,reserve_slots)
+    }
+    // Parser and clone producers share the same unpublished identity projection.
+    pub(super) fn publish_inert_batch(
+        &mut self, first:u32, mut staged:Vec<Entry>, mut sources:Vec<GeneratedNode>, mut payload:usize, mut links:Vec<(u32,u32)>, reserve_slots:bool,
+    )->Result<Value,String>{
+        let base=self.doc.nodes.len();let source_base=self.state.inert_documents.generated.len();
+        let extra=staged.iter().filter(|entry|matches!(entry,Entry::Node(InertNode{kind:Kind::Text(_)|Kind::Element(_)|Kind::Parsed{source:ParsedSource::Loaded(_),..},..}))).count();
+        sources.try_reserve_exact(extra).map_err(|_|"Cannot reserve additional native source snapshots.")?;
         let mut handles = Vec::new();
         handles.try_reserve_exact(staged.len()).map_err(|_|"Cannot reserve clone identity projection.")?;
         let slots = self.state.node_limit.saturating_sub(base.saturating_add(self.state.blank_frame_nodes))
