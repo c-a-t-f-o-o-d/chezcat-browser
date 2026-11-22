@@ -31,7 +31,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn node_mutation_receiver(&self, object: u32) -> bool {
-        node_index(object).is_some_and(|node| self.dom_accessible(node))||self.inert_node_type(object)==Some(10)
+        node_index(object).is_some_and(|node| self.dom_accessible(node))||self.inert_node_type(object)==Some(10)||self.attr_receiver(object)
     }
 
     pub(super) fn root_node_receiver(&self, object: u32) -> bool {

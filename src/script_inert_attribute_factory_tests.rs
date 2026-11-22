@@ -1,0 +1,45 @@
+//! Detached Attr factories retain genuine owner and document-specific case.
+use super::*;
+fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body><span id=mount></span><input id=field value=seed></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();page.set_location(&crate::navigation::address("https://attribute-factories.test/source",&crate::navigation::Location::home()).unwrap());assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
+fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());}
+#[test]
+fn inert_attribute_factory_canonical_html_xml_case_namespace_owner_and_exact_values(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var make=Document.prototype.createAttribute,makeNS=Document.prototype.createAttributeNS,xml=document.implementation.createDocument(null,'Root'),html=document.implementation.createHTMLDocument('owner'),a=xml.createAttribute('MiXeD'),b=html.createAttribute('MiXeD'),c=makeNS.call(xml,'urn:original','p:MiXeD'),d=html.createAttributeNS(null,'MiXeD');
+if(make.length!==1||make.name!=='createAttribute'||makeNS.length!==2||makeNS.name!=='createAttributeNS'||make!==document.createAttribute||make!==xml.createAttribute||makeNS!==html.createAttributeNS||a.name!=='MiXeD'||a.localName!=='MiXeD'||a.nodeName!=='MiXeD'||b.name!=='mixed'||c.name!=='p:MiXeD'||c.localName!=='MiXeD'||c.prefix!=='p'||c.namespaceURI!=='urn:original'||d.name!=='MiXeD'||d.namespaceURI!==null)throw 'real canonical owner case and expanded names';
+for(var attr of [a,b,c,d]){if(!(attr instanceof Attr)||!(attr instanceof Node)||attr.nodeType!==2||attr.ownerElement!==null||attr.parentNode!==null||attr.value!==''||attr.nodeValue!==''||attr.textContent!==''||attr.isConnected||attr.childNodes.length)throw 'actual detached Attr';attr.value='\ud800A\udfff';if(attr.value.charCodeAt(0)!==0xd800||attr.nodeValue!==attr.value||attr.textContent!==attr.value)throw 'exact detached values';}
+if(a.ownerDocument!==xml||b.ownerDocument!==html||c.ownerDocument!==xml||d.ownerDocument!==html||a.baseURI!==xml.baseURI||b.baseURI!==html.baseURI||document.createAttribute('MiXeD').name!=='mixed')throw 'actual associated documents';
+var root=document.getElementById('mount'),prepared=xml.createAttribute('data-note');prepared.value='\ud800';if(root.setAttributeNode(prepared)!==null||prepared.ownerDocument!==document||prepared.ownerElement!==root||root.getAttributeNode('data-note')!==prepared||root.getAttribute('data-note').charCodeAt(0)!==0xd800)throw 'real main attachment adopts factory Attr';
+"#);
+}
+#[test]
+fn inert_attribute_factory_ordered_conversions_namespace_errors_and_brand_precede_publication(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var xml=document.implementation.createDocument(null,''),make=Document.prototype.createAttribute,makeNS=Document.prototype.createAttributeNS,order='',calls=0,a=makeNS.call(xml,{toString:function(){order+='n';return 'urn:original';}},{toString:function(){order+='q';return 'p:Name';}});if(order!=='nq'||a.ownerDocument!==xml||a.prefix!=='p')throw 'ordered conversions';
+var caught=false;try{make.call({}, {toString:function(){calls++;return 'fake';}});}catch(e){caught=e instanceof TypeError;}if(!caught||calls)throw 'brand before author code';
+caught=false;try{make.call(xml,{toString:function(){calls++;return 'bad name';}});}catch(e){caught=e instanceof DOMException&&e.name==='InvalidCharacterError';}if(!caught||calls!==1)throw 'current attribute local name error';
+order='';caught=false;try{makeNS.call(xml,{toString:function(){order+='n';return '';}},{toString:function(){order+='q';return 'p:Name';}});}catch(e){caught=e instanceof DOMException&&e.name==='NamespaceError';}if(!caught||order!=='nq')throw 'all conversions before namespace validation';
+caught=false;try{makeNS.call(xml,'urn:wrong','xml:lang');}catch(e){caught=e instanceof DOMException&&e.name==='NamespaceError';}if(!caught)throw 'XML prefix';var declaration=makeNS.call(xml,'http://www.w3.org/2000/xmlns/','xmlns:p');if(declaration.namespaceURI!=='http://www.w3.org/2000/xmlns/'||declaration.prefix!=='xmlns'||declaration.localName!=='p'||declaration.ownerDocument!==xml)throw 'actual declaration metadata';
+"#);
+}
+#[test]
+fn inert_attribute_factory_real_attr_interface_members_setter_observation_and_node_leaf_brand(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var C=Attr,P=C.prototype,a=document.createAttribute('data-note'),get=Object.getOwnPropertyDescriptor(P,'value'),calls=0;if(C.length!==0||C.name!=='Attr'||Object.getPrototypeOf(C)!==Node||Object.getPrototypeOf(P)!==Node.prototype||Object.getPrototypeOf(a)!==P||P.constructor!==C||!(a instanceof C)||!(a instanceof Node)||a instanceof Element||Object.prototype.toString.call(a)!=='[object Attr]'||typeof get.get!=='function'||typeof get.set!=='function'||get.get.length!==0||get.set.length!==1||!get.enumerable||!get.configurable||Object.hasOwn(a,'value')||a.childNodes!==a.childNodes||a.childNodes.length)throw 'real Attr interface and data descriptors';
+for(var attempt of [function(){new C();},function(){C();},function(){get.get.call({});},function(){get.set.call({}, {toString:function(){calls++;return 'fake';}});}]){var caught=false;try{attempt();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'illegal ctor and exact Attr brand';}if(calls)throw 'brand before setter conversion';
+var root=document.getElementById('mount'),watch=new MutationObserver(function(){});root.setAttributeNode(a);watch.observe(root,{attributes:true,attributeOldValue:true});get.set.call(a,{toString:function(){calls++;return '\ud800';}});var records=watch.takeRecords();if(calls!==1||get.get.call(a).charCodeAt(0)!==0xd800||a.nodeValue!==a.value||a.textContent!==a.value||root.getAttributeNode('data-note')!==a||records.length!==1||records[0].target!==root||records[0].attributeName!=='data-note'||records[0].oldValue!=='')throw 'canonical setter shares real native transaction and observation';
+var caught=false;try{a.appendChild(document.createTextNode('child'));}catch(e){caught=e instanceof DOMException&&e.name==='HierarchyRequestError';}if(!caught||a.childNodes.length||a.firstChild!==null||a.ownerElement!==root)throw 'Attr is a genuine leaf Node';
+"#);
+}
+#[test]
+fn inert_attribute_factory_native_storage_refusal_publishes_no_identity_or_source_prefix_and_recovers(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,"var xml=document.implementation.createDocument(null,'Root');");let before=(doc.nodes.len(),page.state.retained,page.state.attributes.len(),page.state.dom_commits);let limit=page.state.retained_limit;page.state.retained_limit=page.state.retained;
+ assert_eq!(page.console_eval(&mut doc,&mut forms,"xml.createAttributeNS('urn:original','p:Name');").errors,1);assert_eq!((doc.nodes.len(),page.state.retained,page.state.attributes.len(),page.state.dom_commits),before);page.state.retained_limit=limit;
+ run(&mut doc,&mut forms,&mut page,"var recovered=xml.createAttributeNS('urn:original','p:Name');if(recovered.ownerDocument!==xml||recovered.ownerElement!==null||recovered.name!=='p:Name'||recovered.namespaceURI!=='urn:original'||xml.documentElement.ownerDocument!==xml)throw 'fresh factory recovery';");assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());
+}
+#[test]
+fn inert_attribute_factory_saved_child_realm_revalidates_origin_before_conversion_or_identity(){
+ let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"
+var owner=document.implementation.createDocument(null,''),frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,saved=w.Document.prototype.createAttributeNS,order='',namespace={toString:function(){order+='n';return 'urn:original';}},name={toString:function(){order+='q';return 'p:Name';}},first=saved.call(owner,namespace,name);if(saved===Document.prototype.createAttributeNS||Object.getPrototypeOf(saved)!==w.Function.prototype||order!=='nq'||first.ownerDocument!==owner||first.name!=='p:Name')throw 'actual child realm attribute factory';
+"#);page.set_location(&crate::navigation::address("https://other-attribute-factory.test/",&crate::navigation::Location::home()).unwrap());let before=(doc.nodes.len(),page.state.attributes.len(),page.state.dom_commits);assert_eq!(page.console_eval(&mut doc,&mut forms,"saved.call(owner,namespace,name);").errors,1);assert!(page.report().contains("same-origin")||page.report().contains("Security"),"{}",page.report());assert_eq!((doc.nodes.len(),page.state.attributes.len(),page.state.dom_commits),before);run(&mut doc,&mut forms,&mut page,"if(order!=='nq'||first.ownerDocument!==owner)throw 'denied factory has no author or identity effects';");
+}

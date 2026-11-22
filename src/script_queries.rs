@@ -102,6 +102,10 @@ impl Bridge<'_> {
 
     pub(super) fn create_inert_child_list(&mut self, object: u32) -> Result<Value, String> {
         if self.inert_children(object).is_none() { return Err("Invalid inert childNodes owner.".into()); }
+        self.create_logical_child_list(object,false)
+    }
+    pub(super) fn create_attribute_child_list(&mut self,object:u32)->Result<Value,String>{if !self.attr_receiver(object){return Err("Invalid Attr childNodes owner.".into());}self.create_logical_child_list(object,true)}
+    fn create_logical_child_list(&mut self,object:u32,attribute:bool)->Result<Value,String>{
         if let Some(index)=node_index(object){self.state.work(self.state.dom.child_lists.lookup_work())?;if let Some(&saved)=self.state.dom.child_lists.get(&index){return Ok(Value::Host(saved));}}
         self.state.work(1)?;
         self.state.work(self.state.dom.inert_child_lists.lookup_work())?;
@@ -116,7 +120,7 @@ impl Bridge<'_> {
         let copied=work.saturating_add(if map.is_some(){self.state.dom.inert_child_lists.len()}else{0});
         self.state.copies(self.state.dom.inert_child_lists.movement_bytes(copied))?;
         let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
-        self.commit_node_list(NodeList::InertChildren(object),replacement,added,payload);
+        self.commit_node_list(if attribute{NodeList::HandleSnapshot(Vec::new())}else{NodeList::InertChildren(object)},replacement,added,payload);
         self.state.dom.inert_child_lists.commit(map);
         self.state.dom.inert_child_lists.insert(object, handle);
         Ok(Value::Host(handle))

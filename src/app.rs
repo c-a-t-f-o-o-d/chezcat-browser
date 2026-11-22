@@ -6298,3 +6298,7 @@ mod xml_factory_root_identity_tests;
 #[cfg(test)]
 #[path="app_domparser_node_identity_tests.rs"]
 mod domparser_node_identity_tests;
+
+#[cfg(test)]
+#[path="app_inert_attribute_factory_tests.rs"]
+mod inert_attribute_factory_tests;

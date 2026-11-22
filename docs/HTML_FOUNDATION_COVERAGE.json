@@ -446,7 +446,11 @@
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/script_inert_attribute_factory_tests.rs",
+                "src/app_inert_attribute_factory_tests.rs",
+                "src/host_objects.rs",
+                "src/script_queries.rs"
               ],
               "integration_dependencies": [
                 "F06",
@@ -456,7 +460,7 @@
                 "F01-attribute-domstring-unpaired-utf16"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Native Attr now has real illegal-constructor/Node inheritance and canonical namespace/name/owner/specified/value descriptors, exact native value setter observation and stable empty childNodes. Canonical Document factories retain main/inert HTML/XML/template owners, HTML-only local-name folding, ordered conversion/namespace errors and actual associated documents. Name/backing/refusal/recovery, captured-origin and App main attachment evidence cover this producer. Inert attachment, raw namespace/QName UTF-16 and broader lookup/serialization/IDL integration remain required; no package/browser closure.",
               "closing_evidence": []
             },
             {
