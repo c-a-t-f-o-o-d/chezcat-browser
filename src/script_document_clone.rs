@@ -79,7 +79,7 @@ impl Bridge<'_>{
   while let Some(&step)=pending.get(at){
    let handle=first+2+at as u32;staged.try_reserve(1).map_err(|_|"Cannot reserve document clone descendant record.")?;
    let(source,parent,source_parent,owner,source_owner,host)=match step{
-    Step::Owner{implementation}=>{staged.push(Entry::Node(InertNode{kind:Kind::TemplateDocument{kind,implementation},owner:handle,parent:None,children:Vec::new()}));at+=1;continue;},
+    Step::Owner{implementation}=>{staged.push(Entry::Node(InertNode{kind:Kind::TemplateDocument{kind,implementation,html:None,doctype:None},owner:handle,parent:None,children:Vec::new()}));at+=1;continue;},
     Step::Implementation=>{staged.push(Entry::Implementation);at+=1;continue;},
     Step::Node{source,parent,source_parent,owner,source_owner,host}=>(source,parent,source_parent,owner,source_owner,host),
    };

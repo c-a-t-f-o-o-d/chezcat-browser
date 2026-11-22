@@ -6354,3 +6354,7 @@ mod generic_document_tests;
 #[cfg(test)]
 #[path="app_document_template_clone_tests.rs"]
 mod document_template_clone_tests;
+
+#[cfg(test)]
+#[path="app_template_document_children_tests.rs"]
+mod template_document_children_tests;

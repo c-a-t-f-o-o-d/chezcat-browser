@@ -58,7 +58,7 @@ impl Bridge<'_> {
         let arena = &mut self.state.inert_documents;
         arena.entries.push(Entry::Node(InertNode {
             kind: Kind::TemplateDocument {
-                implementation: first + 1,kind:self.doc.kind,
+                implementation: first + 1,kind:self.doc.kind,html:None,doctype:None,
             },
             owner: first,
             parent: None,
