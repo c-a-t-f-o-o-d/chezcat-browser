@@ -7518,10 +7518,9 @@ if(item!==images.item || item.call(images,0)!==first)throw Error('method identit
 var rejected=false;try{item(0);}catch(error){rejected=error.name==='TypeError';}
 if(!rejected)throw Error('unbound method accepted');
 document.title='Images inspected';
-"#, "document.images.length=0;", "if(document.images.length!==6)throw Error('mutable collection');"],
+"#, "document.images.length=0;", "var lengthGetter=Object.getOwnPropertyDescriptor(HTMLCollection.prototype,'length').get;if(document.images.length!==6||lengthGetter.call(document.images)!==6)throw Error('mutable collection');"],
         );
-        assert_eq!(outcome.errors, 1, "{}", page.report());
-        assert!(page.report().contains("image collection is read-only"));
+        assert_eq!(outcome.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "Images inspected");
         assert_eq!(doc.attr(id(&doc, "renamed"), "name"), Some("logo"));
     }

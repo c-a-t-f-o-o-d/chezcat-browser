@@ -229,7 +229,8 @@
           "requirement": "HTML/XML kind, MIME, encoding, URL/origin, document modes and doctype",
           "status": "partial",
           "verification": [
-            "Native document-record increment: eight focused original checks, including actual App across all three stored modes, pass. 305 affected checks pass; the separate standards-metadata fixture now supplies its intended HTML doctype. Frozen loaded-doctype/HTML-factory/Text/Attr/USV/owner witnesses pass; XML factory and arbitrary element namespaces still fail. No browser WPT or full parser/layout closure."
+            "Native document-record increment: eight focused original checks, including actual App across all three stored modes, pass. 305 affected checks pass; the separate standards-metadata fixture now supplies its intended HTML doctype. Frozen loaded-doctype/HTML-factory/Text/Attr/USV/owner witnesses pass; XML factory and arbitrary element namespaces still fail. No browser WPT or full parser/layout closure.",
+            "Native XML producer increment: seven original focused checks including connected App XML-data/HTML-import binding, exact payload/backing/refusal/recovery and current native head/body/title pass. 449 affected checks pass. All eight fixed original F01 witnesses pass on this producer; required unchanged browser assertions and broader contract/integration coverage remain open."
           ],
           "dependency_details": [],
           "detail_requirements": [
@@ -253,7 +254,10 @@
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/script_xml_documents.rs",
+                "src/script_native_xml_document_tests.rs",
+                "src/app_native_xml_document_tests.rs"
               ],
               "integration_dependencies": [
                 "F02",
@@ -264,7 +268,7 @@
                 "F01-xml-document-factory-and-namespace"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Shared explicit DocumentKind and DocumentMode records now travel with supported native documents and scratch views. HTML producers retain actual ownership and MIME metadata. XML constructors/factories and MIME/XML routing remain required and unavailable; the fixed XML-factory witness still fails.",
+              "supplementary_evidence": "Real XMLDocument factory identity and optional root records now preserve actual owners, expanded names, XML case and namespace-based content types. Empty documents have no fabricated HTML nodes. Fixed HTML/XML factory witnesses pass. Non-null doctype adoption, complete document clone/root mutation, XML byte/DTD/entity/CDATA producers, MIME/XML routing and unchanged browser WPT remain required; no package closure.",
               "closing_evidence": []
             },
             {
@@ -296,7 +300,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Factory XML documents carry actual no-quirks kind/mode/MIME/URL and no Window. Head/body/title read current native children after mutations and title normalization preserves units; original App binding and storage negatives pass. Broader origin/encoding/readiness and loader/resource integration remain separately required.",
               "closing_evidence": []
             },
             {
@@ -418,7 +422,7 @@
                 "F01-arbitrary-element-namespace-prefix-and-clone"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Real arbitrary/null URI and prefix/local records, exact URI DOMString units, qualified names, supported clone/owner behavior and canonical default-namespace lookup have original native and connected App evidence. Fixed arbitrary-namespace/prefix/clone witness now passes. Foreign activation/import/adoption, general attribute and namespace-aware query/serialization consumers, scalar QName restriction and F05/F06/F08 integration remain open. Unknown parser provenance is not fabricated as a null URI.",
+              "supplementary_evidence": "Real arbitrary/null URI and prefix/local records, exact URI DOMString units, qualified names, supported clone/owner behavior and canonical default-namespace lookup have original native and connected App evidence. Fixed arbitrary-namespace/prefix/clone witness now passes. Foreign activation/import/adoption, general attribute and namespace-aware query/serialization consumers, scalar QName restriction and F05/F06/F08 integration remain open. Unknown parser provenance is not fabricated as a null URI. XML factory roots and common node factories now consume the same native records with real XML owners and case rules; XML parsing/complete adoption remain open.",
               "closing_evidence": []
             },
             {

@@ -130,8 +130,8 @@ if (!delete node.childNodes || node.childNodes !== live || Object.hasOwn(node, '
 fn child_nodes_actual_document_and_element_borrowed_slice_are_real_static_arrays() {
     let (doc, _, page) = fixture("<!doctype html><!--represented--><html><head></head><body><div id=parent>lead<span id=inside>middle</span>tail</div></body></html>", r#"
 var slice=Array.prototype.slice,children=document.childNodes,root=document.documentElement;
-if(children!==document.childNodes||children.length!==2||children[0].nodeType!==8||children[0].data!=='represented'||children[1]!==root||children.item(1)!==root)throw 'real Document direct children';
-var copied=slice.call(children);if(!Array.isArray(copied)||copied.length!==2||copied[0]!==children[0]||copied[1]!==root||copied===children)throw 'exact reduced Document host slice';
+if(children!==document.childNodes||children.length!==3||children[0]!==document.doctype||children[0].nodeType!==10||children[1].nodeType!==8||children[1].data!=='represented'||children[2]!==root||children.item(2)!==root)throw 'real Document direct children';
+var copied=slice.call(children);if(!Array.isArray(copied)||copied.length!==3||copied[0]!==document.doctype||copied[1]!==children[1]||copied[2]!==root||copied===children)throw 'exact reduced Document host slice';
 var parent=document.getElementById('parent'),list=parent.childNodes,span=document.getElementById('inside');
 if(list!==parent.childNodes||list.length!==3||list[0].nodeType!==3||list[0].data!=='lead'||list[1]!==span||list[2].data!=='tail')throw 'all direct Element/Text nodes';
 var snapshot=slice.call(list),first=list[0],last=list[2];parent.removeChild(span);

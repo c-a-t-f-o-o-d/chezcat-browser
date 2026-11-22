@@ -6262,3 +6262,7 @@ mod native_document_records_tests;
 #[cfg(test)]
 #[path="app_native_expanded_names_tests.rs"]
 mod native_expanded_names_tests;
+
+#[cfg(test)]
+#[path="app_native_xml_document_tests.rs"]
+mod native_xml_document_tests;
