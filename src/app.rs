@@ -6302,3 +6302,7 @@ mod domparser_node_identity_tests;
 #[cfg(test)]
 #[path="app_inert_attribute_factory_tests.rs"]
 mod inert_attribute_factory_tests;
+
+#[cfg(test)]
+#[path="app_inert_attribute_attachment_tests.rs"]
+mod inert_attribute_attachment_tests;

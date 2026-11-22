@@ -182,3 +182,20 @@ fn inert_attribute_writes_canonical_main_methods_preserve_native_form_named_prec
     let mut doc=crate::html::parse_loaded_document("<html><body><form id=f><input id=named name=setAttribute value=kept></form><p id=plain></p></body></html>",&||Ok(())).unwrap();doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
     execute(&mut doc,&mut forms,&mut page,"var f=document.getElementById('f'),input=document.getElementById('named'),p=document.getElementById('plain'),native=Element.prototype.setAttribute;if(f.setAttribute!==input)throw 'native form named precedence';native.call(f,'data-note','form');p.setAttribute('data-note','plain');if(f.getAttribute('data-note')!=='form'||p.getAttribute('data-note')!=='plain'||input.value!=='kept')throw 'canonical main attributes';");
 }
+
+
+#[test]
+fn inert_attribute_attachment_joint_source_identity_accounting_late_refusal_and_recovery(){
+ for cached in [false,true]{
+  let(mut doc,mut forms,mut page)=page();execute(&mut doc,&mut forms,&mut page,r#"var attached=document.getElementById('seed').content.children[0],incoming=document.createAttribute('data-note');incoming.value='new\ud800';"# );
+  if cached{execute(&mut doc,&mut forms,&mut page,"var saved=attached.getAttributeNode('data-note');");}
+  let mut handle=|name:&str|{let Value::Host(h)=page.runtime.execute(name,&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap()else{panic!("handle")};h};let owner=handle("attached");let incoming=handle("incoming");
+  page.begin_job();let mut b=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+  let backing=|b:&Bridge<'_>|b.state.inert_documents.backing_bytes()+b.state.attributes.capacity()*size_of::<script_attr::Attr>()+b.state.attached_attributes.capacity()*size_of::<usize>();
+  let before=(b.state.retained,backing(&b),b.state.attributes.len(),b.state.inert_documents.generated.len(),b.state.dom_commits);let index=b.state.attached_attributes.clone();let limit=b.state.retained_limit;let copies=b.state.copy_work;let incoming_id=script_attr::index(incoming).unwrap();let released=b.state.attributes[incoming_id].value.capacity();
+  for budget in [None,Some(0),Some(100)]{b.state.retained_limit=if budget.is_none(){before.0}else{limit};b.state.copy_work=budget.unwrap_or(copies);assert!(b.set_attribute_node(owner,&[Value::Host(incoming)]).is_err());assert_eq!((b.state.retained,backing(&b),b.state.attributes.len(),b.state.inert_documents.generated.len(),b.state.dom_commits),before);assert_eq!(b.state.attached_attributes,index);assert_eq!(b.state.attributes[incoming_id].owner,None);assert_eq!(b.state.attributes[incoming_id].document,DOCUMENT);assert_eq!(b.inert_element_attributes(owner).unwrap()[1].value.as_str(),"one");}
+  b.state.retained_limit=limit;b.state.copy_work=copies;let Value::Host(old)=b.set_attribute_node(owner,&[Value::Host(incoming)]).unwrap()else{panic!("old identity")};let old=&b.state.attributes[script_attr::index(old).unwrap()];assert_eq!(old.owner,None);assert_eq!(old.value.as_str(),"one");let identity=old.value.capacity()+if cached{0}else{old.name.owned_bytes()};
+  let node=&b.state.inert_documents.generated[before.3].node;let NodeKind::Element{tag,href,..}=&node.kind else{panic!("source")};let source=node_bytes(node)+tag.capacity()+href.as_ref().map_or(0,String::capacity)+size_of::<Node>()+2*size_of::<usize>();
+  assert_eq!(b.state.retained,before.0+identity+source+backing(&b)-before.1-released);assert_eq!(b.state.attributes[incoming_id].owner,Some(owner));assert_eq!(b.state.attributes[incoming_id].value.capacity(),0);assert_eq!(b.state.dom_commits,before.4.map(|n|n+1));
+ }
+}
