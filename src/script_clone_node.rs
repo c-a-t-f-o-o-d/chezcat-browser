@@ -50,14 +50,14 @@ struct DetachedCopy {
 
 impl Bridge<'_> {
     pub(super) fn clone_node_receiver(&self, object: u32) -> bool {
-        self.root_node_receiver(object) || self.inert_clone_receiver(object)
+        self.attr_receiver(object) || self.root_node_receiver(object) || self.inert_clone_receiver(object)
     }
 
     pub(super) fn validate_clone_receiver(&self, object: u32) -> Result<(), (&'static str, String)> {
         if !self.clone_node_receiver(object) {
             return Err(("TypeError", "cloneNode requires a genuine accessible Node.".into()));
         }
-        if !self.inert_clone_receiver(object) && !node_index(object).is_some_and(|node| self.dom_accessible(node)) {
+        if !self.attr_receiver(object) && !self.inert_clone_receiver(object) && !node_index(object).is_some_and(|node| self.dom_accessible(node)) {
             return Err(("NotSupportedError", "Cloning this Node interface or child document is unavailable.".into()));
         }
         Ok(())
@@ -87,6 +87,7 @@ impl Bridge<'_> {
         } else {
             args.get(1).is_some_and(|value| matches!(value, Value::Null) || value.truthy())
         };
+        if self.attr_receiver(*source){return self.clone_attribute_node(*source,Some(DOCUMENT));}
         if !self.inert_clone_receiver(*source)&&!self.template_receiver(*source) {
             return self.clone_node(*source, deep);
         }
@@ -198,6 +199,7 @@ impl Bridge<'_> {
 
     pub(super) fn clone_node(&mut self, object: u32, deep: bool) -> Result<Value, String> {
         self.validate_clone_receiver(object).map_err(|(_, message)| message)?;
+        if self.attr_receiver(object){return self.clone_attribute_node(object,None);}
         self.validate_document_clone(object,deep).map_err(|(_,message)|message)?;
         if self.template_receiver(object)&&!self.inert_clone_receiver(object){return self.import_node(&[Value::Host(object),Value::Bool(deep)],None);}
         if self.inert_clone_receiver(object) {return self.clone_inert_tree(object,deep);}

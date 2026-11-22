@@ -3192,6 +3192,7 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
+        if self.attr_receiver(object){return Some(WINDOW);}
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(11) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(1)
@@ -4113,7 +4114,7 @@ impl Host for Bridge<'_> {
             return Err(("NotSupportedError","Allocation of an independent Document is not implemented.".into()));
         }
         if method == DOCUMENT_ADOPT_NODE{return self.validate_node_adoption(object,args);}
-        if method == DOCUMENT_IMPORT_NODE { return self.validate_import_source(args); }
+        if method==DOCUMENT_IMPORT_NODE{self.validate_import_source(args)?;if object!=DOCUMENT&&!matches!(args.first(),Some(Value::Host(source)) if self.attr_receiver(*source)){return Err(("NotSupportedError","Inert Document tree import remains unsupported; no node was created.".into()));}return Ok(());}
         if method==CREATE_CDATA_SECTION{return self.validate_cdata_factory(object,args);}
         if method == CREATE_PROCESSING_INSTRUCTION || object == WINDOW && method == "ProcessingInstruction" {
             let valid_target = matches!(args.first(), Some(Value::String(target))
@@ -4484,7 +4485,7 @@ impl Host for Bridge<'_> {
                 return self.html_slot_receiver(receiver);
             }
             if method==DOCUMENT_ADOPT_NODE{return receiver==DOCUMENT||self.inert_document(receiver);}
-            if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT; }
+            if method == DOCUMENT_IMPORT_NODE { return receiver == DOCUMENT || self.inert_document(receiver); }
             if matches!(method, script_inert_documents::CREATE | script_inert_documents::CREATE_DOCTYPE | xml_documents::CREATE | script_inert_documents::HAS_FEATURE) {
                 return self.inert_implementation(receiver);
             }
@@ -4682,6 +4683,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
+        if self.attr_receiver(object){self.state.work(1)?;return Ok(Vec::new());}
         if script_inline_style::handle(object) {return self.inline_keys(object, false);}
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(Vec::new());}
         if object==DOCUMENT {self.state.work(1)?;return Ok(Vec::new());}
@@ -4940,7 +4942,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, fields);
         }
-        if method == DOCUMENT_IMPORT_NODE { return self.import_node(args, fields); }
+        if method==DOCUMENT_IMPORT_NODE{if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Attr source.".into());};if !self.inert_document(object)||!self.attr_receiver(*source){return Err("Inert Document import requires a genuine Attr source.".into());}return self.clone_attribute_node(*source,Some(object));}return self.import_node(args,fields);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
@@ -8696,3 +8698,7 @@ mod attribute_namespace_tests;
 #[cfg(test)]
 #[path="script_attribute_name_tests.rs"]
 mod attribute_name_tests;
+
+#[cfg(test)]
+#[path="script_attribute_clone_tests.rs"]
+mod attribute_clone_tests;

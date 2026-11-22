@@ -6318,3 +6318,7 @@ mod attribute_namespace_tests;
 #[cfg(test)]
 #[path="app_attribute_name_tests.rs"]
 mod attribute_name_tests;
+
+#[cfg(test)]
+#[path="app_attribute_clone_tests.rs"]
+mod attribute_clone_tests;
