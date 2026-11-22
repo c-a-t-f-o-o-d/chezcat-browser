@@ -1064,7 +1064,7 @@ impl Bridge<'_> {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
         let bytes = match &kind {
-            NodeKind::Element { tag, .. } => tag.len(),
+            NodeKind::Element {tag,id,href,attrs,expanded_name}=>tag.capacity()+id.as_ref().map_or(0,String::capacity)+href.as_ref().map_or(0,String::capacity)+attrs.capacity()*size_of::<crate::html::Attribute>()+attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>()+crate::html::element_names::owned_bytes(expanded_name),
             NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
             NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
             NodeKind::DocumentFragment => 0,
@@ -1746,7 +1746,7 @@ impl Bridge<'_> {
             if namespace==Some("http://www.w3.org/2000/svg")&&!name.contains(':'){
                 if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)){return Err("SVG creation options are not implemented; no node was created.".into());}
                 if !crate::html::svg_dom_name(&name){return Err("SVG element is outside the supported passive shape/container subset; no node was created.".into());}
-                return self.create_dom_node_ns(NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},crate::html::Namespace::Svg).map(Some);
+                return self.create_dom_node_ns(NodeKind::Element{expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()},crate::html::Namespace::Svg).map(Some);
             }
             if namespace!=Some("http://www.w3.org/1999/xhtml")||name.contains(':') {return Err("createElementNS currently implements the HTML namespace with a null prefix; no node was created.".into());}
             if args.get(2).is_some_and(|v|!matches!(v,Value::Null|Value::Undefined)) {return Err("Element creation options/custom registries are not implemented; no node was created.".into());}
@@ -1754,7 +1754,7 @@ impl Bridge<'_> {
             // Unlike createElement, preserve local-name case. Uppercase IMG is
             // an ordinary unknown HTML element, never an Image/resource alias.
             if name=="img" {return self.create_image(&[]).map(Some);}
-            return self.create_dom_node(NodeKind::Element {tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
+            return self.create_dom_node(NodeKind::Element {expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
         }
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
             let value=args.first().ok_or("DOM creation requires one argument.")?;
@@ -1769,7 +1769,7 @@ impl Bridge<'_> {
                 return self.create_image(&[]).map(Some);
             }
             return self
-                .create_dom_node(NodeKind::Element {
+                .create_dom_node(NodeKind::Element {expanded_name:Vec::new(),
                     tag: text.to_ascii_lowercase(),
                     id: None,
                     href: None,

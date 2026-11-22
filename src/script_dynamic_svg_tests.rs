@@ -97,7 +97,7 @@ fn dynamic_svg_native_allocation_and_copy_refusal_do_not_publish_nodes() {
         state: &mut page.state
     }
     .create_dom_node_ns(
-        NodeKind::Element {
+        NodeKind::Element {expanded_name:Vec::new(),
             tag: "svg".into(),
             id: None,
             href: None,
@@ -116,7 +116,7 @@ fn dynamic_svg_native_allocation_and_copy_refusal_do_not_publish_nodes() {
         state: &mut page.state
     }
     .create_dom_node_ns(
-        NodeKind::Element {
+        NodeKind::Element {expanded_name:Vec::new(),
             tag: "path".into(),
             id: None,
             href: None,

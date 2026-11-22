@@ -17,7 +17,7 @@ fn append_element(nodes: &mut Vec<Node>, tag: &str) -> Result<usize, String> {
         .map_err(|_| "Cannot reserve an HTML document element.")?;
     let index = nodes.len();
     nodes.push(Node {
-        kind: NodeKind::Element {
+        kind: NodeKind::Element {expanded_name:Vec::new(),
             tag: tag.into(),
             id: None,
             href: None,

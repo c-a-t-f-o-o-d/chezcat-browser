@@ -22,6 +22,9 @@ mod svg_namespace;
 mod doctype;
 #[path="html_document_mode.rs"]
 mod document_mode;
+#[path="html_element_names.rs"]
+pub(crate) mod element_names;
+pub(crate) use element_names::{ExpandedElementName,ElementNamespaceValue};
 
 const MAX_NODES: usize = 20_000;
 pub(crate) const MAX_LOADED_DOCUMENT_NODES: usize = 262_144;
@@ -133,6 +136,8 @@ pub enum Namespace {
     Html,
     Svg,
     UnknownForeign,
+    // Known non-HTML/SVG Element URI (including null), owned in expanded_name.
+    Other,
 }
 
 impl Namespace {
@@ -140,12 +145,12 @@ impl Namespace {
         match self {
             Self::Html => Some("http://www.w3.org/1999/xhtml"),
             Self::Svg => Some("http://www.w3.org/2000/svg"),
-            Self::None | Self::UnknownForeign => None,
+            Self::None | Self::UnknownForeign | Self::Other => None,
         }
     }
 
     pub(crate) fn is_foreign(self) -> bool {
-        matches!(self, Self::Svg | Self::UnknownForeign)
+        matches!(self, Self::Svg | Self::UnknownForeign | Self::Other)
     }
 }
 
@@ -201,6 +206,7 @@ impl Attribute {
 pub enum NodeKind {
     Element {
         tag: String,
+        expanded_name: Vec<ExpandedElementName>,
         id: Option<String>,
         href: Option<String>,
         attrs: Vec<Attribute>,
@@ -335,7 +341,7 @@ fn parse_internal(
             native_focus: crate::html::NativeNode::default(),
             native_hover: crate::html::NativeNode::default(),
         nodes: vec![Node {
-            kind: NodeKind::Element {
+            kind: NodeKind::Element {expanded_name:Vec::new(),
                 tag: context.unwrap_or("#document").into(),
                 id: None,
                 href: None,
@@ -571,7 +577,7 @@ fn parse_internal(
                 || matches!(tag.name.as_str(), "svg" | "math")
                 || document.nodes[parent].namespace == Namespace::UnknownForeign
             { Namespace::UnknownForeign } else { Namespace::Html },
-            kind: NodeKind::Element {
+            kind: NodeKind::Element {expanded_name:Vec::new(),
                 tag: tag.name.clone(),
                 id: tag.id,
                 href: tag.href,

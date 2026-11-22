@@ -23,7 +23,7 @@ pub(super) fn copy_text(text:&str)->Result<String,String>{
 }
 pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
     Ok(match kind {
-        NodeKind::Element { tag, id, href, attrs } => {
+        NodeKind::Element { tag, id, href, attrs ,expanded_name} => {
             let mut copied=Vec::new();copied.try_reserve_exact(attrs.len()).map_err(|_|"Cannot reserve copied element attributes.")?;
             for attr in attrs {
                 let namespace=attr.name.namespace.as_ref().map(|ns|Ok::<_,String>(crate::html::AttributeNamespace{
@@ -31,7 +31,7 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
                 })).transpose()?;
                 copied.push(crate::html::Attribute{name:crate::html::AttributeName{qualified:copy_text(&attr.name.qualified)?,namespace},value:attr.value.try_clone()?});
             }
-            NodeKind::Element{tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
+            NodeKind::Element{expanded_name:crate::html::element_names::copy(expanded_name)?,tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },
         NodeKind::Text(text)=>NodeKind::Text(text.try_clone()?),
         NodeKind::Comment(text)=>NodeKind::Comment(text.try_clone()?),
@@ -153,7 +153,7 @@ impl Bridge<'_> {
             let source = self.template_import_source(handle).ok_or("Inert import source is unavailable.")?;
             let (kind, namespace, unsafe_nonce) = match source {
                 ImportSource::Parsed { node, unsafe_nonce } => (copy_node_kind(&node.kind)?, node.namespace, unsafe_nonce),
-                ImportSource::Element(tag) => (NodeKind::Element {
+                ImportSource::Element(tag) => (NodeKind::Element {expanded_name:Vec::new(),
                     tag: tag.into(), id: None, href: None, attrs: Vec::new(),
                 }, crate::html::Namespace::Html, false),
                 ImportSource::Text(data) => (NodeKind::Text(data.try_clone()?), crate::html::Namespace::None, false),

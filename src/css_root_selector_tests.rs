@@ -18,7 +18,7 @@ fn css_root_first_real_document_element_excludes_context_fragment_and_detached_r
     let nested = id(&doc, "nested");
     let detached = doc.nodes.len();
     doc.nodes.push(crate::html::Node {
-        kind: NodeKind::Element { tag: "html".into(), id: Some("detached".into()), href: None, attrs: Vec::new() },
+        kind: NodeKind::Element {expanded_name:Vec::new(), tag: "html".into(), id: Some("detached".into()), href: None, attrs: Vec::new() },
         children: Vec::new(), namespace: crate::html::Namespace::Html,
     });
     let candidates = [0, first, child, nested, second, detached];

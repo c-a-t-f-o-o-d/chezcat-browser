@@ -6524,8 +6524,9 @@ fn node_bytes(node: &Node) -> usize {
         NodeKind::DocumentType(data)=>data.capacity(),
         NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity(),
         NodeKind::ProcessingInstruction { target, data } => target.capacity().saturating_add(data.capacity()),
-        NodeKind::Element { id, attrs, .. } => {
+        NodeKind::Element { id, attrs, expanded_name, .. } => {
             id.as_ref().map_or(0, String::capacity)
+                + crate::html::element_names::owned_bytes(expanded_name)
                 + attrs.capacity()*size_of::<crate::html::Attribute>()
                 + attrs.iter().map(crate::html::Attribute::owned_bytes).sum::<usize>()
         }
@@ -6535,8 +6536,9 @@ fn node_bytes(node: &Node) -> usize {
 // by the allocator after the fallible copy, before publishing its new owner.
 fn copied_node_bytes(node: &Node) -> usize {
     match &node.kind {
-        NodeKind::Element { attrs, id, .. } => {
+        NodeKind::Element { attrs, id, expanded_name, .. } => {
             id.as_ref().map_or(0, String::len)
+                + crate::html::element_names::copied_bytes(expanded_name)
                 + attrs.len() * size_of::<crate::html::Attribute>()
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
         }
@@ -6548,8 +6550,9 @@ fn copied_node_bytes(node: &Node) -> usize {
 }
 fn copied_payload_extra(kind: &NodeKind) -> usize {
     match kind {
-        NodeKind::Element { attrs, id, .. } => {
-            (attrs.capacity() - attrs.len()) * size_of::<crate::html::Attribute>()
+        NodeKind::Element { attrs, id, expanded_name, .. } => {
+            crate::html::element_names::owned_bytes(expanded_name)-crate::html::element_names::copied_bytes(expanded_name)
+                + (attrs.capacity() - attrs.len()) * size_of::<crate::html::Attribute>()
                 + attrs.iter().map(|attr| attr.owned_bytes() - attr.bytes()).sum::<usize>()
                 + id.as_ref().map_or(0, |text| text.capacity() - text.len())
         }

@@ -265,7 +265,7 @@ impl Bridge<'_> {
         let node = self.doc.nodes.len();
         self.doc.nodes.push(Node {
             namespace: crate::html::Namespace::Html,
-            kind: NodeKind::Element {
+            kind: NodeKind::Element {expanded_name:Vec::new(),
                 tag: "img".into(),
                 id: None,
                 href: None,

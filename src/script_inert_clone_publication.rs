@@ -77,7 +77,7 @@ impl Bridge<'_> {
             if !matches!(node.kind,Kind::Parsed { .. }) {
                 let kind = match std::mem::replace(&mut node.kind,Kind::Fragment{template:None}) {
                     Kind::Text(text)=>NodeKind::Text(text),
-                    Kind::Element(tag)=>NodeKind::Element { tag,id:None,href:None,attrs:Vec::new() },
+                    Kind::Element(tag)=>NodeKind::Element {expanded_name:Vec::new(), tag,id:None,href:None,attrs:Vec::new() },
                     _=>unreachable!(),
                 };
                 let namespace = if matches!(kind,NodeKind::Element { .. }) {crate::html::Namespace::Html} else {crate::html::Namespace::None};

@@ -390,7 +390,7 @@ impl Bridge<'_> {
         self.state.copies(minimum.saturating_add(added))?;
         let mut kind=if let Some(source)=source{script_clone_node::copy_node_kind(&self.parsed_source(source).unwrap().0.kind)?}else{
             let Kind::Element(tag)=&self.state.inert_documents.node(object).unwrap().kind else{unreachable!()};
-            NodeKind::Element{tag:script_clone_node::copy_text(tag)?,id:None,href:None,attrs:Vec::new()}
+            NodeKind::Element{expanded_name:Vec::new(),tag:script_clone_node::copy_text(tag)?,id:None,href:None,attrs:Vec::new()}
         };
         let NodeKind::Element{attrs,id,href,..}=&mut kind else{unreachable!()};
         let actual_name=slot.map_or(&name,|slot|&attrs[slot].name);let changes_id=actual_name.html_is("id");let changes_href=actual_name.html_is("href");
@@ -537,7 +537,7 @@ impl Bridge<'_> {
                 },
             };
             let mut bytes = copied_node_bytes(&raw);
-            if let NodeKind::Element { tag, href, attrs, id } = &raw.kind {
+            if let NodeKind::Element { tag, href, attrs, id ,..} = &raw.kind {
                 if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
                     self.state.work(self.forms.controls.len())?;
                     if self.forms.controls.keys().any(|&control| self.doc.attr(control, "form") == Some(id)) {
@@ -1614,7 +1614,7 @@ impl Bridge<'_> {
 
     fn create_inert_svg(&mut self,owner:u32,name:String)->Result<Value,String>{
         self.state.copies(name.len())?;
-        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()},0).map(Value::Host)
+        self.append_inert_source_leaf(owner,None,Node{kind:NodeKind::Element{expanded_name:Vec::new(),tag:name,id:None,href:None,attrs:Vec::new()},namespace:crate::html::Namespace::Svg,children:Vec::new()},0).map(Value::Host)
     }
 
     fn append_inert_leaf(&mut self, owner: u32, kind: Kind) -> Result<Value, String> {
@@ -1626,7 +1626,7 @@ impl Bridge<'_> {
                 || crate::html::valid_custom_element_name(name) {
                 let Kind::Element(name) = kind else { unreachable!() };
                 return self.append_inert_source_leaf(owner,None,Node {
-                    kind:NodeKind::Element { tag:name,id:None,href:None,attrs:Vec::new() },
+                    kind:NodeKind::Element {expanded_name:Vec::new(), tag:name,id:None,href:None,attrs:Vec::new() },
                     namespace:crate::html::Namespace::Html,children:Vec::new(),
                 },0).map(Value::Host);
             }

@@ -189,7 +189,7 @@ fn inert_replace_loaded_promotion_failure_restores_main_slot_and_inert_owner_the
         state: &mut page.state,
     };
     let Value::Host(template) = bridge
-        .create_dom_node(NodeKind::Element {
+        .create_dom_node(NodeKind::Element {expanded_name:Vec::new(),
             tag: "template".into(),
             id: None,
             href: None,
@@ -203,7 +203,7 @@ fn inert_replace_loaded_promotion_failure_restores_main_slot_and_inert_owner_the
         panic!()
     };
     let Value::Host(child) = bridge
-        .create_dom_node(NodeKind::Element {
+        .create_dom_node(NodeKind::Element {expanded_name:Vec::new(),
             tag: "div".into(),
             id: None,
             href: None,
@@ -221,7 +221,7 @@ fn inert_replace_loaded_promotion_failure_restores_main_slot_and_inert_owner_the
         .append_template_child(fragment, &[Value::Host(child)])
         .unwrap();
     let Value::Host(button) = bridge
-        .create_dom_node(NodeKind::Element {
+        .create_dom_node(NodeKind::Element {expanded_name:Vec::new(),
             tag: "button".into(),
             id: None,
             href: None,

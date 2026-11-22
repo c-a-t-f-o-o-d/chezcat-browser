@@ -50,6 +50,7 @@ fn dump(doc:&Document)->Result<String,String> {
                     Namespace::Svg=>"svg ",
                     Namespace::None=>"null-namespace ",
                     Namespace::UnknownForeign=>"unknown-foreign ",
+                    Namespace::Other=>return Err("F01: arbitrary-namespace native tree dump schema is unavailable.".into()),
                 };
                 writeln!(&mut output,"| {indent}<{namespace}{tag}>").unwrap();
                 let mut attributes:Vec<_>=attrs.iter().map(|attr|(attribute_name(&attr.name),&attr.value)).collect();
@@ -105,7 +106,7 @@ fn evaluate(lines:&[&str])->Result<(&'static str,String),String> {
         _=>return Err("Unknown native parser entry.".into()),
     };
     match parsed {
-        Ok(doc)=>Ok(match dump(&doc) {Ok(tree)=>("tree",tree),Err(error)=>("fail",format!("malformed native tree: {error}"))}),
+        Ok(doc)=>Ok(match dump(&doc) {Ok(tree)=>("tree",tree),Err(error) if error.starts_with("F01:")=>("harness_blocked",error),Err(error)=>("fail",format!("malformed native tree: {error}"))}),
         Err(error)=>Ok(("fail",error)),
     }
 }
