@@ -91,17 +91,23 @@ impl Bridge<'_> {
                         unreachable!()
                     };
                     if length != old.len() {
-                        if length > self.state.limits.host.string_bytes {
+                        let mut parts=Vec::new();parts.try_reserve_exact(index-start).map_err(|_|"Cannot reserve normalization DOMString parts.")?;
+                        for &node in &children[start..index] {
+                            let NodeKind::Text(data)=&self.doc.nodes[node].kind else {unreachable!()};
+                            parts.push(data);
+                        }
+                        let (logical,storage)=DomString::concat_size(&parts)?;
+                        if logical > self.state.limits.host.string_bytes {
                             return Err("Normalized Text exceeds the host string bound.".into());
                         }
                         old_bytes = old_bytes
                             .checked_add(old.capacity())
                             .ok_or("Normalize retained accounting overflow.")?;
                         new_bytes = new_bytes
-                            .checked_add(length)
+                            .checked_add(storage)
                             .ok_or("Normalize retained accounting overflow.")?;
-                        text_copies = text_copies.checked_add(length).ok_or("Normalize text copy work overflow.")?;
-                        replacements.push((keeper, children[start..index].to_vec(), length));
+                        text_copies = text_copies.checked_add(DomString::concat_copy_work(&parts)?).ok_or("Normalize text copy work overflow.")?;
+                        replacements.push((keeper, children[start..index].to_vec(), storage));
                     }
                 }
                 for &node in &children[start..index] {
@@ -151,18 +157,16 @@ impl Bridge<'_> {
             .try_reserve(replacements.len())
             .map_err(|_| "Normalize text storage reservation failed.")?;
         for (keeper, run, length) in replacements {
-            let mut text = String::new();
-            text.try_reserve_exact(length)
-                .map_err(|_| "Normalize text reservation failed.")?;
+            let mut parts=Vec::new();parts.try_reserve_exact(run.len()).map_err(|_|"Cannot reserve normalized DOMString part references.")?;
+            for node in run {
+                let NodeKind::Text(part)=&self.doc.nodes[node].kind else {unreachable!()};
+                parts.push(part);
+            }
+            let available=self.state.retained_limit.checked_sub(retained).and_then(|n|n.checked_add(length)).ok_or("Normalized DOMString allowance overflow.")?;
+            let text=DomString::concat(&parts,available)?;
             retained = retained.checked_add(text.capacity() - length)
                 .filter(|bytes| *bytes <= self.state.retained_limit)
                 .ok_or("DOM retained text allocation limit reached during normalize.")?;
-            for node in run {
-                let NodeKind::Text(part) = &self.doc.nodes[node].kind else {
-                    unreachable!()
-                };
-                text.push_str(part);
-            }
             strings.push((keeper, text));
         }
         // String copying was charged before allocation; the retained total was

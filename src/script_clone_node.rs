@@ -33,9 +33,9 @@ pub(super) fn copy_node_kind(kind: &NodeKind) -> Result<NodeKind,String> {
             }
             NodeKind::Element{tag:copy_text(tag)?,id:id.as_deref().map(copy_text).transpose()?,href:href.as_deref().map(copy_text).transpose()?,attrs:copied}
         },
-        NodeKind::Text(text)=>NodeKind::Text(copy_text(text)?),
-        NodeKind::Comment(text)=>NodeKind::Comment(copy_text(text)?),
-        NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:copy_text(data)?},
+        NodeKind::Text(text)=>NodeKind::Text(text.try_clone()?),
+        NodeKind::Comment(text)=>NodeKind::Comment(text.try_clone()?),
+        NodeKind::ProcessingInstruction{target,data}=>NodeKind::ProcessingInstruction{target:copy_text(target)?,data:data.try_clone()?},
         NodeKind::DocumentFragment=>NodeKind::DocumentFragment,
     })
 }
@@ -139,8 +139,8 @@ impl Bridge<'_> {
                     }
                     tag.len()
                 }
-                ImportSource::Text(data) => data.len(),
-                ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+                ImportSource::Text(data) => data.used_bytes(),
+                ImportSource::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
                 ImportSource::Fragment => 0,
             };
             bytes = bytes.checked_add(cost).ok_or("DOM import size overflow.")?;
@@ -154,9 +154,9 @@ impl Bridge<'_> {
                 ImportSource::Element(tag) => (NodeKind::Element {
                     tag: tag.into(), id: None, href: None, attrs: Vec::new(),
                 }, crate::html::Namespace::Html, false),
-                ImportSource::Text(data) => (NodeKind::Text(data.into()), crate::html::Namespace::None, false),
+                ImportSource::Text(data) => (NodeKind::Text(data.try_clone()?), crate::html::Namespace::None, false),
                 ImportSource::ProcessingInstruction { target, data } => (NodeKind::ProcessingInstruction {
-                    target: target.into(), data: data.into(),
+                    target: target.into(), data: data.try_clone()?,
                 }, crate::html::Namespace::None, false),
                 ImportSource::Fragment => (NodeKind::DocumentFragment, crate::html::Namespace::None, false),
             };

@@ -478,8 +478,10 @@
         {
           "id": "F01.03",
           "requirement": "DOMString versus USVString and UTF-16 boundary preservation",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "Native CharacterData DOMString: eight original focused checks pass, including actual App jobs/Range/pixels/editor/link and exact inert-import owned storage. Frozen original Text witness now passes; Attr witness still fails. See src/script_native_dom_string_tests.rs and src/app_native_dom_string_tests.rs. Required browser subtests remain unrun."
+          ],
           "dependency_details": [],
           "detail_requirements": [
             {
@@ -497,13 +499,17 @@
                 "Attr APIs",
                 "HTML reflections"
               ],
-              "status": "absent",
+              "status": "partial",
               "source_anchors": [
                 "src/html.rs",
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/dom_string.rs",
+                "src/script_dom_tree.rs",
+                "src/script_native_dom_string_tests.rs",
+                "src/app_native_dom_string_tests.rs"
               ],
               "integration_dependencies": [
                 "F06",
@@ -514,7 +520,7 @@
                 "F01-attribute-domstring-unpaired-utf16"
               ],
               "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
+              "supplementary_evidence": "Native Text/Comment/PI.data raw UTF-16 storage and aliases, clone/import/promotion, normalize/Range and observer old values have original focused and connected App evidence. Frozen F01 Text DOMString witness passes; Attr/reflections remain scalar-only and the required Attr witness still fails. No unchanged browser-file closure. F06/F07/F08/F09 consumers remain separately required.",
               "closing_evidence": []
             },
             {

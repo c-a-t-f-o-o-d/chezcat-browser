@@ -33,6 +33,7 @@ mod forms;
 mod history;
 mod session_history;
 mod html;
+mod dom_string;
 mod html_canvas;
 mod http;
 mod image;

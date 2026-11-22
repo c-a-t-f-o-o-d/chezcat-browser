@@ -51,15 +51,17 @@ if(a.nextSibling!==template||a.nextElementSibling!==template||template.nextEleme
     foreignText.nodeType!==3||text.data!=='kept')throw 'template host and real namespace boundaries';
 "#);
     let snapshot=format!("{:?}",doc.nodes);
-    for source in ["blocked.nextElementSibling;","before.nextElementSibling;","foreign.nextElementSibling;","foreignText.nextElementSibling;","text.arbitrarySiblingState=17;"] {
+    for source in ["blocked.nextElementSibling;","before.nextElementSibling;","foreign.nextElementSibling;","foreignText.nextElementSibling;"] {
         page.clear_console();let out=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(out.errors,1,"{source}\n{}",page.report());
         assert_eq!(format!("{:?}",doc.nodes),snapshot,"{source}");
         run(&mut doc,&mut forms,&mut page,"if(a.nextSibling!==template||template.nextElementSibling!==b||text.data!=='kept'||document.title!=='Sibling refusals'||document.getElementById('after')!==after||document.getElementById('hidden')!==null)throw 'sibling refusal altered existing boundaries';");
     }
+    run(&mut doc,&mut forms,&mut page,"text.arbitrarySiblingState=17;if(text.arbitrarySiblingState!==17||text.data!=='kept')throw 'ordinary CharacterData state';");
+    assert_eq!(format!("{:?}",doc.nodes),snapshot);
     let bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     let text=bridge.doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Text(data) if data=="kept")).unwrap();
-    assert!(bridge.expando_owner(node_handle(text)).is_none());
+    assert!(bridge.expando_owner(node_handle(text)).is_some());
 }
 
 #[test]

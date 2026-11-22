@@ -345,8 +345,8 @@ impl Bridge<'_> {
     pub(super) fn create_processing_instruction(&mut self, owner: u32, args: &[Value]) -> Result<Value, String> {
         let target = self.text(args.first().ok_or("ProcessingInstruction requires a target.")?)?;
         let data = match args.get(1) {
-            None | Some(Value::Undefined) => String::new(),
-            Some(data) => self.text(data)?,
+            None | Some(Value::Undefined) => DomString::new(),
+            Some(data) => self.dom_text(data)?,
         };
         if self.inert_document(owner) {
             return self.create_inert_processing_instruction(owner, target, data);
@@ -842,7 +842,7 @@ impl Bridge<'_> {
     pub(super) fn dom_get(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         if self.fragment_receiver(object) {
             if property=="nodeValue" {self.state.work(1)?;return Ok(Some(Value::Null));}
-            if property=="textContent" {let node=self.dom_node(object)?;return self.text_content(node).map(|value|Some(Value::String(value)));}
+            if property=="textContent" {let node=self.dom_node(object)?;return self.text_content(node).map(|value|Some(Self::dom_string_owned(value)));}
             if !common_node_property(property) && property!="childNodes" {self.state.work(1)?;return Ok(Some(Value::Undefined));}
         }
         if property=="childNodes" && node_index(object).is_some() {return self.create_child_list(object).map(Some);}
@@ -995,18 +995,14 @@ impl Bridge<'_> {
                 }
             }));
         }
-        if let Some(value) = self.doc.nodes[node].kind.character_data() {
+        if let Some(value) = self.doc.nodes[node].kind.character_dom_string() {
             return Ok(Some(match property {
                 "data" | "nodeValue" | "textContent" => {
-                    if value.len() > self.state.limits.host.string_bytes {
-                        return Err("DOM result exceeds 32 KiB.".into());
-                    }
-                    self.state.copies(value.len())?;
-                    Value::String(value.into())
+                    Self::dom_string_value(self.state,value)?
                 }
                 "length" => {
-                    self.state.copies(value.len())?;
-                    Value::Number(value.encode_utf16().count() as f64)
+                    self.state.copies(value.logical_bytes())?;
+                    Value::Number(value.utf16_len() as f64)
                 }
                 _ => Value::Undefined,
             }));
@@ -1063,8 +1059,8 @@ impl Bridge<'_> {
             "DOM retained node/payload backing allowance exhausted ({remaining} bytes available; {bytes} payload bytes requested)."))?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(1, available)?;
         let work = match &kind {
-            NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
-            NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+            NodeKind::Text(text) | NodeKind::Comment(text) => text.used_bytes(),
+            NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
             _ => bytes,
         };
         self.state.replace_storage(0, bytes.checked_add(node_bytes).ok_or("DOM node/payload storage overflow.")?, work)?;
@@ -1542,6 +1538,7 @@ impl Bridge<'_> {
         for &child in &self.doc.nodes[node].children {
             self.state.work(1)?;
             if let NodeKind::Text(value) = &self.doc.nodes[child].kind {
+                let value=value.scalar()?;
                 if text.len().saturating_add(value.len()) > self.state.limits.host.string_bytes {
                     return Err("Raw element text exceeds the configured string allowance.".into());
                 }
@@ -1574,7 +1571,7 @@ impl Bridge<'_> {
         let new_child = if text.is_empty() {
             None
         } else {
-            let created = match self.create_dom_node(NodeKind::Text(text)) {
+            let created = match self.create_dom_node(NodeKind::Text(text.into())) {
                 Ok(value) => value,
                 Err(error) => { self.state.retained -= added; return Err(error); }
             };
@@ -1614,7 +1611,7 @@ impl Bridge<'_> {
     ) -> Result<bool, String> {
         if self.fragment_receiver(object) {
             if property=="nodeValue" {self.state.work(1)?;return Ok(true);}
-            if property=="textContent" {let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(value)?};let node=self.dom_node(object)?;self.set_text_content(node,text)?;return Ok(true);}
+            if property=="textContent" {let text=if matches!(value,Value::Null|Value::Undefined){DomString::new()}else{self.dom_text(value)?};let node=self.dom_node(object)?;self.set_text_content(node,text)?;return Ok(true);}
         }
         if node_index(object).is_none() {
             return Ok(false);
@@ -1634,12 +1631,12 @@ impl Bridge<'_> {
             let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
-                String::new()
+                DomString::new()
             } else {
-                self.text(value)?
+                self.dom_text(value)?
             };
             self.state.prepare_range_changes(1,0)?;
-            self.state.replace_storage(old_bytes, text.capacity(), text.len())?;
+            self.state.replace_storage(old_bytes, text.capacity(), text.used_bytes())?;
             self.state.ranges_replace_data(node);
             match &mut self.doc.nodes[node].kind {
                 NodeKind::Text(data) | NodeKind::Comment(data) | NodeKind::ProcessingInstruction { data, .. } => {
@@ -1738,7 +1735,8 @@ impl Bridge<'_> {
             return self.create_dom_node(NodeKind::Element {tag:name,id:None,href:None,attrs:Vec::new()}).map(Some);
         }
         if object == DOCUMENT && matches!(method, "createElement" | "createTextNode" | "createComment") {
-            let text = self.text(args.first().ok_or("DOM creation requires one argument.")?)?;
+            let value=args.first().ok_or("DOM creation requires one argument.")?;
+            let text = if method=="createElement"{DomString::from(self.text(value)?)}else{self.dom_text(value)?};
             if method == "createComment" {
                 return self.create_dom_node(NodeKind::Comment(text)).map(Some);
             }

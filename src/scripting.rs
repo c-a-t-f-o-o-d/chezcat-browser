@@ -12,6 +12,11 @@ use std::time::{Duration, Instant};
 
 use crate::forms::{self, Forms, Kind};
 use crate::html::{Document, Node, NodeKind};
+use crate::dom_string::DomString;
+
+#[cfg(test)]
+#[path="script_native_dom_string_tests.rs"]
+mod native_dom_string_tests;
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
@@ -2403,6 +2408,32 @@ impl Bridge<'_> {
         Ok(Value::String(text.into()))
     }
 
+    fn dom_text(&mut self,value:&Value)->Result<DomString,String>{
+        if let Value::StringUnits(units)=value {
+            let logical=units.len().checked_mul(2).ok_or("DOMString input byte count overflow.")?;
+            if logical>self.state.limits.host.string_bytes{return Err("DOMString input exceeds the host string allowance.".into());}
+            let (projection,unpaired)=DomString::projected_size(units)?;
+            let copies=projection.checked_add(if unpaired{logical}else{0}).ok_or("DOMString input copy count overflow.")?;
+            self.state.copies(copies)?;
+            DomString::from_units(units,self.state.retained_limit)
+        }else{self.text(value).map(DomString::from)}
+    }
+    fn dom_string_value(state:&mut State,text:&DomString)->Result<Value,String>{
+        if text.logical_bytes()>state.limits.host.string_bytes{return Err("DOMString result exceeds the host string allowance.".into());}
+        state.copies(text.logical_bytes())?;
+        Self::dom_string_copy(text)
+    }
+    fn dom_string_copy(text:&DomString)->Result<Value,String>{
+        if let Some(units)=text.raw_units() {
+            let mut copy=Vec::new();copy.try_reserve_exact(units.len()).map_err(|_|"Cannot reserve DOMString result code units.")?;
+            copy.extend_from_slice(units);Ok(Value::StringUnits(copy))
+        }else{Ok(Value::String(script_clone_node::copy_text(text.scalar()?)?))}
+    }
+    fn dom_string_owned(text:DomString)->Value{
+        let (scalar,units)=text.into_parts();
+        match units {Some(units)=>Value::StringUnits(units),None=>Value::String(scalar)}
+    }
+
     fn location_handle(&self) -> Result<Value, String> {
         if self.state.location.is_some() {
             Ok(Value::Host(LOCATION))
@@ -2616,9 +2647,9 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn text_content(&mut self, node: usize) -> Result<String, String> {
+    fn text_content(&mut self, node: usize) -> Result<DomString, String> {
         self.state.rebuild(self.doc)?;
-        let mut result = String::new();
+        let mut parts = Vec::new();
         let root = node;
         let mut stack = vec![node];
         while let Some(node) = stack.pop() {
@@ -2632,14 +2663,15 @@ impl Bridge<'_> {
                 continue;
             }
             if let NodeKind::Text(text) = &self.doc.nodes[node].kind {
-                if result.len().saturating_add(text.len()) > self.state.limits.host.string_bytes {
-                    return Err(format!("textContent result exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
-                }
-                self.state.copies(text.len())?;
-                result.push_str(text);
+                parts.try_reserve(1).map_err(|_|"Cannot reserve native textContent parts.")?;
+                parts.push(text);
             }
             stack.extend(self.doc.nodes[node].children.iter().rev().copied());
         }
+        let (logical,_bytes)=DomString::concat_size(&parts)?;
+        if logical>self.state.limits.host.string_bytes{return Err("textContent result exceeds the host string allowance.".into());}
+        self.state.copies(DomString::concat_copy_work(&parts)?)?;
+        let result=DomString::concat(&parts,DomString::storage_bound(self.state.limits.host.string_bytes)?)?;
         Ok(result)
     }
 
@@ -2649,7 +2681,7 @@ impl Bridge<'_> {
                 && matches!(item.kind,NodeKind::Element{..}) && script_clone_node::ordinary_clone_element(tag(self.doc,node)))
     }
 
-    fn set_text_content(&mut self, node: usize, text: String) -> Result<(), String> {
+    fn set_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
@@ -3525,6 +3557,17 @@ impl Host for Bridge<'_> {
             || node_index(object).is_some_and(|node| self.html_spacing_property(node, property))
     }
 
+    fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        index==0&&(object==DOCUMENT&&matches!(method,"createTextNode"|"createComment")
+            ||self.inert_factory(object,method)==Some("createTextNode")
+            ||self.event_target_interface(object)&&matches!(method,"Text"|"Comment"))
+            ||index==1&&(method==CREATE_PROCESSING_INSTRUCTION||method=="createProcessingInstruction"
+                ||self.event_target_interface(object)&&method=="ProcessingInstruction")
+    }
+    fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        matches!(property,"data"|"nodeValue")&&self.mutation_observation_target(object)==Some(true)
+            ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
+    }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
@@ -5445,7 +5488,7 @@ impl Host for Bridge<'_> {
         if let Some(value) = self.hidden_input_get(object,property)? {return Ok(value);}
         if self.textarea_default_property(object, property) {
             let node = self.node(object)?;
-            return Ok(Value::String(self.text_content(node)?));
+            return Ok(Self::dom_string_owned(self.text_content(node)?));
         }
         if let Some(value) = self.button_get(object,property)? {return Ok(value);}
         if let Some(value) = self.text_input_metadata_get(object,property)? {return Ok(value);}
@@ -5490,7 +5533,7 @@ impl Host for Bridge<'_> {
                 };
                 Ok(Value::Number(value))
             }
-            "textContent" => Ok(Value::String(self.text_content(node)?)),
+            "textContent" => Ok(Self::dom_string_owned(self.text_content(node)?)),
             "style" => Ok(Value::Host(STYLE_BASE + node as u32)),
             "dataset" => Ok(Value::Host(DATASET_BASE + node as u32)),
             "id" | "className" | "title" => {
@@ -5606,8 +5649,8 @@ impl Host for Bridge<'_> {
         }
         if self.inert_interface(object).is_some() {
             if property=="name"&&self.html_slot_receiver(object){return self.set_inert_attribute(object,&[Value::String("name".into()),value]).map(|_|());}
-            if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){String::new()}else{self.text(&value)?};return self.replace_inert_text_content(object,text);}
-            if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=self.text(&value)?;return self.write_inert_character_data(object,text);}
+            if property=="textContent"&&self.inert_text_replacement_receiver(object){let text=if matches!(value,Value::Null|Value::Undefined){DomString::new()}else{self.dom_text(&value)?};return self.replace_inert_text_content(object,text);}
+            if matches!(self.inert_node_type(object),Some(3|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){let text=if matches!(value,Value::Null)&&property!="data"{DomString::new()}else{self.dom_text(&value)?};return self.write_inert_character_data(object,text);}
             if property == "textContent" && matches!(self.inert_node_type(object), Some(9 | 10)) { return Ok(()); }
             return Err(format!("Writing inert DOM property {property:?} is unavailable."));
         }
@@ -5756,9 +5799,9 @@ impl Host for Bridge<'_> {
         match property {
             "textContent" => {
                 let text = if matches!(value, Value::Null | Value::Undefined) {
-                    String::new()
+                    DomString::new()
                 } else {
-                    self.text(&value)?
+                    self.dom_text(&value)?
                 };
                 self.set_text_content(node, text)
             }
@@ -5980,8 +6023,8 @@ impl Host for Bridge<'_> {
         }
         if object == WINDOW && matches!(method, "Text" | "Comment") {
             let data = match args.first() {
-                None | Some(Value::Undefined) => String::new(),
-                Some(value) => self.text(value)?,
+                None | Some(Value::Undefined) => DomString::new(),
+                Some(value) => self.dom_text(value)?,
             };
             let kind = if method == "Comment" { NodeKind::Comment(data) } else { NodeKind::Text(data) };
             return self.create_dom_node(kind);
@@ -6466,8 +6509,8 @@ fn copied_node_bytes(node: &Node) -> usize {
                 + attrs.len() * size_of::<crate::html::Attribute>()
                 + attrs.iter().map(crate::html::Attribute::bytes).sum::<usize>()
         }
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.len(),
-        NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.len()),
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.used_bytes(),
+        NodeKind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
         NodeKind::DocumentFragment => 0,
     }
 }
@@ -6478,9 +6521,9 @@ fn copied_payload_extra(kind: &NodeKind) -> usize {
                 + attrs.iter().map(|attr| attr.owned_bytes() - attr.bytes()).sum::<usize>()
                 + id.as_ref().map_or(0, |text| text.capacity() - text.len())
         }
-        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity() - text.len(),
+        NodeKind::Text(text) | NodeKind::Comment(text) => text.capacity() - text.used_bytes(),
         NodeKind::ProcessingInstruction { target, data } => {
-            target.capacity() - target.len() + data.capacity() - data.len()
+            target.capacity() - target.len() + data.capacity() - data.used_bytes()
         }
         NodeKind::DocumentFragment => 0,
     }

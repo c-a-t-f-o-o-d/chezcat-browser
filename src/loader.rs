@@ -1609,7 +1609,7 @@ fn used_font_characters(loaded: &mut Loaded) -> HashMap<String, BTreeSet<u32>> {
             continue;
         }
         let text = match &item.kind {
-            NodeKind::Text(text) => text.as_str(),
+            NodeKind::Text(text) => text.render_projection(),
             NodeKind::Element { tag, .. }
                 if matches!(tag.as_str(), "input" | "textarea" | "select") =>
             {

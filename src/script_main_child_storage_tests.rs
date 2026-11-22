@@ -37,7 +37,7 @@ fn main_child_storage_startup_and_clear_retain_backing_while_replacement_refunds
     let expected=baseline+page.state.tree_storage_bytes();
     assert_eq!(page.state.retained, expected);
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-    bridge.set_text_content(parent, String::new()).unwrap();
+    bridge.set_text_content(parent, String::new().into()).unwrap();
     assert_eq!(bridge.state.retained, expected);
     assert_eq!(child_link_bytes(&bridge.doc.nodes[parent].children), width);
     let old_order=bridge.state.order_bytes();
@@ -271,7 +271,7 @@ fn main_child_storage_normalize_exact_one_record_and_empty_output_need_no_geomet
         let mut doc = parsed("<html><body><p></p></body></html>");
         let parent = element(&doc, "p");
         let first = doc.nodes.len();
-        doc.nodes.push(Node { kind: NodeKind::Text(if empty {String::new()}else{"x".into()}), children: Vec::new(), namespace: crate::html::Namespace::None });
+        doc.nodes.push(Node { kind: NodeKind::Text(if empty {String::new().into()}else{"x".into()}), children: Vec::new(), namespace: crate::html::Namespace::None });
         doc.nodes[parent].children.try_reserve_exact(if empty {1}else{2}).unwrap();
         doc.nodes[parent].children.push(first);
         if !empty {
