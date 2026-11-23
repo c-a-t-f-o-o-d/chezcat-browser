@@ -4,15 +4,25 @@
 //! Global matching finishes before the first callback. Custom Symbol.replace/
 //! RegExp execution protocols remain outside the existing subset.
 
-use super::{regexp, Fault, Host, Runtime, Value};
 #[cfg(test)]
 use super::MAX_ARRAY_LENGTH;
+use super::{regexp, Fault, Host, Runtime, Value};
+
+fn scalar_units(s: &str) -> Result<Vec<u16>, Fault> {
+    let mut units = Vec::new();
+    units
+        .try_reserve_exact(s.len())
+        .map_err(|_| Fault::new("Cannot reserve replacement input."))?;
+    units.extend(s.encode_utf16());
+    Ok(units)
+}
 
 impl Runtime {
-    pub(super) fn string_replace_all(
+    pub(super) fn string_replace_value(
         &mut self,
         receiver: Value,
         args: &[Value],
+        all: bool,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         Self::require_property_receiver(&receiver)?;
@@ -21,67 +31,50 @@ impl Runtime {
             Value::Object(id) if self.object(*id)?.regexp.is_some() => Some(*id),
             _ => None,
         };
-        // RegExp validation precedes observable receiver/replacement conversion.
-        // Custom Symbol.replace protocols remain outside the RegExp subset.
-        if let Some(id) = regex {
+        if let Some(id) = regex.filter(|_| all) {
             let flags = self.get_property_with_host(id, "flags", host)?;
             Self::require_property_receiver(&flags)?;
-            if !self.replacement_string_value(flags, host)?.contains('g') {
+            let value = self.replacement_value(flags, host)?;
+            let global = match value {
+                Value::String(s) => s.contains('g'),
+                Value::StringUnits(u) => u.contains(&103),
+                _ => unreachable!(),
+            };
+            if !global {
                 return Err(Fault::exception(
                     "TypeError",
                     "replaceAll requires a global RegExp.",
                 ));
             }
         }
-        let text = self.replacement_string_value(receiver, host)?;
-        self.work_as(text.len().saturating_mul(3), super::WorkKind::StringMethodInput)?;
-        self.string_replace_mode(
-            &text,
-            pattern,
-            regex,
-            args.get(1).unwrap_or(&Value::Undefined),
-            true,
-            host,
-        )
-    }
-
-    pub(super) fn string_replace(
-        &mut self,
-        text: &str,
-        pattern: &Value,
-        regex: Option<usize>,
-        replacement: &Value,
-        host: &mut dyn Host,
-    ) -> Result<Value, Fault> {
-        self.string_replace_mode(text, pattern, regex, replacement, false, host)
-    }
-
-    fn string_replace_mode(
-        &mut self,
-        text: &str,
-        pattern: &Value,
-        regex: Option<usize>,
-        replacement: &Value,
-        all: bool,
-        host: &mut dyn Host,
-    ) -> Result<Value, Fault> {
+        let text = self.replacement_value(receiver, host)?;
+        self.work_as(
+            text.bytes().saturating_mul(3),
+            super::WorkKind::StringMethodInput,
+        )?;
+        let replacement = args.get(1).unwrap_or(&Value::Undefined);
         let callable = matches!(replacement, Value::Function(_));
-        // Literal search conversion precedes replacement conversion. A native
-        // RegExp keeps its identity and does not stringify its pattern.
         let literal = if regex.is_none() {
-            let pattern = self.copy_value(pattern)?;
-            let pattern = self.replacement_string_value(pattern, host)?;
-            Some(pattern.encode_utf16().collect::<Vec<_>>())
+            let value = self.copy_value(pattern)?;
+            Some(self.replacement_units(value, host)?)
         } else {
             None
         };
         let template = if callable {
             None
         } else {
-            let replacement = self.copy_value(replacement)?;
-            Some(self.replacement_string_value(replacement, host)?)
+            let value = self.copy_value(replacement)?;
+            Some(self.replacement_units(value, host)?)
         };
-        let input: Vec<_> = text.encode_utf16().collect();
+        let encoded;
+        let input: &[u16] = match &text {
+            Value::String(s) => {
+                encoded = scalar_units(s)?;
+                &encoded
+            }
+            Value::StringUnits(u) => u,
+            _ => unreachable!(),
+        };
         let (global, unicode) = if let Some(id) = regex {
             let flags = self.object(id)?.regexp.as_ref().unwrap().flags;
             (flags.global, flags.unicode)
@@ -99,23 +92,34 @@ impl Runtime {
             loop {
                 self.step()?;
                 let Some(found) =
-                    self.next_replacement_match(regex, literal.as_deref(), &input, search_from)?
+                    self.next_replacement_match(regex, literal.as_deref(), input, search_from)?
                 else {
                     break;
                 };
                 if matches.len() >= self.limits.heap.array_length {
-                    return Err(Fault::new(format!("Replacement match limit reached ({}).", self.limits.heap.array_length)));
+                    return Err(Fault::new(format!(
+                        "Replacement match limit reached ({}).",
+                        self.limits.heap.array_length
+                    )));
                 }
                 let bytes = found.retained_bytes();
                 snapshot_bytes = snapshot_bytes.saturating_add(bytes);
                 if snapshot_bytes > self.limits.heap.retained_values {
-                    return Err(Fault::new(format!("Replacement snapshot limit reached ({} bytes).", self.limits.heap.retained_values)));
+                    return Err(Fault::new(format!(
+                        "Replacement snapshot limit reached ({} bytes).",
+                        self.limits.heap.retained_values
+                    )));
                 }
                 // Range snapshots retain no duplicate source strings and also
                 // spend the shared job allowance, including across recursion.
                 self.work(bytes)?;
                 let empty_end = (found.start() == found.end()).then_some(found.end());
-                search_from = empty_end.map_or(found.end(), |index| regexp::advance_string_index(&input, index, unicode));
+                search_from = empty_end.map_or(found.end(), |index| {
+                    regexp::advance_string_index(input, index, unicode)
+                });
+                matches
+                    .try_reserve(1)
+                    .map_err(|_| Fault::new("Cannot reserve replacement matches."))?;
                 matches.push(found);
                 if !global {
                     break;
@@ -128,61 +132,72 @@ impl Runtime {
                     )?;
                 }
             }
-            let mut output = String::new();
+            let mut output = Vec::new();
             let mut cursor = 0;
+            if matches.is_empty() {
+                return Ok(text);
+            }
             for found in matches {
                 self.step()?;
-                let mut arguments = Vec::with_capacity(found.captures.len() + 3);
+                let mut arguments = Vec::new();
+                arguments
+                    .try_reserve_exact(
+                        found
+                            .captures
+                            .len()
+                            .checked_add(3)
+                            .ok_or_else(|| Fault::new("Replacement argument count overflow."))?,
+                    )
+                    .map_err(|_| Fault::new("Cannot reserve replacement arguments."))?;
                 for capture in &found.captures {
                     arguments.push(if let Some((start, end)) = capture {
-                        Value::String(self.units_string(&input[*start..*end])?)
+                        self.string_from_units(&input[*start..*end])?
                     } else {
                         Value::Undefined
                     });
                 }
                 arguments.push(Value::Number(found.start() as f64));
-                self.work(text.len())?;
-                arguments.push(Value::String(text.into()));
+                arguments.push(self.copy_value(&text)?);
                 if !found.named_captures.is_empty() {
-                    arguments.push(self.regexp_named_groups(&found, &input)?);
+                    arguments.push(self.regexp_named_groups(&found, input)?);
                 }
                 let value =
                     self.call_value(replacement.clone(), &arguments, Value::Undefined, host)?;
-                let replace = self.replacement_string_value(value, host)?;
+                let replace = self.replacement_value(value, host)?;
                 // Callback execution and return-value conversion precede
                 // concatenation. Its result is literal, not a $ template.
-                let prefix = self.units_string(&input[cursor..found.start()])?;
-                self.append_string(&mut output, &prefix)?;
-                self.append_string(&mut output, &replace)?;
+                self.append_replace_units(&mut output, &input[cursor..found.start()])?;
+                self.append_replace_value(&mut output, &replace)?;
                 cursor = found.end();
             }
-            let suffix = self.units_string(&input[cursor..])?;
-            self.append_string(&mut output, &suffix)?;
-            return self.checked_value(Value::String(output));
+            self.append_replace_units(&mut output, &input[cursor..])?;
+            return self.finish_replacement(output);
         }
 
         // Preserve the original streaming path and $ substitutions for string
         // replacements; it does not need a callback match snapshot.
         let template = template.unwrap();
-        let mut output = String::new();
+        let mut matched = false;
+        let mut output = Vec::new();
         let mut cursor = 0;
         let mut search_from = 0;
         loop {
             self.step()?;
             let Some(found) =
-                self.next_replacement_match(regex, literal.as_deref(), &input, search_from)?
+                self.next_replacement_match(regex, literal.as_deref(), input, search_from)?
             else {
                 break;
             };
-            let prefix = self.units_string(&input[cursor..found.start()])?;
-            self.append_string(&mut output, &prefix)?;
-            let replace = self.replacement_text(&template, &found, &input)?;
-            self.append_string(&mut output, &replace)?;
+            matched = true;
+            self.append_replace_units(&mut output, &input[cursor..found.start()])?;
+            self.append_substitution(&mut output, &template, &found, input)?;
             cursor = found.end();
             let empty = found.start() == found.end();
             search_from = if empty {
-                regexp::advance_string_index(&input, found.end(), unicode)
-            } else { found.end() };
+                regexp::advance_string_index(input, found.end(), unicode)
+            } else {
+                found.end()
+            };
             if !global {
                 break;
             }
@@ -194,19 +209,162 @@ impl Runtime {
                 )?;
             }
         }
-        let suffix = self.units_string(&input[cursor..])?;
-        self.append_string(&mut output, &suffix)?;
-        self.checked_value(Value::String(output))
+        if !matched {
+            return Ok(text);
+        }
+        self.append_replace_units(&mut output, &input[cursor..])?;
+        self.finish_replacement(output)
     }
 
-    fn replacement_string_value(
-        &mut self,
-        value: Value,
-        host: &mut dyn Host,
-    ) -> Result<String, Fault> {
+    fn replacement_value(&mut self, value: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         let value = self.primitive_with_hint(value, true, host)?;
         self.work(value.bytes())?;
-        value.script_text()
+        match value {
+            Value::String(_) | Value::StringUnits(_) => self.checked_value(value),
+            _ => self.checked_value(Value::String(value.script_text()?)),
+        }
+    }
+
+    fn replacement_units(&mut self, value: Value, host: &mut dyn Host) -> Result<Vec<u16>, Fault> {
+        match self.replacement_value(value, host)? {
+            Value::StringUnits(u) => Ok(u),
+            Value::String(s) => {
+                self.work_as(s.len().saturating_mul(3), super::WorkKind::ConversionOutput)?;
+                scalar_units(&s)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn prepare_replace_output(&mut self, out: &mut Vec<u16>, count: usize) -> Result<(), Fault> {
+        let limit = self.limits.capacity.string_bytes;
+        let needed = out
+            .len()
+            .checked_add(count)
+            .filter(|&n| n <= limit)
+            .ok_or_else(|| self.string_limit_fault())?;
+        self.work_as(count.saturating_mul(2), super::WorkKind::ConversionOutput)?;
+        if needed > out.capacity() {
+            self.work_as(out.len().saturating_mul(2), super::WorkKind::ValueCopy)?;
+            let capacity = needed.max(out.capacity().saturating_mul(2).max(8).min(limit));
+            out.try_reserve_exact(capacity - out.len())
+                .map_err(|_| Fault::new("Cannot reserve string replacement output."))?;
+        }
+        Ok(())
+    }
+
+    fn append_replace_units(&mut self, out: &mut Vec<u16>, units: &[u16]) -> Result<(), Fault> {
+        self.prepare_replace_output(out, units.len())?;
+        out.extend_from_slice(units);
+        Ok(())
+    }
+
+    fn append_replace_value(&mut self, out: &mut Vec<u16>, value: &Value) -> Result<(), Fault> {
+        match value {
+            Value::StringUnits(u) => self.append_replace_units(out, u),
+            Value::String(s) => {
+                self.work(s.len())?;
+                self.prepare_replace_output(out, s.encode_utf16().count())?;
+                out.extend(s.encode_utf16());
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn finish_replacement(&mut self, out: Vec<u16>) -> Result<Value, Fault> {
+        // Joining two portions may repair a surrogate pair. Apply the final
+        // scalar/raw byte allowance after composing the actual code units.
+        self.work_as(
+            out.len().saturating_mul(2),
+            super::WorkKind::ConversionOutput,
+        )?;
+        let value = super::string_units::canonical(out, self.limits.capacity.string_bytes)?;
+        self.checked_value(value)
+    }
+
+    fn append_substitution(
+        &mut self,
+        out: &mut Vec<u16>,
+        template: &[u16],
+        found: &regexp::Match,
+        input: &[u16],
+    ) -> Result<(), Fault> {
+        // Literal scanning and the search for named-capture closers visit
+        // each unit at most twice, including a suffix with no closing '>'.
+        self.work(template.len().saturating_mul(4))?;
+        let mut start = 0;
+        let mut at = 0;
+        let mut no_closer = false;
+        let ascii = |at: usize| template.get(at).and_then(|&u| u8::try_from(u).ok());
+        while at + 1 < template.len() {
+            if template[at] != u16::from(b'$') {
+                at += 1;
+                continue;
+            }
+            let next = ascii(at + 1);
+            let mut end = at + 2;
+            let range = match next {
+                Some(b'$') => {
+                    self.append_replace_units(out, &template[start..=at])?;
+                    at = end;
+                    start = end;
+                    continue;
+                }
+                Some(b'&') => Some((found.start(), found.end())),
+                Some(b'`') => Some((0, found.start())),
+                Some(b'\'') => Some((found.end(), input.len())),
+                Some(d @ b'0'..=b'9') => {
+                    let first = usize::from(d - b'0');
+                    let second = ascii(end)
+                        .filter(u8::is_ascii_digit)
+                        .map(|d| first * 10 + usize::from(d - b'0'));
+                    let capture =
+                        if let Some(n) = second.filter(|&n| n != 0 && n < found.captures.len()) {
+                            end += 1;
+                            n
+                        } else if first != 0 && first < found.captures.len() {
+                            first
+                        } else {
+                            at += 1;
+                            continue;
+                        };
+                    found.captures[capture]
+                }
+                Some(b'<') if !found.named_captures.is_empty() && !no_closer => {
+                    let Some(length) = template[end..]
+                        .iter()
+                        .position(|&unit| unit == u16::from(b'>'))
+                    else {
+                        no_closer = true;
+                        at += 1;
+                        continue;
+                    };
+                    let name = &template[end..end + length];
+                    end += length + 1;
+                    let mut matched = None;
+                    for (key, capture) in &found.named_captures {
+                        self.work(key.len().saturating_add(name.len().saturating_mul(2)))?;
+                        if key.encode_utf16().eq(name.iter().copied()) {
+                            matched = *capture;
+                            break;
+                        }
+                    }
+                    matched
+                }
+                _ => {
+                    at += 1;
+                    continue;
+                }
+            };
+            self.append_replace_units(out, &template[start..at])?;
+            if let Some((a, b)) = range {
+                self.append_replace_units(out, &input[a..b])?;
+            }
+            at = end;
+            start = end;
+        }
+        self.append_replace_units(out, &template[start..])
     }
 
     fn next_replacement_match(
@@ -267,6 +425,75 @@ mod tests {
                 .to_text(),
             "ok"
         );
+    }
+
+    #[test]
+    fn utf16_replacement_literal_and_template_values_preserve_and_join_units() {
+        succeeds(
+            r#"
+var hi='\ud800',lo='\udfff',raw=hi+'X'+lo;
+if(raw.replace('X','')!=='\u{103ff}'||raw.replaceAll('missing','noop')!==raw)throw 'join or no match';
+if(raw.replaceAll(hi,'$&$&')!==hi+hi+'X'+lo||'abc'.replace('b',lo)!=='a'+lo+'c')throw 'raw search or substitution';
+var expr=new RegExp('(?<unit>'+hi+')(z)?');
+if(raw.replace(expr,'$<unit>:$2:$12:$&:$$')!==hi+'::'+hi+'2:'+hi+':$X'+lo)throw 'capture substitution';
+if(raw.replace('X',String.fromCharCode(36,96)+'-'+String.fromCharCode(36,39))!==hi+hi+'-'+lo+lo)throw 'prefix and suffix';
+if(String.prototype.replace.call({toString:function(){return raw;}},hi,lo)!==lo+'X'+lo)throw 'generic receiver';
+if(('\u{1f431}').replace(/./,'x')!=='x\udc31')throw 'non-unicode scalar split';
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn utf16_replacement_callbacks_observe_raw_matches_groups_positions_and_reentry() {
+        succeeds(
+            r#"
+var hi='\ud800',lo='\udfff',raw=hi+'b'+lo,re=new RegExp('(?<unit>['+hi+lo+'])','g'),trace=[];
+var result=raw.replaceAll(re,function(m,u,pos,original,groups){
+ if(m!==u||groups.unit!==u||Object.getPrototypeOf(groups)!==null||original!==raw)throw 'native callback arguments';
+ trace.push(pos);re.lastIndex=8;return {toString:function(){return u===hi?lo:hi;}};
+});
+if(result!==lo+'b'+hi||trace.join(',')!=='0,2'||re.lastIndex!==8)throw 'snapshots and raw callback result';
+var marker={},order='';
+var receiver={toString:function(){order+='o';return raw;}},search={toString:function(){order+='s';return hi;}};
+var replace={toString:function(){order+='r';return lo;}};
+if(String.prototype.replaceAll.call(receiver,search,replace)!==lo+'b'+lo||order!=='osr')throw 'ordered conversion';
+try{raw.replaceAll(re,function(){throw marker;});throw 'missing abrupt';}catch(e){if(e!==marker)throw e;}
+'ok';
+"#,
+        );
+    }
+
+    #[test]
+    fn utf16_replacement_final_storage_cap_and_recovery() {
+        let mut runtime = Runtime::for_test();
+        let mut host = NoHost;
+        let high = Value::StringUnits(vec![0xd800]);
+        let low = Value::StringUnits(vec![0xdfff]);
+        let args = [Value::String(String::new()), high.clone()];
+        runtime.limits.capacity.string_bytes = 3;
+        let error = runtime
+            .string_replace_value(low.clone(), &args, false, &mut host)
+            .unwrap_err();
+        assert!(error.exception.is_none() && error.message.contains("String limit"));
+        runtime.begin_job();
+        runtime.limits.capacity.string_bytes = 4;
+        assert!(
+            matches!(runtime.string_replace_value(low,&args,false,&mut host),Ok(Value::String(s)) if s=="\u{103ff}")
+        );
+        runtime.limits.capacity.string_bytes = 2;
+        let args = [Value::String(String::new()), Value::String("x".into())];
+        assert!(runtime
+            .string_replace_value(high.clone(), &args, false, &mut host)
+            .is_err());
+        runtime.begin_job();
+        // The absent replacement converts to "undefined" before matching.
+        // Its nine-byte value itself exceeds this two-byte profile.
+        let error=runtime.string_replace_value(high.clone(), &[Value::String("z".into())], false, &mut host).unwrap_err();
+        assert!(error.exception.is_none() && error.message.contains("String limit"));
+        runtime.begin_job();
+        let small=[Value::String("z".into()),Value::String(String::new())];
+        assert!(matches!(runtime.string_replace_value(high,&small,false,&mut host),Ok(Value::StringUnits(u)) if u==[0xd800]));
     }
 
     #[test]

@@ -125,15 +125,8 @@ impl Runtime {
     }
 
     pub(super) fn regexp_string_method(&mut self, text: &str, method: &str, args: &[Value], host: &mut dyn Host) -> Result<Value, Fault> {
+        if method=="replace" {return self.string_replace_value(Value::String(text.to_owned()),args,false,host);}
         self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
-        if method == "replace" {
-            let pattern = args.first().unwrap_or(&Value::Undefined);
-            let regex_id = match pattern {
-                Value::Object(id) if self.object(*id)?.regexp.is_some() => Some(*id),
-                _ => None,
-            };
-            return self.string_replace(text, pattern, regex_id, args.get(1).unwrap_or(&Value::Undefined), host);
-        }
         let input: Vec<_> = text.encode_utf16().collect();
         self.regexp_search_or_match_units(&input, method, args, || Value::String(text.to_owned()))
     }
