@@ -1302,8 +1302,7 @@ impl Page {
         runtime.define_range_interfaces(WINDOW).expect("fixed range interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
         runtime.define_tree_walker(WINDOW).expect("fixed tree traversal interfaces");
-        runtime.define_inert_document_interfaces(WINDOW, script_inert_documents::GET,
-            script_inert_documents::CREATE, script_inert_documents::HAS_FEATURE)
+        runtime.define_inert_document_interfaces(WINDOW)
             .expect("fixed inert document interfaces");
         runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
         Self { runtime, state }

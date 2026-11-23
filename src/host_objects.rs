@@ -22,13 +22,12 @@ mod document_property_limits_tests;
 
 impl Runtime {
     pub(crate) fn define_inert_document_interfaces(
-        &mut self, window: u32, implementation_get: &'static str,
-        create: &'static str, has_feature: &'static str,
+        &mut self, window: u32,
     ) -> Result<(), String> {
         let marker = self.inhibit_transient_collection();
         let result = (|| {
             let document = self.native_constructor_prototypes[&(window, "Document")];
-            self.define_readonly_node_getter(document, window, "implementation", implementation_get)?;
+            self.define_readonly_node_getter(document, window, "implementation", super::DOCUMENT_IMPLEMENTATION_GET)?;
             self.define_readonly_node_getter(document,window,"doctype",super::DOCUMENT_DOCTYPE_GET)?;
             for name in ["DOMImplementation", "DocumentType", "XMLDocument"] {
                 let allocation = self.allocate_host_function_with_length(window, name, 0).map_err(Fault::new)?;
@@ -47,7 +46,7 @@ impl Runtime {
                     }
                     if name=="DocumentType"{for &(name,method) in super::DOCUMENT_TYPE_GETTERS {self.define_readonly_node_getter(prototype,window,name,method)?;}}
                 } else {
-                    for (name, operation,length) in [("createHTMLDocument", create,0), ("hasFeature", has_feature,0),("createDocumentType","\0DOMImplementation.createDocumentType",3),("createDocument","\0DOMImplementation.createDocument",2)] {
+                    for (name, operation,length) in [("createHTMLDocument", super::DOM_IMPLEMENTATION_CREATE_HTML_DOCUMENT,0), ("hasFeature", super::DOM_IMPLEMENTATION_HAS_FEATURE,0),("createDocumentType",super::DOM_IMPLEMENTATION_CREATE_DOCTYPE,3),("createDocument",super::DOM_IMPLEMENTATION_CREATE_DOCUMENT,2)] {
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;

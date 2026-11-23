@@ -3,6 +3,40 @@ use super::*;
 fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse_loaded_document("<!doctype html><html><head></head><body><span id=mount></span></body></html>",&||Ok(())).unwrap();doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();page.set_location(&crate::navigation::address("https://xml-records.test/source",&crate::navigation::Location::home()).unwrap());assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
 fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());}
 fn no_effects(page:&mut Page){assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());let(a,b,c)=page.take_image_changes();assert!(a.is_empty()&&b.is_empty()&&c.is_empty());}
+
+#[test]
+fn document_factory_validation_uses_canonical_dom_exception_slots_and_preserves_inputs() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var xml=document.implementation.createDocument(null,'root'), html=document.implementation.createHTMLDocument('sample');
+var canonical=DOMException, calls=0, caught=0;
+function expectError(fn,name,code){
+ var value=null;try{fn();}catch(e){value=e;}
+ if(!(value instanceof canonical)||Object.getPrototypeOf(value)!==canonical.prototype||value.name!==name||value.code!==code||typeof value.message!=='string')throw 'incorrect native exception for '+name;
+ caught++;
+}
+var make=DOMImplementation.prototype.createDocumentType;
+window.DOMException=function(){throw 'author constructor is not an intrinsic';};
+for(var owner of [document,html,xml]){
+ expectError(function(){make.call(owner.implementation,'bad>','public','system');},'InvalidCharacterError',5);
+ expectError(function(){owner.implementation.createDocument(null,'prefix:name',null);},'NamespaceError',14);
+ expectError(function(){owner.createAttributeNS(null,'prefix:name');},'NamespaceError',14);
+ expectError(function(){owner.createElementNS(null,'prefix:name');},'NamespaceError',14);
+}
+expectError(function(){xml.createCDATASection(']]>');},'InvalidCharacterError',5);
+expectError(function(){document.createCDATASection('valid');},'NotSupportedError',9);
+expectError(function(){xml.createProcessingInstruction('okay','?>');},'InvalidCharacterError',5);
+var input={toString:function(){calls++;return 'value';}};
+expectError(function(){make.call(xml.implementation,'bad ',input,input);},'InvalidCharacterError',5);
+if(calls!==2||caught!==16)throw 'IDL argument effects';
+var wrong=false;try{make.call({},input,input,input);}catch(e){wrong=e instanceof TypeError&&!(e instanceof canonical);}
+if(!wrong||calls!==2)throw 'receiver before conversion';
+var good=make.call(xml.implementation,'valid','public','system');
+if(good.ownerDocument!==xml||good.name!=='valid'||good.publicId!=='public'||good.systemId!=='system'||xml.documentElement.localName!=='root')throw 'factory recovery';
+window.DOMException=canonical;
+"#);
+}
+
 #[test]
 fn native_xml_document_factory_kind_optional_roots_mime_names_and_owner_are_real(){
     let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"

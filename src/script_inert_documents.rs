@@ -79,10 +79,10 @@ mod promoted_child_list_tests;
 #[path = "script_main_node_storage_tests.rs"]
 mod main_node_storage_tests;
 
-pub(super) const GET: &str = "\0Document.get.implementation";
-pub(super) const CREATE: &str = "\0DOMImplementation.createHTMLDocument";
-pub(super) const CREATE_DOCTYPE:&str="\0DOMImplementation.createDocumentType";
-pub(super) const HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
+pub(super) use crate::javascript::DOCUMENT_IMPLEMENTATION_GET as GET;
+pub(super) use crate::javascript::DOM_IMPLEMENTATION_CREATE_HTML_DOCUMENT as CREATE;
+pub(super) use crate::javascript::DOM_IMPLEMENTATION_CREATE_DOCTYPE as CREATE_DOCTYPE;
+pub(super) use crate::javascript::DOM_IMPLEMENTATION_HAS_FEATURE as HAS_FEATURE;
 
 #[derive(Default)]
 pub(super) struct Arena {

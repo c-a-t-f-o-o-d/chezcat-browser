@@ -4,6 +4,18 @@
 //! The inherited Error.prototype.toString remains the ordinary live-field path.
 use super::*;
 
+/// Standard input validation exceptions from the supported native factories.
+pub(super) fn factory_validation(method: &str, name: &str) -> bool {
+    match method {
+        "createElement" | "createElementNS" | DOM_IMPLEMENTATION_CREATE_DOCUMENT |
+        DOCUMENT_CREATE_ATTRIBUTE | DOCUMENT_CREATE_ATTRIBUTE_NS => matches!(name, "InvalidCharacterError" | "NamespaceError"),
+        DOM_IMPLEMENTATION_CREATE_DOCTYPE | CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction" =>
+            name == "InvalidCharacterError",
+        CREATE_CDATA_SECTION => matches!(name, "InvalidCharacterError" | "NotSupportedError"),
+        _ => false,
+    }
+}
+
 pub(super) struct Data { name:String, message:String }
 #[derive(Default)]
 pub(super) struct Roots { prototype:Option<usize>, constructor:Option<usize> }
