@@ -1688,7 +1688,7 @@ var caught=false;try{f.getElementsByClassName('probe');}catch(e){caught=e.name==
 
 #[test]
 fn class_name_collections_match_all_ascii_tokens_in_live_descendant_order() {
-    let (doc,_,page,outcome)=page("<main><section id=s class='a b'><p id=p class='a b'></p><div><b id=b class='b a'></b></div><i id=c class='a B'></i></section><p id=outside class='a b'></p></main>",&[r#"
+    let (doc,_,page,outcome)=page("<!doctype html><main><section id=s class='a b'><p id=p class='a b'></p><div><b id=b class='b a'></b></div><i id=c class='a B'></i></section><p id=outside class='a b'></p></main>",&[r#"
 var s=document.getElementById('s'),p=document.getElementById('p'),b=document.getElementById('b'),c=document.getElementById('c');
 var all=document.getElementsByClassName(' a\t b a\n'),inside=s.getElementsByClassName('b a');
 if(document.compatMode!=='CSS1Compat'||all.length!==4||all[0]!==s||all[1]!==p||all[2]!==b||all[3]!==document.getElementById('outside'))throw 'standards order';

@@ -3591,7 +3591,7 @@ impl Host for Bridge<'_> {
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
         if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
-        index==0&&dom_collections::operation(method).is_some_and(|(name,_)|name=="getElementsByTagName")
+        index==0&&dom_collections::operation(method).is_some()
             ||index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
             ||(script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
             ||index==0&&matches!(method,"getAttribute"|"getAttributeNode"|"setAttribute"|"removeAttribute"|"hasAttribute")
