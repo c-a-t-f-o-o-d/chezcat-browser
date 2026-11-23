@@ -1,12 +1,13 @@
 //! Original bounded JSON support. Parsing and serialization use explicit frame
 //! stacks and the enclosing Runtime's object, retained-value and work budgets.
 //! Callback walks retain source snapshots and real holders without recursive
-//! native traversal. Serialization escapes unpaired UTF-16 code units exactly;
-//! parsing lone surrogates and raw-unit indentation remain explicit limitations.
+//! native traversal. Parsing preserves exact UTF-16 strings, keys and source
+//! tokens; serialization escapes unpaired units. Raw-unit indentation is not
+//! implemented.
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
-    Runtime, StringKey, Value,
+    Runtime, StringKey, Value, WorkKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
@@ -17,10 +18,184 @@ struct ParseSnapshot {
     end: usize,
 }
 
-type Snapshots = BTreeMap<(usize, String), ParseSnapshot>;
+type Snapshots = BTreeMap<usize, BTreeMap<StringKey, ParseSnapshot>>;
+
+// Positions use the source's native representation. Grammar is ASCII, but
+// strings and reviver source tokens must retain every UTF-16 code unit.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Scalar(&'a str),
+    Units(&'a [u16]),
+}
+
+impl Source<'_> {
+    fn len(self) -> usize {
+        match self { Self::Scalar(text) => text.len(), Self::Units(units) => units.len() }
+    }
+
+    fn bytes(self) -> usize {
+        match self { Self::Scalar(text) => text.len(), Self::Units(units) => units.len().saturating_mul(2) }
+    }
+
+    fn position_kind(self) -> &'static str {
+        match self { Self::Scalar(_) => "byte", Self::Units(_) => "code unit" }
+    }
+
+    fn grammar_byte(self, at: usize) -> Option<u8> {
+        // 0xff is an invalid grammar byte, not EOF. Never narrow a raw unit
+        // into an ASCII delimiter (for example, U+0122 into a quote).
+        match self {
+            Self::Scalar(text) => text.as_bytes().get(at).copied(),
+            Self::Units(units) => units.get(at).map(|&unit| {
+                if unit <= 0x7f { unit as u8 } else { 0xff }
+            }),
+        }
+    }
+
+    fn starts_with(self, at: usize, word: &[u8]) -> bool {
+        word.iter().enumerate().all(|(index, &byte)| self.grammar_byte(at + index) == Some(byte))
+    }
+
+    fn slice_value(self, runtime: &mut Runtime, start: usize, end: usize) -> Result<Value, Fault> {
+        match self {
+            Self::Scalar(text) => {
+                let text = &text[start..end];
+                runtime.work(text.len())?;
+                let mut copy = String::new();
+                copy.try_reserve_exact(text.len()).map_err(|_| Fault::new("Unable to allocate JSON source token."))?;
+                copy.push_str(text);
+                Ok(Value::String(copy))
+            }
+            Self::Units(units) => runtime.string_from_units(&units[start..end]),
+        }
+    }
+}
+
+enum StringBuffer {
+    Scalar(String),
+    Units(Vec<u16>),
+}
+
+struct ParsedString {
+    buffer: StringBuffer,
+    high: Option<u16>,
+    unpaired: bool,
+}
+
+impl ParsedString {
+    fn new(raw_source: bool) -> Self {
+        Self {
+            // A raw source can contain a BMP prefix whose UTF-8 expansion
+            // exceeds the limit, followed by an unpaired unit that makes the
+            // final, smaller UTF-16 representation necessary. Its admitted
+            // source bytes bound the decoded units until the full token is known.
+            buffer: if raw_source { StringBuffer::Units(Vec::new()) } else { StringBuffer::Scalar(String::new()) },
+            high: None,
+            unpaired: false,
+        }
+    }
+
+    fn reserve_units(runtime: &mut Runtime, units: &mut Vec<u16>, added: usize) -> Result<(), Fault> {
+        let limit = runtime.limits.capacity.string_bytes / 2;
+        let required = units.len().saturating_add(added);
+        if required > limit { return Err(runtime.string_limit_fault()); }
+        runtime.work_as(added.saturating_mul(2), WorkKind::ConversionOutput)?;
+        if required > units.capacity() {
+            runtime.work(units.len().saturating_mul(2))?;
+            let target = required.max(units.capacity().saturating_mul(2).min(limit));
+            units.try_reserve_exact(target - units.len())
+                .map_err(|_| Fault::new("Unable to allocate JSON string units."))?;
+            if units.capacity() > limit { return Err(runtime.string_limit_fault()); }
+        }
+        Ok(())
+    }
+
+    fn append_char(&mut self, runtime: &mut Runtime, ch: char) -> Result<(), Fault> {
+        match &mut self.buffer {
+            StringBuffer::Scalar(text) => {
+                let limit = runtime.limits.capacity.string_bytes;
+                let required = text.len().saturating_add(ch.len_utf8());
+                if required > limit { return Err(runtime.string_limit_fault()); }
+                runtime.work_as(ch.len_utf8(), WorkKind::ConversionOutput)?;
+                if required > text.capacity() {
+                    runtime.work(text.len())?;
+                    let target = required.max(text.capacity().saturating_mul(2).min(limit));
+                    text.try_reserve_exact(target - text.len())
+                        .map_err(|_| Fault::new("Unable to allocate JSON string."))?;
+                    if text.capacity() > limit { return Err(runtime.string_limit_fault()); }
+                }
+                text.push(ch);
+            }
+            StringBuffer::Units(units) => {
+                let mut buffer = [0; 2];
+                let added = ch.encode_utf16(&mut buffer);
+                Self::reserve_units(runtime, units, added.len())?;
+                units.extend_from_slice(added);
+            }
+        }
+        Ok(())
+    }
+
+    fn append_unpaired(&mut self, runtime: &mut Runtime, unit: u16) -> Result<(), Fault> {
+        self.unpaired = true;
+        if let StringBuffer::Scalar(text) = &self.buffer {
+            runtime.work(text.len())?;
+            let count = text.encode_utf16().count().saturating_add(1);
+            if count > runtime.limits.capacity.string_bytes / 2 { return Err(runtime.string_limit_fault()); }
+            runtime.work_as(count.saturating_mul(2), WorkKind::ConversionOutput)?;
+            let mut units = Vec::new();
+            units.try_reserve_exact(count)
+                .map_err(|_| Fault::new("Unable to allocate JSON string units."))?;
+            if units.capacity() > runtime.limits.capacity.string_bytes / 2 {
+                return Err(runtime.string_limit_fault());
+            }
+            units.extend(text.encode_utf16());
+            units.push(unit);
+            self.buffer = StringBuffer::Units(units);
+        } else if let StringBuffer::Units(units) = &mut self.buffer {
+            Self::reserve_units(runtime, units, 1)?;
+            units.push(unit);
+        }
+        Ok(())
+    }
+
+    fn unit(&mut self, runtime: &mut Runtime, unit: u16) -> Result<(), Fault> {
+        if let Some(high) = self.high.take() {
+            if (0xdc00..=0xdfff).contains(&unit) {
+                let code = 0x10000 + ((high as u32 - 0xd800) << 10) + unit as u32 - 0xdc00;
+                return self.append_char(runtime, char::from_u32(code).unwrap());
+            }
+            self.append_unpaired(runtime, high)?;
+        }
+        if (0xd800..=0xdbff).contains(&unit) {
+            self.high = Some(unit);
+            Ok(())
+        } else if (0xdc00..=0xdfff).contains(&unit) {
+            self.append_unpaired(runtime, unit)
+        } else {
+            self.append_char(runtime, char::from_u32(unit as u32).unwrap())
+        }
+    }
+
+    fn scalar(&mut self, runtime: &mut Runtime, ch: char) -> Result<(), Fault> {
+        if let Some(high) = self.high.take() { self.append_unpaired(runtime, high)?; }
+        self.append_char(runtime, ch)
+    }
+
+    fn finish(mut self, runtime: &mut Runtime) -> Result<Value, Fault> {
+        if let Some(high) = self.high.take() { self.append_unpaired(runtime, high)?; }
+        match self.buffer {
+            StringBuffer::Scalar(text) => Ok(Value::String(text)),
+            StringBuffer::Units(units) if self.unpaired => Ok(Value::StringUnits(units)),
+            // Fully well-formed raw-source tokens use the same canonical
+            // scalar identity and output-byte admission as other strings.
+            StringBuffer::Units(units) => runtime.string_from_units(&units),
+        }
+    }
+}
 
 struct Reader<'a> {
-    source: &'a str,
+    source: Source<'a>,
     at: usize,
     snapshots: Option<Snapshots>,
     snapshot_bytes: usize,
@@ -71,7 +246,7 @@ impl Reader<'_> {
         &mut self,
         runtime: &mut Runtime,
         holder: usize,
-        key: &str,
+        key: &StringKey,
         value: &Value,
         start: usize,
         frame_bytes: usize,
@@ -79,41 +254,56 @@ impl Reader<'_> {
         let Some(snapshots) = self.snapshots.as_mut() else {
             return Ok(());
         };
-        let key = (holder, key.to_owned());
-        let old = snapshots.get(&key).map_or(0, |old| {
-            std::mem::size_of::<((usize, String), ParseSnapshot)>()
-                + 3 * std::mem::size_of::<usize>()
-                + key.1.len()
-                + old.value.bytes()
-        });
-        let bytes = std::mem::size_of::<((usize, String), ParseSnapshot)>()
-            + 3 * std::mem::size_of::<usize>()
-            + key.1.len()
-            + value.bytes();
-        let retained = self
+        let entries = snapshots.get(&holder);
+        let previous = entries.and_then(|entries| entries.get_key_value(key));
+        let entry_bytes = size_of::<(StringKey, ParseSnapshot)>() + 3 * size_of::<usize>();
+        let holder_bytes = if entries.is_none() {
+            size_of::<(usize, BTreeMap<StringKey, ParseSnapshot>)>() + 3 * size_of::<usize>()
+        } else { 0 };
+        let old = previous.map_or(0, |(key, old)| entry_bytes + key.capacity_bytes() + old.value.bytes());
+        let key_bytes = previous.map_or(key.byte_len(), |(key, _)| key.capacity_bytes());
+        let bytes = entry_bytes.saturating_add(key_bytes).saturating_add(value.bytes());
+        let mut retained = self
             .snapshot_bytes
             .saturating_sub(old)
-            .saturating_add(bytes);
+            .saturating_add(bytes)
+            .saturating_add(holder_bytes);
         let scratch = frame_bytes.saturating_add(runtime.json_scratch_bytes);
-        if retained > runtime.limits.heap.retained_values.saturating_sub(scratch) {
-            return Err(Fault::new(format!("JSON reviver snapshot limit reached ({} bytes).", runtime.limits.heap.retained_values)));
-        }
-        runtime.work(bytes)?;
+        let budget = runtime.limits.heap.retained_values;
+        let exhausted = || Fault::new(format!("JSON reviver snapshot limit reached ({budget} bytes)."));
+        if retained > budget.saturating_sub(scratch) { return Err(exhausted()); }
+        runtime.work(bytes.saturating_add(holder_bytes))?;
         let value = runtime.copy_value(value)?;
-        snapshots.insert(
-            key,
-            ParseSnapshot {
-                value,
-                start,
-                end: self.at,
-            },
-        );
+        let snapshot = ParseSnapshot { value, start, end: self.at };
+        if let Some(previous) = snapshots.get_mut(&holder).and_then(|entries| entries.get_mut(key)) {
+            // Replacing a duplicate retains the original key allocation, as
+            // well as the parsed object's original property creation order.
+            *previous = snapshot;
+        } else {
+            let owned = match key {
+                StringKey::Scalar(name) => {
+                    let mut copy = String::new();
+                    copy.try_reserve_exact(name.len()).map_err(|_| Fault::new("Unable to allocate JSON snapshot key."))?;
+                    copy.push_str(name);
+                    StringKey::Scalar(copy)
+                }
+                StringKey::Units(units) => {
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(units.len()).map_err(|_| Fault::new("Unable to allocate JSON snapshot key."))?;
+                    copy.extend_from_slice(units);
+                    StringKey::Units(copy)
+                }
+            };
+            retained = retained.saturating_add(owned.capacity_bytes().saturating_sub(key_bytes));
+            if retained > budget.saturating_sub(scratch) { return Err(exhausted()); }
+            snapshots.entry(holder).or_default().insert(owned, snapshot);
+        }
         self.snapshot_bytes = retained;
         Ok(())
     }
 
     fn byte(&self) -> Option<u8> {
-        self.source.as_bytes().get(self.at).copied()
+        self.source.grammar_byte(self.at)
     }
 
     fn space(&mut self) {
@@ -125,7 +315,7 @@ impl Reader<'_> {
     fn syntax(&self, message: &str) -> Fault {
         Fault::exception(
             "SyntaxError",
-            format!("JSON at byte {}: {message}", self.at),
+            format!("JSON at {} {}: {message}", self.source.position_kind(), self.at),
         )
     }
 
@@ -153,17 +343,17 @@ impl Reader<'_> {
         Ok(value)
     }
 
-    fn string(&mut self, runtime: &mut Runtime) -> Result<String, Fault> {
+    fn string(&mut self, runtime: &mut Runtime) -> Result<Value, Fault> {
         runtime.step()?;
         if !self.take(b'"') {
             return Err(self.syntax("Expected a quoted string."));
         }
-        let mut output = String::new();
+        let mut output = ParsedString::new(matches!(self.source, Source::Units(_)));
         loop {
-            let ch = match self.byte() {
+            match self.byte() {
                 Some(b'"') => {
                     self.at += 1;
-                    return Ok(output);
+                    return output.finish(runtime);
                 }
                 Some(b'\\') => {
                     self.at += 1;
@@ -171,7 +361,7 @@ impl Reader<'_> {
                         .byte()
                         .ok_or_else(|| self.syntax("Unterminated escape."))?;
                     self.at += 1;
-                    match escaped {
+                    let unit = match escaped {
                         b'"' => '"',
                         b'\\' => '\\',
                         b'/' => '/',
@@ -181,46 +371,34 @@ impl Reader<'_> {
                         b'r' => '\r',
                         b't' => '\t',
                         b'u' => {
-                            let high = self.hex_unit()?;
-                            let code = if (0xd800..=0xdbff).contains(&high) {
-                                if !self.source[self.at..].starts_with("\\u") {
-                                    return Err(Fault::new(
-                                        "JSON lone UTF-16 surrogates are not implemented.",
-                                    ));
-                                }
-                                self.at += 2;
-                                let low = self.hex_unit()?;
-                                if !(0xdc00..=0xdfff).contains(&low) {
-                                    return Err(Fault::new(
-                                        "JSON lone UTF-16 surrogates are not implemented.",
-                                    ));
-                                }
-                                0x10000 + ((high as u32 - 0xd800) << 10) + low as u32 - 0xdc00
-                            } else if (0xdc00..=0xdfff).contains(&high) {
-                                return Err(Fault::new(
-                                    "JSON lone UTF-16 surrogates are not implemented.",
-                                ));
-                            } else {
-                                high as u32
-                            };
-                            char::from_u32(code).unwrap()
+                            output.unit(runtime, self.hex_unit()?)?;
+                            continue;
                         }
                         _ => return Err(self.syntax("Invalid string escape.")),
-                    }
+                    };
+                    output.unit(runtime, unit as u16)?;
                 }
                 Some(0..=31) => return Err(self.syntax("Unescaped control character in string.")),
                 Some(_) => {
-                    let ch = self.source[self.at..].chars().next().unwrap();
-                    self.at += ch.len_utf8();
-                    ch
+                    match self.source {
+                        Source::Scalar(text) => {
+                            let ch = text[self.at..].chars().next().unwrap();
+                            self.at += ch.len_utf8();
+                            output.scalar(runtime, ch)?;
+                        }
+                        Source::Units(units) => {
+                            let unit = units[self.at];
+                            self.at += 1;
+                            output.unit(runtime, unit)?;
+                        }
+                    }
                 }
                 None => return Err(self.syntax("Unterminated string.")),
-            };
-            runtime.append_string(&mut output, ch.encode_utf8(&mut [0; 4]))?;
+            }
         }
     }
 
-    fn number(&mut self) -> Result<Value, Fault> {
+    fn number(&mut self, runtime: &mut Runtime) -> Result<Value, Fault> {
         let start = self.at;
         self.take(b'-');
         match self.byte() {
@@ -255,8 +433,22 @@ impl Reader<'_> {
                 return Err(self.syntax("An exponent needs digits."));
             }
         }
-        self.source[start..self.at]
-            .parse::<f64>()
+        // Only a validated ASCII number token needs a scalar copy for f64
+        // conversion; the surrounding raw source is never replaced or lost.
+        let copied;
+        let text = match self.source {
+            Source::Scalar(text) => &text[start..self.at],
+            Source::Units(units) => {
+                let units = &units[start..self.at];
+                runtime.work(units.len())?;
+                let mut text = String::new();
+                text.try_reserve_exact(units.len()).map_err(|_| Fault::new("Unable to allocate JSON number token."))?;
+                text.extend(units.iter().map(|&unit| char::from_u32(unit as u32).unwrap()));
+                copied = text;
+                &copied
+            }
+        };
+        text.parse::<f64>()
             .map(Value::Number)
             .map_err(|_| self.syntax("Invalid JSON number."))
     }
@@ -285,17 +477,17 @@ impl Reader<'_> {
                     }),
                 ));
             }
-            Some(b'"') => Value::String(self.string(runtime)?),
-            Some(b'-' | b'0'..=b'9') => self.number()?,
-            Some(b'n') if self.source[self.at..].starts_with("null") => {
+            Some(b'"') => self.string(runtime)?,
+            Some(b'-' | b'0'..=b'9') => self.number(runtime)?,
+            Some(b'n') if self.source.starts_with(self.at, b"null") => {
                 self.at += 4;
                 Value::Null
             }
-            Some(b't') if self.source[self.at..].starts_with("true") => {
+            Some(b't') if self.source.starts_with(self.at, b"true") => {
                 self.at += 4;
                 Value::Bool(true)
             }
-            Some(b'f') if self.source[self.at..].starts_with("false") => {
+            Some(b'f') if self.source.starts_with(self.at, b"false") => {
                 self.at += 5;
                 Value::Bool(false)
             }
@@ -311,7 +503,7 @@ impl Reader<'_> {
         let mut frames = Vec::new();
         self.reserve_frames(runtime, &mut frames, usize::from(frame.is_some()))?;
         self.snapshot(
-            runtime, usize::MAX, "", &root, start, frames.capacity() * size_of::<ParseFrame>(),
+            runtime, usize::MAX, &StringKey::Scalar(String::new()), &root, start, frames.capacity() * size_of::<ParseFrame>(),
         )?;
         frames.extend(frame);
         while let Some(mut frame) = frames.pop() {
@@ -325,10 +517,19 @@ impl Reader<'_> {
                 let key = if frame.array {
                     let key = frame.next.to_string();
                     frame.next += 1;
-                    key
+                    StringKey::Scalar(key)
                 } else {
-                    let key = self.string(runtime)?;
-                    runtime.property_name(&key)?;
+                    let key = match self.string(runtime)? {
+                        Value::String(name) => {
+                            runtime.property_name(&name)?;
+                            StringKey::Scalar(name)
+                        }
+                        Value::StringUnits(units) => {
+                            runtime.property_name_units(&units)?;
+                            StringKey::Units(units)
+                        }
+                        _ => unreachable!("a JSON string token"),
+                    };
                     self.space();
                     if !self.take(b':') {
                         return Err(self.syntax("Expected a colon after the property name."));
@@ -342,7 +543,10 @@ impl Reader<'_> {
                 self.snapshot(
                     runtime, frame.id, &key, &value, start, frames.capacity() * size_of::<ParseFrame>(),
                 )?;
-                runtime.set_property(frame.id, key, value)?;
+                match key {
+                    StringKey::Scalar(name) => runtime.store_property(frame.id, name, value, Some((true, true, true)))?,
+                    StringKey::Units(units) => runtime.store_units_property(frame.id, units, value, Some((true, true, true)))?,
+                }
                 frame.entry = false;
                 frames.push(frame);
                 frames.extend(child);
@@ -436,21 +640,29 @@ impl Runtime {
         // and callback processing with its caller's host.
         let value = args.first().unwrap_or(&Value::Undefined);
         self.work(value.bytes())?;
-        let source = value.script_text()?;
-        self.json_parse_source(&source, false)
+        let scalar;
+        let source = match value {
+            Value::String(text) => Source::Scalar(text),
+            Value::StringUnits(units) => Source::Units(units),
+            _ => {
+                scalar = value.script_text()?;
+                Source::Scalar(&scalar)
+            }
+        };
+        self.json_parse_source(source, false)
             .map(|(value, _, _)| value)
     }
 
     fn json_parse_source(
         &mut self,
-        source: &str,
+        source: Source<'_>,
         capture: bool,
     ) -> Result<(Value, Snapshots, usize), Fault> {
         let max_source = self.limits.capacity.string_bytes;
-        if source.len() > max_source {
+        if source.bytes() > max_source {
             return Err(Fault::new(format!("JSON source limit reached ({max_source} bytes).")));
         }
-        self.work(source.len())?;
+        self.work(source.bytes())?;
         let checkpoint = (self.objects.len(), self.properties, self.value_bytes);
         let mut reader = Reader {
             source,
@@ -486,13 +698,20 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         let source = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
-        let source = self
-            .primitive_with_hint(source, true, host)?
-            .script_text()?;
+        let source = self.primitive_with_hint(source, true, host)?;
+        let source_value = match source {
+            Value::String(_) | Value::StringUnits(_) => source,
+            _ => Value::String(source.script_text()?),
+        };
+        let source = match &source_value {
+            Value::String(text) => Source::Scalar(text),
+            Value::StringUnits(units) => Source::Units(units),
+            _ => unreachable!("a JSON source string"),
+        };
         let callback = args
             .get(1)
             .filter(|value| matches!(value, Value::Function(_)));
-        let (root, snapshots, snapshot_bytes) = self.json_parse_source(&source, callback.is_some())?;
+        let (root, snapshots, snapshot_bytes) = self.json_parse_source(source, callback.is_some())?;
         let Some(callback) = callback else {
             return Ok(root);
         };
@@ -502,8 +721,8 @@ impl Runtime {
         let first = self.json_revive_frame(
             Value::Object(holder),
             StringKey::Scalar(String::new()),
-            snapshots.get(&(usize::MAX, String::new())),
-            &source,
+            snapshots.get(&usize::MAX).and_then(|entries| entries.get(&StringKey::Scalar(String::new()))),
+            source,
             host,
         )?;
         let mut frames = Vec::new();
@@ -525,14 +744,11 @@ impl Runtime {
                 let id = self.ordinary_id(self.ordinary_required(&holder)?)?;
                 let snapshot = if frame.snapshot_matches {
                     self.work(key.byte_len())?;
-                    // Reader snapshots currently contain scalar keys only.
-                    // A callback can introduce raw keys into a later holder,
-                    // but those keys have no source-token context.
-                    key.as_scalar().and_then(|name| snapshots.get(&(id, name.to_owned())))
+                    snapshots.get(&id).and_then(|entries| entries.get(&key))
                 } else {
                     None
                 };
-                let child = self.json_revive_frame(holder, key, snapshot, &source, host)?;
+                let child = self.json_revive_frame(holder, key, snapshot, source, host)?;
                 self.json_push_revive_frame(&mut frames, child)?;
                 continue;
             }
@@ -573,7 +789,7 @@ impl Runtime {
         holder: Value,
         key: StringKey,
         snapshot: Option<&ParseSnapshot>,
-        source: &str,
+        source: Source<'_>,
         host: &mut dyn Host,
     ) -> Result<ReviveFrame, Fault> {
         self.work(key.byte_len())?;
@@ -588,12 +804,11 @@ impl Runtime {
             snapshot.is_some_and(|snapshot| json_same_value(&snapshot.value, &value));
         if snapshot_matches && !matches!(value, Value::Object(_) | Value::Function(_)) {
             let snapshot = snapshot.unwrap();
-            let text = &source[snapshot.start..snapshot.end];
-            self.work(text.len())?;
+            let text = source.slice_value(self, snapshot.start, snapshot.end)?;
             self.store_property(
                 context,
                 "source".into(),
-                Value::String(text.into()),
+                text,
                 Some((true, true, true)),
             )?;
         }
@@ -1052,6 +1267,14 @@ impl Runtime {
         self.checked_value(Value::String(writer.output))
     }
 }
+
+#[cfg(test)]
+#[path = "json_utf16_tests.rs"]
+mod utf16_tests;
+
+#[cfg(test)]
+#[path = "json_utf16_boundary_tests.rs"]
+mod utf16_boundary_tests;
 
 #[cfg(test)]
 mod tests {
