@@ -9,6 +9,54 @@ fn execute(page:&mut Page,doc:&mut Document,forms:&mut Forms,source:&str)->Value
     page.begin_job();page.runtime.execute(source,&mut Bridge{doc,forms,state:&mut page.state}).unwrap()
 }
 #[test]
+fn class_collection_document_modes_fold_only_ascii_and_preserve_raw_tokens() {
+    for (doctype, fold) in [
+        ("", true),
+        ("<!doctype html>", false),
+        ("<!doctype html PUBLIC '-//W3C//DTD HTML 4.01 Transitional//EN' 'original'>", false),
+    ] {
+        let (mut doc, mut forms, mut page) = page(&format!("{doctype}<html><body><div id='root'><i id='a' class='seed'></i><i id='b'></i></div></body></html>"));
+        // Supply the native record directly. Public mutation of raw class
+        // values on a main-document element still has separate CSS consumers.
+        let target = (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some("a")).unwrap();
+        let NodeKind::Element { attrs, .. } = &mut doc.nodes[target].kind else { unreachable!() };
+        let mut units: Vec<_> = "UP\u{a0}X\tA".encode_utf16().collect();
+        units.push(0xd800);
+        units.extend("z É".encode_utf16());
+        attrs.iter_mut().find(|attr| attr.name.html_is("class")).unwrap().value = DomString::from_units(&units, 128).unwrap();
+        let script = r#"
+var root=document.getElementById('root'), a=document.getElementById('a'), b=document.getElementById('b');
+b.setAttribute('class','UP\u00a0X A\ufffdz é');
+var raw=root.getElementsByClassName('A\ud800z UP\u00a0X A\ud800z');
+var lossy=document.getElementsByClassName('A\ufffdz');
+if(raw.length!==1 || raw[0]!==a || lossy.length!==1 || lossy[0]!==b) throw 'exact code units';
+if(root.getElementsByClassName('UP X').length || root.getElementsByClassName('é')[0]!==b) throw 'ASCII boundaries';
+var folded=root.getElementsByClassName('a\ud800Z');
+if(folded.length!==(FOLD?1:0)) throw 'node document mode';
+var copy=a.cloneNode(false);root.insertBefore(copy,a);b.setAttribute('class','changed');
+if(raw.length!==2 || raw[0]!==copy || raw[1]!==a || lossy.length!==0) throw 'live order and mutation';
+"#.replace("FOLD", if fold { "true" } else { "false" });
+        execute(&mut page, &mut doc, &mut forms, &script);
+    }
+}
+
+#[test]
+fn class_collection_inert_owners_and_adoption_follow_the_current_document_mode() {
+    let (mut doc, mut forms, mut page) = page("<!doctype html><html><body></body></html>");
+    execute(&mut page, &mut doc, &mut forms, r#"
+var parsed=new DOMParser().parseFromString('<html><body><section><b></b></section></body></html>', 'text/html');
+var root=parsed.body.firstChild, child=root.firstChild;
+child.setAttribute('class','A\udfff'); var view=root.getElementsByClassName('a\udfff');
+if(parsed.compatMode!=='BackCompat' || view.length!==1 || view[0]!==child) throw 'inert quirks root';
+var html=document.implementation.createHTMLDocument('standards');
+html.body.appendChild(html.adoptNode(root));
+if(root.ownerDocument!==html || child.ownerDocument!==html || view.length!==0) throw 'saved collection after adoption';
+child.setAttribute('class','a\udfff');
+if(view.length!==1 || view[0]!==child || html.getElementsByClassName('a\ufffd').length) throw 'adopted raw match';
+"#);
+}
+
+#[test]
 fn browser_live_tag_and_class_collections_exceed_old_identity_range_and_keep_actual_live_behavior() {
     let(mut doc,mut forms,mut page)=page("<html><body><div id=one class='red blue'></div><div id=two class=red></div></body></html>");
     let baseline=page.state.retained;
@@ -46,8 +94,8 @@ fn browser_class_filter_staging_refusal_preserves_registry_and_recovers_with_ded
     assert_eq!(page.state.retained,baseline);assert_eq!(page.state.dom.collections.capacity(),0);
     page.state.retained_limit=limit;page.begin_job();
     let Value::Host(handle)=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.create_class_collection(DOCUMENT,&value).unwrap() else{panic!("Expected collection")};
-    let Filter::Classes(names)=&page.state.dom.collections[0].filter else{panic!("Expected class filter")};assert_eq!(names,&["a","b"]);
-    let payload=names.capacity()*size_of::<String>()+names.iter().map(String::capacity).sum::<usize>();
+    let Filter::Classes(names)=&page.state.dom.collections[0].filter else{panic!("Expected class filter")};assert_eq!(names, &[vec![0x61], vec![0x62]]);
+    let payload=names.capacity()*size_of::<Vec<u16>>()+names.iter().map(|name| name.capacity()*size_of::<u16>()).sum::<usize>();
     assert_eq!(page.state.retained,baseline+payload+page.state.dom.collections.capacity()*size_of::<TagCollection>());
     assert_eq!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.tag_collection_get(handle,"length").unwrap().to_number(),1.0);
 }

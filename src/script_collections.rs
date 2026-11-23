@@ -3,6 +3,7 @@
 //! limits and preserve the document's inert-subtree policy.
 //! https://dom.spec.whatwg.org/#concept-getelementsbytagname
 use super::*;
+use crate::dom_string::DomStringRef;
 
 // Independent of adjacent Window/frame/node identities.
 const COLLECTION_BASE:u32=0x8c00_0000;
@@ -19,7 +20,7 @@ pub(super) struct TagCollection {
 enum Filter {
     Children(u32),
     Tag(DomString,bool),
-    Classes(Vec<String>),
+    Classes(Vec<Vec<u16>>),
 }
 fn qualified_matches(local:crate::dom_string::DomStringRef<'_>,prefix:Option<&DomString>,name:&DomString,lowercase:bool)->bool{
     let actual=prefix.into_iter().flat_map(DomString::code_units).chain(prefix.map(|_|0x3a)).chain(local.code_units());actual.eq(name.code_units().map(|u|if lowercase&&(0x41..=0x5a).contains(&u){u+0x20}else{u}))
@@ -30,9 +31,30 @@ impl Filter {
         match self {
             Self::Children(_) => 0,
             Self::Tag(name,_) => name.capacity(),
-            Self::Classes(names) => names.capacity()*size_of::<String>()+names.iter().map(String::capacity).sum::<usize>(),
+            Self::Classes(names) => names.capacity()*size_of::<Vec<u16>>()+names.iter().map(|name| name.capacity()*size_of::<u16>()).sum::<usize>(),
         }
     }
+}
+
+fn class_tokens(value: DomStringRef<'_>) -> impl Iterator<Item = DomStringRef<'_>> {
+    let (text, units) = match value {
+        DomStringRef::Scalar(text) => (text, &[][..]),
+        DomStringRef::Raw(units) => ("", units),
+    };
+    let scalar = text.split(class_whitespace).map(DomStringRef::Scalar);
+    let raw = units.split(|unit| matches!(unit, 0x09 | 0x0a | 0x0c | 0x0d | 0x20)).map(DomStringRef::Raw);
+    scalar.chain(raw).filter(|token| !token.is_empty())
+}
+
+fn class_token_eq(left: DomStringRef<'_>, right: &[u16], quirks: bool) -> bool {
+    if !quirks { return left.code_units().eq(right.iter().copied()); }
+    let fold = |unit| if (0x41..=0x5a).contains(&unit) { unit + 0x20 } else { unit };
+    left.code_units().map(fold).eq(right.iter().copied().map(fold))
+}
+
+fn class_filter_matches(attribute: Option<&DomString>, names: &[Vec<u16>], quirks: bool) -> bool {
+    attribute.is_some_and(|class| names.iter().all(|name|
+        class_tokens(class.view()).any(|token| class_token_eq(token, name, quirks))))
 }
 
 pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
@@ -44,25 +66,36 @@ pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
 impl Bridge<'_> {
     pub(super) fn collection_interface_receiver(&self,object:u32)->Option<bool>{if object==DOCUMENT||self.inert_node_type(object)==Some(9){Some(true)}else if self.inert_node_type(object)==Some(1)||node_index(object).is_some_and(|index|self.dom_accessible(index)&&matches!(self.doc.nodes[index].kind,NodeKind::Element{..})){Some(false)}else{None}}
     pub(super) fn canonical_collection_member(&self,object:u32,property:&str)->bool{matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.collection_interface_receiver(object).is_some()&&!self.form_named_control(object,property)}
+    fn inert_class_attribute(&self, node: u32) -> Option<&DomString> {
+        self.inert_element_attributes(node)?.iter().find(|attr| attr.name.html_is("class"))
+            .map(|attr| &attr.value)
+    }
+
     fn tag_collection_handles(&mut self,handle:u32)->Result<Vec<u32>,String>{
         let index=collection_handle_index(handle).ok_or("Invalid HTMLCollection handle.")?;let root=self.state.dom.collections.get(index).ok_or("Missing live collection.")?.root;let owner=root;
         if self.inert_node_type(owner).is_none(){let nodes=self.tag_collection_nodes(handle)?;self.state.copies(nodes.len().checked_mul(size_of::<u32>()).ok_or("Collection handle conversion overflow.")?)?;let mut result=Vec::new();result.try_reserve_exact(nodes.len()).map_err(|_|"Cannot reserve live collection handles.")?;result.extend(nodes.into_iter().map(node_handle));return Ok(result);}
         if matches!(&self.state.dom.collections[index].filter,Filter::Classes(names) if names.is_empty()){return Ok(Vec::new());}
         let mut pending=Vec::new();let mut result=Vec::new();let count=self.inert_children(owner).ok_or("Adopted collection root is unavailable.")?.len();self.state.work(count)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Collection root traversal overflow.")?)?;pending.try_reserve_exact(count).map_err(|_|"Cannot reserve adopted collection traversal.")?;pending.extend(self.inert_children(owner).unwrap().iter().rev().copied());
+        let quirks = self.inert_document_mode_for_node(owner) == Some(crate::html::DocumentMode::Quirks);
         let maximum=self.inert_node_count();let mut visited=0usize;
         while let Some(node)=pending.pop(){
             visited=visited.checked_add(1).filter(|&count|count<=maximum).ok_or("Cyclic adopted collection topology.")?;self.state.work(1)?;
             let source=self.inert_import_source(node);let element=matches!(source,Some(script_inert_documents::ImportSource::Element(_)|script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{..},..},..}));
             let work=match &source{Some(script_inert_documents::ImportSource::Element(tag))=>tag.len(),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{tag,attrs,expanded_name,..},..},..})=>attrs.iter().fold(attrs.len()+crate::html::element_names::qualified_work(tag,expanded_name),|n,attr|n.saturating_add(attr.name.bytes())),_=>0};self.state.work(work)?;
             let classes=match &self.state.dom.collections[index].filter{Filter::Classes(names)=>names.len(),_=>0};
-            if classes!=0{let length=match self.inert_import_source(node){Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..})=>attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("").len(),_=>0};let scans=length.checked_mul(classes).ok_or("Adopted class scan overflow.")?;self.state.work(scans)?;self.state.copies(scans)?;}
+            if classes != 0 {
+                let length = self.inert_class_attribute(node).map_or(0, DomString::logical_bytes);
+                let scans = length.checked_mul(classes).ok_or("Adopted class scan overflow.")?;
+                self.state.work(scans)?;
+                self.state.copies(scans)?;
+            }
             let filter=&self.state.dom.collections[index].filter;let source=self.inert_import_source(node);
             if matches!(source,Some(script_inert_documents::ImportSource::Parsed{node:Node{namespace:crate::html::Namespace::UnknownForeign,..},..})){return Err("Adopted collection requires known namespace provenance.".into());}
             let matched=if !element{false}else{match (filter,source){
                 (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Element(tag)))=>name=="*"||qualified_matches(crate::dom_string::DomStringRef::Scalar(tag),None,name,*html),
                 (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Parsed{node,..}))=>tag_matches(node,name,*html)?,
-                (Filter::Classes(names),Some(script_inert_documents::ImportSource::Parsed{node:Node{kind:NodeKind::Element{attrs,..},..},..}))=>{let class=attrs.iter().find(|attr|attr.name.html_is("class")).map(|attr|attr.value.scalar()).transpose()?.unwrap_or("");names.iter().all(|name|class.split(class_whitespace).any(|token|token==name))},
-                (Filter::Classes(_),_)=>false,_=>return Err("Unsupported adopted collection filter.".into()),
+                (Filter::Classes(names), _) => class_filter_matches(self.inert_class_attribute(node), names, quirks),
+                _=>return Err("Unsupported adopted collection filter.".into()),
             }};
             if matched{self.state.copies(size_of::<u32>())?;result.try_reserve(1).map_err(|_|"Cannot reserve adopted collection result.")?;result.push(node);}
             if self.template_receiver(node){continue;}
@@ -89,29 +122,46 @@ impl Bridge<'_> {
     ) -> Result<Value, String> {
         if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
         let root=object;
-        let text = self.text(value)?;
-        self.state.work(text.len())?;
-        self.state.copies(text.len())?;
-        let available=self.state.retained_limit.saturating_sub(self.state.retained);
-        let count=text.split(class_whitespace).filter(|token|!token.is_empty()).count();
-        self.state.work(text.len())?;
-        let source=text.capacity();
-        let minimum=count.checked_mul(size_of::<&str>()).and_then(|bytes|bytes.checked_add(source)).filter(|bytes|*bytes<=available).ok_or("DOM retained class-filter scratch allowance exhausted.")?;
-        let mut tokens=Vec::new();tokens.try_reserve_exact(count).map_err(|_|"Could not reserve class-filter tokens.")?;
-        let scratch=tokens.capacity().checked_mul(size_of::<&str>()).and_then(|bytes|bytes.checked_add(source)).filter(|bytes|*bytes<=available).ok_or("DOM retained class-filter token allocation exceeds allowance.")?;
-        debug_assert!(scratch>=minimum);
-        tokens.extend(text.split(class_whitespace).filter(|token|!token.is_empty()));
-        let levels=(usize::BITS-count.leading_zeros()) as usize+1;
-        self.state.work(text.len().saturating_mul(levels).saturating_mul(4))?;
-        tokens.sort_unstable();tokens.dedup();
-        tokens.len().checked_mul(size_of::<String>()).and_then(|bytes|bytes.checked_add(scratch)).filter(|bytes|*bytes<=available).ok_or("DOM retained class-filter name allowance exhausted.")?;
-        let mut names=Vec::new();names.try_reserve_exact(tokens.len()).map_err(|_|"Could not reserve class-filter names.")?;
-        let mut occupied=scratch.checked_add(names.capacity()*size_of::<String>()).filter(|bytes|*bytes<=available).ok_or("DOM retained class-filter name allocation exceeds allowance.")?;
+        let text = self.dom_text(value)?;
+        let bytes = text.logical_bytes();
+        self.state.work(bytes)?;
+        self.state.copies(bytes)?;
+        let available = self.state.retained_limit.saturating_sub(self.state.retained);
+        let count = class_tokens(text.view()).count();
+        self.state.work(bytes)?;
+        let scratch_cost = |capacity: usize| capacity.checked_mul(size_of::<DomStringRef>())
+            .and_then(|amount| amount.checked_add(text.capacity()))
+            .filter(|amount| *amount <= available)
+            .ok_or("DOM retained class-filter scratch allowance exhausted.");
+        scratch_cost(count)?;
+        let mut tokens = Vec::new();
+        tokens.try_reserve_exact(count).map_err(|_| "Could not reserve class-filter tokens.")?;
+        let scratch = scratch_cost(tokens.capacity())?;
+        tokens.extend(class_tokens(text.view()));
+        let levels = (usize::BITS - count.leading_zeros()) as usize + 1;
+        self.state.work(bytes.saturating_mul(levels).saturating_mul(4))?;
+        tokens.sort_unstable_by(|a, b| a.code_units().cmp(b.code_units()));
+        tokens.dedup_by(|a, b| a.code_units().eq(b.code_units()));
+
+        let name_cost = |capacity: usize| capacity.checked_mul(size_of::<Vec<u16>>())
+            .and_then(|amount| amount.checked_add(scratch))
+            .filter(|amount| *amount <= available)
+            .ok_or("DOM retained class-filter name allowance exhausted.");
+        name_cost(tokens.len())?;
+        let mut names = Vec::new();
+        names.try_reserve_exact(tokens.len()).map_err(|_| "Could not reserve class-filter names.")?;
+        let mut occupied = name_cost(names.capacity())?;
         for token in tokens {
-            if token.len()>available.saturating_sub(occupied){return Err("DOM retained class-filter text allowance exhausted.".into());}
-            let mut name=String::new();name.try_reserve_exact(token.len()).map_err(|_|"Could not reserve class-filter text.")?;
-            occupied=occupied.checked_add(name.capacity()).filter(|bytes|*bytes<=available).ok_or("DOM retained class-filter text allocation exceeds allowance.")?;
-            name.push_str(token);names.push(name);
+            let units = token.code_units().count();
+            let needed = units.checked_mul(size_of::<u16>()).ok_or("Class filter length overflow.")?;
+            if needed > available - occupied { return Err("DOM retained class-filter text allowance exhausted.".into()); }
+            self.state.copies(needed)?;
+            let mut name = Vec::new();
+            name.try_reserve_exact(units).map_err(|_| "Could not reserve class-filter text.")?;
+            occupied = name.capacity().checked_mul(size_of::<u16>()).and_then(|size| occupied.checked_add(size))
+                .filter(|amount| *amount <= available).ok_or("DOM retained class-filter text allocation exceeds allowance.")?;
+            name.extend(token.code_units());
+            names.push(name);
         }
         drop(text);
         self.store_live_collection(root, Filter::Classes(names))
@@ -158,7 +208,7 @@ impl Bridge<'_> {
                     let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};
                     self.state.work(attrs.len())?;
                     self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
-                    let scans=self.doc.attr(node,"class").unwrap_or("").len().checked_mul(count).ok_or("Class collection scan accounting overflow.")?;
+                    let scans=self.doc.dom_attr(node,"class").map_or(0, DomString::logical_bytes).checked_mul(count).ok_or("Class collection scan accounting overflow.")?;
                     self.state.work(scans)?;self.state.copies(scans)?;
                 }
             }
@@ -166,8 +216,7 @@ impl Bridge<'_> {
                 Filter::Children(_)=>unreachable!(),
                 Filter::Tag(name,html)=>tag_matches(&self.doc.nodes[node],name,*html)?,
                 Filter::Classes(names)=>{
-                    let class=self.doc.attr(node,"class").unwrap_or("");
-                    names.iter().all(|name|class.split(class_whitespace).any(|token|token==name))
+                    class_filter_matches(self.doc.dom_attr(node, "class"), names, self.doc.mode == crate::html::DocumentMode::Quirks)
                 }
             };
             if matches {

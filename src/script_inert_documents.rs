@@ -197,6 +197,15 @@ impl Arena {
 impl Bridge<'_> {
     pub(in crate::scripting) fn inert_node_count(&self)->usize{self.state.inert_documents.entries.len().saturating_add(self.state.inert_documents.adopted.len())}
     pub(in crate::scripting) fn inert_document_kind_for_node(&self,object:u32)->Option<crate::html::DocumentKind>{let owner=self.state.inert_documents.node(object)?.owner;Some(if owner==DOCUMENT{self.doc.kind}else{match self.state.inert_documents.node(owner)?.kind{Kind::Document(ref doc)=>doc.kind,Kind::TemplateDocument{kind,..}=>kind,_=>crate::html::DocumentKind::Html}})}
+    pub(in crate::scripting) fn inert_document_mode_for_node(&self, object: u32) -> Option<crate::html::DocumentMode> {
+        let owner = self.state.inert_documents.node(object)?.owner;
+        if owner == DOCUMENT { return Some(self.doc.mode); }
+        match &self.state.inert_documents.node(owner)?.kind {
+            Kind::Document(document) => Some(document.mode),
+            Kind::TemplateDocument { .. } => Some(crate::html::DocumentMode::NoQuirks),
+            _ => None,
+        }
+    }
     fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
         let owner = self
             .state
