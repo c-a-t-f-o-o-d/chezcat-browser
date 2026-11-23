@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 use work_attribution::Kind as WorkKind;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
+#[path="anchor_url_interface.rs"]
+pub(crate) mod anchor_url_interface;
+#[path="document_location_interface.rs"]
+pub(crate) mod document_location_interface;
 #[path="adjacent_interface.rs"]
 pub(crate) mod adjacent_interface;
 #[path="text_split_interface.rs"]
@@ -954,6 +958,9 @@ pub trait Host {
     fn prepare_node_normalize(&mut self,_target:u32)->Result<NativeNormalizeInfo,String>{Err("Native normalization preparation is unavailable.".into())}
     fn commit_node_normalize(&mut self,_target:u32)->Result<(),String>{Err("Native normalization publication is unavailable.".into())}
     fn abort_node_normalize(&mut self,_target:u32){}
+    fn document_location_owner(&self, _target:u32)->Option<u32>{None}
+    fn document_location_access(&self,_caller:Option<u32>,_target:u32)->Result<(),String>{Err("Unknown Document location owner.".into())}
+    fn document_location_value(&mut self,_caller:Option<u32>,_target:u32)->Result<Value,String>{Err("No native Document location.".into())}
     fn adjacent_receiver_access(&self, _target: u32) -> Result<(), (&'static str, String)> {
         Err(("NotSupportedError","Adjacent insertion is unavailable.".into()))
     }
@@ -9214,6 +9221,9 @@ impl Runtime {
             if let Err((kind, message)) = host.validate_call(object, method, &[]) {
                 return Err(Fault::exception(kind, message));
             }
+        }
+        if matches!(method,document_location_interface::GET|document_location_interface::SET) {
+            return self.document_location_call(object,method,args,host);
         }
         // Canonical attribute getters ignore arguments; setters use one value.
         let attribute_setter=html_reflection_interface::operation(method).map(|(_,setter)|setter)

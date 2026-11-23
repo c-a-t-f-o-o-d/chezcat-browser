@@ -1596,7 +1596,7 @@ impl Runtime {
         &mut self,
         value: &Value,
         name: &str,
-        host: &dyn Host,
+        host: &mut dyn Host,
     ) -> Result<DescriptorTarget, Fault> {
         self.reject_foreign_window(value, host)?;
         if let Value::Host(handle) = value {
@@ -1862,6 +1862,8 @@ impl Runtime {
                         self.ensure_native_expando(*handle,host,false)?;
                         if self.is_browser_global(*handle) {
                             self.window_keys(false, false, host)?
+                        } else if host.document_location_owner(*handle).is_some() {
+                            self.document_own_string_keys(*handle,false,host)?
                         } else if host.indexed_iteration_owner(*handle).is_some() {
                             self.indexed_host_keys(*handle,false,false,host)?
                         } else if let Some(&id) = self.host_objects.get(handle) {

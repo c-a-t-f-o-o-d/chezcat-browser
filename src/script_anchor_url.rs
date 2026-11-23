@@ -2,7 +2,7 @@
 //! admits a navigation, a resource request, or a file capability.
 use super::*;
 
-fn property(name: &str) -> bool {
+pub(super) fn property(name: &str) -> bool {
     matches!(name, "href" | "origin" | "protocol" | "username" | "password"
         | "host" | "hostname" | "port" | "pathname" | "search" | "hash")
 }
@@ -16,6 +16,63 @@ fn local_reference(raw: &str) -> bool {
 }
 
 impl Bridge<'_> {
+    pub(super) fn native_anchor(&self, object:u32)->bool {
+        if self.inert_node_type(object).is_some() {self.inert_interface(object)==Some("HTMLAnchorElement")}
+        else {self.attr_element_receiver(object) && node_index(object).is_some_and(|n|self.anchor_url_property(n,"href"))}
+    }
+
+    fn anchor_usv(&mut self,value:&Value)->Result<String,String>{
+        let Value::StringUnits(units)=value else{return self.text(value)};
+        self.state.work(units.len().saturating_mul(2))?;
+        let (bytes,_)=DomString::projected_size(units)?;
+        if bytes>self.state.limits.host.string_bytes{return Err("Anchor URL exceeds the host string allowance.".into());}
+        self.state.copies(bytes)?;
+        let mut text=String::new();text.try_reserve_exact(bytes).map_err(|_|"Cannot reserve anchor USVString.")?;
+        text.extend(char::decode_utf16(units.iter().copied()).map(|result|result.unwrap_or(char::REPLACEMENT_CHARACTER)));
+        Ok(text)
+    }
+
+    fn inert_anchor_raw(&self, object:u32)->Option<&DomString>{
+        self.inert_element_attributes(object)?.iter().find(|a|a.name.html_is("href")).map(|a|&a.value)
+    }
+
+    fn inert_anchor_inputs(&mut self,object:u32,extra:usize)->Result<Option<(String,String)>,String>{
+        let count=self.inert_element_attributes(object).ok_or("Missing inert anchor attributes.")?.len();
+        self.state.work(count.saturating_mul(5))?;
+        let Some(raw)=self.inert_anchor_raw(object) else{return Ok(None)};
+        let length=raw.render_projection().len();
+        if length.saturating_add(extra)>self.state.limits.host.string_bytes{return Err("Anchor URL exceeds the configured string allowance.".into());}
+        let Value::String(base)=self.inert_node_base_uri(object)? else{return Err("Expected a scalar document base URL.".into())};
+        let raw=self.inert_anchor_raw(object).unwrap().render_projection();
+        let cost=dom_compat::url_copy_cost(raw,None)?.checked_add(
+            base.len().checked_add(extra).and_then(|n|n.checked_mul(20)).ok_or("Anchor URL work overflow.")?
+        ).ok_or("Anchor URL work overflow.")?;
+        self.state.work(cost)?;self.state.copies(cost)?;
+        let raw=script_clone_node::copy_text(self.inert_anchor_raw(object).unwrap().render_projection())?;
+        Ok(Some((raw,base)))
+    }
+
+    pub(super) fn anchor_reflection_get(&mut self, object:u32,name:&str)->Result<Value,String>{
+        self.native_node_access(object).map_err(|(_,message)|message)?;
+        if self.inert_node_type(object).is_none(){let node=self.node(object)?;return self.anchor_url_get(node,name);}
+        let Some((raw,base))=self.inert_anchor_inputs(object,0)? else{return self.string(if name=="protocol"{":"}else{""})};
+        let projected=crate::javascript::anchor_url_project(&raw,Some(&base),name)?;
+        self.string(projected.as_deref().unwrap_or(if name=="href"{&raw}else if name=="protocol"{":"}else{""}))
+    }
+
+    pub(super) fn anchor_reflection_set(&mut self, object:u32,name:&str,value:&Value)->Result<(),String>{
+        self.native_node_access(object).map_err(|(_,message)|message)?;
+        if self.inert_node_type(object).is_none(){let node=self.node(object)?;return self.anchor_url_set(node,name,value);}
+        let text=self.anchor_usv(value)?;
+        let href=if name=="href"{text}else{
+            let Some((raw,base))=self.inert_anchor_inputs(object,text.len())? else{return Ok(())};
+            let Some(url)=crate::javascript::anchor_url_mutate(&raw,Some(&base),name,&text)? else{return Ok(())};
+            url
+        };
+        let attribute=crate::html::AttributeName::unqualified(script_clone_node::copy_text("href")?);
+        self.write_inert_dom_attribute_ns(object,attribute,Some(href.into()))
+    }
+
     pub(super) fn anchor_url_property(&self, node: usize, name: &str) -> bool {
         property(name) && self.doc.nodes.get(node).is_some_and(|entry|
             entry.namespace == crate::html::Namespace::Html && tag(self.doc, node) == "a")
@@ -61,7 +118,7 @@ impl Bridge<'_> {
     pub(super) fn anchor_url_set(&mut self, node: usize, name: &str, value: &Value) -> Result<(), String> {
         // The evaluator performs Web IDL string coercion before this call.
         // Its observable side effects therefore precede the live base/Attr read.
-        let text = self.text(value)?;
+        let text = self.anchor_usv(value)?;
         if name == "href" {
             return self.attribute(node, "href", Some(text));
         }

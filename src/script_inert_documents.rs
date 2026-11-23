@@ -208,7 +208,7 @@ impl Bridge<'_> {
             _ => None,
         }
     }
-    fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
+    pub(super) fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
         let owner = self
             .state
             .inert_documents

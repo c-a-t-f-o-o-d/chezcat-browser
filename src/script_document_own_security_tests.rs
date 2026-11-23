@@ -149,7 +149,8 @@ if(document.title!=='Document security seed'||document.body.nodeName!=='BODY')th
         editor.value.offset, editor.dirty_value, editor.owner), before);
     assert_eq!(forms.text_default_value(neighbor).unwrap(), "original");
     run(&mut page, &mut doc, &mut forms, r#"
-if(caught||finalized||after||document.stableState!==original||!original.kept||Object.keys(document).join(',')!=='stableState')throw 'fatal property key changed state or entered user handlers';
+if(caught||finalized||after||document.stableState!==original||!original.kept||Object.keys(document).join(',')!=='location,stableState')throw 'fatal property key changed state or entered user handlers';
+var ld=Object.getOwnPropertyDescriptor(document,'location');if(!ld.enumerable||ld.configurable||ld.get.call(document)!==window.location)throw 'native Location descriptor changed after key refusal';
 document.recoveredState=53;
 if(document.recoveredState!==53||document.body.nodeName!=='BODY'||document.getElementById('neighbor').value!=='edited neighbor')throw 'following own/native job';
 "#);
