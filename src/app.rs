@@ -6405,3 +6405,7 @@ mod text_split_tests;
 #[cfg(test)]
 #[path="app_shared_normalize_tests.rs"]
 mod shared_normalize_tests;
+
+#[cfg(test)]
+#[path = "app_string_index_utf16_tests.rs"]
+mod string_index_utf16_tests;
