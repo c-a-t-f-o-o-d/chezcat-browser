@@ -18,6 +18,7 @@ mod script_encoding;
 pub(crate) use script_encoding::{decode_script, script_fallback};
 #[path = "stylesheet_encoding.rs"]
 mod stylesheet_encoding;
+pub(crate) use stylesheet_encoding::{decode as decode_stylesheet, environment as stylesheet_environment};
 #[cfg(test)]
 #[path = "loader_document_encoding_app_tests.rs"]
 mod document_encoding_app_tests;

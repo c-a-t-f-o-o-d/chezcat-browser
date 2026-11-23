@@ -15,10 +15,17 @@ struct Job {
     cancel: Arc<AtomicBool>,
 }
 
+#[derive(Debug)]
+struct FetchedStylesheet {
+    bytes: Vec<u8>,
+    content_type: String,
+    base: Location,
+}
+
 struct Completion {
     epoch: u64,
     request: DynamicStylesheet,
-    result: Result<(String, Location), String>,
+    result: Result<FetchedStylesheet, String>,
     events: Vec<String>,
 }
 
@@ -40,7 +47,8 @@ fn worker_storage(state: &Shared) -> usize {
 }
 fn completion_payload(completion: &Completion) -> usize {
     let result = match &completion.result {
-        Ok((source, base)) => source.capacity().saturating_add(base.payload_bytes()),
+        Ok(response) => response.bytes.capacity().saturating_add(response.content_type.capacity())
+            .saturating_add(response.base.payload_bytes()),
         Err(error) => error.capacity(),
     };
     completion.events.iter().fold(result.saturating_add(completion.events.capacity() * std::mem::size_of::<String>()),
@@ -200,7 +208,7 @@ fn fetch(
     trust: &crate::trust::Store,
     cookies: Arc<crate::cookies::Session>,
     events: &mut Vec<String>,
-) -> Result<(String, Location), String> {
+) -> Result<FetchedStylesheet, String> {
     if let Some(error) = &job.request.error {
         return Err(error.clone());
     }
@@ -253,17 +261,15 @@ fn fetch(
     if loader::media_type(&content_type) != "text/css" {
         return Err("Dynamic external stylesheets require a text/css Content-Type.".into());
     }
-    let source = loader::decode_text(&response.body, &content_type, false)?;
-    job.request.limits.accept(&source,crate::css::StylesheetUsage::default())?;
     events.push(format!(
-        "DYNAMIC STYLESHEET node {}: loaded {} bytes from {}",
+        "DYNAMIC STYLESHEET node {}: received {} encoded bytes from {}",
         job.request.node,
-        source.len(),
+        response.body.len(),
         response.url.display()
     ));
-    Ok((source, Location {
+    Ok(FetchedStylesheet { bytes: response.body, content_type, base: Location {
         url: Some(response.url), path: None, root: None, fragment: String::new(),
-    }))
+    }})
 }
 
 impl App {
@@ -375,14 +381,27 @@ impl App {
     fn finish_dynamic_stylesheet(
         &mut self,
         request: &DynamicStylesheet,
-        result: Result<(String, Location), String>,
+        result: Result<FetchedStylesheet, String>,
     ) {
         let Some(page) = &mut self.scripting else {
             return;
         };
         let owned = page.accepts_dynamic_stylesheet(&self.document, request);
         let (result, base) = match result {
-            Ok((source, base)) => (Ok(source), Some(base)),
+            Ok(response) if owned => {
+                // LINK charset/document environment is live at response completion.
+                // Retired requests never allocate decoded source or publish CSS.
+                let limit = page.dynamic_stylesheet_output_limit(&self.document, request);
+                let environment = loader::stylesheet_environment(&self.document, request.node);
+                let check = || if request.cancel.load(Ordering::Acquire) {
+                    Err("Dynamic stylesheet canceled.".into())
+                } else { Ok(()) };
+                match loader::decode_stylesheet(&response.bytes, &response.content_type, Some(environment), limit, &check) {
+                    Ok(source) => (Ok(source), Some(response.base)),
+                    Err(error) => (Err(error), None),
+                }
+            }
+            Ok(_) => (Err("Retired stylesheet response.".into()), None),
             Err(error) => (Err(error), None),
         };
         let outcome = page.complete_dynamic_stylesheet(
@@ -431,6 +450,9 @@ mod tests {
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::time::{Duration, Instant};
 
+    #[path = "app_stylesheet_encoding_tests.rs"]
+    mod encoding_tests;
+
     struct Site {
         address: SocketAddr,
         stopped: Arc<AtomicBool>,
@@ -475,6 +497,10 @@ mod tests {
                         let request = String::from_utf8_lossy(&request);
                         let path = request.split_ascii_whitespace().nth(1).unwrap_or("").to_owned();
                         seen.lock().unwrap().push(path.clone());
+                        if let Some((mime,body))=encoding_tests::response(&path) {
+                            let header=format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len());
+                            let _=stream.write_all(header.as_bytes());let _=stream.write_all(&body);return;
+                        }
                         if matches!(path.as_str(),"/large.css"|"/latin.css") {
                             let (body,extra)=if path=="/large.css" {(include_bytes!("../tools/fixtures/large-tail.css.gz").to_vec(),"Content-Encoding: gzip\r\n")} else {
                                 let mut body=b"/*".to_vec();body.extend(std::iter::repeat_n(0xa3,1000));body.extend_from_slice(b"*/#target{width:999px}");(body,"")
@@ -750,7 +776,7 @@ document.head.appendChild(sheet);
             if refused {
                 assert!(completion.result.unwrap_err().contains("completion storage exhausted"));
             } else {
-                assert!(completion.result.unwrap().0.contains("width:123px"));
+                assert!(completion.result.unwrap().bytes.windows(b"width:123px".len()).any(|part|part==b"width:123px"));
             }
             assert_eq!(worker.state.0.lock().unwrap().completed_payload, 0);
         }
@@ -943,7 +969,7 @@ document.head.appendChild(sheet);
         let node=*app.styles.keys().next().unwrap();assert_base(&app,node,&site.location("/sheet.css"));
         queue_base_change(&mut app,"sheet.onload=null;sheet.href='/base-redirect.css';");
         let completion=take_base_completion(&app);
-        assert_eq!(completion.result.as_ref().unwrap().1.url,site.location("/assets/theme.css").url);
+        assert_eq!(completion.result.as_ref().unwrap().base.url,site.location("/assets/theme.css").url);
         assert!(app.accept_dynamic_stylesheet(completion));
         assert_base(&app,node,&site.location("/assets/theme.css"));
         assert!(site.requests.lock().unwrap().iter().any(|path|path=="/base-redirect.css"));

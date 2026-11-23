@@ -117,6 +117,7 @@ pub(super) fn link_attribute(property: &str) -> Option<&'static str> {
         "href" => "href",
         "rel" => "rel",
         "type" => "type",
+        "charset" => "charset",
         "media" => "media",
         "as" => "as",
         "nonce" => "nonce",
@@ -223,6 +224,14 @@ impl Page {
 
     pub fn accepts_dynamic_stylesheet(&self, doc: &Document, request: &DynamicStylesheet) -> bool {
         self.state.enabled && doc.scripting_enabled && self.owns_dynamic_stylesheet(request)
+    }
+
+    pub fn dynamic_stylesheet_output_limit(&self, doc: &Document, request: &DynamicStylesheet) -> usize {
+        let old = self.state.stylesheets.sources.get(&request.node).copied().unwrap_or_default();
+        let used = self.state.stylesheets.source_bytes.saturating_sub(old.bytes);
+        request.limits.sheet_bytes.min(request.limits.document_bytes)
+            .min(doc.stylesheet_limits.sheet_bytes)
+            .min(doc.stylesheet_limits.document_bytes.saturating_sub(used))
     }
 
     pub fn complete_dynamic_stylesheet(
@@ -379,7 +388,7 @@ impl Bridge<'_> {
             Some(self.text(value)?)
         };
         self.attribute(node, attribute, value)?;
-        self.queue_dynamic_stylesheet(node)?;
+        if attribute != "charset" { self.queue_dynamic_stylesheet(node)?; }
         Ok(true)
     }
 
@@ -395,6 +404,7 @@ impl Bridge<'_> {
         if !matches!(
             name,
             "href"
+                | "charset"
                 | "rel"
                 | "type"
                 | "media"
@@ -410,7 +420,7 @@ impl Bridge<'_> {
         }
         self.state.copies(value.map_or(0, str::len))?;
         self.attribute(node, name, value.map(str::to_owned))?;
-        self.queue_dynamic_stylesheet(node)?;
+        if name != "charset" { self.queue_dynamic_stylesheet(node)?; }
         Ok(true)
     }
 
