@@ -144,6 +144,7 @@ impl PendingMethod {
 fn property_key_bytes(key: &PropertyKey) -> usize {
     match key {
         PropertyKey::String(name) => name.len(),
+        PropertyKey::StringUnits(units) => units.len().saturating_mul(2),
         PropertyKey::Symbol(_) => 0,
     }
 }

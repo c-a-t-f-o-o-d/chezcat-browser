@@ -70,13 +70,10 @@ true;
         )
         .unwrap();
     assert!(matches!(got, Value::Bool(true)));
-    let error = vm
-        .execute("var target={};target[high]=1;", &mut NoHost)
-        .unwrap_err();
-    assert!(error.contains("unpaired UTF-16"), "{error}");
+    vm.execute("var target={};target[high]=1;", &mut NoHost).unwrap();
     vm.begin_job();
     assert!(matches!(
-        vm.execute("Object.keys(target).length===0;", &mut NoHost)
+        vm.execute("Object.keys(target).length===1 && Object.keys(target)[0]===high && target[high]===1 && target['\\ufffd']===undefined;", &mut NoHost)
             .unwrap(),
         Value::Bool(true)
     ));

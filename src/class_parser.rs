@@ -1,7 +1,7 @@
 //! Original finite base-class syntax. Method bodies reuse the bounded deferred
 //! function parser; no class source is rewritten or executed during parsing.
 //! https://tc39.es/ecma262/#sec-class-definitions
-use super::{number_text, object_literals::Kind, ExprId, ExprKind, Fault, FunctionKind, Parser, Template, TokenKind};
+use super::{number_text, object_literals::Kind, ExprId, ExprKind, Fault, FunctionKind, Parser, Template, TokenKind, Value};
 use std::collections::HashSet;
 
 #[derive(Clone)]
@@ -97,6 +97,25 @@ impl Parser {
                 }
                 self.need("]")?;
                 MemberKey::Computed(expression)
+            } else if let TokenKind::StringUnits(units) = &self.token().kind {
+                let at = self.at();
+                let length = units.len();
+                let bytes = length.saturating_mul(std::mem::size_of::<u16>());
+                if bytes > self.capacity.property_bytes {
+                    return Err(self.unsupported("Class property-name limit reached."));
+                }
+                self.check_compilation_progress()?;
+                self.charge_expression_text(bytes)?;
+                let mut copy = Vec::new();
+                copy.try_reserve_exact(length)
+                    .map_err(|_| super::compilation_storage_limit(self.capacity))?;
+                let TokenKind::StringUnits(units) = &self.token().kind else { unreachable!() };
+                copy.extend_from_slice(units);
+                self.charge_expression_text(copy.capacity().saturating_mul(std::mem::size_of::<u16>()) - bytes)?;
+                self.current += 1;
+                // A quoted raw key shares the existing literal-expression
+                // representation; it cannot spell constructor or prototype.
+                MemberKey::Computed(self.expr(ExprKind::Literal(Value::StringUnits(copy)), at)?)
             } else {
                 MemberKey::Literal(self.class_literal_key()?)
             };

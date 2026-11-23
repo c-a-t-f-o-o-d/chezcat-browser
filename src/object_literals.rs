@@ -83,6 +83,7 @@ impl Runtime {
             // A preceding data property starts a fresh accessor pair.
             let previous = match &key {
                 PropertyKey::String(name) => self.objects[object].properties.get(name),
+                PropertyKey::StringUnits(units) => self.objects[object].properties.get_units(units),
                 PropertyKey::Symbol(symbol) => {
                     self.objects[object].symbol_properties.get(symbol)
                 }
@@ -103,6 +104,9 @@ impl Runtime {
                 PropertyKey::String(name) => {
                     self.store_accessor_property(object, name, accessor, (enumerable, true))
                 }
+                PropertyKey::StringUnits(units) => {
+                    self.store_units_accessor_property(object, units, accessor, (enumerable, true))
+                }
                 PropertyKey::Symbol(symbol) => {
                     self.store_symbol_accessor_property(object, symbol, accessor, (enumerable, true))
                 }
@@ -113,6 +117,9 @@ impl Runtime {
         match key {
             PropertyKey::String(name) => {
                 self.store_property(object, name, value, Some((enumerable, true, true)))
+            }
+            PropertyKey::StringUnits(units) => {
+                self.store_units_property(object, units, value, Some((enumerable, true, true)))
             }
             PropertyKey::Symbol(symbol) => {
                 self.store_symbol_property(object, symbol, value, Some((enumerable, true, true)))
@@ -132,11 +139,34 @@ impl Runtime {
             Kind::Method => "",
             Kind::Data => unreachable!(),
         };
+        if let PropertyKey::StringUnits(units) = key {
+            // Prefixes are ASCII; copying their code units cannot repair an
+            // unpaired unit in the property name or change its identity.
+            let length = prefix.len().saturating_add(units.len());
+            let bytes = length.saturating_mul(std::mem::size_of::<u16>());
+            if bytes > self.limits.capacity.string_bytes {
+                return Err(self.string_limit_fault());
+            }
+            self.work(bytes)?;
+            let mut name = Vec::new();
+            name.try_reserve_exact(length)
+                .map_err(|_| Fault::new("Unable to reserve bounded member name."))?;
+            name.extend(prefix.bytes().map(u16::from));
+            name.extend_from_slice(units);
+            let properties = self.ordinary_id(Ordinary::Function(function))?;
+            return self.store_property(
+                properties,
+                "name".into(),
+                Value::StringUnits(name),
+                Some((false, false, true)),
+            );
+        }
         let key_name = match key {
             PropertyKey::String(name) => {
                 self.work(name.len())?;
                 name.clone()
             }
+            PropertyKey::StringUnits(_) => unreachable!(),
             PropertyKey::Symbol(symbol) => match self.symbol_description(Value::Symbol(*symbol))? {
                 Value::Undefined => String::new(),
                 Value::String(description) => {
@@ -236,6 +266,35 @@ mod tests {
             var getter=Object.getOwnPropertyDescriptor({get value(){return this.n;}},'value').get;
             if(getter.call({n:12})!==12)throw 'borrowed getter';
             if(({get pattern(){return /a+/.test('aaa');}}).pattern!==true)throw 'regexp lexical goal';
+        "#);
+    }
+
+    #[test]
+    fn literal_raw_utf16_members_merge_accessors_and_preserve_callable_names() {
+        run(r#"
+            var method='\ud800',access='a\udfff',quoted='\udc00',value=3;
+            var object={
+                [method](){return this.n;},n:7,
+                get [access](){return value;},
+                set [access](next){value=next;},
+                '\udc00'(){return 11;},
+                get '\ud800x'(){return 13;}
+            };
+            if(object[method]()!==7||object[method].name!==method||
+                object[quoted]()!==11||object[quoted].name!==quoted)throw 'raw method name';
+            var descriptor=Object.getOwnPropertyDescriptor(object,access);
+            if(descriptor.get.name!=='get '+access||descriptor.set.name!=='set '+access||
+                !descriptor.enumerable||!descriptor.configurable)throw 'raw accessor names';
+            object[access]=17;
+            if(object[access]!==17||Object.getOwnPropertyDescriptor(object,'\ud800x').get.name!=='get \ud800x')
+                throw 'quoted accessor name';
+            var merged={get [method](){return 1;},set [method](next){value=next;},get [method](){return value;}};
+            merged[method]=19;
+            if(merged[method]!==19||Object.keys(merged).length!==1)throw 'raw accessor halves';
+            var replaced={get [method](){throw 'obsolete accessor';},[method]:23};
+            descriptor=Object.getOwnPropertyDescriptor(replaced,method);
+            if(replaced[method]!==23||!descriptor.writable||descriptor.get!==undefined||
+                Object.hasOwn(replaced,'\ufffd'))throw 'raw data replaces accessor';
         "#);
     }
 

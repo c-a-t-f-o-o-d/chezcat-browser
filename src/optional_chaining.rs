@@ -515,6 +515,10 @@ impl Runtime {
                     name: None,
                 })
             }
+            Reference::UnitsProperty(receiver, units) => {
+                let function = self.read_units_property(&receiver, &units, host)?;
+                Ok(CallTarget { function: Some(function), receiver, name: None })
+            }
             Reference::SuperProperty { base, receiver, name } => {
                 let function = self.read_super_property(base, &receiver, &name, host)?;
                 Ok(CallTarget { function: Some(function), receiver, name: Some(name.into_string()) })

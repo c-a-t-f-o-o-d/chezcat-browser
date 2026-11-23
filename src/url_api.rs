@@ -5,7 +5,7 @@
 //! Source: https://url.spec.whatwg.org/#api (algorithms, not engine source).
 
 use super::{
-    Accessors, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, Value,
+    Accessors, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, StringKey, Value,
 };
 use std::net::Ipv6Addr;
 
@@ -1134,9 +1134,16 @@ impl Runtime {
             let mut bytes = 0usize;
             for key in keys {
                 self.step()?;
-                if !self.own_enumerable(object, &key)? {
+                let enumerable = match &key {
+                    StringKey::Scalar(name) => self.own_enumerable(object, name)?,
+                    StringKey::Units(units) => self.own_units_enumerable(object, units)?,
+                };
+                if !enumerable {
                     continue;
                 }
+                let StringKey::Scalar(key) = key else {
+                    return Err(Fault::new("URLSearchParams record names containing unpaired UTF-16 require the pending USVString conversion."));
+                };
                 if pairs.len() >= MAX_PAIRS {
                     return Err(Fault::new("URLSearchParams entry limit reached (1024)."));
                 }

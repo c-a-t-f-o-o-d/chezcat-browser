@@ -69,6 +69,7 @@ impl Runtime {
             }
             return match key {
                 PropertyKey::String(name) => self.read_property(target, &name, host),
+                PropertyKey::StringUnits(name) => self.read_units_property(target, &name, host),
                 PropertyKey::Symbol(key) => {
                     self.get_symbol_property(Value::Host(*handle), key, host)
                 }
@@ -81,6 +82,9 @@ impl Runtime {
         match key {
             PropertyKey::String(name) => {
                 self.get_ordinary_property_with_receiver(object, &name, receiver, host)
+            }
+            PropertyKey::StringUnits(name) => {
+                self.get_units_property_with_receiver(object, &name, receiver, host)
             }
             PropertyKey::Symbol(key) => self.reflect_get_symbol(object, key, receiver, host),
         }
@@ -157,6 +161,7 @@ impl Runtime {
         let value = take_value(self)?;
         match key {
             PropertyKey::String(name) => self.store_property(id, name, value, None)?,
+            PropertyKey::StringUnits(name) => self.store_units_property(id, name, value, None)?,
             PropertyKey::Symbol(key) => self.store_symbol_property(id, key, value, None)?,
         }
         Ok(true)

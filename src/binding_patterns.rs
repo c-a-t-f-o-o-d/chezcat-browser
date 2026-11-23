@@ -229,6 +229,22 @@ impl Parser {
                     let key = self.assignment_with_in()?;
                     self.need("]")?;
                     (key, None)
+                } else if let TokenKind::StringUnits(units) = &self.token().kind {
+                    let length = units.len();
+                    let bytes = length.saturating_mul(std::mem::size_of::<u16>());
+                    if bytes > self.capacity.property_bytes {
+                        return Err(self.unsupported("Property-name limit reached (256 bytes)."));
+                    }
+                    self.check_compilation_progress()?;
+                    self.charge_expression_text(bytes)?;
+                    let mut copy = Vec::new();
+                    copy.try_reserve_exact(length)
+                        .map_err(|_| super::compilation_storage_limit(self.capacity))?;
+                    let TokenKind::StringUnits(units) = &self.token().kind else { unreachable!() };
+                    copy.extend_from_slice(units);
+                    self.charge_expression_text(copy.capacity().saturating_mul(std::mem::size_of::<u16>()) - bytes)?;
+                    self.current += 1;
+                    (self.expr(ExprKind::Literal(Value::StringUnits(copy)), key_at)?, None)
                 } else {
                     let (name, shorthand) = match self.token().kind.clone() {
                         TokenKind::Word(name) | TokenKind::EscapedWord(name) => {
@@ -558,6 +574,7 @@ impl Runtime {
             if rest.is_some() {
                 self.work(match &key {
                     PropertyKey::String(name) => name.len(),
+                    PropertyKey::StringUnits(units) => units.len().saturating_mul(std::mem::size_of::<u16>()),
                     PropertyKey::Symbol(_) => std::mem::size_of::<usize>(),
                 })?;
                 excluded.insert(key);
@@ -636,15 +653,32 @@ impl Runtime {
             }
             for key in keys {
                 self.step()?;
-                if excluded.contains(&PropertyKey::String(key.clone()))
-                    || !self.own_enumerable(source, &key)?
-                {
+                let key = key.into_property_key();
+                if excluded.contains(&key) {
+                    continue;
+                }
+                let enumerable = match &key {
+                    PropertyKey::String(name) => self.own_enumerable(source, name)?,
+                    PropertyKey::StringUnits(units) => self.objects[source]
+                        .properties
+                        .get_units(units)
+                        .is_some_and(|property| property.enumerable),
+                    PropertyKey::Symbol(_) => unreachable!(),
+                };
+                if !enumerable {
                     continue;
                 }
                 let receiver = self.copy_value(value)?;
-                let next =
-                    self.read_reference(&Reference::Property(receiver, key.clone()), host)?;
-                self.store_property(object, key, next, Some((true, true, true)))?;
+                let next = self.read_reference(&key.clone().reference(receiver), host)?;
+                match key {
+                    PropertyKey::String(name) => {
+                        self.store_property(object, name, next, Some((true, true, true)))?;
+                    }
+                    PropertyKey::StringUnits(units) => {
+                        self.store_units_property(object, units, next, Some((true, true, true)))?;
+                    }
+                    PropertyKey::Symbol(_) => unreachable!(),
+                }
             }
             for key in symbols {
                 self.step()?;
@@ -732,6 +766,39 @@ var descriptor=Object.getOwnPropertyDescriptor(rest,'b');
 if(descriptor.value!==2||!descriptor.writable||!descriptor.enumerable||!descriptor.configurable||descriptor.get!==undefined)throw 'rest data descriptor';'ok';
 "#,
         );
+    }
+
+    #[test]
+    fn patterns_raw_utf16_rest_and_spread_keep_exact_exclusions_and_live_descriptors() {
+        succeeds(r#"
+var high='\ud800',low='\udfff',later='later\ud800',added='added\udfff',symbol=Symbol('kept');
+var source={},reads=0;
+source[high]=3;
+Object.defineProperty(source,low,{get:function(){reads++;delete source[later];source[added]=19;return 5;},enumerable:true,configurable:true});
+source[later]=7;
+source['\ufffd']=11;
+source[symbol]=13;
+Object.defineProperty(source,'hidden\ud800',{value:17});
+let {[high]:taken,...rest}=source;
+if(taken!==3||reads!==1||rest[low]!==5||rest['\ufffd']!==11||rest[symbol]!==13||
+    high in rest||later in rest||added in rest||'hidden\ud800' in rest)throw 'raw rest snapshot';
+var names=Object.keys(rest);
+if(names.length!==2||names[0]!==low||names[1]!=='\ufffd')throw 'raw rest order';
+var descriptor=Object.getOwnPropertyDescriptor(rest,low);
+if(descriptor.value!==5||!descriptor.writable||!descriptor.enumerable||!descriptor.configurable||descriptor.get!==undefined)
+    throw 'raw rest data descriptor';
+let {'\ud800':quoted,...other}={[high]:23,[low]:29,'\ufffd':31};
+if(quoted!==23||high in other||other[low]!==29||other['\ufffd']!==31)throw 'quoted raw exclusion';
+var spread={...rest};
+if(spread[low]!==5||spread['\ufffd']!==11||spread[symbol]!==13||Object.keys(spread)[0]!==low)
+    throw 'raw spread copy';
+var selected,remaining,key={},conversions=0;
+key[Symbol.toPrimitive]=function(hint){conversions++;if(hint!=='string')throw 'hint';return low;};
+({[key]:selected,...remaining}=rest);
+if(selected!==5||conversions!==1||low in remaining||remaining['\ufffd']!==11||remaining[symbol]!==13)
+    throw 'raw computed assignment exclusion';
+'ok';
+"#);
     }
 
     #[test]

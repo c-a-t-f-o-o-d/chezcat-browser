@@ -70,6 +70,11 @@ impl Runtime {
                 self.work_as(name.len(), WorkKind::ValueCopy)?;
                 Ok(Value::String(name.clone()))
             }
+            PropertyKey::StringUnits(name) => {
+                self.property_name_units(name)?;
+                self.work_as(name.len().saturating_mul(2), WorkKind::ValueCopy)?;
+                Ok(Value::StringUnits(name.clone()))
+            }
             PropertyKey::Symbol(key) => {
                 self.symbol(*key)?;
                 Ok(Value::Symbol(*key))
@@ -102,6 +107,12 @@ impl Runtime {
             let Some(trap) = runtime.proxy_method(handler, "get", host)? else {
                 return match key {
                     PropertyKey::String(name) => runtime.get_ordinary_property_with_receiver(
+                        Ordinary::Object(target),
+                        &name,
+                        receiver,
+                        host,
+                    ),
+                    PropertyKey::StringUnits(name) => runtime.get_units_property_with_receiver(
                         Ordinary::Object(target),
                         &name,
                         receiver,
@@ -330,6 +341,9 @@ impl Runtime {
         let value = self.copy_value(value)?;
         match key {
             PropertyKey::String(name) => self.store_property(target, name, value, Some(attrs))?,
+            PropertyKey::StringUnits(name) => {
+                self.store_units_property(target, name, value, Some(attrs))?
+            }
             PropertyKey::Symbol(key) => {
                 self.store_symbol_property(target, key, value, Some(attrs))?
             }

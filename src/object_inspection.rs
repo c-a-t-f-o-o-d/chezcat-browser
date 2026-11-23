@@ -4,7 +4,7 @@
 //! https://tc39.es/ecma262/multipage/fundamental-objects.html
 //! https://tc39.es/ecma262/multipage/abstract-operations.html#sec-enumerableownproperties
 
-use super::{property_index, Fault, Host, Ordinary, Reference, Runtime, Value};
+use super::{Fault, Host, Ordinary, Reference, Runtime, StringKey, Value};
 #[cfg(test)]
 use super::MAX_OBJECT_PROPERTIES;
 
@@ -46,7 +46,7 @@ impl Runtime {
             let result = self.new_object(Some(keys.len()))?;
             for (index, key) in keys.into_iter().enumerate() {
                 self.step()?;
-                self.set_property(result, index.to_string(), Value::String(key))?;
+                self.set_property(result, index.to_string(), key.into_value())?;
             }
             return Ok(Value::Object(result));
         }
@@ -68,14 +68,14 @@ impl Runtime {
             for key in keys {
                 self.step()?;
                 let receiver = self.copy_value(value)?;
-                self.work(key.len())?;
+                self.work(key.byte_len())?;
                 let descriptor = self.object_static(
                     "getOwnPropertyDescriptor",
-                    &[receiver, Value::String(key.clone())],
+                    &[receiver, key.clone().into_value()],
                     host,
                 )?;
                 if !matches!(descriptor, Value::Undefined) {
-                    self.set_property(result, key, descriptor)?;
+                    self.create_data_property(&Value::Object(result), key.into_property_key(), descriptor, host)?;
                 }
             }
             for key in symbols {
@@ -101,12 +101,26 @@ impl Runtime {
         let mut index = 0;
         for key in keys {
             self.step()?;
-            let enumerable = if let Value::Host(handle) = value {
-                self.host_owned(*handle, &key, true, host)?
-            } else if let Some(object) = ordinary {
-                self.own_enumerable(self.ordinary_id(object)?, &key)?
-            } else {
-                false
+            let enumerable = match &key {
+                StringKey::Scalar(name) => {
+                    if let Value::Host(handle) = value {
+                        self.host_owned(*handle, name, true, host)?
+                    } else if let Some(object) = ordinary {
+                        self.own_enumerable(self.ordinary_id(object)?, name)?
+                    } else {
+                        false
+                    }
+                }
+                StringKey::Units(units) => {
+                    if let Some(object) = self.symbol_backing(value, host)? {
+                        let id = self.ordinary_id(object)?;
+                        self.owns_units_property(id, units)?
+                            && self.objects[id].properties.get_units(units)
+                                .is_some_and(|property| property.enumerable)
+                    } else {
+                        false
+                    }
+                }
             };
             if !enumerable {
                 continue;
@@ -114,10 +128,13 @@ impl Runtime {
             // Earlier getters can delete, replace or change the enumerability
             // of a later property. Added keys are absent from this snapshot.
             let receiver = self.copy_value(value)?;
-            self.work(key.len())?;
-            let next = self.read_reference(&Reference::Property(receiver, key.clone()), host)?;
+            self.work(key.byte_len())?;
+            let next = match &key {
+                StringKey::Scalar(name) => self.read_reference(&Reference::Property(receiver, name.clone()), host)?,
+                StringKey::Units(units) => self.read_units_property(&receiver, units, host)?,
+            };
             let next = if method == "entries" {
-                self.array_from_values(&[Value::String(key), next])?
+                self.array_from_values(&[key.into_value(), next])?
             } else {
                 next
             };
@@ -129,7 +146,7 @@ impl Runtime {
         Ok(Value::Object(result))
     }
 
-    fn inspection_string_keys(&mut self, id: usize) -> Result<Vec<String>, Fault> {
+    fn inspection_string_keys(&mut self, id: usize) -> Result<Vec<StringKey>, Fault> {
         let mut keys = self.own_string_keys(id, false)?;
         if self.object(id)?.length.is_some() && !self.objects[id].properties.contains_key("length")
         {
@@ -141,7 +158,7 @@ impl Runtime {
                 ));
             }
             self.work(6)?;
-            let at = keys.partition_point(|key| property_index(key).is_some());
+            let at = keys.partition_point(|key| key.index().is_some());
             keys.insert(at, "length".into());
         }
         Ok(keys)

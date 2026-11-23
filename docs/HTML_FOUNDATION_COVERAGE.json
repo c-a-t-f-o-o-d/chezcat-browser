@@ -551,7 +551,8 @@
           "status": "partial",
           "verification": [
             "Native CharacterData DOMString: eight original focused checks pass, including actual App jobs/Range/pixels/editor/link and exact inert-import owned storage. Frozen original Text witness now passes; Attr witness still fails. See src/script_native_dom_string_tests.rs and src/app_native_dom_string_tests.rs. Required browser subtests remain unrun.",
-            "Native Attr DOMString metadata increment: 12 combined focused checks including two connected App checks pass; 417 affected checks covered by 414 unchanged passes, two corrected child-realm fixtures and the added raw-unit repeated-prefix check. Actual native Attr aliases/oldValue/copy/promotion and storage/active-consumer refusals are checked. Frozen Attr/Text/USV/owner witnesses are a selected subset, not browser WPT closure."
+            "Native Attr DOMString metadata increment: 12 combined focused checks including two connected App checks pass; 417 affected checks covered by 414 unchanged passes, two corrected child-realm fixtures and the added raw-unit repeated-prefix check. Actual native Attr aliases/oldValue/copy/promotion and storage/active-consumer refusals are checked. Frozen Attr/Text/USV/owner witnesses are a selected subset, not browser WPT closure.",
+            "Ordinary UTF-16 property-key increment: all 43 focused standalone Linux runtime tests pass, covering exact key identity, reflection/proxy callbacks, storage/reachability refusal and recovery, native author-property boundaries, literals/patterns and JSON serialization. The full Windows suite, connected App journeys and required frozen browser conformance were not rerun for this increment; F01/F01.03 remain partial."
           ],
           "dependency_details": [],
           "detail_requirements": [
@@ -627,6 +628,48 @@
               ],
               "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Canonical native compareDocumentPosition now covers actual main/inert/document/fragment/doctype/CharacterData/Attr and immutable child roots, current sibling and attribute-list order, stable reciprocal disconnected masks, detach/adopt/current owners and template dedicated-root separation. Nonnullable Node brands, both operand/captured caller origin/lifetime, iterative paid main/inert paths, child scratch admission, refusal/recovery,350-depth no-slot and original Windows App binding/pixels/editor/link provide supplementary evidence. Complete parser/custom-element/shadow/lifecycle and required unchanged browser WPT remain open; no F01 closure.",
+              "closing_evidence": []
+            },
+            {
+              "id": "F01.03.ordinary-property-keys",
+              "requirement": "Preserve exact ECMAScript string property keys in supported ordinary operations and document-foundation consumers",
+              "normative_anchor": "https://tc39.es/ecma262/#sec-topropertykey",
+              "normative_pins": [
+                "html",
+                "dom",
+                "webidl"
+              ],
+              "entry_paths": [
+                "computed and quoted property names; read/write/in/delete",
+                "ordinary descriptors/accessors, prototypes, Reflect and supported Proxy operations",
+                "own-key and for-in enumeration; Object assign/entries/fromEntries and object rest/spread",
+                "object/class literal member keys and callable names",
+                "JSON.stringify keys, replacer lists and callback keys",
+                "registered native author-property stores"
+              ],
+              "status": "partial",
+              "source_anchors": [
+                "src/javascript.rs",
+                "src/string_property_map.rs",
+                "src/property_key_utf16.rs",
+                "src/property_key_utf16_tests.rs",
+                "src/property_key_proxy_tests.rs",
+                "src/property_key_retention_tests.rs",
+                "src/property_key_native_tests.rs",
+                "src/object_literals.rs",
+                "src/class_parser.rs",
+                "src/class_runtime.rs",
+                "src/binding_patterns.rs",
+                "src/json.rs"
+              ],
+              "integration_dependencies": [
+                "F03",
+                "F06",
+                "F09"
+              ],
+              "required_original_witness_ids": [],
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
+              "supplementary_evidence": "All 43 focused standalone Linux runtime tests passed for this finite increment. Exact unpaired units remain distinct from U+FFFD, scalar spellings and Symbols; well-formed pairs retain scalar identity. Ordinary reads/writes, membership/deletion, descriptor/accessor/prototype behavior, ordering, copy operations, supported Reflect/Proxy paths, literal/class names and pattern exclusions preserve keys. Storage, copy-work, strong-edge retention, atomic refusal/recovery and registered native owner/origin/lifetime boundaries have focused evidence. JSON.stringify escapes raw names exactly, retains callback keys and live values, and accepts supported raw replacer-list names; reviver-created raw keys receive no fabricated source context. The current ECMAScript algorithm anchor accompanies the existing HTML/DOM/WebIDL integration pins; no new normative revision is asserted. Scalar-only native consumers, opaque handles, URLSearchParams raw record-name USVString conversion, JSON.parse lone-surrogate strings/keys and raw-unit indentation retain their limitations. The full Windows suite, connected App journeys and required frozen browser conformance were not rerun. Frozen input files, selection, expected results and witness IDs are unchanged. These focused tests are supplementary evidence and do not close F01 or F01.03.",
               "closing_evidence": []
             }
           ]

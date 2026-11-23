@@ -100,7 +100,7 @@ impl Runtime {
                 // No value/getter is read; captured zero length stays on the
                 // original path. Prepay the bounded key/node inspection.
                 if zero_shortcut && length > 0 && self.objects[object].properties
-                    .first_key_value().is_some_and(|(key, _)| key == "0")
+                    .scalar_iter().next().is_some_and(|(key, _)| key == "0")
                 {
                     self.work_as(std::mem::size_of::<usize>() + 1, super::WorkKind::ArrayJoinPreflight)?;
                     has_indices = true;
@@ -115,7 +115,7 @@ impl Runtime {
                 )?;
                 if self.objects[object]
                     .properties
-                    .keys()
+                    .scalar_keys()
                     .any(|key| property_index(key).is_some_and(|index| index < length))
                 {
                     has_indices = true;
