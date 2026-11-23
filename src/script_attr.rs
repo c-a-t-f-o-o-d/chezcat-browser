@@ -573,6 +573,7 @@ impl Bridge<'_> {
         let media_controls=key=="controls"&&self.media_interface_receiver(node_handle(node));
         let style_metadata=matches!(key,"type"|"media")&&self.created_html_style(node);
         if self.stylesheet_attribute_change(node, key, value.as_deref())? { return Ok(()); }
+        if self.resource_charset_attribute(node,&name) { return self.attribute_named_prepared(node,name,value,input); }
         if self.dom_script(node) && matches!(key, "src" | "type" | "charset" | "nonce" | "integrity" | "crossorigin" | "referrerpolicy" | "fetchpriority" | "async" | "defer" | "nomodule") {
             let queue = key == "src" && self.state.dom.connected[node];
             self.attribute_named_prepared(node, name, value,input)?;

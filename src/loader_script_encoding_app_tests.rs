@@ -120,3 +120,38 @@ fn script_charset_domstring_app_unknown_raw_label_and_captured_fallback() {
         assert_painted_document(&app,expected);exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
     }
 }
+
+
+#[test]
+fn parsed_script_charset_app_exact_metadata_attr_and_observer_without_activation() {
+    let source=document("","waiting",false)+r#"<script id=parsed type=application/x-inert charset=seed>throw 'must stay inert';</script><script>
+var s=document.getElementById('parsed');if(s.charset!=='seed'||!('charset' in s))throw 'parsed charset reflection';
+var attr=s.getAttributeNode('charset'),observer=new MutationObserver(function(){});observer.observe(s,{attributes:true,attributeOldValue:true,attributeFilter:['charset']});
+var calls=0;s.charset={toString:function(){calls++;s.setAttribute('charset','during');return '\ud800';}};
+var records=observer.takeRecords();if(calls!==1||s.charset!=='\ud800'||s.getAttribute('charset')!==s.charset||attr.value!==s.charset||records.length!==2||records[0].oldValue!=='seed'||records[1].oldValue!=='during')throw 'parsed exact conversion and records';
+attr.value='x\udfff';var replacement=document.createAttribute('charset');replacement.value='\ud800\ufffd';s.setAttributeNode(replacement);
+records=observer.takeRecords();if(records.length!==2||records[0].oldValue!=='\ud800'||records[1].oldValue!=='x\udfff'||attr.ownerElement!==null||replacement.ownerElement!==s||s.charset!==replacement.value)throw 'parsed Attr identity';
+s.removeAttributeNode(replacement);records=observer.takeRecords();if(s.charset!==''||replacement.ownerElement!==null||records.length!==1||records[0].oldValue!=='\ud800\ufffd')throw 'parsed removal';
+s.charset=null;if(s.getAttribute('charset')!=='null')throw 'parsed nullable DOMString';
+document.getElementById('probe').textContent='Parsed script metadata';document.title='Parsed script metadata';
+</script>"#;
+    let site=Site::new(vec![Response{path:"/page",content_type:"text/html;charset=utf-8",headers:"",body:source.into_bytes()}]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"Parsed script metadata","{}",app.activity_report());
+    assert_painted_document(&app,"Parsed script metadata");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page"]);
+}
+
+#[test]
+fn parsed_script_charset_app_metadata_preserves_loaded_source_execution() {
+    let source=document("","waiting",false)+r#"<script>var runs=0;</script><script id=parsed charset=Shift_JIS src=/source></script><script>
+var s=document.getElementById('parsed'),originalSource=s.src;if(runs!==1||document.title!=='あ'||s.charset!=='Shift_JIS')throw 'original parsed execution';
+s.charset='windows-1252';s.setAttribute('charset','\ud800');var a=s.getAttributeNode('charset');a.value='Shift_JIS';
+if(runs!==1||s.charset!=='Shift_JIS'||s.src!==originalSource)throw 'parsed authority changed';
+document.getElementById('probe').textContent='Parsed source retained';document.title='Parsed source retained';
+</script>"#;
+    let site=Site::new(vec![
+        Response{path:"/page",content_type:"text/html;charset=utf-8",headers:"",body:source.into_bytes()},
+        Response{path:"/source",content_type:"text/javascript",headers:"",body:b"runs++;document.title='\x82\xa0';".to_vec()},
+    ]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"Parsed source retained","{}",app.activity_report());
+    assert_painted_document(&app,"Parsed source retained");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
+}

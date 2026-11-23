@@ -4,10 +4,15 @@ use super::*;
 #[cfg(test)]
 #[path = "script_charset_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "script_parsed_charset_tests.rs"]
+mod parsed_tests;
 
 impl Bridge<'_> {
     pub(super) fn resource_charset_element(&self, node: usize) -> bool {
-        self.doc.nodes.get(node).is_some_and(|_| self.dom_stylesheet(node) || self.dom_script(node))
+        self.doc.nodes.get(node).is_some_and(|entry|
+            entry.namespace == crate::html::Namespace::Html
+                && matches!(&entry.kind, NodeKind::Element {tag,..} if matches!(tag.as_str(), "link" | "script")))
     }
 
     pub(super) fn resource_charset_attribute(&self, node: usize, name: &crate::html::AttributeName) -> bool {
