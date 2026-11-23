@@ -14,6 +14,11 @@ impl Bridge<'_> {
         object: u32,
         property: &str,
     ) -> Result<Option<u32>, String> {
+        if object==DOCUMENT && property=="title" {
+            self.state.rebuild(self.doc)?;
+            return Ok(self.state.tree.title.map(node_handle));
+        }
+        if property=="text" && self.title_receiver(object) { return Ok(Some(object)); }
         if !matches!(property, "innerHTML" | "textContent") {
             return Ok(None);
         }
@@ -35,7 +40,7 @@ impl Bridge<'_> {
                 && matches!(item.kind, NodeKind::Element { .. })
                 && !matches!(tag(self.doc, node), "script" | "style")
         } else {
-            self.text_content_container(node)
+            self.text_content_container(node) || self.title_receiver(object)
                 || self.created_html_style(node) && self.state.detached_nodes.contains(&node)
                 || matches!(item.kind, NodeKind::DocumentFragment)
         };
@@ -50,13 +55,9 @@ impl Bridge<'_> {
         let Some(target) = self.content_observation_target(object, property)? else {
             return Ok(Vec::new());
         };
-        let text = if matches!(value, Value::Null | Value::Undefined) {
-            String::new()
-        } else {
-            self.text(value)?
-        };
         let mut added = Vec::new();
         if property == "innerHTML" {
+            let text=if matches!(value,Value::Null|Value::Undefined) {String::new()} else {self.text(value)?};
             if text.len() > self.state.limits.host.string_bytes {
                 return Err("HTML observation source exceeds the host allowance.".into());
             }
@@ -92,7 +93,10 @@ impl Bridge<'_> {
                     )?);
                 }
             }
-        } else if !text.is_empty() {
+        } else if match value {
+            Value::String(text)=>!text.is_empty(),Value::StringUnits(units)=>!units.is_empty(),
+            Value::Null|Value::Undefined=>false,_=>!self.text(value)?.is_empty(),
+        } {
             added
                 .try_reserve_exact(1)
                 .map_err(|_| "Content observer text reservation failed.")?;

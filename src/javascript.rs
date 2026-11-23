@@ -484,6 +484,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("canvas", "HTMLCanvasElement"),
     ("div", "HTMLDivElement"),
     ("form", "HTMLFormElement"),
+    ("head", "HTMLHeadElement"),
     ("html", "HTMLHtmlElement"),
     ("iframe", "HTMLIFrameElement"),
     ("img", "HTMLImageElement"),
@@ -493,6 +494,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("slot", "HTMLSlotElement"),
     ("template", "HTMLTemplateElement"),
     ("textarea", "HTMLTextAreaElement"),
+    ("title", "HTMLTitleElement"),
     ("ul", "HTMLUListElement"),
 ];
 
@@ -523,6 +525,8 @@ pub(crate) fn document_encoding_getter(method: &str) -> bool {
 
 pub(crate) const DOCUMENT_CURRENT_SCRIPT_GET: &str = "\0Document.get.currentScript";
 pub(crate) const DOCUMENT_ACTIVE_ELEMENT_GET:&str="\0Document.get.activeElement";
+pub(crate) const TITLE_TEXT_GET: &str = "\0HTMLTitleElement.get.text";
+pub(crate) const TITLE_TEXT_SET: &str = "\0HTMLTitleElement.set.text";
 pub(crate) const HTML_SLOT_NAME_GET: &str = "\0HTMLSlotElement.get.name";
 pub(crate) const HTML_SLOT_NAME_SET: &str = "\0HTMLSlotElement.set.name";
 pub(crate) const NODE_MUTATION_METHODS: [(&str, usize); 4] = [

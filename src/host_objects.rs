@@ -611,6 +611,9 @@ impl Runtime {
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
             }
+            if name == "HTMLTitleElement" {
+                self.define_host_attribute(prototype,window,"text",super::TITLE_TEXT_GET,Some(super::TITLE_TEXT_SET))?;
+            }
             if name == "HTMLMetaElement" {
                 for &(property, _, get, set) in html_reflection_interface::META {
                     self.define_host_attribute(prototype, window, property, get, Some(set))?;

@@ -21,7 +21,7 @@ use crate::javascript::adjacent_interface;
 use crate::javascript::html_reflection_interface::{meta_attribute, meta_operation};
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
-    HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
+    TITLE_TEXT_GET, TITLE_TEXT_SET, HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_VALUE_GET, NODE_VALUE_SET, NODE_HAS_CHILDREN, NODE_TRAVERSAL_GETTERS};
 
@@ -241,6 +241,8 @@ mod script_document_properties;
 mod script_inner_html;
 #[path = "script_meta_element.rs"]
 mod script_meta_element;
+#[path="script_title_element.rs"]
+mod script_title_element;
 #[path = "script_history.rs"]
 mod script_history;
 #[cfg(test)]
@@ -413,6 +415,7 @@ struct Tree {
     ids: Vec<(usize, usize)>,
     body: Option<usize>,
     head: Option<usize>,
+    title: Option<usize>,
     document_element: Option<usize>,
 }
 
@@ -2702,10 +2705,26 @@ impl Bridge<'_> {
     }
 
     fn set_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
+        if !self.title_receiver(node_handle(node)) {return self.replace_main_text_content(node,text);}
+        self.state.rebuild(self.doc)?;
+        if self.state.tree.title!=Some(node) {return self.replace_main_text_content(node,text);}
+        let display=self.normalized_title(&text)?.into_parts().0;
+        let old=self.doc.title.capacity().min(self.state.retained);
+        let new=display.capacity();
+        self.state.replace_storage(old,new,0)?;
+        if let Err(message)=self.replace_main_text_content(node,text) {
+            self.state.retained=self.state.retained-new+old;
+            return Err(message);
+        }
+        self.doc.title=display;
+        Ok(())
+    }
+
+    fn replace_main_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
-        if !self.text_content_container(node) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
+        if !self.text_content_container(node) && !self.title_receiver(node_handle(node)) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
             return Err(
                 "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
@@ -3082,6 +3101,7 @@ impl Bridge<'_> {
         if matches!(property,"insertAdjacentText"|"insertAdjacentElement") && self.collection_interface_receiver(object)==Some(false) {
             return !self.form_named_control(object,property);
         }
+        if property=="text" && self.title_receiver(object) {return true;}
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3476,6 +3496,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if property=="text" && self.title_receiver(object) {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if self.meta_member(object, property) { return true; }
         if self.aria_reflection_attribute(object,property){return true;}
@@ -3523,6 +3544,7 @@ impl Host for Bridge<'_> {
     fn nullable_scalar_setter(&self,object:u32,property:&str)->bool{property=="hidden"&&self.html_reflection_receiver(object)}
     fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if self.aria_reflection_attribute(object,property){return true;}
         if self.meta_member(object, property) { return true; }
         if !matches!(property,"hidden"|"tabIndex")&&crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return true;}
@@ -3577,6 +3599,7 @@ impl Host for Bridge<'_> {
         }
         if method == NODE_VALUE_SET && self.text_content_receiver(object) { return Some("nodeValue"); }
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
+        if method==TITLE_TEXT_SET && self.title_receiver(object) {return Some("text");}
         if method == HTML_SLOT_NAME_SET && self.html_slot_receiver(object) {return Some("name");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
         if let Some((name, true)) = script_canvas::accessor(method) {
@@ -3633,6 +3656,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return true; }
         if self.meta_member(object, property) { return true; }
         self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent")
@@ -3860,6 +3884,7 @@ impl Host for Bridge<'_> {
         if crate::javascript::window_relationships::operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) && self.event_target_interface(object) { return Some(object); }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) && self.event_target_interface(object) {return Some(object);}
+        if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) && self.event_target_interface(object){return Some(object);}
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4157,6 +4182,7 @@ impl Host for Bridge<'_> {
             }
             return Ok(());
         }
+        if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
         if meta_operation(method).is_some() { return self.validate_meta(object); }
         if let Some((_,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return self.validate_aria_reflection(object,setter);}
         if let Some((_,setter))=crate::javascript::html_reflection_interface::operation(method){return self.validate_html_reflection(object,setter);}
@@ -4602,6 +4628,7 @@ impl Host for Bridge<'_> {
         }
         if crate::javascript::window_relationships::operation(method).is_some() { return self.event_target_interface(object) && self.event_target_interface(receiver); }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return self.event_target_interface(object) && self.collection_interface_receiver(receiver)==Some(false);}
+        if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.event_target_interface(object) && self.title_receiver(receiver);}
         if meta_operation(method).is_some() { return self.event_target_interface(object) && self.meta_receiver(receiver); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
@@ -5650,6 +5677,10 @@ impl Host for Bridge<'_> {
                     self.string(&content_type)
                 }
                 "title" => {
+                    self.state.rebuild(self.doc)?;
+                    if let Some(node)=self.state.tree.title {
+                        return self.title_child_text(node_handle(node),true).map(Self::dom_string_owned);
+                    }
                     if self.doc.title.len() > self.state.limits.host.string_bytes {
                         return Err(format!("Document title exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
                     }
@@ -5849,6 +5880,7 @@ impl Host for Bridge<'_> {
             if !self.attr_receiver(object) && !self.character_data_receiver(object) { return Ok(()); }
         }
         if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(());}
+        if property=="text" && self.title_receiver(object) {return self.set_title_text(object,&value);}
         if self.meta_member(object, property) { return self.meta_set(object, meta_attribute(property).unwrap(), &value); }
         if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
         if crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return self.html_reflection_set(object,property,&value);}
@@ -5958,6 +5990,8 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         if object == DOCUMENT && property == "title" {
+            self.state.rebuild(self.doc)?;
+            if let Some(node)=self.state.tree.title {return self.set_title_text(node_handle(node),&value);}
             let value = self.text(&value)?;
             self.state
                 .replace_storage(self.doc.title.capacity(), value.capacity(), value.len())?;
@@ -6224,6 +6258,7 @@ impl Host for Bridge<'_> {
             return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
         if method == NODE_HAS_CHILDREN { return self.has_child_nodes(object); }
+        if method==TITLE_TEXT_GET {return self.title_child_text(object,false).map(Self::dom_string_owned);}
         if method == NODE_VALUE_GET { return self.canonical_node_value(object); }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };

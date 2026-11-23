@@ -4,6 +4,73 @@ fn fixture()->(Document,Forms,Page){let mut doc=crate::html::parse_loaded_docume
 fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());}
 fn no_effects(page:&mut Page){assert!(!page.has_navigation_request());assert!(page.take_dynamic_scripts().is_empty()&&page.take_dynamic_stylesheets().is_empty());let(a,b,c)=page.take_image_changes();assert!(a.is_empty()&&b.is_empty()&&c.is_empty());}
 
+
+#[test]
+fn html_head_title_element_actual_children_and_committed_title_are_consistent() {
+    let mut doc=crate::html::parse_loaded_document("<!doctype html><html><head><title id=t>  original  title </title></head><body><input id=f></body></html>",&||Ok(())).unwrap();
+    doc.scripting_enabled=true;
+    let mut forms=Forms::new(&doc);
+    let mut page=Page::new();
+    page.set_location(&crate::navigation::address("https://titles.test/", &crate::navigation::Location::home()).unwrap());
+    assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
+    run(&mut doc,&mut forms,&mut page,r#"
+var title=document.getElementById('t'),d=Object.getOwnPropertyDescriptor(HTMLTitleElement.prototype,'text'),saved=title.firstChild,list=title.childNodes;
+if(Object.getPrototypeOf(document.head)!==HTMLHeadElement.prototype||Object.getPrototypeOf(HTMLHeadElement.prototype)!==HTMLElement.prototype||!(title instanceof HTMLTitleElement)||title.text!=='  original  title '||document.title!=='original title'||!d.enumerable||!d.configurable)throw 'loaded interfaces or title';
+var obs=new MutationObserver(function(){});obs.observe(title,{childList:true});
+title.text=' \u0009A\ud800 \n B  ';
+var rows=obs.takeRecords();
+if(title.text!==' \u0009A\ud800 \n B  '||document.title!=='A\ud800 B'||saved.parentNode!==null||rows.length!==1||rows[0].removedNodes[0]!==saved||rows[0].addedNodes[0]!==list[0])throw 'current title and observer';
+document.title='  another    title ';
+if(title.text!=='  another    title '||document.title!=='another title'||obs.takeRecords().length!==1)throw 'document title updates the same element';
+title.text=null;if(title.text!=='null'||document.title!=='null')throw 'DOMString null';
+var orphan=document.createElement('title');orphan.text='local';if(orphan.text!=='local'||document.title!=='null')throw 'detached scope';
+var wrong=0;try{d.set.call(document.head,{toString:function(){wrong++;return 'bad';}});}catch(e){if(e instanceof TypeError)wrong+=2;}if(wrong!==2)throw 'brand before conversion';
+"#);
+    assert_eq!(doc.title,"null");
+}
+
+#[test]
+fn html_head_title_element_factories_xml_owners_and_child_only_text() {
+    let(mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var owner=document.implementation.createHTMLDocument('A   B'),t=owner.head.firstChild,ns='http://www.w3.org/1999/xhtml';
+if(!(owner.head instanceof HTMLHeadElement)||!(t instanceof HTMLTitleElement)||t.text!=='A   B'||owner.title!=='A B')throw 'factory structure';
+var nested=owner.createElement('span');nested.textContent='ignored';t.appendChild(nested);t.appendChild(owner.createComment('skip'));t.appendChild(owner.createTextNode(' end'));
+if(t.text!=='A   B end'||t.textContent!=='A   Bignored end')throw 'child-only content';
+var observer=new MutationObserver(function(){});observer.observe(t,{childList:true});
+t.text='\udfff';var rows=observer.takeRecords();if(rows.length!==1||rows[0].removedNodes.length!==4||rows[0].addedNodes[0]!==t.firstChild||owner.title!=='\udfff'||t.text!=='\udfff')throw 'inert exact replacement';
+var xml=document.implementation.createDocument(null,'Root'),xt=xml.createElementNS(ns,'p:title');
+xt.appendChild(xml.createCDATASection('raw'));if(!(xt instanceof HTMLTitleElement)||xt.text!=='raw')throw 'XML factory title';
+var lookalike=xml.createElementNS('urn:other','title');if(lookalike instanceof HTMLTitleElement)throw 'foreign lookalike';
+"#);
+}
+
+
+#[test]
+fn html_head_title_element_numeric_limits_and_atomic_display_recovery() {
+    let mut doc=crate::html::parse("<html><head><title>            x             </title></head><body></body></html>");
+    doc.scripting_enabled=true;
+    let mut forms=Forms::new(&doc);let mut page=Page::new();
+    assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);
+    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    bridge.state.rebuild(bridge.doc).unwrap();
+    let title=bridge.state.tree.title.unwrap();
+    let old=bridge.doc.nodes[title].children.clone();
+    let limit=bridge.state.limits.host.string_bytes;
+    bridge.state.limits.host.string_bytes=1;
+    assert_eq!(bridge.title_child_text(node_handle(title),true).unwrap().scalar().unwrap(),"x");
+    assert!(bridge.title_child_text(node_handle(title),false).unwrap_err().contains("allowance"));
+    bridge.state.limits.host.string_bytes=limit;
+    let budget=bridge.state.node_limit;bridge.state.node_limit=bridge.doc.nodes.len();
+    let before=(bridge.state.retained,bridge.doc.nodes.len());
+    assert!(bridge.set_title_text(node_handle(title),&Value::String("replacement".into())).is_err());
+    assert_eq!((bridge.state.retained,bridge.doc.nodes.len()),before);
+    assert_eq!(bridge.doc.title,"x");assert_eq!(bridge.doc.nodes[title].children,old);
+    bridge.state.node_limit=budget;
+    bridge.set_title_text(node_handle(title),&Value::String("  recovered  ".into())).unwrap();
+    assert_eq!(bridge.doc.title,"recovered");
+}
+
 #[test]
 fn document_factory_validation_uses_canonical_dom_exception_slots_and_preserves_inputs() {
     let (mut doc,mut forms,mut page)=fixture();

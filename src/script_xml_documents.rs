@@ -31,19 +31,7 @@ impl Bridge<'_>{
             }
         }
         let Some(title)=title else{return Ok(Value::String(String::new()));};
-        let children=self.inert_children(title).ok_or("Missing title child nodes.")?;let mut handles=Vec::new();handles.try_reserve_exact(children.len()).map_err(|_|"Cannot reserve title text references.")?;
-        handles.extend(children.iter().copied().filter(|&node|matches!(self.inert_node_type(node),Some(3|4))));
-        let (bytes,count)={let parts=self.inert_dom_text_parts(&handles)?;(parts.iter().try_fold(0usize,|n,p|n.checked_add(p.used_bytes()).ok_or("Title input size overflow."))?,parts.iter().try_fold(0usize,|n,p|n.checked_add(p.utf16_len()).ok_or("Title unit count overflow."))?)};
-        self.state.work(bytes)?;self.state.copies(count.checked_mul(2).ok_or("Title temporary size overflow.")?)?;
-        let parts=self.inert_dom_text_parts(&handles)?;let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve title code units.")?;let mut whitespace=false;
-        for unit in parts.iter().flat_map(|part|part.code_units()){
-            if matches!(unit,0x09|0x0a|0x0c|0x0d|0x20){whitespace=!units.is_empty();continue;}
-            if whitespace{units.push(0x20);whitespace=false;}units.push(unit);
-        }
-        let(projection,unpaired)=DomString::projected_size(&units)?;let logical=if unpaired{units.len().checked_mul(2).ok_or("Title result size overflow.")?}else{projection};
-        if logical>self.state.limits.host.string_bytes{return Err("Document title exceeds the host string allowance.".into());}
-        self.state.copies(projection.checked_add(if unpaired{logical}else{0}).ok_or("Title copy size overflow.")?)?;
-        DomString::from_units(&units,DomString::storage_bound(self.state.limits.host.string_bytes)?).map(Self::dom_string_owned)
+        self.title_child_text(title,true).map(Self::dom_string_owned)
     }
     pub(in crate::scripting) fn create_xml_element(&mut self,owner:u32,args:&[Value])->Result<Value,String>{
         let name=self.text(args.first().ok_or("createElement requires a local name.")?)?;
