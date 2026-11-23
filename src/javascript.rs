@@ -7033,17 +7033,17 @@ impl Runtime {
                 let separator = if method == "toString"
                     || matches!(args.first(), None | Some(Value::Undefined))
                 {
-                    ",".into()
+                    Value::String(",".into())
                 } else {
                     let value = self.copy_value(&args[0])?;
-                    self.primitive_with_hint(value, true, host)?.script_text()?
+                    Self::array_join_primitive(self.primitive_with_hint(value, true, host)?)?
                 };
                 let text = if self.objects[id].length.is_some() {
                     self.array_join(id, length, &separator, host)?
                 } else {
                     self.array_like_join(id, length, &separator, host)?
                 };
-                self.checked_value(Value::String(text))
+                self.checked_value(text)
             }
             "indexOf" | "includes" => {
                 let needle = args.first().unwrap_or(&Value::Undefined);
