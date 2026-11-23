@@ -374,3 +374,116 @@ fn string_last_index_utf16_late_workspace_refusal_preserves_author_publications(
     assert_eq!(runtime.execute("published;",&mut host).unwrap().to_text(),"position");
     assert_eq!(runtime.execute("'\\ud800x\\ud800'.lastIndexOf('\\ud800');",&mut host).unwrap().to_text(),"2");
 }
+
+#[test]
+fn string_index_utf16_exact_units_positions_empty_and_scalar_halves() {
+    succeeds(r#"
+var f=String.prototype.indexOf,cases=[
+['A\ud800B\ud800','\ud800',undefined,1],['A\ud800B\ud800','\ud800',2,3],
+['😀x😀','\ude00',NaN,1],['😀x😀','\ud83d',1,3],
+['\ud800','',Infinity,1],['\ud800','',-Infinity,0],['\ud800','',NaN,0],
+['\ud800','\ud800',Infinity,-1],['\ud800','\ud800',-2,0],
+['\ud800','\ud800x',0,-1],['\ud800','\ufffd',0,-1],
+['A\u0000\ud800\u0000','\u0000',2,3],['ababa','aba',1.9,2],
+['undefined',undefined,0,0],['null',null,0,0]
+];
+for(var c of cases){if(f.call(c[0],c[1],c[2])!==c[3])throw 'exact forward search';}
+if('\ud800x'.indexOf('\ud800')!==0||f.call(new String('😀x'),'\ude00')!==1)throw 'represented routes';
+if('/a/'.indexOf(/a/)!==0)throw 'regexp is stringified';
+"#);
+}
+
+#[test]
+fn string_index_utf16_ordered_hooks_reentry_and_captured_values() {
+    succeeds(r#"
+var f=String.prototype.indexOf,order='',current='A\ud800B\ud800';
+var receiver={toString:function(){order+='R';return current;},valueOf:function(){throw 'receiver hint';}};
+var search={toString:function(){order+='S';current='changed';if(f.call('😀','\ude00')!==1)throw 'nested';return '\ud800';},valueOf:function(){throw 'search hint';}};
+var position={valueOf:function(){order+='P';current='again';return 2;},toString:function(){throw 'position hint';}};
+if(f.call(receiver,search,position)!==3||order!=='RSP'||current!=='again')throw 'conversion order';
+order='';if(f.call({toString:function(){order+='R';return '\ud800';}},{toString:function(){order+='S';return '';}},{valueOf:function(){order+='P';return Infinity;}})!==1||order!=='RSP')throw 'empty conversion';
+order='';if(f.call('x',{toString:function(){order+='S';return 'long';}},{valueOf:function(){order+='P';return 0;}})!==-1||order!=='SP')throw 'long conversion';
+"#);
+}
+
+#[test]
+fn string_index_utf16_abrupt_conversion_null_and_fresh_recovery() {
+    succeeds(r#"
+var f=String.prototype.indexOf,marker={},calls=0;
+try{f.call('\ud800',{toString:function(){calls++;throw marker;}},{valueOf:function(){throw 'position ran';}});throw 'missing search throw';}catch(e){if(e!==marker)throw e;}
+try{f.call('\ud800',{toString:function(){calls++;return '\ud800';}},{valueOf:function(){calls++;throw marker;}});throw 'missing position throw';}catch(e){if(e!==marker)throw e;}
+if(calls!==3)throw 'duplicate conversion';
+try{f.call(null,{toString:function(){throw 'search on null';}});throw 'missing null error';}catch(e){if(!(e instanceof TypeError))throw e;}
+try{f.call('\ud800',Symbol('x'));throw 'missing symbol error';}catch(e){if(!(e instanceof TypeError))throw e;}
+if(f.call('\ud800','\ud800')!==0)throw 'fresh recovery';
+"#);
+}
+#[test]
+fn string_index_utf16_workspace_refusal_refunds_exact_temporary_backing_and_recovers() {
+    let mut runtime=Runtime::for_test();let mut host=NoHost::default();
+    let receiver=Value::StringUnits(vec![0xd800,65,0xd800]);let pattern=Value::StringUnits(vec![0xd800]);
+    let retained=runtime.value_bytes;let limit=runtime.limits.heap.retained_values;
+    for headroom in [0,1,2,5,7,9] {
+        runtime.begin_job();runtime.limits.heap.retained_values=retained+headroom;
+        let error=runtime.string_index_value(&receiver,&[pattern.clone()],false,&mut host).unwrap_err();
+        assert!(error.exception.is_none());assert!(error.message.contains("workspace limit"),"{headroom}: {}",error.message);
+        assert_eq!(runtime.value_bytes,retained,"headroom {headroom}");
+    }
+    runtime.begin_job();runtime.limits.heap.retained_values=retained+10;
+    assert_eq!(runtime.string_index_value(&receiver,&[pattern.clone()],false,&mut host).unwrap().to_text(),"0");
+    assert_eq!(runtime.value_bytes,retained);
+    runtime.limits.heap.retained_values=limit;runtime.begin_job();
+    assert_eq!(runtime.string_index_value(&receiver,&[pattern],false,&mut host).unwrap().to_text(),"0");
+    assert_eq!(runtime.value_bytes,retained);assert_eq!((host.gets,host.sets,host.calls),(0,0,0));
+}
+
+#[test]
+fn string_index_utf16_copy_step_and_string_refusals_leave_fresh_search_usable() {
+    let mut runtime=Runtime::for_test();let mut host=NoHost::default();
+    let receiver=Value::StringUnits(vec![0xd800,65,0xd800]);let pattern=Value::StringUnits(vec![0xd800]);
+    let retained=runtime.value_bytes;let cap=runtime.limits.capacity.string_bytes;
+    runtime.begin_job();runtime.copy_bytes=0;
+    let error=runtime.string_index_value(&receiver,&[pattern.clone()],false,&mut host).unwrap_err();
+    assert!(error.message.contains("work limit"));assert_eq!(runtime.value_bytes,retained);
+    runtime.begin_job();runtime.steps=0;
+    let error=runtime.string_index_value(&receiver,&[pattern.clone()],false,&mut host).unwrap_err();
+    assert!(error.message.contains("step limit"));assert_eq!(runtime.value_bytes,retained);
+    runtime.begin_job();runtime.limits.capacity.string_bytes=1;
+    let error=runtime.string_index_value(&receiver,&[pattern.clone()],false,&mut host).unwrap_err();
+    assert!(error.message.contains("String limit"));assert_eq!(runtime.value_bytes,retained);
+    runtime.limits.capacity.string_bytes=cap;runtime.begin_job();
+    assert_eq!(runtime.string_index_value(&receiver,&[pattern],false,&mut host).unwrap().to_text(),"0");
+    assert_eq!(runtime.value_bytes,retained);
+}
+
+#[test]
+fn string_index_utf16_late_workspace_refusal_preserves_author_publications() {
+    let mut runtime=Runtime::for_test();let mut host=NoHost::default();
+    runtime.execute("var published='before',probe={toString:function(){published='search';return '\\ud800';}},position={valueOf:function(){published='position';return 0;}};",&mut host).unwrap();
+    let search=runtime.execute("probe;",&mut host).unwrap();let position=runtime.execute("position;",&mut host).unwrap();
+    let retained=runtime.value_bytes;let limit=runtime.limits.heap.retained_values;
+    runtime.limits.heap.retained_values=retained+1024;runtime.begin_job();
+    let error=runtime.string_index_value(&Value::StringUnits(vec![0xd800;4096]),&[search,position],false,&mut host).unwrap_err();
+    assert!(error.message.contains("workspace limit"),"{}",error.message);
+    assert!(runtime.value_bytes<=retained+1024);
+    runtime.limits.heap.retained_values=limit;runtime.begin_job();
+    assert_eq!(runtime.execute("published;",&mut host).unwrap().to_text(),"position");
+    assert_eq!(runtime.execute("'\\ud800x\\ud800'.indexOf('\\ud800');",&mut host).unwrap().to_text(),"0");
+}
+
+
+#[test]
+fn string_index_utf16_empty_and_impossible_ranges_need_no_unit_scratch() {
+    let mut runtime=Runtime::for_test();let mut host=NoHost::default();
+    let receiver=Value::StringUnits(vec![0xd800,65,0xd800]);
+    let retained=runtime.value_bytes;let limit=runtime.limits.heap.retained_values;
+    runtime.limits.heap.retained_values=retained;runtime.begin_job();
+    assert_eq!(runtime.string_index_value(&receiver,&[Value::String(String::new()),Value::Number(f64::INFINITY)],false,&mut host).unwrap().to_text(),"3");
+    assert_eq!(runtime.value_bytes,retained);
+    runtime.limits.heap.retained_values=retained+2;runtime.begin_job();
+    assert_eq!(runtime.string_index_value(&receiver,&[Value::StringUnits(vec![0xd800]),Value::Number(f64::INFINITY)],false,&mut host).unwrap().to_text(),"-1");
+    assert_eq!(runtime.value_bytes,retained);
+    runtime.limits.heap.retained_values=retained+8;runtime.begin_job();
+    assert_eq!(runtime.string_index_value(&receiver,&[Value::StringUnits(vec![0xd800;4])],false,&mut host).unwrap().to_text(),"-1");
+    assert_eq!(runtime.value_bytes,retained);runtime.limits.heap.retained_values=limit;
+}

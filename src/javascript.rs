@@ -10262,6 +10262,9 @@ impl Runtime {
         if method == "lastIndexOf" && object.is_string() {
             return self.string_last_index_value(&object, args, host);
         }
+        if method == "indexOf" && object.is_string() {
+            return self.string_index_value(&object, args, false, host);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
                 "charCodeAt" | "codePointAt" | "charAt" => self.raw_string_character(units, method, args),
@@ -10286,7 +10289,7 @@ impl Runtime {
                 "trim" => self.checked_value(Value::String(text.trim_matches(js_space).into())),
                 "toLowerCase" => self.checked_value(Value::String(text.to_lowercase())),
                 "toUpperCase" => self.checked_value(Value::String(text.to_uppercase())),
-                "includes" | "startsWith" | "endsWith" | "indexOf" => {
+                "includes" | "startsWith" | "endsWith" => {
                     let search = args.first().unwrap_or(&Value::Undefined);
                     search.primitive()?;
                     self.work(search.bytes())?;
@@ -10329,11 +10332,7 @@ impl Runtime {
                         }
                         found
                     };
-                    if method == "indexOf" {
-                        Ok(Value::Number(index.map_or(-1.0, |index| index as f64)))
-                    } else {
-                        Ok(Value::Bool(index.is_some()))
-                    }
+                    Ok(Value::Bool(index.is_some()))
                 }
                 _ => Err(Fault::new(format!(
                     "String method {method:?} is not implemented."
