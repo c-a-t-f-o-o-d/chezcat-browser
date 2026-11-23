@@ -50,15 +50,12 @@ impl Runtime {
             self.store_property(self.function_properties[allocation.id],"prototype".into(),
                 Value::Object(prototype),Some((false,false,false)))?;
             for &(name,operation) in FIELDS {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)?
-                    else {unreachable!()};
-                let set=match name {
-                    "cancelBubble"=>Some("\0Event.set.cancelBubble"),
-                    "returnValue"=>Some("\0Event.set.returnValue"),
-                    _=>None,
-                }.map(|operation|self.event_native_function(window,operation,&format!("set {name}"),1))
-                    .transpose()?.map(|value|{let Value::Function(id)=value else {unreachable!()};id});
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set},(true,true))?;
+                let setter = match name {
+                    "cancelBubble" => Some("\0Event.set.cancelBubble"),
+                    "returnValue" => Some("\0Event.set.returnValue"),
+                    _ => None,
+                };
+                self.define_host_attribute(prototype, window, name, operation, setter)?;
             }
             for (name,operation,length) in [
                 ("composedPath",PATH_METHOD,0),
@@ -109,9 +106,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),
                 Value::Object(prototype),Some((false,false,false)))?;
-            let Value::Function(get)=self.event_native_function(window,"\0CustomEvent.get.detail","get detail",0)?
-                else {unreachable!()};
-            self.store_accessor_property(prototype,"detail".into(),Accessors {get:Some(get),set:None},(true,true))?;
+            self.define_host_attribute(prototype, window, "detail", "\0CustomEvent.get.detail", None)?;
             let initializer=self.event_native_function(window,"initCustomEvent","initCustomEvent",1)?;
             self.store_property(prototype,"initCustomEvent".into(),initializer,Some((true,true,true)))?;
             self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),
@@ -145,9 +140,7 @@ impl Runtime {
             self.store_property(self.function_properties[allocation.id],"prototype".into(),
                 Value::Object(prototype),Some((false,false,false)))?;
             for (name,operation) in [("view","\0UIEvent.get.view"),("detail","\0UIEvent.get.detail"),("which","\0UIEvent.get.which")] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)?
-                    else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             let initializer=self.event_native_function(window,"initUIEvent","initUIEvent",1)?;
             self.store_property(prototype,"initUIEvent".into(),initializer,Some((true,true,true)))?;
@@ -193,9 +186,7 @@ impl Runtime {
                 ("button","\0MouseEvent.get.button"),("buttons","\0MouseEvent.get.buttons"),
                 ("relatedTarget","\0MouseEvent.get.relatedTarget"),
             ] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)?
-                    else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             for method in ["initMouseEvent","getModifierState"] {
                 let function=self.event_native_function(window,method,method,1)?;
@@ -236,8 +227,7 @@ impl Runtime {
                 ("isComposing","\0KeyboardEvent.get.isComposing"),("keyCode","\0KeyboardEvent.get.keyCode"),
                 ("charCode","\0KeyboardEvent.get.charCode"),
             ] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             let modifier=self.event_native_function(window,"\0KeyboardEvent.getModifierState","getModifierState",1)?;
             self.store_property(prototype,"getModifierState".into(),modifier,Some((true,true,true)))?;
@@ -271,8 +261,7 @@ impl Runtime {
             self.objects[prototype].prototype=Some(Ordinary::Object(parent));
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
-            let Value::Function(get)=self.event_native_function(window,"\0FocusEvent.get.relatedTarget","get relatedTarget",0)? else {unreachable!()};
-            self.store_accessor_property(prototype,"relatedTarget".into(),Accessors {get:Some(get),set:None},(true,true))?;
+            self.define_host_attribute(prototype, window, "relatedTarget", "\0FocusEvent.get.relatedTarget", None)?;
             self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("FocusEvent".into()),Some((false,false,true)))?;
             self.native_constructor_prototypes.insert((window,"FocusEvent"),prototype);
             self.put_binding(self.global_environment,"FocusEvent".into(),Some(constructor),super::Declaration::Var,false)?;
@@ -299,8 +288,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,operation) in [("lengthComputable","\0ProgressEvent.get.lengthComputable"),("loaded","\0ProgressEvent.get.loaded"),("total","\0ProgressEvent.get.total")] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("ProgressEvent".into()),Some((false,false,true)))?;
             self.native_constructor_prototypes.insert((window,"ProgressEvent"),prototype);
@@ -328,8 +316,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,operation) in [("deltaX","\0WheelEvent.get.deltaX"),("deltaY","\0WheelEvent.get.deltaY"),("deltaZ","\0WheelEvent.get.deltaZ"),("deltaMode","\0WheelEvent.get.deltaMode"),("momentum","\0WheelEvent.get.momentum")] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             for (name,value) in [("DOM_DELTA_PIXEL",0.0),("DOM_DELTA_LINE",1.0),("DOM_DELTA_PAGE",2.0)] {
                 for object in [prototype,self.function_properties[allocation.id]] {self.store_property(object,name.into(),Value::Number(value),Some((true,false,false)))?;}
@@ -360,8 +347,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,operation) in [("message","\0ErrorEvent.get.message"),("filename","\0ErrorEvent.get.filename"),("lineno","\0ErrorEvent.get.lineno"),("colno","\0ErrorEvent.get.colno"),("error","\0ErrorEvent.get.error")] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("ErrorEvent".into()),Some((false,false,true)))?;
             self.native_constructor_prototypes.insert((window,"ErrorEvent"),prototype);
@@ -389,8 +375,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,operation) in [("animationName","\0AnimationEvent.get.animationName"),("elapsedTime","\0AnimationEvent.get.elapsedTime"),("pseudoElement","\0AnimationEvent.get.pseudoElement")] {
-                let Value::Function(get)=self.event_native_function(window,operation,&format!("get {name}"),0)? else {unreachable!()};
-                self.store_accessor_property(prototype,name.into(),Accessors {get:Some(get),set:None},(true,true))?;
+                self.define_host_attribute(prototype, window, name, operation, None)?;
             }
             self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("AnimationEvent".into()),Some((false,false,true)))?;
             self.native_constructor_prototypes.insert((window,"AnimationEvent"),prototype);

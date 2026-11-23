@@ -125,6 +125,7 @@ impl Runtime {
         };
         if let Some(prototype) = prototype {
             if let Some(owner) = self.property_owner(Ordinary::Object(prototype), &name)? {
+                self.materialize_host_accessor(owner, &name, true)?;
                 let property = self.objects[owner].properties.get(&name);
                 if let Some(setter) = property
                     .and_then(|property| property.accessor)

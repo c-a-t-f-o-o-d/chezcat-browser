@@ -109,8 +109,8 @@ var own=ChildFunction('var e=new UIEvent("own",{view:window});return e.view===wi
     diverge(&mut page);
     let count=page.state.created_events.len();
     let next=page.state.next_event;
-    let allocations=page.runtime.window_allocation_state_for_test();
     for source in ["new w.UIEvent(type,options);","new ChildC(type,options);","read(event);","getSaved(event,get);","initSaved(event,init,type);"] {
+        let allocations=page.runtime.window_allocation_state_for_test();
         let outcome=page.console_eval(&mut doc,&mut forms,source);
         assert_eq!(outcome.errors,1,"{source}: {}",page.report());
         assert!(page.report().contains("same-origin"),"{source}: {}",page.report());

@@ -1,6 +1,6 @@
 //! Genuine finite media interfaces over the embedding's existing native player.
 //! Interface identity does not manufacture another controller or decoder.
-use super::{Accessors, Fault, Function, Ordinary, Runtime, Value};
+use super::{ Fault, Function, Ordinary, Runtime, Value};
 
 impl Runtime {
     fn media_native_function(&mut self,window:u32,operation:&'static str,name:&str,length:usize)
@@ -53,11 +53,7 @@ impl Runtime {
                     ("videoHeight","\0Video.get.videoHeight",None),
                 ]};
                 for &(field,operation,setter) in fields {
-                    let Value::Function(get)=self.media_native_function(window,operation,&format!("get {field}"),0)?
-                        else {unreachable!()};
-                    let set=setter.map(|operation|self.media_native_function(window,operation,&format!("set {field}"),1))
-                        .transpose()?.map(|value|{let Value::Function(id)=value else {unreachable!()};id});
-                    self.store_accessor_property(prototype,field.into(),Accessors {get:Some(get),set},(true,true))?;
+                    self.define_host_attribute(prototype, window, field, operation, setter)?;
                 }
                 if name=="HTMLMediaElement" {
                     for (method,operation) in [("load","\0Media.load"),("pause","\0Media.pause"),("play","\0Media.play")] {

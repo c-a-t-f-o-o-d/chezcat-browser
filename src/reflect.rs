@@ -208,6 +208,9 @@ impl Runtime {
                     "Reflect.set on this exotic prototype or target is not implemented.",
                 ));
             }
+            if let PropertyKey::String(name) = &key {
+                self.materialize_host_accessor(id, name, true)?;
+            }
             if let Some(property) = self.stored_descriptor_property(id, &key) {
                 if let Some(accessor) = property.accessor {
                     let Some(setter) = accessor.set else {
