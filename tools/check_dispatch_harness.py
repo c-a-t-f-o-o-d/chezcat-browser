@@ -364,7 +364,7 @@ def ui_event_case(exe, folder, *, source=None):
                 "var factory=document.createEvent('UIEvents')", "P.initUIEvent.call(factory,'ui-factory'",
                 "var child=new ChildC('child-ui'", "getView.call(child)!==childWindow",
                 "if(!input.isTrusted||!input.composed", "getWhich.call(event)!==65",
-                "P.initUIEvent.call(event,'ignored'", "typeof MouseEvent!=='function'", "typeof CustomEvent!=='function'"])
+                "P.initUIEvent.call(event,'ignored'", "Object.getPrototypeOf(event)!==KeyboardEvent.prototype", "Object.getPrototypeOf(KeyboardEvent.prototype)!==UIEvent.prototype", "typeof MouseEvent!=='function'", "typeof CustomEvent!=='function'"])
             expected_title = {'before': 'Original UIEvent waiting', 'keyboard': 'Original UIEvent keyboard passed',
                 'first': 'Original UIEvent activation 1 passed', 'second': 'Original UIEvent activation 2 passed'}[label]
             checks['ui_event_' + label + '_actual_document_title'] = 'Page title: ' + expected_title in activity
@@ -532,7 +532,7 @@ def mouse_event_case(exe, folder, *, source=None):
                 "getClient.call(input)", "input instanceof C", "error.name==='NotSupportedError'",
                 "event.target!==null", "P.initMouseEvent.call(event,'legacy-mouse'",
                 "var factory=document.createEvent('MouseEvents')", "var child=new ChildC('child-mouse'",
-                "getView.call(child)!==childWindow", "typeof KeyboardEvent!=='undefined'", "typeof CustomEvent!=='function'"])
+                "getView.call(child)!==childWindow", "Object.getPrototypeOf(KeyboardEvent.prototype)!==UIEvent.prototype", "typeof PointerEvent!=='undefined'", "typeof CustomEvent!=='function'"])
             title = 'Original MouseEvent waiting' if label == 'before' else 'Original MouseEvent activation ' + ('1' if label == 'first' else '2') + ' passed'
             checks['mouse_event_' + label + '_actual_document_title'] = 'Page title: ' + title in activity
             if label in ['first', 'second']:
@@ -791,7 +791,13 @@ def main():
     guarded=read('guarded','activity.txt');recovered=read('recovered','activity.txt');layout=read('recovered','layout.txt')
     target=read('target','activity.txt');target_layout=read('target','layout.txt')
     interface=read('interface','activity.txt');interface_layout=read('interface','layout.txt')
-    checks={'process_survived_nested_guard':row['state']=='completed','measured_native_reserve':reserve==8*1024*1024 and 0<commit<reserve,'guard_reached':'Function call limit reached' in guarded or 'evaluation nesting' in guarded,'continued_real_input_recovered':'Page title: Nested dispatch recovered' in recovered,'real_recovered_text_rendered':all(('text="'+word+'"') in layout for word in ['Nested','dispatch','recovered']),'paired_pixels_written':'Stage paired_ppm_written=1' in guarded and 'Stage paired_ppm_written=1' in recovered,'source_unchanged':before==capture_tests.source_identity(ROOT)}
+    measured = re.search(
+        r'Native stack headroom exhausted during (?:Function call|evaluator entry): '
+        r'(\d+) bytes available; (\d+) bytes reserved for guarded evaluator work and unwind \(native stack limit\)',
+        guarded,
+    )
+    native_refusal = measured is not None and int(measured[1]) < int(measured[2]) == min(1024 * 1024, reserve // 3)
+    checks={'process_survived_nested_guard':row['state']=='completed','measured_native_reserve':reserve==8*1024*1024 and 0<commit<reserve,'guard_reached':native_refusal,'continued_real_input_recovered':'Page title: Nested dispatch recovered' in recovered,'real_recovered_text_rendered':all(('text="'+word+'"') in layout for word in ['Nested','dispatch','recovered']),'paired_pixels_written':'Stage paired_ppm_written=1' in guarded and 'Stage paired_ppm_written=1' in recovered,'source_unchanged':before==capture_tests.source_identity(ROOT)}
     checks.update({'standalone_target_real_dispatch':'Page title: Standalone EventTarget delivered' in target,'standalone_target_text_rendered':all(('text="'+word+'"') in target_layout for word in ['Standalone','EventTarget','delivered']),'standalone_target_pixels_written':'Stage paired_ppm_written=1' in target})
     checks.update({'element_prototype_real_extension':'Page title: Element prototype extension delivered' in interface,'element_prototype_text_rendered':all(('text="'+word+'"') in interface_layout for word in ['Element','prototype','extension','delivered']),'element_prototype_pixels_written':'Stage paired_ppm_written=1' in interface})
     custom=custom_event_case(exe,folder/'custom-event')

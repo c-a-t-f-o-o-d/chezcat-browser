@@ -20,14 +20,14 @@ var method=Object.getOwnPropertyDescriptor(P,'initUIEvent');
 if(typeof method.value!=='function'||method.value.length!==1||!method.writable||!method.enumerable||!method.configurable)throw Error('Canonical UI initializer');
 var badBrands=0;try{getView.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
 try{getDetail.call(new Event('base-only'));}catch(error){if(error.name==='TypeError')badBrands++;}
-if(badBrands!==2||typeof MouseEvent!=='function'||typeof CustomEvent!=='function'||typeof KeyboardEvent!=='undefined')throw Error('Genuine UI brands and deferred constructors');
+if(badBrands!==2||typeof MouseEvent!=='function'||typeof CustomEvent!=='function'||typeof KeyboardEvent!=='function'||Object.getPrototypeOf(KeyboardEvent)!==UIEvent||Object.getPrototypeOf(KeyboardEvent.prototype)!==UIEvent.prototype)throw Error('Genuine UI brands and keyboard constructor ancestry');
 var defaults=new C('defaults');if(defaults.view!==null||defaults.detail!==0||defaults.which!==0||defaults.bubbles||defaults.cancelable||defaults.composed||defaults.isTrusted)throw Error('UIEvent dictionary defaults');
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
 var childWindow=frame.contentWindow,ChildC=childWindow.UIEvent,ChildP=ChildC.prototype;
 if(ChildC===C||ChildP===P||Object.getPrototypeOf(ChildC)!==childWindow.Event||Object.getPrototypeOf(ChildP)!==childWindow.Event.prototype)throw Error('Canonical child UIEvent inheritance');
 function nativeKey(event){
  if(event.key!=='a'||event.ctrlKey)return;
- if(!event.isTrusted||!event.composed||!(event instanceof C)||!(event instanceof Event)||getView.call(event)!==window||getDetail.call(event)!==0||getWhich.call(event)!==65||event.target!==keys)throw Error('Actual native keyboard UI ancestry and slots');
+ if(!event.isTrusted||!event.composed||!(event instanceof KeyboardEvent)||Object.getPrototypeOf(event)!==KeyboardEvent.prototype||!(event instanceof C)||!(event instanceof Event)||getView.call(event)!==window||getDetail.call(event)!==0||getWhich.call(event)!==65||event.target!==keys)throw Error('Actual native keyboard UI ancestry and slots');
  var type=event.type,stamp=event.timeStamp;P.initUIEvent.call(event,'ignored',false,false,null,17);
  if(event.type!==type||event.timeStamp!==stamp||getView.call(event)!==window||getDetail.call(event)!==0||!event.isTrusted)throw Error('Native UI initialization is a dispatch no-op');
  if(event.type==='keydown')keyDown++;else if(event.type==='keyup')keyUp++;else throw Error('Unexpected native key producer');
