@@ -6,6 +6,10 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+#[cfg(test)]
+#[path = "script_link_charset_tests.rs"]
+mod charset_tests;
+
 pub type DynamicStylesheet = Arc<StylesheetRequest>;
 
 #[derive(Debug)]
@@ -296,6 +300,10 @@ impl Page {
 }
 
 impl Bridge<'_> {
+    pub(super) fn stylesheet_charset_attribute(&self, node: usize, name: &crate::html::AttributeName) -> bool {
+        self.dom_stylesheet(node) && name.html_is("charset")
+    }
+
     // https://html.spec.whatwg.org/multipage/semantics.html#update-a-style-block
     // The node stays real on CSP/MIME refusal. Source-limit failures precede
     // mutation and never publish a partial sheet or displace a preceding one.
@@ -353,6 +361,14 @@ impl Bridge<'_> {
         let Some(attribute) = link_attribute(property) else {
             return Ok(None);
         };
+        if attribute == "charset" {
+            let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else {unreachable!()};
+            self.state.work(attrs.len())?;
+            return match self.doc.dom_attr(node, attribute) {
+                Some(value) => Self::dom_string_value(self.state, value).map(Some),
+                None => self.string("").map(Some),
+            };
+        }
         if attribute == "disabled" {
             return Ok(Some(Value::Bool(self.doc.attr(node, attribute).is_some())));
         }
@@ -382,6 +398,13 @@ impl Bridge<'_> {
         let Some(attribute) = link_attribute(property) else {
             return Ok(false);
         };
+        if attribute == "charset" {
+            let value = self.dom_text(value)?;
+            self.state.copies(attribute.len())?;
+            let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text(attribute)?);
+            self.public_dom_attribute(node, name, Some(value), script_attr::InputPreparation::Pending)?;
+            return Ok(true);
+        }
         let value = if attribute == "disabled" {
             value.truthy().then(String::new)
         } else {

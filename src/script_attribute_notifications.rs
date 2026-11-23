@@ -112,6 +112,7 @@ impl Bridge<'_> {
             "className" if html => "class",
             "classList" if self.class_list_element_receiver(object) => "class",
             "title" if html => "title",
+            "charset" if self.dom_stylesheet(node) => "charset",
             _ if html && self.html_text_reflection(node, property).is_some() => {
                 self.html_text_reflection(node, property).unwrap()
             }
