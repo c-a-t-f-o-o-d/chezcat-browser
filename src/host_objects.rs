@@ -325,7 +325,7 @@ impl Runtime {
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
                 if name=="Node" {
-                    let readers = [("getRootNode", "\0Node.getRootNode", 0),
+                    let readers = [("hasChildNodes", super::NODE_HAS_CHILDREN, 0), ("getRootNode", "\0Node.getRootNode", 0),
                         ("contains", "\0Node.contains", 1), ("normalize","\0Node.normalize",0), ("cloneNode", "\0Node.cloneNode", 0),("isDefaultNamespace","\0Node.isDefaultNamespace",1),("lookupNamespaceURI","\0Node.lookupNamespaceURI",1),("lookupPrefix","\0Node.lookupPrefix",1),("isSameNode","\0Node.isSameNode",1),("isEqualNode","\0Node.isEqualNode",1),("compareDocumentPosition","\0Node.compareDocumentPosition",1)];
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),

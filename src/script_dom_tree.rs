@@ -374,6 +374,24 @@ impl Bridge<'_> {
         self.node_identity_receiver(object) || self.frame_contains_node(object).is_some()
     }
 
+    pub(super) fn has_child_nodes(&mut self, object: u32) -> Result<Value, String> {
+        self.native_node_access(object).map_err(|(_, message)| message)?;
+        self.state.work(1)?;
+        let has_children = if let Some((owner, root)) = self.frame_contains_node(object) {
+            !self.contains_child_document(owner)?.nodes[root].children.is_empty()
+        } else if let Some(children) = self.inert_children(object) {
+            !children.is_empty()
+        } else if self.attr_receiver(object) || self.template_receiver(object) {
+            // Attr has no children. Loaded template contents have a separate fragment.
+            false
+        } else {
+            let root = if object == DOCUMENT { 0 } else { node_index(object).ok_or("Unknown native child topology.")? };
+            self.check_iframe_child_topology(root)?;
+            !self.doc.nodes[root].children.is_empty()
+        };
+        Ok(Value::Bool(has_children))
+    }
+
     pub(super) fn canonical_node_value(&mut self, object: u32) -> Result<Value, String> {
         self.native_node_access(object).map_err(|(_, message)| message)?;
         if self.attr_receiver(object) { return self.attr_get(object, "value"); }

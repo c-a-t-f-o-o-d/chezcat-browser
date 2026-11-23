@@ -547,6 +547,7 @@ pub(crate) const PARENT_NODE_GETTERS: [(&str, &str); 4] = [
     ("lastElementChild", "\0ParentNode.get.lastElementChild"),
     ("childElementCount", "\0ParentNode.get.childElementCount"),
 ];
+pub(crate) const NODE_HAS_CHILDREN: &str = "\0Node.hasChildNodes";
 pub(crate) const NODE_VALUE_GET: &str = "\0Node.get.nodeValue";
 pub(crate) const NODE_VALUE_SET: &str = "\0Node.set.nodeValue";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
@@ -9197,7 +9198,7 @@ impl Runtime {
             if setter { &args[..args.len().min(1)] } else { &[][..] }
         } else {
             match method {
-                ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET => &[][..],
+                ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET | NODE_HAS_CHILDREN => &[][..],
                 ELEMENT_STYLE_SET | SVG_STYLE_SET | NODE_VALUE_SET => &args[..args.len().min(1)],
                 _ => args,
             }

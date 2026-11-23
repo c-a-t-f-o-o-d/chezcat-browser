@@ -223,6 +223,16 @@
       ],
       "status": "partial",
       "scope": "required",
+      "browser_runtime_observation": {
+        "source_commit": "09a88b13b516356ed59330db9ee5831568574034",
+        "selected_files_attempted": 21,
+        "files_with_terminal_summary": 10,
+        "files_with_details_rendered": 6,
+        "files_without_terminal_summary": 11,
+        "reported_subtests_passed": 428,
+        "reported_subtests_failed": 726,
+        "scope": "Unmodified pinned pages and original scripts loaded in the Windows App. Four additional terminal summaries reported counts before detail rendering failed. Files without a terminal summary have no measured result totals."
+      },
       "source_anchors": [
         "src/html.rs",
         "src/host_objects.rs",
@@ -274,7 +284,7 @@
                 "F01-html-document-factory-kind-and-owner",
                 "F01-xml-document-factory-and-namespace"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Real XMLDocument factory identity and optional root records now preserve actual owners, expanded names, XML case and namespace-based content types. Empty documents have no fabricated HTML nodes. Fixed HTML/XML factory witnesses pass. complete document clone/root mutation, XML byte/DTD/entity/CDATA producers, MIME/XML routing and unchanged browser WPT remain required; no package closure.",
               "closing_evidence": []
             },
@@ -306,7 +316,7 @@
                 "F10"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Factory XML documents carry actual no-quirks kind/mode/MIME/URL and no Window. Head/body/title read current native children after mutations and title normalization preserves units; original App binding and storage negatives pass. The selected network/local HTML and plain-text decoder is retained through document commit and read by the three Document encoding getters. Original App cases cover legacy transport/meta, BOM precedence, factory defaults, receiver checks and refused navigation. Confidence/restart, inheritance, broader origin/readiness and loader/resource integration remain required.",
               "closing_evidence": []
             },
@@ -343,7 +353,7 @@
               "required_original_witness_ids": [
                 "F01-loaded-doctype-node"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Genuine loaded/inert/factory doctype payloads, canonical getters, exact DOMStrings, owner/order, clone/import, hierarchy refusal, allocation refusal/recovery and cancellation have native original evidence. Frozen loaded-doctype witness passes. Document-root mutation/adoption, full parser recovery and unchanged browser WPT remain open; no package closure.",
               "closing_evidence": []
             },
@@ -379,7 +389,7 @@
                 "F13"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Iterative doctype producer applies the reviewed normative identifier classification and retains all three distinct native modes. Main/inert compatMode consumes that state. Live class collections use the current owner mode for ASCII class matching, including after adoption, and retain exact UTF-16 tokens. HTML factory/initial blank are no-quirks and native views inherit owner state. Original App checks exercise all three records without rendering doctype boxes. Full F05 initial/tree recovery, F07 fragment-mode inheritance and F13 quirks layout remain required; native mode/API evidence does not close those integrations.",
               "closing_evidence": []
             }
@@ -428,7 +438,7 @@
               "required_original_witness_ids": [
                 "F01-arbitrary-element-namespace-prefix-and-clone"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Real arbitrary/null URI and prefix/local records, exact URI DOMString units, qualified names, supported clone/owner behavior and canonical default-namespace lookup have original native and connected App evidence. Fixed arbitrary-namespace/prefix/clone witness now passes. Element prefix/raw-local DOMString records, ordinary/namespace-aware main/inert factories and XML roots, ordered validation, exact getters/clone and qualified-tag filters now retain actual units. Scalar selector type matching uses real local units with document-sensitive HTML folding, XML/SVG case and non-ASCII unescaped identifiers. Original storage/no-slot/copy/refusal/origin and connected App same-node/Attr/list/query/pixel/editor/link evidence cover this producer. Legal inert SVG edges remain data; preflight and the direct native sink enforce rendering-edge policy before publication, with no-prefix refusal and safe recovery checked. Document and Element getElementsByTagNameNS now provide live namespace/local-name filtering in supported owners, including XML factory documents and initial blank child documents. Original tests cover wildcard and nullable namespaces, exact UTF-16 units, ordering after mutation, owner access and storage refusal. The connected App reads the imported prefixed element before checking pixels and input. Foreign activation/import/adoption, raw-name serialization and F05/F06/F08 integration remain open. Unknown parser provenance is not fabricated as a null URI. XML factory roots and common node factories now consume the same native records with real XML owners and case rules; XML parsing/complete adoption remain open.",
               "closing_evidence": []
             },
@@ -466,7 +476,7 @@
               "required_original_witness_ids": [
                 "F01-attribute-domstring-unpaired-utf16"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Native Attr now has real illegal-constructor/Node inheritance and canonical namespace/name/owner/specified/value descriptors, exact native value setter observation and stable empty childNodes. Canonical Document factories retain main/inert HTML/XML/template owners, HTML-only local-name folding, ordered conversion/namespace errors and actual associated documents. Name/backing/refusal/recovery, captured-origin and App main attachment evidence cover this producer. Canonical Element attribute-node methods now attach/remove genuine identities on inert HTML/XML/foreign elements, adopt actual documents, replace expanded names with incoming QName, preserve old identities/values/maps and publish observation with joint source/identity backing admission. Original source/Attr/index storage/refusal/recovery, captured-origin and connected App promotion checks cover this transfer. Ordinary scalar inert foreign/SVG setAttribute/NS now stores real data, with actual owner case, expanded names, existing-prefix/Attr identity and observation. Fragment preflight reuses current subtree activation checks for typed refusal before publication; native storage/copy refusal/recovery and connected App SVG paint/editor/link pass. Attribute URI DOMString storage, exact UTF-16 equality/index/factory/nullable validation/getter/lookup/removal/observation and supported inert clone/attachment now have native raw-versus-replacement/null, quota/refusal, origin and connected App same-Attr evidence. Attr qualified/prefix/local fields now also retain exact DOMString units through factories, current name/namespace validation, main/inert qualified and expanded lookup, owner-index keys, HTML-only ASCII folding/XML case, getters, native name snapshots, supported inert clone/attachment/removal and original mutation names. Non-ASCII HTML names remain ordinary data and cannot name native ASCII effects. Zero/one namespace metadata uses separately admitted fallible backing, preserving 140,000 genuine Attr records within the unchanged 64 MiB native allowance. Native exact backing/refusal/recovery and connected App raw-prefix/local same-Attr checks cover this boundary. Native Attr leaf clone/import now creates independent detached identities with exact names/current attached-or-detached value, source-associated or actual destination document, no owner mutation and no copied author properties. Main/inert HTML/XML/template destinations, dictionary reentry, bounded ordinary Attr author fields, native registry/payload refusal/recovery, origin and connected App copy/import/pixel/editor/link checks cover this producer. MutationObserver attributeFilter now converts and stores exact DOMString sequences with actual vector/projection/unit capacity, stable snapshots, code-unit equality, unchanged namespace exclusion and case sensitivity. Ordered dictionary/iterator conversion, reentry, iterator close, atomic subscription refusal/replacement credit/disconnect refund, origin and connected App raw-name filtered delivery/pixels/editor/link have original evidence. Loaded-source clones now own immutable payload snapshots even when no native slot can be reserved. Actual reserved/no-slot identities remain stable across original reactivation and mutation; native compact snapshot/child-link/backing accounting, storage/copy refusal/recovery and connected App no-slot data binding/pixels/editor/link have original evidence. Ordinary inert-target Document.importNode now stages actual destination owners, independent parent/child/Attr identities, exact namespaces/names/character leaves/doctype and genuine fragment semantics from main or inert data. Dictionary callbacks complete before typed deep-source revalidation and one batch admission. Native controls/resources/focus/template/customized clone hooks remain guarded. Native no-slot snapshot/link/backing/refusal/recovery, origin and connected App source-independent same-copy activation/pixels/editor/link cover this producer. Associated template-owner documents now retain the actual source HTML/XML kind with generic Document identity, default application/xml MIME, UTF-8/about:blank/no-quirks/null-view metadata and one-per-source/self-reuse rules. Factory case, namespace, CDATA, tag/attribute/collection/selector consumers use kind independently of MIME; XML template markup operations explicitly await the XML backend. Native joint owner/implementation/content backing refusal/recovery, origin and connected App XML-owner CData/attribute binding/pixels/editor/link have evidence. Inert-target template imports now jointly stage appropriate destination owner/implementation, fresh shallow/deep content fragments, nested host/content links and the associated-document index. Existing owners and algorithm-created owner targets are reused; source contents are read natively before clone IDs, with ordinary inert host children separate and author-shadowed getters ignored. Actual joint payload/index/backing/copy refusal/recovery, origin and connected App destination-content same-node activation/pixels/editor/link have evidence. Native-main template host-child mutation, complete control/resource/customized hooks, raw-name serialization/dataset/property-name consumers, broader IDL and protected clone/import/activation integration remain required; no package/browser closure.",
               "closing_evidence": []
             },
@@ -523,7 +533,7 @@
                 "F08"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Genuine native CDATA factory records preserve exact UTF-16, actual XML owner, Text/CharacterData ancestry and kind through supported clone/import/mutation/promotion. Saved identity/author fields/old-value observation, exclusive-Text normalize boundaries, Range strings, actual storage/native-slot fallback/refusal/recovery and connected Windows App text/pixels/editor/link have original evidence. HTML factory rejection and XML closing-delimiter validation preserve ordered IDL conversion. XML byte/DTD/entity/parser/serialization producers, complete CharacterData methods and unchanged browser WPT remain open; no F01/F08 closure. Non-null XML factory doctype adoption now moves genuine same-identity leaves from loaded main, parsed/inert or detached sources, preserving payload and updating old child lists/doctype, owner/order, removal observation and main live Ranges. Storage/copy refusal/recovery and original connected App evidence cover this producer; general root mutation/adoptNode/document clone remain required. Same-owner inert Document child append/insert/remove/replace now applies current pre-insertion exclusions, preserves real roots/doctypes/metadata and saved identities, and covers fragment, observation, cycle, storage/copy refusal/recovery and connected App paths. Displayed-document root mutations, general cross-owner adoption, template-owner mutation and document clone remain required; unchanged browser WPT stays open. Supported inert Document cloning now batches new document/implementation/owner topology, stored kind/mode/MIME/URL and effective-base override, exact doctype/expanded-name/CharacterData units, independent state and source observations. Native storage/mode/no-slot/refusal/recovery and connected App evidence cover this producer. Deep template-containing or unknown-provenance documents refuse pending F06/parser support; displayed/template-owner Document cloning, broader metadata/lifecycle and complete clone hooks remain open. Canonical adoptNode now moves supported inert/passive native trees with the same handles, genuine Attr-associated documents, source removal/metadata, observer/main-Range changes and stable live views. Canonical Document/Element collection brands preserve saved filter/owner behavior; native form named-field precedence remains. Exact actual owner-index/child-link storage, payload retention, refusal/recovery/zero-growth, captured-realm origin and same-ID App export/return evidence cover this producer. Native resource/control/focus/frame/template lifecycle transfers and direct/automatic insertion consumers, broader namespace/IDL/mode and complete adoption/clone hooks remain open; unchanged browser WPT is still required. Supported direct inert append/insert now shares checked root promotion with fragment insertion, retains actual IDs, implicit owners/Attrs, old source-parent/document metadata and old/new observer records without a temporary fragment identity. Inert PI factories reserve native identity when available. Original no-extra-identity, source-root/storage/copy refusal/recovery, captured-origin and direct same-node Windows App evidence cover this slice. Unmaterialized producer, namespace/lifecycle, displayed-root, replacement and broader parser/shared insertion families remain required; no F01/F06/F08 or browser/package closure. Eligible XML factory HTML/SVG roots now reserve native identity before publication through the existing leaf reservation. Genuine document/implementation/doctype order and saved root/Attr/list/author identity survive direct activation. Late header refusal rolls back unpublished roots/identities, keeps paid backing and preserves the old doctype; copy refusal and recovery plus actual App evidence pass. Parsed/foreign/unavailable-slot/lifecycle materialization and broader insertion/namespace/IDL remain required; no package or browser closure. Eligible DOMParser HTML sources now join the existing unpublished source batch/ID projection before return, preserving real Doc/implementation/root/doctype/head/body/parent and native leaf identities. Actual tag/href capacities and native/inert backing are charged. Saved node/Attr/list/author references, direct insertion, source/destination observations, nonce/resource/template guards, source-staging storage/copy refusal/recovery and connected App evidence pass. This does not change or close the finite parser algorithm; F04/F05/F06/F08/full browser/package gates remain required. Native inert contains now follows actual ordinary parent links with nullable Node brands, saved identities, detach/adoption/current-owner and template/Attr boundaries; no owner-as-parent substitution. Native canonical isSameNode/isEqualNode now compare actual identities and iterative corresponding ordinary trees with exact UTF-16 namespace/name/data, unordered expanded-name attributes, native node interfaces and doctype tuples. Nullable Node brands, captured-origin/lifetime, template dedicated-root distinction, clone/import/current owners, scratch refusal/recovery and original connected App equality-derived binding/pixel/editor/link witnesses cover this producer. Native materialization of arbitrary unpaired attribute values, broader parser/custom-element/shadow/lifecycle and unchanged browser WPT remain open; no F01 closure.",
               "closing_evidence": []
             }
@@ -577,7 +587,7 @@
                 "F01-text-domstring-unpaired-utf16",
                 "F01-attribute-domstring-unpaired-utf16"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Native CharacterData and passive null-namespace HTML data-* Attr records preserve exact units through supported setters/aliases/old values/copy/promotion. Original focused/native App/storage/refusal/selector checks pass. Frozen Text and Attr witnesses pass; USV and saved-template-owner regressions pass. Broader attributes, dataset writes, HTML string reflections, arbitrary names/namespaces and serialization/consumer integration remain required. No unchanged browser-file closure; F06/F07/F08/F09 dependencies remain open. Element namespace URI records also retain raw UTF-16 and compare actual units in default-namespace lookup; Element QName inputs and getters now retain raw prefix/local units, with real names used by qualified tag views and scalar selector matching. Supported HTML fragment reads now serialize raw UTF-16 local names, attribute names and values, and CharacterData through the normal and template content getters. Broader foreign and XML markup, parser inputs and remaining consumers are still open. Inert attribute construction now retains arbitrary exact DOMString values across ordinary/arbitrary namespaces and actual HTML/XML/generic/template owners, with attached/detached Attr identity, live maps, original old-value observation, immutable clone/inert-import snapshots and ordered conversion/reentry effects. Inert id reads its authoritative null-namespace value, excluding namespaced lookalikes. Native storage payload/backing/refusal/recovery, result limits, no-slot/captured origin and original Windows App inert-observer-derived binding/pixel/editor/link witnesses cover this producer. Explicit native import/promotion guards preserve the existing raw XMLNS/null data- materialization boundary; other raw consumers, remaining named/selector ID lookup/URL/reflections/parser/XML and required unchanged browser WPT remain open, with no F01 closure.",
               "closing_evidence": []
             },
@@ -609,7 +619,7 @@
               "required_original_witness_ids": [
                 "F01-usvstring-replacement-distinct-from-domstring"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Canonical native compareDocumentPosition now covers actual main/inert/document/fragment/doctype/CharacterData/Attr and immutable child roots, current sibling and attribute-list order, stable reciprocal disconnected masks, detach/adopt/current owners and template dedicated-root separation. Nonnullable Node brands, both operand/captured caller origin/lifetime, iterative paid main/inert paths, child scratch admission, refusal/recovery,350-depth no-slot and original Windows App binding/pixels/editor/link provide supplementary evidence. Complete parser/custom-element/shadow/lifecycle and required unchanged browser WPT remain open; no F01 closure.",
               "closing_evidence": []
             }
@@ -650,7 +660,7 @@
               "required_original_witness_ids": [
                 "F01-stable-template-import-owner-and-saved-text"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Canonical Document/DocumentFragment getElementById now uses separate target-interface brands, required DOMString conversion and actual first-descendant tree order with exact UTF-16 ID values/null namespaces. Main scalar lookup retains the existing ID index with real-value verification and raw/large-query traversal; inert and fragment ordinary trees preserve current reordering/adoption, no-slot identities and dedicated template-root separation. Original projection-collision, borrowed-input/cache-cost, scratch/work refusal/recovery, captured-origin and connected Windows App same-element splice/binding/pixels/editor/link witnesses provide supplementary evidence. The native App retains the same checkbox identity and correct paint, control hits and adjacent link hits after moving an older control under a newer positioned parent. Inspector tree folding keeps the genuine doctype sibling visible. Existing main parser/lifecycle exposure and wider named/selector/raw lookup consumers, full parser/custom-element/shadow integration and required unchanged browser WPT remain open, with no F01 closure.",
               "closing_evidence": []
             },
@@ -684,7 +694,7 @@
               "required_original_witness_ids": [
                 "F01-stable-template-import-owner-and-saved-text"
               ],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
               "closing_evidence": []
             },
@@ -718,7 +728,7 @@
                 "F12"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
               "closing_evidence": []
             }
@@ -759,7 +769,7 @@
                 "F06"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
               "closing_evidence": []
             },
@@ -792,7 +802,7 @@
                 "F12"
               ],
               "required_original_witness_ids": [],
-              "required_browser_selection": "All unchanged assertions in first F01 locked dom/nodes HTML/XHTML files; runtime subtest enumeration remains required and harness-blocked.",
+              "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
               "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT.",
               "closing_evidence": []
             }
