@@ -9,6 +9,85 @@ fn execute(page:&mut Page,doc:&mut Document,forms:&mut Forms,source:&str)->Value
     page.begin_job();page.runtime.execute(source,&mut Bridge{doc,forms,state:&mut page.state}).unwrap()
 }
 #[test]
+fn namespace_collection_exact_uri_local_name_wildcards_and_nullable_arguments() {
+    let (mut doc, mut forms, mut page) = page("<!doctype html><html><body></body></html>");
+    execute(&mut page, &mut doc, &mut forms, r#"
+var xml=document.implementation.createDocument(null,'Root'),root=xml.documentElement;
+var a=xml.createElementNS('urn:A','p:Mixed'),b=xml.createElementNS(null,'Mixed');
+var raw=xml.createElementNS('urn:\ud800','Mixed'),replacement=xml.createElementNS('urn:\ufffd','Mixed');
+var spelled=xml.createElementNS(null,'Q\ufffd');
+for(var node of [a,b,raw,replacement,spelled])root.appendChild(node);
+var named=Document.prototype.getElementsByTagNameNS,scoped=Element.prototype.getElementsByTagNameNS;
+if(named===scoped||named.name!=='getElementsByTagNameNS'||named.length!==2||scoped.length!==2)throw 'IDL methods';
+if(xml.getElementsByTagNameNS('*','*').length!==6||root.getElementsByTagNameNS('*','*').length!==5)throw 'descendant scope';
+if(named.call(xml,'urn:A','Mixed')[0]!==a||scoped.call(root,'urn:A','mixed').length||
+   scoped.call(root,'urn:A','p:Mixed').length||xml.getElementsByTagNameNS('urn:a','*').length)throw 'local versus qualified spelling';
+if(root.getElementsByTagNameNS(null,'Mixed')[0]!==b||root.getElementsByTagNameNS('','Mixed')[0]!==b||
+   root.getElementsByTagNameNS(undefined,'Mixed')[0]!==b||xml.getElementsByTagNameNS(null,'Root')[0]!==root)throw 'null namespace';
+if(root.getElementsByTagNameNS('*','Mixed').length!==4||root.getElementsByTagNameNS('urn:A','*').length!==1||
+   root.getElementsByTagNameNS('urn:\ud800','Mixed')[0]!==raw||root.getElementsByTagNameNS('urn:\ufffd','Mixed')[0]!==replacement||
+   root.getElementsByTagNameNS(null,'Q\ud800').length||root.getElementsByTagNameNS(null,'Q\ufffd')[0]!==spelled)throw 'raw units';
+var effects='',ns={toString:function(){effects+='n';return 'urn:A';}},local={toString:function(){effects+='l';return 'Mixed';}};
+var bad=0;try{named.call(root,ns,local);}catch(e){if(e instanceof TypeError)bad++;}
+try{scoped.call(xml,ns,local);}catch(e){if(e instanceof TypeError)bad++;}
+try{scoped.call(root,ns);}catch(e){if(e instanceof TypeError)bad++;}
+if(bad!==3||effects!==''||scoped.call(root,ns,local)[0]!==a||effects!=='nl')throw 'brand, arity or conversion order';
+var failed=false;
+try{scoped.call(root,ns,Symbol());}catch(e){failed=e instanceof TypeError;}
+if(!failed||effects!=='nln')throw 'second conversion refusal and earlier effect';
+var desc=Object.getOwnPropertyDescriptor(Document.prototype,'getElementsByTagNameNS');
+if(!desc.enumerable||!desc.writable||!desc.configurable||Object.hasOwn(xml,'getElementsByTagNameNS'))throw 'method descriptor';
+Object.defineProperty(Document.prototype,'getElementsByTagNameNS',{value:function(){return 17;},configurable:true});
+if(xml.getElementsByTagNameNS()!==17||named.call(xml,'urn:A','Mixed')[0]!==a)throw 'author override versus saved native query';
+delete Document.prototype.getElementsByTagNameNS;
+if(typeof xml.getElementsByTagNameNS!=='undefined')throw 'deleted prototype method resurrected';
+Object.defineProperty(Document.prototype,'getElementsByTagNameNS',desc);
+"#);
+}
+
+#[test]
+fn namespace_collection_live_order_adoption_template_separation_and_named_controls() {
+    let (mut doc, mut forms, mut page) = page("<!doctype html><html><body><form id='f'><input id='field' name='getElementsByTagNameNS'></form><template><i id='hidden'></i></template></body></html>");
+    execute(&mut page, &mut doc, &mut forms, r#"
+var html='http://www.w3.org/1999/xhtml',form=document.getElementById('f'),field=document.getElementById('field');
+if(form.getElementsByTagNameNS!==field||Element.prototype.getElementsByTagNameNS.call(form,html,'input')[0]!==field||
+   document.getElementsByTagNameNS(html,'i').length||document.getElementsByTagNameNS(html,'INPUT').length)throw 'named form and HTML casing';
+var x=document.implementation.createDocument('urn:r','r:root'),y=document.implementation.createDocument(null,'second');
+var section=x.createElementNS(null,'section');x.documentElement.appendChild(section);
+var one=x.createElementNS('urn:a','p:item'),two=x.createElementNS('urn:a','q:item');
+one.setAttribute('id','one');var items=section.getElementsByTagNameNS('urn:a','item');
+section.appendChild(one);section.insertBefore(two,one);
+if(items.length!==2||items.item(0)!==two||items[1]!==one||items.namedItem('one')!==one||items.item(2)!==null)throw 'live order';
+y.documentElement.appendChild(y.adoptNode(section));
+if(x.getElementsByTagNameNS('urn:a','item').length||y.getElementsByTagNameNS('urn:a','item')[0]!==two||
+   section.ownerDocument!==y||items[1]!==one)throw 'owner transfer';
+section.removeChild(two);if(items.length!==1||items[0]!==one)throw 'live removal';
+"#);
+}
+
+#[test]
+fn namespace_collection_storage_refusal_keeps_registry_and_recovers() {
+    let (mut doc, mut forms, mut page) = page("<html><body></body></html>");
+    let retained = page.state.retained;
+    let limit = page.state.retained_limit;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let args = [Value::String("urn:test".into()), Value::String("local".into())];
+    let string_limit = bridge.state.limits.host.string_bytes;
+    bridge.state.limits.host.string_bytes = 4;
+    assert!(bridge.create_namespace_collection(DOCUMENT, &args).is_err());
+    bridge.state.limits.host.string_bytes = string_limit;
+    bridge.state.retained_limit = retained + 3;
+    assert!(bridge.create_namespace_collection(DOCUMENT, &args).is_err());
+    assert!(bridge.state.dom.collections.is_empty());
+    assert_eq!(bridge.state.retained, retained);
+    bridge.state.retained_limit = limit;
+    let Value::Host(handle) = bridge.create_namespace_collection(DOCUMENT, &args).unwrap() else { unreachable!() };
+    let records = &bridge.state.dom.collections;
+    assert_eq!(bridge.state.retained, retained + records.capacity()*size_of::<TagCollection>() + records[0].filter.owned_bytes());
+    assert_eq!(bridge.tag_collection_get(handle,"length").unwrap().to_number(), 0.0);
+}
+
+#[test]
 fn class_collection_document_modes_fold_only_ascii_and_preserve_raw_tokens() {
     for (doctype, fold) in [
         ("", true),

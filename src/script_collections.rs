@@ -8,7 +8,25 @@ use crate::dom_string::DomStringRef;
 // Independent of adjacent Window/frame/node identities.
 const COLLECTION_BASE:u32=0x8c00_0000;
 const COLLECTION_END:u32=0x8d00_0000;
-pub(super) fn operation(method:&str)->Option<(&'static str,bool)>{use crate::javascript::*;match method{DOCUMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",true)),DOCUMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",true)),ELEMENT_GET_ELEMENTS_TAG=>Some(("getElementsByTagName",false)),ELEMENT_GET_ELEMENTS_CLASS=>Some(("getElementsByClassName",false)),_=>None}}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Query { Tag, Namespace, Class }
+
+impl Query {
+    pub(super) fn arity(self) -> usize { if self == Self::Namespace { 2 } else { 1 } }
+}
+
+pub(super) fn operation(method: &str) -> Option<(Query, bool)> {
+    use crate::javascript::*;
+    match method {
+        DOCUMENT_GET_ELEMENTS_TAG => Some((Query::Tag, true)),
+        DOCUMENT_GET_ELEMENTS_TAG_NS => Some((Query::Namespace, true)),
+        DOCUMENT_GET_ELEMENTS_CLASS => Some((Query::Class, true)),
+        ELEMENT_GET_ELEMENTS_TAG => Some((Query::Tag, false)),
+        ELEMENT_GET_ELEMENTS_TAG_NS => Some((Query::Namespace, false)),
+        ELEMENT_GET_ELEMENTS_CLASS => Some((Query::Class, false)),
+        _ => None,
+    }
+}
 #[cfg(test)]
 const MAX_COLLECTIONS:usize=128;
 
@@ -20,7 +38,91 @@ pub(super) struct TagCollection {
 enum Filter {
     Children(u32),
     Tag(DomString,bool),
+    Namespace(ExpandedNameFilter),
     Classes(Vec<Vec<u16>>),
+}
+
+// The local name and namespace are DOMStrings. A prefix is not part of either
+// comparison. Store the exact units without retaining a display projection.
+struct ExpandedNameFilter {
+    namespace: Option<Vec<u16>>,
+    local: Vec<u16>,
+}
+
+impl ExpandedNameFilter {
+    fn owned_bytes(&self) -> usize {
+        (self.local.capacity() + self.namespace.as_ref().map_or(0, Vec::capacity)) * size_of::<u16>()
+    }
+
+    fn all(&self) -> bool {
+        self.namespace.as_deref() == Some(&[0x2a]) && self.local == [0x2a]
+    }
+
+    fn matches(&self, namespace: crate::html::element_names::NamespaceRef<'_>, local: DomStringRef<'_>) -> bool {
+        use crate::html::element_names::NamespaceRef;
+        let actual = match namespace {
+            NamespaceRef::Null => None,
+            NamespaceRef::Static(uri) => Some(DomStringRef::Scalar(uri)),
+            NamespaceRef::Owned(uri) => Some(uri.view()),
+        };
+        let same_namespace = match (self.namespace.as_deref(), actual) {
+            (Some([0x2a]), _) | (None, None) => true,
+            (Some(expected), Some(value)) => value.same_units(DomStringRef::Raw(expected)),
+            _ => false,
+        };
+        same_namespace && (self.local == [0x2a] || local.same_units(DomStringRef::Raw(&self.local)))
+    }
+
+    fn matches_node(&self, node: &Node) -> Result<bool, String> {
+        let NodeKind::Element { tag, expanded_name, .. } = &node.kind else { return Ok(false); };
+        if self.all() { return Ok(true); }
+        let name = crate::html::element_names::local(node.namespace, tag, expanded_name)?;
+        let namespace = crate::html::element_names::namespace(node.namespace, expanded_name)?;
+        Ok(self.matches(namespace, name))
+    }
+
+    fn comparison_bytes(&self, node: &Node) -> Result<usize, String> {
+        use crate::html::element_names::NamespaceRef;
+        let NodeKind::Element { tag, expanded_name, .. } = &node.kind else { return Ok(0); };
+        if self.all() { return Ok(0); }
+        let local = crate::html::element_names::local(node.namespace, tag, expanded_name)?;
+        let namespace = crate::html::element_names::namespace(node.namespace, expanded_name)?;
+        let uri_bytes = match namespace {
+            NamespaceRef::Null => 0,
+            NamespaceRef::Static(uri) => uri.len(),
+            NamespaceRef::Owned(uri) => uri.logical_bytes(),
+        };
+        Ok(self.field_work(uri_bytes, local.logical_bytes()))
+    }
+
+    fn field_work(&self, uri_bytes: usize, local_bytes: usize) -> usize {
+        // Comparing an exact unit filter stops at the shorter string. A
+        // scalar view can consume up to four source bytes for its next unit.
+        let compare = |actual: usize, expected: &[u16]| {
+            if expected == [0x2a] { return 0; }
+            actual.min(expected.len().saturating_add(1).saturating_mul(4))
+                .saturating_add(expected.len().saturating_mul(2).min(actual.saturating_add(1).saturating_mul(2)))
+        };
+        compare(local_bytes, &self.local).saturating_add(self.namespace.as_deref().map_or(0, |ns| compare(uri_bytes, ns)))
+    }
+}
+
+fn converted_string(value: &Value) -> Result<DomStringRef<'_>, String> {
+    match value {
+        Value::String(s) => Ok(DomStringRef::Scalar(s)),
+        Value::StringUnits(units) => Ok(DomStringRef::Raw(units)),
+        _ => Err("Expected the converted DOMString collection argument.".into()),
+    }
+}
+
+fn copy_filter_units(text: DomStringRef<'_>, length: usize, available: &mut usize) -> Result<Vec<u16>, String> {
+    if length > *available / size_of::<u16>() { return Err("DOM retained expanded-name filter allowance exhausted.".into()); }
+    let mut units = Vec::new();
+    units.try_reserve_exact(length).map_err(|_| "Cannot reserve expanded-name collection filter.")?;
+    let bytes = units.capacity().checked_mul(size_of::<u16>()).ok_or("Expanded-name filter size overflow.")?;
+    *available = available.checked_sub(bytes).ok_or("DOM retained expanded-name filter allowance exhausted.")?;
+    units.extend(text.code_units());
+    Ok(units)
 }
 fn qualified_matches(local:crate::dom_string::DomStringRef<'_>,prefix:Option<&DomString>,name:&DomString,lowercase:bool)->bool{
     let actual=prefix.into_iter().flat_map(DomString::code_units).chain(prefix.map(|_|0x3a)).chain(local.code_units());actual.eq(name.code_units().map(|u|if lowercase&&(0x41..=0x5a).contains(&u){u+0x20}else{u}))
@@ -31,6 +133,7 @@ impl Filter {
         match self {
             Self::Children(_) => 0,
             Self::Tag(name,_) => name.capacity(),
+            Self::Namespace(filter) => filter.owned_bytes(),
             Self::Classes(names) => names.capacity()*size_of::<Vec<u16>>()+names.iter().map(|name| name.capacity()*size_of::<u16>()).sum::<usize>(),
         }
     }
@@ -64,15 +167,110 @@ pub(super) fn collection_handle_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
-    pub(super) fn collection_interface_receiver(&self,object:u32)->Option<bool>{if object==DOCUMENT||self.inert_node_type(object)==Some(9){Some(true)}else if self.inert_node_type(object)==Some(1)||node_index(object).is_some_and(|index|self.dom_accessible(index)&&matches!(self.doc.nodes[index].kind,NodeKind::Element{..})){Some(false)}else{None}}
-    pub(super) fn canonical_collection_member(&self,object:u32,property:&str)->bool{matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.collection_interface_receiver(object).is_some()&&!self.form_named_control(object,property)}
+    pub(super) fn create_namespace_collection(&mut self, root: u32, args: &[Value]) -> Result<Value, String> {
+        let [ns, local, ..] = args else { return Err("getElementsByTagNameNS requires two arguments.".into()); };
+        let namespace = if matches!(ns, Value::Null | Value::Undefined) { None }
+            else { Some(converted_string(ns)?).filter(|s| !s.is_empty()) };
+        let local = converted_string(local)?;
+        let string_limit = self.state.limits.host.string_bytes;
+        if local.logical_bytes() > string_limit || namespace.is_some_and(|s| s.logical_bytes() > string_limit) {
+            return Err("Expanded-name filter input exceeds the DOM string allowance.".into());
+        }
+        let input_bytes = local.logical_bytes().checked_add(namespace.map_or(0, DomStringRef::logical_bytes))
+            .ok_or("Expanded-name collection comparison overflow.")?;
+        self.state.work(input_bytes.saturating_add(1))?;
+        let n = namespace.map_or(0, |s| s.code_units().count());
+        let l = local.code_units().count();
+        let required = n.checked_add(l).and_then(|units| units.checked_mul(size_of::<u16>()))
+            .ok_or("Expanded-name collection filter size overflow.")?;
+        let mut available = self.state.retained_limit.saturating_sub(self.state.retained);
+        if required > available { return Err("DOM retained expanded-name filter allowance exhausted.".into()); }
+        self.state.copies(required)?;
+        let namespace = namespace.map(|s| copy_filter_units(s, n, &mut available)).transpose()?;
+        let local = copy_filter_units(local, l, &mut available)?;
+        self.store_live_collection(root, Filter::Namespace(ExpandedNameFilter { namespace, local }))
+    }
+    pub(super) fn collection_interface_receiver(&self, object: u32) -> Option<bool> {
+        if let Some((_, node)) = self.frame_contains_node(object) { return Some(node == 0); }
+        if object == DOCUMENT || self.inert_node_type(object) == Some(9) { return Some(true); }
+        if self.inert_node_type(object) == Some(1) || node_index(object).is_some_and(|n|
+            self.dom_accessible(n) && matches!(self.doc.nodes[n].kind, NodeKind::Element { .. })) {
+            return Some(false);
+        }
+        None
+    }
+    pub(super) fn canonical_collection_member(&self, object: u32, property: &str) -> bool {
+        matches!(property, "getElementsByTagName" | "getElementsByTagNameNS" | "getElementsByClassName")
+            && self.collection_interface_receiver(object).is_some() && !self.form_named_control(object, property)
+    }
+    fn verify_collection_root(&mut self, object: u32) -> Result<(), String> {
+        if let Some((owner, _)) = self.frame_contains_node(object) { self.contains_child_document(owner)?; }
+        else if object != DOCUMENT && !matches!(self.inert_node_type(object), Some(1 | 9)) { self.node(object)?; }
+        Ok(())
+    }
     fn inert_class_attribute(&self, node: u32) -> Option<&DomString> {
         self.inert_element_attributes(node)?.iter().find(|attr| attr.name.html_is("class"))
             .map(|attr| &attr.value)
     }
 
+    fn frame_collection_handles(&mut self, owner: u32, root: usize, index: usize) -> Result<Vec<u32>, String> {
+        let doc = self.contains_child_document(owner)?;
+        let count = doc.nodes.len();
+        if doc.nodes[root].children.len() > count { return Err("Child collection root has invalid topology.".into()); }
+        if doc.nodes[root].children.is_empty()
+            || matches!(&self.state.dom.collections[index].filter, Filter::Classes(names) if names.is_empty()) {
+            return Ok(Vec::new());
+        }
+        let available = self.state.retained_limit.saturating_sub(self.state.retained);
+        let required = count.checked_mul(size_of::<usize>() + size_of::<u32>()).ok_or("Child collection storage overflow.")?;
+        if required > available { return Err("Child collection traversal storage exhausted.".into()); }
+        let mut stack = Vec::new();
+        let mut result = Vec::new();
+        stack.try_reserve_exact(count).map_err(|_| "Cannot reserve child collection traversal.")?;
+        result.try_reserve_exact(count).map_err(|_| "Cannot reserve child collection handles.")?;
+        let storage = stack.capacity().checked_mul(size_of::<usize>())
+            .and_then(|bytes| bytes.checked_add(result.capacity().checked_mul(size_of::<u32>())?))
+            .filter(|&bytes| bytes <= available).ok_or("Child collection traversal storage exhausted.")?;
+        self.state.copies(storage)?;
+        stack.extend(self.contains_child_document(owner)?.nodes[root].children.iter().rev().copied());
+        let mut visited = 0;
+        while let Some(node) = stack.pop() {
+            visited += 1;
+            if visited > count { return Err("Child collection topology repeats a node.".into()); }
+            let doc = self.contains_child_document(owner)?;
+            let record = doc.nodes.get(node).ok_or("Unknown child collection node.")?;
+            let NodeKind::Element { tag, expanded_name, attrs, .. } = &record.kind else { continue; };
+            let inert = dom_tree::inert_dom_tag(tag, doc.scripting_enabled);
+            if !inert {
+                if record.children.len() > count - stack.len() { return Err("Child collection topology exceeds its document.".into()); }
+                stack.extend(record.children.iter().rev().copied());
+            } else if !dom_tree::exposes_inert_host(tag, record.namespace) { continue; }
+            let filter = &self.state.dom.collections[index].filter;
+            let work = match filter {
+                Filter::Tag(_, _) => crate::html::element_names::qualified_work(tag, expanded_name),
+                Filter::Namespace(query) => query.comparison_bytes(record)?,
+                Filter::Classes(names) => attrs.len().saturating_add(
+                    doc.dom_attr(node, "class").map_or(0, DomString::logical_bytes).saturating_mul(names.len())),
+                Filter::Children(_) => return Err("Child collections use the direct children view.".into()),
+            };
+            self.state.work(work.saturating_add(1))?;
+            let doc = self.contains_child_document(owner)?;
+            let matches = match &self.state.dom.collections[index].filter {
+                Filter::Tag(name, html) => tag_matches(&doc.nodes[node], name, *html)?,
+                Filter::Namespace(query) => query.matches_node(&doc.nodes[node])?,
+                Filter::Classes(names) => class_filter_matches(doc.dom_attr(node, "class"), names, doc.mode == crate::html::DocumentMode::Quirks),
+                Filter::Children(_) => unreachable!(),
+            };
+            if matches { result.push(self.frame_child_node_handle(owner, node)?); }
+        }
+        Ok(result)
+    }
+
     fn tag_collection_handles(&mut self,handle:u32)->Result<Vec<u32>,String>{
         let index=collection_handle_index(handle).ok_or("Invalid HTMLCollection handle.")?;let root=self.state.dom.collections.get(index).ok_or("Missing live collection.")?.root;let owner=root;
+        if let Some((window, node)) = self.frame_contains_node(root) {
+            return self.frame_collection_handles(window, node, index);
+        }
         if self.inert_node_type(owner).is_none(){let nodes=self.tag_collection_nodes(handle)?;self.state.copies(nodes.len().checked_mul(size_of::<u32>()).ok_or("Collection handle conversion overflow.")?)?;let mut result=Vec::new();result.try_reserve_exact(nodes.len()).map_err(|_|"Cannot reserve live collection handles.")?;result.extend(nodes.into_iter().map(node_handle));return Ok(result);}
         if matches!(&self.state.dom.collections[index].filter,Filter::Classes(names) if names.is_empty()){return Ok(Vec::new());}
         let mut pending=Vec::new();let mut result=Vec::new();let count=self.inert_children(owner).ok_or("Adopted collection root is unavailable.")?.len();self.state.work(count)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Collection root traversal overflow.")?)?;pending.try_reserve_exact(count).map_err(|_|"Cannot reserve adopted collection traversal.")?;pending.extend(self.inert_children(owner).unwrap().iter().rev().copied());
@@ -89,11 +287,23 @@ impl Bridge<'_> {
                 self.state.work(scans)?;
                 self.state.copies(scans)?;
             }
+            if let Filter::Namespace(query) = &self.state.dom.collections[index].filter {
+                let bytes = match self.inert_import_source(node) {
+                    Some(script_inert_documents::ImportSource::Parsed { node, .. }) => query.comparison_bytes(node)?,
+                    Some(script_inert_documents::ImportSource::Element(local)) =>
+                        query.field_work("http://www.w3.org/1999/xhtml".len(), local.len()),
+                    _ => 0,
+                };
+                self.state.work(bytes.saturating_add(1))?;
+            }
             let filter=&self.state.dom.collections[index].filter;let source=self.inert_import_source(node);
             if matches!(source,Some(script_inert_documents::ImportSource::Parsed{node:Node{namespace:crate::html::Namespace::UnknownForeign,..},..})){return Err("Adopted collection requires known namespace provenance.".into());}
             let matched=if !element{false}else{match (filter,source){
                 (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Element(tag)))=>name=="*"||qualified_matches(crate::dom_string::DomStringRef::Scalar(tag),None,name,*html),
                 (Filter::Tag(name,html),Some(script_inert_documents::ImportSource::Parsed{node,..}))=>tag_matches(node,name,*html)?,
+                (Filter::Namespace(query), Some(script_inert_documents::ImportSource::Parsed { node, .. })) => query.matches_node(node)?,
+                (Filter::Namespace(query), Some(script_inert_documents::ImportSource::Element(local))) =>
+                    query.matches(crate::html::element_names::NamespaceRef::Static("http://www.w3.org/1999/xhtml"), DomStringRef::Scalar(local)),
                 (Filter::Classes(names), _) => class_filter_matches(self.inert_class_attribute(node), names, quirks),
                 _=>return Err("Unsupported adopted collection filter.".into()),
             }};
@@ -109,9 +319,11 @@ impl Bridge<'_> {
         value: &Value,
     ) -> Result<Value, String> {
         let name = self.dom_text(value)?;
-        if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
+        self.verify_collection_root(object)?;
         let root=object;
-        let html=self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Html;
+        let kind = if let Some((owner, _)) = self.frame_contains_node(root) { self.contains_child_document(owner)?.kind }
+            else { self.inert_document_kind_for_node(root).unwrap_or(self.doc.kind) };
+        let html = kind == crate::html::DocumentKind::Html;
         self.store_live_collection(root, Filter::Tag(name,html))
     }
 
@@ -120,7 +332,7 @@ impl Bridge<'_> {
         object: u32,
         value: &Value,
     ) -> Result<Value, String> {
-        if object!=DOCUMENT&&!matches!(self.inert_node_type(object),Some(1|9)){self.node(object)?;}
+        self.verify_collection_root(object)?;
         let root=object;
         let text = self.dom_text(value)?;
         let bytes = text.logical_bytes();
@@ -202,6 +414,9 @@ impl Bridge<'_> {
             let node=candidates[position];self.state.work(1)?;
             match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
+                Filter::Namespace(query) => {
+                    self.state.work(query.comparison_bytes(&self.doc.nodes[node])?.saturating_add(1))?;
+                }
                 Filter::Tag(_,_)=>{let NodeKind::Element{tag,expanded_name,..}=&self.doc.nodes[node].kind else{unreachable!()};self.state.copies(crate::html::element_names::qualified_work(tag,expanded_name))?;},
                 Filter::Classes(names)=>{
                     let count=names.len();
@@ -215,6 +430,7 @@ impl Bridge<'_> {
             let matches=match &self.state.dom.collections[index].filter {
                 Filter::Children(_)=>unreachable!(),
                 Filter::Tag(name,html)=>tag_matches(&self.doc.nodes[node],name,*html)?,
+                Filter::Namespace(query) => query.matches_node(&self.doc.nodes[node])?,
                 Filter::Classes(names)=>{
                     class_filter_matches(self.doc.dom_attr(node, "class"), names, self.doc.mode == crate::html::DocumentMode::Quirks)
                 }
@@ -382,7 +598,9 @@ impl Bridge<'_> {
     }
     pub(super) fn collection_owner_window(&self,handle:u32)->Option<u32>{
         if !self.collection_receiver(handle){return None;}
-        Some(self.children_collection_owner(handle).and_then(|owner|self.frame_instance_window(owner)).unwrap_or(WINDOW))
+        let root = self.children_collection_owner(handle).or_else(||
+            self.state.dom.collections.get(collection_handle_index(handle)?).map(|record| record.root));
+        Some(root.and_then(|owner| self.frame_instance_window(owner)).unwrap_or(WINDOW))
     }
     pub(super) fn create_children_collection(&mut self,owner:u32)->Result<Value,String>{
         // SameObject lookup needs no second owner registry or promotion update.

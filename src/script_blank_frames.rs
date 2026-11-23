@@ -1444,6 +1444,43 @@ document.title='call-order-ok';
     }
 
     #[test]
+    fn namespace_collection_in_child_realm_reads_actual_descendants_and_retains_owner_guards() {
+        let source = format!("{CREATE}{}", r#"
+var html='http://www.w3.org/1999/xhtml',childDoc=f.contentDocument,all=childDoc.getElementsByTagNameNS(html,'*');
+var childRoot=childDoc.documentElement,scoped=childRoot.getElementsByTagNameNS('*','body');
+if(Object.getPrototypeOf(all)!==w.HTMLCollection.prototype||all.length!==3||all[0]!==childRoot||
+   all.item(1)!==childDoc.head||all.item(2)!==childDoc.body||scoped.length!==1||scoped[0]!==childDoc.body)throw 'real child collection';
+if(childDoc.getElementsByTagName('BODY')[0]!==childDoc.body||childRoot.getElementsByClassName('absent').length)throw 'child collection family';
+var keyReads=0, keyArg={toString:function(){keyReads++;return html;}};
+var mainQuery=Document.prototype.getElementsByTagNameNS;
+var borrowed=w.Function('method','target','key','return method.call(target,key,"body");');
+if(borrowed(mainQuery,document,keyArg)[0]!==document.body||keyReads!==1)throw 'same-origin borrowed collection';
+"#);
+        let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let other = crate::navigation::address("https://other.test/", &crate::navigation::Location::home()).unwrap();
+        page.set_location(&other);
+        let count = page.state.dom.collections.len();
+        for read in ["all.length;", "borrowed(mainQuery,document,keyArg);"] {
+            let result = page.console_eval(&mut doc, &mut forms, read);
+            assert_eq!(result.errors, 1, "{}", page.report());
+            assert!(page.report().contains("same-origin"), "{}", page.report());
+            assert_eq!(page.state.dom.collections.len(), count);
+        }
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "if(keyReads!==1)throw 'denied conversion';").errors, 0);
+        let original = crate::navigation::address("https://example.test/parent/page", &crate::navigation::Location::home()).unwrap();
+        page.set_location(&original);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "document.body.removeChild(f);").errors, 0);
+        for read in ["all.length;", "scoped.item(0);", "mainQuery.call(childDoc,html,'body');"] {
+            let result = page.console_eval(&mut doc, &mut forms, read);
+            assert_eq!(result.errors, 1, "{read}: {}", page.report());
+            assert_eq!(page.state.dom.collections.len(), count);
+        }
+        let result = page.console_eval(&mut doc, &mut forms, "document.body.appendChild(f);var fresh=f.contentDocument;if(fresh===childDoc||fresh.getElementsByTagNameNS(html,'body')[0]!==fresh.body)throw 'fresh child owner';");
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"
 if(tags.length!==1||list.length!==1||tags[0]!==list[0]||tags[0].tagName!=='P')throw 'collection collision';
