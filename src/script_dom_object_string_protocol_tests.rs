@@ -432,11 +432,20 @@ if(!typed)throw 'child realm illegal constructor error';
 fn iframe_interface_unrepresented_fallback_refuses_child_handles_but_empty_frames_keep_live_lists() {
     let (mut doc, mut forms, mut page) = fixture_with(concat!(
         "<iframe id=plain>fallback</iframe><iframe id=markup><b id=buried>fallback</b></iframe>",
-        "<iframe id=empty></iframe><div id=after><b id=visible>neighbor</b></div>"
+        "<iframe id=empty></iframe><div id=after><b id=visible>neighbor</b></div>",
+        "<iframe id=legacy>old fallback</iframe>"
     ));
+    // Preserve the refusal witness for a physical tree from the old producer.
+    // This element-shaped child is not an HTML raw-text record.
+    let legacy = id(&doc, "legacy");
+    let old_child = doc.nodes[legacy].children[0];
+    doc.nodes[old_child].kind = NodeKind::Element {
+        tag: "b".into(), expanded_name: Vec::new(), id: None, href: None, attrs: Vec::new(),
+    };
+    doc.nodes[old_child].namespace = crate::html::Namespace::Html;
     run(&mut doc, &mut forms, &mut page, r#"
 var plain=document.getElementById('plain'),markup=document.getElementById('markup'),empty=document.getElementById('empty');
-var fresh=document.createElement('iframe'),after=document.getElementById('after');
+var fresh=document.createElement('iframe'),after=document.getElementById('after'),legacy=document.getElementById('legacy');
 if(!(plain instanceof HTMLIFrameElement)||!(markup instanceof HTMLIFrameElement)||
    document.getElementById('buried')!==null||markup.querySelector('*')!==null||
    markup.getElementsByTagName('*').length!==0||after.querySelector('b')!==document.getElementById('visible'))
@@ -445,13 +454,20 @@ if(('firstElementChild' in markup && markup.firstElementChild!==null)||
    ('lastElementChild' in markup && markup.lastElementChild!==null)||
    ('children' in markup && markup.children.length!==0))
     throw 'iframe fallback exposed as element children';
+for(var iframe of [plain,markup]){
+    var text=iframe.firstChild, children=iframe.childNodes;
+    var expected=iframe===plain?'fallback':'<b id=buried>fallback</b>';
+    if(!(text instanceof Text)||text!==iframe.lastChild||text.parentNode!==iframe||text.ownerDocument!==document||
+       text.data!==expected||text.textContent!==expected||iframe.textContent!==expected||iframe.innerHTML!==expected||children!==iframe.childNodes||
+       children.length!==1||children.item(0)!==text||children[0]!==text)throw 'real iframe Text';
+}
 "#);
     let lists = page.state.node_lists.len();
     let retained = page.state.retained;
     let commits = page.state.dom_commits;
     for source in [
-        "plain.childNodes;", "plain.firstChild;", "plain.lastChild;",
-        "markup.childNodes;", "markup.firstChild;", "markup.lastChild;",
+        "legacy.childNodes;", "legacy.firstChild;", "legacy.lastChild;",
+        "legacy.children.length;", "legacy.firstElementChild;", "legacy.lastElementChild;",
     ] {
         let outcome = page.console_eval(&mut doc, &mut forms, source);
         assert_eq!(outcome.errors, 1, "{source}\n{}", page.report());
@@ -467,6 +483,7 @@ for(var iframe of [empty,fresh]){
     if(children!==iframe.childNodes||children.length!==0||children[0]!==undefined||children.item(0)!==null||
        iframe.firstChild!==null||iframe.lastChild!==null)throw 'empty iframe child topology';
 }
+if(legacy.querySelector('*')!==null)throw 'legacy element-shaped child was exposed';
 var saved=fresh.childNodes;fresh.hidden=true;document.body.appendChild(fresh);
 if(fresh.childNodes!==saved||saved.length!==0||fresh.firstChild!==null||!fresh.contentWindow||
    markup.contentWindow!==null||markup.contentDocument!==null||after.childNodes[0]!==after.firstChild||

@@ -362,7 +362,11 @@ fn parse_internal(
         }],
     };
     if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
-        let text = if matches!(context, Some("title" | "textarea")) { decode_entities(input) } else { input.to_owned() }.replace('\0', "\u{fffd}");
+        let text = if matches!(context, Some("title" | "textarea")) {
+            decode_entities(input).replace('\0', "\u{fffd}")
+        } else {
+            html_raw_text(input, None)?
+        };
         if !append_text_value(&mut document, 0, text, node_limit)? { return Err(node_limit_error()); }
         document.scripting_enabled = scripting;
         return Ok(document);
@@ -564,7 +568,10 @@ fn parse_internal(
         if !template_svg && svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
             svg.root = None;
         }
-        let raw = matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
+        let html_raw = matches!(tag.name.as_str(), "iframe" | "xmp" | "noembed" | "noframes")
+            && !uncertain_foreign_recovery && svg.root.is_none()
+            && matches!(document.nodes[parent].namespace, Namespace::None | Namespace::Html);
+        let raw = html_raw || matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
         let void = is_void(&tag.name);
         let nesting_full = !raw && !void && !svg_empty && stack.len() == MAX_DEPTH;
         if document.nodes.len() == node_limit || nesting_full {
@@ -597,7 +604,8 @@ fn parse_internal(
         });
 
         if raw {
-            let (content_end, after_end_tag) = raw_text_end_mode(input, position, &tag.name, checked)?;
+            let check = loaded.map(|tree| tree.check_cancel);
+            let (content_end, after_end_tag) = raw_text_end_mode(input, position, &tag.name, checked, check)?;
             if checked && tag.name == "script" && input[position..content_end].contains("<!--") { return Err("HTML fragment escaped script-data tokenization is not implemented.".into()); }
             if matches!(tag.name.as_str(), "title" | "textarea") {
                 // RCDATA recognizes only its own end tag as markup. Decode
@@ -620,14 +628,18 @@ fn parse_internal(
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
+            } else if html_raw {
+                let content = html_raw_text(&input[position..content_end], check)?;
+                if !append_text_value(&mut document, node, content, node_limit)? {
+                    if fail_on_capacity { return Err(node_limit_error()); }
+                    break;
+                }
             } else if matches!(tag.name.as_str(), "style" | "script")
                 && !append_text_value(&mut document, node, input[position..content_end].to_owned(), node_limit)?
             {
                 if fail_on_capacity { return Err(node_limit_error()); }
                 break;
             }
-            // CSS and classic JavaScript remain raw text. Their consumers apply
-            // the resource/execution policy; neither is rendered as page text.
             position = after_end_tag;
         } else if svg_empty {
             if svg.root == Some(node) {
@@ -960,10 +972,46 @@ fn close_in_scope(stack: &mut Vec<usize>, document: &Document, target: &str, bar
     }
 }
 
-fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool) -> Result<(usize, usize), String> {
+const RAW_TEXT_CHECK_BYTES: usize = 16 * 1024;
+
+fn html_raw_text(input: &str, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<String, String> {
+    let mut bytes = input.len();
+    for chunk in input.as_bytes().chunks(RAW_TEXT_CHECK_BYTES) {
+        if let Some(check) = check { check()?; }
+        let zeros = chunk.iter().filter(|&&byte| byte == 0).count();
+        bytes = bytes.checked_add(2 * zeros).ok_or("HTML raw text size overflow.")?;
+    }
+    let mut output = String::new();
+    output.try_reserve_exact(bytes).map_err(|_| "Cannot reserve HTML raw text.")?;
+    let mut remaining = input;
+    while !remaining.is_empty() {
+        if let Some(check) = check { check()?; }
+        let end = remaining.floor_char_boundary(remaining.len().min(RAW_TEXT_CHECK_BYTES));
+        let (chunk, rest) = remaining.split_at(end);
+        for (i, part) in chunk.split('\0').enumerate() {
+            if i != 0 { output.push('\u{fffd}'); }
+            output.push_str(part);
+        }
+        remaining = rest;
+    }
+    Ok(output)
+}
+
+fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool,
+    check: Option<&dyn Fn() -> Result<(), String>>) -> Result<(usize, usize), String> {
     let bytes = input.as_bytes();
     let mut position = start;
-    while let Some(offset) = input[position..].find('<') {
+    let mut next_check = position;
+    while position < bytes.len() {
+        if position >= next_check {
+            if let Some(check) = check { check()?; }
+            next_check = position.saturating_add(RAW_TEXT_CHECK_BYTES);
+        }
+        let end = next_check.min(bytes.len());
+        let Some(offset) = bytes[position..end].iter().position(|&b| b == b'<') else {
+            position = end;
+            continue;
+        };
         let opening = position + offset;
         let name_start = opening + 2;
         let name_end = name_start + name.len();
@@ -1293,6 +1341,43 @@ fn named_character(name: &str) -> Option<(char, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn html_raw_text_elements_keep_one_literal_child_until_their_own_end_tag() {
+        for tag in ["iframe", "xmp", "noembed", "noframes"] {
+            let body = format!("<b data-q='x'>é&amp;</b></{tag}more>\r\n\0tail");
+            let source = format!("<{tag}>{body}</{} ><p>after</p>", tag.to_ascii_uppercase());
+            let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
+            let root = doc.nodes[0].children[0];
+            let [child] = doc.nodes[root].children.as_slice() else { panic!("expected one {tag} text child") };
+            let expected = body.replace("\r\n", "\n").replace('\0', "\u{fffd}");
+            assert!(matches!(&doc.nodes[*child].kind, NodeKind::Text(data) if data == &expected));
+            let tail = doc.nodes[0].children[1];
+            assert!(matches!(&doc.nodes[tail].kind, NodeKind::Element { tag, .. } if tag == "p"));
+            assert!(parse(&format!("<{tag}></{tag}>")).nodes[1].children.is_empty());
+            let unfinished = parse(&format!("<{tag}>literal <i> and &amp;"));
+            assert!(matches!(&unfinished.nodes[unfinished.nodes[1].children[0]].kind,
+                NodeKind::Text(data) if data == "literal <i> and &amp;"));
+        }
+        let foreign = parse("<math><iframe><b>foreign</b></iframe></math>");
+        assert!(foreign.nodes.iter().any(|n| n.namespace == Namespace::UnknownForeign
+            && matches!(&n.kind, NodeKind::Element { tag, .. } if tag == "b")));
+    }
+
+    #[test]
+    fn html_raw_text_limits_and_cancellation_return_before_document_commit() {
+        let text = format!("<iframe>{}</iframe>", "x".repeat(100_000));
+        let calls = std::cell::Cell::new(0);
+        let error = parse_loaded_document(&text, &|| {
+            calls.set(calls.get() + 1);
+            if calls.get() >= 4 { Err("cancel raw text".into()) } else { Ok(()) }
+        }).unwrap_err();
+        assert!(error.contains("cancel raw text"));
+        let limit = LoadedTree { nodes: 2, check_cancel: &|| Ok(()) };
+        assert!(parse_internal("<iframe>x</iframe>", None, false, Some(limit), None).is_err());
+        let fresh = parse_loaded_document("<iframe>x</iframe>", &|| Ok(())).unwrap();
+        assert_eq!(fresh.nodes.len(), 3);
+    }
 
     #[test]
     fn default_namespace_parser_provenance_is_conservative_across_foreign_recovery() {

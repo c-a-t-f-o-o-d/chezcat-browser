@@ -2374,8 +2374,10 @@ native editing and link activation. Functional realm fixtures use the product
 admission profile to include the expanded native IDL surface; explicit narrow
 admission/copy-work cases keep their own profiles. The unchanged 1,024-function
 adversarial profile still refuses incomplete intrinsic bootstrap and preserves main
-native state. A previously documented raw-text iframe fallback fixture still fails;
-these checks do not claim full DOM/HTML/SVG conformance or actual-site readiness.
+native state. Parsed HTML iframe fallback now retains its actual Text child and its owner.
+Empty frames keep their live child lists. Element-shaped legacy fallback still
+refuses child-handle publication. Broader DOM/HTML/SVG conformance and site
+acceptance remain open.
 
 ## Same-inert-owner Node replacement and loaded parked promotion
 

@@ -168,10 +168,14 @@ mod tests {
         }
         for markup in ["<svg id=root><g/>", "<svg id=root><g", "<svg id=root><circle id=unquoted/></svg>",
                        "<select><svg id=root></svg></select>", "<select><template><svg id=root></svg></template></select>",
-                       "<iframe><template><svg id=root></svg></template></iframe>",
                        "<math><svg id=root></svg></math>"] {
             assert_eq!(node(&parse(markup), "root").namespace, Namespace::UnknownForeign, "{markup}");
         }
+        let literal = "<template><svg id=root></svg></template>";
+        let doc = parse(&format!("<iframe id=frame>{literal}</iframe>"));
+        let [child] = node(&doc, "frame").children.as_slice() else { panic!("iframe fallback must be a single Text node") };
+        assert!(matches!(&doc.nodes[*child].kind, super::super::NodeKind::Text(text) if text == literal));
+        assert!(!(0..doc.nodes.len()).any(|n| doc.attr(n, "id") == Some("root")));
         let doc = parse("<select><option></option></select><svg id='s'/>");
         assert_eq!(node(&doc, "s").namespace, Namespace::Svg);
     }

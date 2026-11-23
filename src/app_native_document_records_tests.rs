@@ -9,8 +9,12 @@ fn native_document_records_actual_app_three_modes_no_doctype_box_jobs_pixels_edi
         ("<!doctype html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN' 'native-system'>",crate::html::DocumentMode::LimitedQuirks),
     ].into_iter().enumerate(){
         let file=Fixture(std::env::temp_dir().join(format!("chezcat-native-document-records-{}-{index}.html",std::process::id())));
-        let source=r#"<html><head><style>body{margin:0;background:white}#field{position:absolute;left:10px;top:10px;width:140px;height:30px}#run{position:absolute;left:10px;top:65px;width:140px;height:30px}#bound{position:absolute;left:10px;top:120px;display:block;width:220px;height:30px;background:#eeeeee}#go{position:absolute;left:260px;top:10px;display:block;width:100px;height:30px;background:#2040e0}</style></head><body><input id=field value=seed><button id=run type=button>Use records</button><span id=bound>seed</span><a id=go href=#end>Continue</a><div id=end></div><script>
+        let source=r#"<html><head><style>body{margin:0;background:white}#field{position:absolute;left:10px;top:10px;width:140px;height:30px}#run{position:absolute;left:10px;top:65px;width:140px;height:30px}#bound{position:absolute;left:10px;top:120px;display:block;width:220px;height:30px;background:#eeeeee}#go{position:absolute;left:260px;top:10px;display:block;width:100px;height:30px;background:#2040e0}</style></head><body><input id=field value=seed><button id=run type=button>Use records</button><span id=bound>seed</span><a id=go href=#end>Continue</a><div id=end></div><iframe hidden id=fallback>Literal <b id=apparent>fallback</b> &amp;</iframe><script>
 var root=document.getElementById('bound'),initial=document.doctype,expected='_EXPECTED_MODE_';if(document.compatMode!==expected)throw 'actual document mode';
+var frame=document.getElementById('fallback'), fallback=frame.firstChild;
+if(!(fallback instanceof Text)||frame.childNodes[0]!==fallback||frame.lastChild!==fallback||fallback.parentNode!==frame||
+   fallback.data!=='Literal <b id=apparent>fallback</b> &amp;'||document.getElementById('apparent')!==null||
+   frame.contentWindow!==null)throw 'loaded fallback identity and text';
 var matches=document.getElementsByClassName('nativeMark');
 root.setAttribute('class','NATIVEMARK');
 if(matches.length!==(expected==='BackCompat'?1:0))throw 'live class mode';

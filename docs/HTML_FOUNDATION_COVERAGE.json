@@ -991,7 +991,7 @@
         "F01",
         "F02"
       ],
-      "status": "planned",
+      "status": "partial",
       "scope": "required",
       "source_anchors": [
         "src/html.rs",
@@ -1001,8 +1001,10 @@
         {
           "id": "F04.01",
           "requirement": "All registered tokenizer states and branch/EOF/reconsume conditions",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "HTML iframe, xmp, noembed and noframes use literal Text records with appropriate end-tag matching, EOF handling and null replacement. Supplementary original parser, cancellation/admission, DOM and connected App checks exercise the producer. The original F04-loaded-iframe-rawtext witness stays in the frozen selection. Full tokenizer state/transition, streaming, diagnostics and tree integration remain open."
+          ],
           "dependency_details": []
         },
         {
@@ -1696,11 +1698,13 @@
       "title": "RAWTEXT state",
       "anchor": "rawtext-state",
       "work_package": "F04",
-      "status": "unassessed",
+      "status": "partial",
       "branch_registry_required": true,
       "scope": "required",
       "standard_url": "https://html.spec.whatwg.org/multipage/parsing.html#rawtext-state",
-      "verification": []
+      "verification": [
+        "src/html.rs exercises the loaded raw-text path, mixed-case matching end tags, nonmatching candidates, EOF, null replacement and cancellation. Full state-level corpus coverage remains open."
+      ]
     },
     {
       "id": "T04",
@@ -1804,11 +1808,13 @@
       "title": "RAWTEXT less-than sign state",
       "anchor": "rawtext-less-than-sign-state",
       "work_package": "F04",
-      "status": "unassessed",
+      "status": "partial",
       "branch_registry_required": true,
       "scope": "required",
       "standard_url": "https://html.spec.whatwg.org/multipage/parsing.html#rawtext-less-than-sign-state",
-      "verification": []
+      "verification": [
+        "src/html.rs exercises the loaded raw-text path, mixed-case matching end tags, nonmatching candidates, EOF, null replacement and cancellation. Full state-level corpus coverage remains open."
+      ]
     },
     {
       "id": "T13",
@@ -1816,11 +1822,13 @@
       "title": "RAWTEXT end tag open state",
       "anchor": "rawtext-end-tag-open-state",
       "work_package": "F04",
-      "status": "unassessed",
+      "status": "partial",
       "branch_registry_required": true,
       "scope": "required",
       "standard_url": "https://html.spec.whatwg.org/multipage/parsing.html#rawtext-end-tag-open-state",
-      "verification": []
+      "verification": [
+        "src/html.rs exercises the loaded raw-text path, mixed-case matching end tags, nonmatching candidates, EOF, null replacement and cancellation. Full state-level corpus coverage remains open."
+      ]
     },
     {
       "id": "T14",
@@ -1828,11 +1836,13 @@
       "title": "RAWTEXT end tag name state",
       "anchor": "rawtext-end-tag-name-state",
       "work_package": "F04",
-      "status": "unassessed",
+      "status": "partial",
       "branch_registry_required": true,
       "scope": "required",
       "standard_url": "https://html.spec.whatwg.org/multipage/parsing.html#rawtext-end-tag-name-state",
-      "verification": []
+      "verification": [
+        "src/html.rs exercises the loaded raw-text path, mixed-case matching end tags, nonmatching candidates, EOF, null replacement and cancellation. Full state-level corpus coverage remains open."
+      ]
     },
     {
       "id": "T15",
