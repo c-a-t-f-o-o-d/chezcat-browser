@@ -1,74 +1,89 @@
-//! Reverse substring search over UTF-16 code units, not UTF-8 byte offsets.
+//! Original bounded reverse search over exact UTF-16 code units.
 //! https://tc39.es/ecma262/#sec-string.prototype.lastindexof
 use super::{bounded_index, Fault, Host, Runtime, Value, WorkKind};
 
-impl Runtime {
-    pub(super) fn string_last_index_of(
-        &mut self,
-        receiver: &str,
-        args: &[Value],
-        host: &mut dyn Host,
-    ) -> Result<Value, Fault> {
-        // StringMethod already performed RequireObjectCoercible/ToString on
-        // the receiver. Keep its value across search/position callbacks.
-        self.work_as(
-            receiver.len().saturating_mul(3),
-            WorkKind::StringMethodInput,
-        )?;
-        let search = {
-            let value = self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
-            let value = self.primitive_with_hint(value, true, host)?;
-            // Existing scalar ToString has a small finite formatting bound;
-            // Strings reserve their complete owned copy before conversion.
-            let bytes = if let Value::String(text) = &value {
-                text.len()
-            } else {
-                64
-            };
-            self.work_as(bytes, WorkKind::ConversionOutput)?;
-            let Value::String(text) = self.checked_value(Value::String(value.script_text()?))?
-            else {
-                unreachable!("ToString produces a String");
-            };
-            text
-        };
-        // Do not use binary_integer: NaN means search from the end here, not
-        // zero. This conversion also runs for empty or too-long patterns.
-        let position = self.binary_number(args.get(1).unwrap_or(&Value::Undefined), host)?;
-        self.work_as(search.len().saturating_mul(2), WorkKind::StringMethodInput)?;
+#[derive(Clone,Copy)]
+enum Input<'a> { Scalar(&'a str), Units(&'a [u16]) }
+impl Input<'_> {
+    fn bytes(self)->usize {match self {Self::Scalar(s)=>s.len(),Self::Units(s)=>s.len().saturating_mul(2)}}
+    fn len(self)->usize {match self {Self::Scalar(s)=>s.encode_utf16().count(),Self::Units(s)=>s.len()}}
+}
 
-        // UTF-8 byte length is a finite upper bound on UTF-16 unit count. These
-        // two buffers contain only copied scalar data and need no JS GC roots.
-        let mut units = Vec::new();
-        units
-            .try_reserve_exact(receiver.len())
-            .map_err(|_| Fault::new("String search input reservation failed."))?;
-        units.extend(receiver.encode_utf16());
-        let mut needle = Vec::new();
-        needle
-            .try_reserve_exact(search.len())
-            .map_err(|_| Fault::new("String search pattern reservation failed."))?;
-        needle.extend(search.encode_utf16());
-        let Some(max_start) = units.len().checked_sub(needle.len()) else {
-            return Ok(Value::Number(-1.0));
+impl Runtime {
+    #[cfg(test)]
+    pub(super) fn string_last_index_of(&mut self,receiver:&str,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
+        self.string_last_index_input(Input::Scalar(receiver),args,host)
+    }
+
+    pub(super) fn string_last_index_value(&mut self,receiver:&Value,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
+        let input=match receiver {
+            Value::String(s)=>Input::Scalar(s),Value::StringUnits(s)=>Input::Units(s),
+            _=>return Err(Fault::new("String reverse search requires an already converted string.")),
         };
-        let start = if position.is_nan() {
-            max_start
-        } else {
-            bounded_index(position, max_start)
-        };
-        if needle.is_empty() {
-            return Ok(Value::Number(start as f64));
+        self.string_last_index_input(input,args,host)
+    }
+
+    fn reverse_search_workspace(&mut self,bytes:usize,owned:&mut usize)->Result<(),Fault> {
+        let next=self.value_bytes.checked_add(bytes).filter(|next|*next<=self.limits.heap.retained_values)
+            .ok_or_else(||Fault::new("String reverse-search workspace limit reached."))?;
+        let next_owned=owned.checked_add(bytes).ok_or_else(||Fault::new("String reverse-search workspace accounting overflow."))?;
+        self.value_bytes=next;*owned=next_owned;Ok(())
+    }
+
+    fn reverse_search_units(&mut self,input:Input<'_>,owned:&mut usize)->Result<Vec<u16>,Fault> {
+        let count=input.len();
+        let bytes=count.checked_mul(2).ok_or_else(||Fault::new("String reverse-search workspace size overflow."))?;
+        self.work_as(bytes,WorkKind::StringMethodInput)?;
+        self.reverse_search_workspace(bytes,owned)?;
+        let mut units=Vec::new();
+        units.try_reserve_exact(count).map_err(|_|Fault::new("String search input reservation failed."))?;
+        let actual=units.capacity().checked_mul(2).ok_or_else(||Fault::new("String search allocation size overflow."))?;
+        if actual>bytes {self.reverse_search_workspace(actual-bytes,owned)?;}
+        match input {
+            Input::Scalar(text)=>for unit in text.encode_utf16(){self.step()?;units.push(unit);},
+            Input::Units(source)=>{self.step()?;units.extend_from_slice(source);}
         }
-        for at in (0..=start).rev() {
-            self.step()?;
-            // As with the existing forward search, debit a whole comparison
-            // before it runs. Repeated prefixes cannot hide quadratic work.
-            self.work(needle.len().saturating_mul(2))?;
-            if units[at..at + needle.len()] == needle {
-                return Ok(Value::Number(at as f64));
+        Ok(units)
+    }
+
+    fn string_last_index_input(&mut self,receiver:Input<'_>,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
+        self.work_as(receiver.bytes().saturating_mul(3),WorkKind::StringMethodInput)?;
+        let mut owned=0usize;
+        let result=(|| {
+            // Receiver conversion is complete. Preserve its immutable exact
+            // value while the search and numeric-position hooks run in order.
+            let value=self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+            let value=self.primitive_with_hint(value,true,host)?;
+            let bytes=if value.is_string(){value.bytes()}else{64};
+            self.work_as(bytes,WorkKind::ConversionOutput)?;
+            let search=if value.is_string(){value}else{Value::String(value.script_text()?)};
+            let search=self.checked_value(search)?;
+            let backing=match &search {
+                Value::String(s)=>s.capacity(),Value::StringUnits(s)=>s.capacity().checked_mul(2)
+                    .ok_or_else(||Fault::new("String search capture size overflow."))?,_=>unreachable!(),
+            };
+            // This owned conversion survives position callbacks and nested
+            // searches, so its actual backing shares retained admission.
+            self.reverse_search_workspace(backing,&mut owned)?;
+            let position=self.binary_number(args.get(1).unwrap_or(&Value::Undefined),host)?;
+            self.work_as(search.bytes().saturating_mul(2),WorkKind::StringMethodInput)?;
+            let pattern=match &search {Value::String(s)=>Input::Scalar(s),Value::StringUnits(s)=>Input::Units(s),_=>unreachable!()};
+            let Some(max_start)=receiver.len().checked_sub(pattern.len())else{return Ok(Value::Number(-1.0));};
+            let start=if position.is_nan(){max_start}else{bounded_index(position,max_start)};
+            if pattern.len()==0{return Ok(Value::Number(start as f64));}
+            let units=self.reverse_search_units(receiver,&mut owned)?;
+            let needle=self.reverse_search_units(pattern,&mut owned)?;
+            for at in (0..=start).rev() {
+                self.step()?;
+                self.work(needle.len().saturating_mul(2))?;
+                if units[at..at+needle.len()]==needle{return Ok(Value::Number(at as f64));}
             }
-        }
-        Ok(Value::Number(-1.0))
+            Ok(Value::Number(-1.0))
+        })();
+        // Refund this operation's captures and workspaces only. Author
+        // publications and nested-call accounting remain committed.
+        self.value_bytes=self.value_bytes.checked_sub(owned)
+            .ok_or_else(||Fault::new("String reverse-search workspace refund failed."))?;
+        result
     }
 }

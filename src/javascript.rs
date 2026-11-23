@@ -10259,6 +10259,9 @@ impl Runtime {
         if matches!(method, "slice" | "substring" | "substr") && object.is_string() {
             return self.string_slice_value(&object, method, args, host);
         }
+        if method == "lastIndexOf" && object.is_string() {
+            return self.string_last_index_value(&object, args, host);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
                 "charCodeAt" | "codePointAt" | "charAt" => self.raw_string_character(units, method, args),
@@ -10270,7 +10273,6 @@ impl Runtime {
         }
         if let Value::String(text) = object {
             if method == "concat" { return self.string_concat(&text,args,host); }
-            if method == "lastIndexOf" { return self.string_last_index_of(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
             }
