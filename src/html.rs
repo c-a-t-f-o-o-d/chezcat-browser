@@ -22,6 +22,8 @@ mod svg_namespace;
 mod doctype;
 #[path="html_document_structure.rs"]
 mod document_structure;
+#[path="html_table_construction.rs"]
+mod table_construction;
 #[path="html_processing_instructions.rs"]
 mod processing_instructions;
 #[path="html_document_mode.rs"]
@@ -369,6 +371,7 @@ fn parse_internal(
     }
     let mut stack = vec![0];
     let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new());
+    let mut tables = table_construction::Tables::default();
     let mut position = 0;
     let mut title_seen = false;
     // If unsupported foreign recovery escapes through an unrelated ancestor,
@@ -394,7 +397,9 @@ fn parse_internal(
             if let Some(start)=&mut structure {
                 let text=decode_entities(&input[position..end]);
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
-                start.text(&mut document,&mut stack,text,node_limit)?;
+                if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit)? {
+                    start.text(&mut document,&mut stack,text,node_limit)?;
+                }
                 position=end;continue;
             }
             let before_root=context.is_none()&&parent==0&&!document.nodes[0].children.iter().any(|&node|matches!(document.nodes[node].kind,NodeKind::Element{..}));
@@ -420,6 +425,7 @@ fn parse_internal(
         ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
+            tables.flush(&mut document,node_limit)?;
             let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
             // A comment neither leaves the current tree context nor terminates
             // a checked SVG island. Its data never reenters markup scanning.
@@ -432,6 +438,7 @@ fn parse_internal(
             position+=4+consumed;continue;
         }
         if !checked&&rest.get(..9).is_some_and(|prefix|prefix.eq_ignore_ascii_case("<!doctype")) {
+            tables.flush(&mut document,node_limit)?;
             let token=doctype::read(&rest[9..],loaded.map(|loaded|loaded.check_cancel))?;
             if initial {
                 if document.nodes.len()==node_limit {if fail_on_capacity{return Err(node_limit_error());}break;}
@@ -448,6 +455,7 @@ fn parse_internal(
         if rest.starts_with("<?") {
             let (token,consumed)=processing_instructions::read(rest,loaded.map(|load|load.check_cancel))?;
             if !matches!(token,processing_instructions::Token::Eof) {
+                tables.flush(&mut document,node_limit)?;
                 if document.nodes.len()>=node_limit {
                     if fail_on_capacity {return Err(node_limit_error());}break;
                 }
@@ -457,6 +465,7 @@ fn parse_internal(
             position+=consumed;continue;
         }
         if rest.starts_with("<!") {
+            tables.flush(&mut document,node_limit)?;
             svg.root=None;
             if checked{return Err("HTML fragment declaration/comment tokens are not implemented.".into());}
             if inert_doctype.is_some(){return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());}
@@ -474,7 +483,10 @@ fn parse_internal(
                 svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
                 if let Some(start)=&mut structure{
-                    initial=false;start.text(&mut document,&mut stack,"<".into(),node_limit)?;
+                    initial=false;
+                    if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit)? {
+                        start.text(&mut document,&mut stack,text,node_limit)?;
+                    }
                     position+=1;continue;
                 }
                 if !append_text(&mut document, parent, "<", node_limit)? {
@@ -487,12 +499,24 @@ fn parse_internal(
         };
         if initial {initial=false;}
         position = tag.end;
+        let mut foster=false;
         let structural_parent=if let Some(start)=&mut structure {
-            match start.tag(&mut document,&mut stack,&mut tag,node_limit,loaded.unwrap().check_cancel)? {
+            tables.flush(&mut document,node_limit)?;
+            let active=tables.has_active(&stack);
+            if active {
+                match tables.tag(&mut document,&mut stack,&tag,node_limit)? {
+                    table_construction::Action::Consumed=>continue,
+                    table_construction::Action::Foster=>foster=true,
+                    table_construction::Action::Normal=>{}
+                }
+            }
+            let parent=match start.tag(&mut document,&mut stack,&mut tag,node_limit,loaded.unwrap().check_cancel)? {
                 document_structure::Action::Consumed=>continue,
                 document_structure::Action::AtHead(head)=>Some(head),
                 document_structure::Action::Normal=>None,
-            }
+            };
+            if !active && matches!(tables.tag(&mut document,&mut stack,&tag,node_limit)?,table_construction::Action::Consumed){continue;}
+            parent
         }else{None};
 
         let empty_table = checked && tag.name == "table";
@@ -556,6 +580,7 @@ fn parse_internal(
             let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
             if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
                 if index > 0 {
+                    if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
                     if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
                         && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
                     {
@@ -573,7 +598,7 @@ fn parse_internal(
         if previous_stack.as_ref().is_some_and(|previous| previous[stack.len()..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
             return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
         }
-        let parent = structural_parent.unwrap_or_else(||*stack.last().unwrap());
+        let parent = if foster {tables.foster_location(&document)?.0} else {structural_parent.unwrap_or_else(||*stack.last().unwrap())};
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
             uncertain_foreign_recovery = true;
         }
@@ -611,7 +636,8 @@ fn parse_internal(
         if matches!(tag.name.as_str(), "script" | "style" | "link") && tag.duplicate_attributes {
             document.nonce_unsafe_nodes.insert(node);
         }
-        document.nodes[parent].children.push(node);
+        let slot=document.nodes[parent].children.len();
+        if foster {tables.link_before_table(&mut document,node)?;} else {document.nodes[parent].children.push(node);}
         document.nodes.push(Node {
             namespace: if uncertain_foreign_recovery
                 || matches!(tag.name.as_str(), "svg" | "math")
@@ -671,6 +697,9 @@ fn parse_internal(
             }
         } else if !void && !empty_table {
             // A trailing slash does not close a non-void HTML element.
+            if structure.is_some() && tag.name=="table" && document.nodes[node].namespace==Namespace::Html {
+                tables.opened(node,parent,slot,stack.len())?;
+            }
             stack.push(node);
             if !checked && document.nodes[node].namespace == Namespace::Html &&
                 svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
@@ -680,7 +709,7 @@ fn parse_internal(
         }
     }
 
-    if let Some(start)=&mut structure {start.finish(&mut document,&mut stack,node_limit)?;}
+    if let Some(start)=&mut structure {tables.flush(&mut document,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
