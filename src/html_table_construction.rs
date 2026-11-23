@@ -93,6 +93,13 @@ impl Tables {
         let Some(table) = self.active(stack) else {
             return false;
         };
+        // Closing the nearest open HTML template unwinds its entire contents,
+        // including an unfinished table, row or cell inside that template.
+        if doc.nodes[stack[target]].namespace == Namespace::Html
+            && name(doc, stack[target]) == "template"
+        {
+            return false;
+        }
         target < table.depth
             || stack[target + 1..].iter().any(|&n| {
                 doc.nodes[n].namespace != Namespace::Html

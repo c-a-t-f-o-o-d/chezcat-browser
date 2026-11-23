@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn table_construction_closing_template_unwinds_its_unfinished_table() {
+    for content in ["<table>", "<table><tr>", "<table><td>", "<table><colgroup>"] {
+        let source = format!("<template>{content}</template><body><span>outside");
+        let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
+        assert_eq!(child_tags(&doc, first(&doc, "head")), ["template"]);
+        assert_eq!(child_tags(&doc, first(&doc, "template")), ["table"]);
+        assert_eq!(child_tags(&doc, first(&doc, "body")), ["span"]);
+        assert_eq!(child_tags(&doc, first(&doc, "span")), ["#outside"]);
+    }
+}
+
 fn child_tags(doc: &Document, parent: usize) -> Vec<String> {
     doc.nodes[parent]
         .children
