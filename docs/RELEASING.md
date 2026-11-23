@@ -2,7 +2,7 @@
 
 # Development and releases
 
-*Frequent source progress. Explicit release decisions. Verified delivery.*
+*Source development, milestone acceptance and verified delivery.*
 
 [Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Documentation](README.md)
 
@@ -13,16 +13,22 @@
 ## Release policy
 
 > [!IMPORTANT]
-> **Named releases require an explicit owner request.** A merged PR, passing CI
-> or completed feature does not authorize a version bump, release tag, package
-> or publication.
+> **Prepare one named release for each fully accepted foundation or product milestone.**
+> Acceptance requires the specified contracts, supported entry paths, integrations
+> and negative or recovery checks to pass. Required failures and unrun cases keep
+> the milestone open. An accepted milestone awaiting delivery remains eligible.
+>
+> For each accepted milestone, update the capability register, roadmap and
+> changelog, select an unused version, and qualify the exact tagged source.
+> Record the delivered source, assets and checksums after verifying the public
+> downloads and extracted runtime. Ordinary source PRs keep the current version.
 
 | Activity | Normal path | Release required? |
 | :--- | :--- | :--- |
 | **Source development** | Short-lived `feat/`, `fix/`, `docs/`, or `security/` branch, coherent commits, PR and existing checks | No |
 | **Integrated source** | Changes merged into `main` after focused development checks | No |
 | **Development artifacts / dev channel** | Proposed roadmap work; not assumed operational | No |
-| **Named release** | Owner request → final source → immutable tag → exact delivery gates | Yes: explicit authorization |
+| **Named release** | Accepted milestone or specific release request → final source → immutable tag → exact delivery gates | Yes |
 
 [Routine verification](#contribution-and-routine-verification) · [Tagged delivery](#exact-tagged-delivery)
 · [Payloads](#payloads-and-identity) · [Failures](#when-a-check-fails)
@@ -86,7 +92,7 @@ delivery does not authorize another release or retroactively include newer sourc
 
 For a development PR, compile where relevant and run the affected reproduction or
 focused tests, including a negative check for a changed security or resource
-boundary. Reuse applicable results for unchanged code. An owner-requested release
+boundary. Reuse applicable results for unchanged code. Each release candidate
 runs `tools/verify_offline.py` for the normal Windows suite, optimized build,
 PE/resources/version/import checks, identity/packaging controls and local App/input
 journeys. Preserve normal failures and serial diagnostics separately.
@@ -130,7 +136,7 @@ same exact terms; changed license text needs fresh affirmative acceptance.
 
 ```mermaid
 flowchart TD
-    REQUEST["Explicit owner request"] --> SOURCE["Clean final source and version"]
+    REQUEST["Accepted milestone or specific release request"] --> SOURCE["Clean final source and version"]
     SOURCE --> TAG["New immutable matching tag"]
     TAG --> VERIFY["Offline tests and optimized build"]
     VERIFY --> PACKAGE["Exact runtime and source packages"]
@@ -139,8 +145,9 @@ flowchart TD
     PUBLISH --> DOWNLOAD["Download and compare published bytes"]
 ```
 
-The diagram summarizes existing responsibilities; it is not a new automatic
-promotion mechanism. A failed gate leaves the requested delivery incomplete.
+A failed gate leaves delivery incomplete. Preserve the result and correct the
+failure before publishing. A source change after tagging requires a fresh version
+and matching tag.
 
 | Step | Required action | Do not substitute |
 | :--- | :--- | :--- |

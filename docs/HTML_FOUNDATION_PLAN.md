@@ -672,7 +672,7 @@ without the corresponding evidence.
 | Connected original App | Composed DOM, resources, controls, jobs, focus and rendering | A fresh live YouTube outcome |
 | Unchanged browser WPT | The selected harness-complete assertions on exact source/platform | All requirements absent from that selection |
 | Live site milestone | That exact journey/cohort/build actually worked | General standards conformance or a release |
-| Release qualification | The unchanged owner-requested delivery gates | A reason to rerun full release checks after each implementation PR |
+| Release qualification | Exact-source delivery gates for an accepted milestone | A reason to rerun full release checks after each implementation PR |
 
 WPT's reviewed parsing resources contain 62 data files, including four scripted
 files. **File counts are not case counts.** The native adapter must enumerate

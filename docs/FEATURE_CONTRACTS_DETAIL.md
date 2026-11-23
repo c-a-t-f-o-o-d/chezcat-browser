@@ -9,9 +9,8 @@ This document owns lasting behavior, refusal and acceptance requirements. The
 [roadmap](ROADMAP.md) owns work order, the [capability matrix](CAPABILITIES.md)
 implemented limits, and [compatibility](COMPATIBILITY.md) measured workflows.
 Historical execution results remain bound to their recorded source and scope;
-they do not replace affected checks for a changed implementation. Development
-continues independently of releases, which require an explicit owner request
-under [RELEASING.md](RELEASING.md).
+they do not replace affected checks for a changed implementation. Fully accepted
+milestones enter release preparation under [RELEASING.md](RELEASING.md).
 
 ## T1 — shared TLS/trust and data coverage baseline
 
