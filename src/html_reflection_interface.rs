@@ -33,3 +33,21 @@ pub(crate) fn operation(method: &str) -> Option<(&'static str, bool)> {
         }
     })
 }
+
+// IDL property, null-namespace content attribute, getter and setter.
+pub(crate) const META: &[(&str, &str, &str, &str)] = &[
+    ("name", "name", "\0HTMLMetaElement.get.name", "\0HTMLMetaElement.set.name"),
+    ("httpEquiv", "http-equiv", "\0HTMLMetaElement.get.httpEquiv", "\0HTMLMetaElement.set.httpEquiv"),
+    ("content", "content", "\0HTMLMetaElement.get.content", "\0HTMLMetaElement.set.content"),
+    ("media", "media", "\0HTMLMetaElement.get.media", "\0HTMLMetaElement.set.media"),
+    ("scheme", "scheme", "\0HTMLMetaElement.get.scheme", "\0HTMLMetaElement.set.scheme"),
+];
+
+pub(crate) fn meta_attribute(name: &str) -> Option<&'static str> {
+    META.iter().find_map(|&(property, attr, _, _)| (name == property).then_some(attr))
+}
+pub(crate) fn meta_operation(method: &str) -> Option<(&'static str, &'static str, bool)> {
+    META.iter().find_map(|&(property, attr, get, set)| {
+        (method == get || method == set).then_some((property, attr, method == set))
+    })
+}

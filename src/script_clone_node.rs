@@ -244,7 +244,7 @@ impl Bridge<'_> {
                 let textarea = tag == "textarea" && self.owned_native_textarea(source);
                 let radio = tag == "input" && self.owned_native_radio(source);
                 let svg=item.namespace==crate::html::Namespace::Svg;
-                if !svg&&(item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || textarea || radio || image || style)
+                if !svg&&(item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || tag == "meta" || textarea || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_empty()
                         && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
