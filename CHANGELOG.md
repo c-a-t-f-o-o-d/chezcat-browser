@@ -15,6 +15,32 @@
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
+## 0.82.0-alpha.4
+
+This candidate covers the accepted F00 requirements and native parser baseline.
+The [foundation register](docs/HTML_FOUNDATION_COVERAGE.json) retains the original
+10,968 native case modes and the 21 browser-file groups awaiting their harness.
+F01 document representation, F02 encoding and F04 tokenization are partial.
+
+Since the alpha.3 tag, the native corpus adapter has gained a normal-suite case
+for real protocol decoding, fragment parsing, serialization and malformed input.
+The external runner works with both generations of the worker. The input hashes,
+case catalog, expected outputs and cohort assignments are unchanged.
+
+Large DOM workloads now reuse paid order storage for eligible leaf appends,
+avoid unrelated form scans, and compare exact native string representations.
+Stylesheet candidate filtering uses mandatory rightmost classes or IDs, then
+runs the complete selector. Live order, origin checks, storage admission, script
+execution counts and deadlines remain part of the tested contracts.
+
+The corrected browser source integrated at
+[`7e0d347`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/7e0d347a3ef177d6487bc7feae451e4cc20a1c71).
+Its normal Windows capture accepted 4,454 passes with zero failures or ignored
+tests. Nine frozen original F01/F04 cases passed separately. Four capacity cases
+also passed together in two constrained scheduling diagnostics. The
+[release record](docs/RELEASING.md#published-baseline) identifies verified
+downloads and records the earlier unsuccessful candidates.
+
 ## 0.82.0-alpha.3
 
 ### HTML foundation baseline

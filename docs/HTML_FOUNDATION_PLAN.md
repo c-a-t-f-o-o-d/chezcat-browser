@@ -12,23 +12,21 @@
 
 ## Decision and objective
 
-**Owner priority, November 21, 2026:** complete the document foundation before
-resuming feature-led YouTube development. The YouTube journey remains a product
-goal and a later integration workload. It is not the selector for the next
-missing parser, DOM or HTML operation.
+The HTML/XHTML document foundation precedes the saved YouTube shell, search,
+navigation and playback milestones. Required parser and DOM behavior is selected
+from the [coverage register](HTML_FOUNDATION_COVERAGE.json).
 
-This plan replaces the previous P1-first scheduling, including the restriction
-against creating a foundation inventory. It authorizes the local representation,
-parser and binding changes needed for these contracts. It does not schedule an
-unrelated architecture rewrite, crate migration, broad capacity sweep or release.
+F00 has met its requirements, input-lock and baseline criteria. The original
+source-bound native results retain their failures and harness gaps. F01 now has
+shared native document, node, namespace and UTF-16 operations; F02 has shared
+decoders and initial document charset selection; F04 has a partial raw-text
+producer. Required integrations and unchanged browser assertions remain open.
+Named release verification is tracked in the [release history](RELEASING.md#published-baseline).
 
-The implementation review is anchored to public main
-[250705b](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/250705b6c46ad472f7dc8fd6a1442503a85e7dfd),
-through PR #438. During planning, PR #439 integrated genuine Event author
-prototype chains at 31647743f184382a40f58ab1b43bebf6788910fb. That work is
-preserved. Newer work must be reconciled, not reset to the audit snapshot. The
-coverage register records **requirements and source-review status**, not an
-executed conformance score.
+The initial review was anchored to
+[`250705b`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/250705b6c46ad472f7dc8fd6a1442503a85e7dfd)
+through PR #438, with PR #439 adding Event author-prototype behavior. The
+historical review below and the current package register serve different purposes.
 
 ### What completion means
 

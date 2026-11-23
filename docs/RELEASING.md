@@ -50,13 +50,22 @@ different states. Report only the state actually reached.
 
 ## Current release candidate
 
-`0.82.0-alpha.3` prepares the accepted F00 foundation baseline for tagged
-qualification. F00 records the fixed inputs, native adapter and source-bound
-baseline. Its unresolved parser cases and browser harness dependencies remain
-in the [coverage register](HTML_FOUNDATION_COVERAGE.json). The
-[change summary](../CHANGELOG.md#0820-alpha3) includes the partial foundation
-work integrated since that baseline. Delivery awaits the exact tagged gates
-and verification of the downloaded assets.
+`0.82.0-alpha.4` prepares the F00 requirements and parser-baseline milestone.
+The [changelog](../CHANGELOG.md#0820-alpha4) identifies the release scope and
+the [register](HTML_FOUNDATION_COVERAGE.json) retains the unresolved parser
+cases and required browser measurements. Verify exact tagged delivery and the
+downloaded distribution before treating this candidate as a published build.
+
+### Historical alpha.3 candidate
+
+The immutable `v0.82.0-alpha.3` tag identifies `ff5740d3dba4f549c854996c32e28adb592a8959`.
+The [hosted normal run](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
+reported 4,445 passes, four failures and one ignored adapter. The four failures
+involved child lists, dynamic scripts, element attributes and stylesheet
+requests. The serial diagnostic reported 4,449 passes and one ignored test.
+The complete normal-run gate requires zero ignored cases. Publication was
+skipped. Subsequent source integrates a real normal adapter test and repairs
+for the capacity workloads. Local checks do not retroactively qualify alpha.3.
 
 ### Historical alpha.2 candidate
 
@@ -83,6 +92,7 @@ Development source after the tag, including PR #433, is not part of this attempt
 
 | Snapshot | Recorded outcome |
 | :--- | :--- |
+| **v0.82.0-alpha.3** | Immutable F00 candidate `ff5740d`. Hosted normal qualification failed; publication was skipped. [Validation attempt](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) |
 | **v0.82.0-alpha.2** | Immutable candidate at `14134aba8ac2ab001c8ec13db77f68fa220b1400`. Normal Windows test stage failed; failure-summary reporting also failed. Packaging was not reached and publication was skipped. No release assets. [Validation attempt](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) |
 | **[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** | Published from `f2e1823266a7c08c89bce7293572d801da62053c`. All four downloads matched their public digests. Both archives and the release notes passed verification. The extracted browser started and completed the App input journey. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **[v0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3)** | Published from `57cc1d5`; runtime/source ZIPs, `publication.json` and `SHA256SUMS` all downloaded and verified, including extracted runtime checks |

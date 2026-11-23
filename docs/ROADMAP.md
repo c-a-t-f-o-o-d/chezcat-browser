@@ -22,11 +22,12 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
-| **F00 release preparation** | `0.82.0-alpha.3` packages the accepted requirements and parser-baseline milestone. See the [change summary](../CHANGELOG.md#0820-alpha3). | Exact tagged qualification, publication and downloaded-asset verification pending |
+| **F00 release preparation** | `0.82.0-alpha.4` prepares the accepted requirements and parser-baseline milestone with the normal-suite and capacity repairs. See the [change summary](../CHANGELOG.md#0820-alpha4). | Exact tagged qualification, publication and downloaded-asset verification pending |
+| **Failed F00 candidate** | `0.82.0-alpha.3` at `ff5740d`. The hosted normal run had four failures and one ignored test. | [Qualification failed and publication was skipped](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) |
 | **Failed validation candidate** | `0.82.0-alpha.2` identifies [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400), including integrated feature changes through `1de1f24` and release preparation. See the [change summary](../CHANGELOG.md). | [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) failed at normal native tests; no packages or release assets were published |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
-| **Public `main`** | Integrated source beyond the alpha.2 tag includes passive HTML/custom-host content replacement in PR #433 (`ce464a4`) stable newly created inert Text identities in PR #434 (`117bbb5`), and supported inert HTML/SVG constructor identities in PR #435 (`ad58c9a`). PR #437/#438 subsequently fix inert subtree-clone and main-template import identity reservation; PR #439 adds genuine Event author chains. See [recent commits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commits/main/) and [capability boundaries](CAPABILITIES.md). A source merge does not establish a new site result or update an old binary. | Coherent PRs after applicable development checks |
+| **Public `main`** | F00 baseline and partial F01/F02/F04 implementation, including verified integration of the capacity repairs at `7e0d347`. | Source development continues through the [foundation register](HTML_FOUNDATION_COVERAGE.json). |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
 
@@ -61,9 +62,9 @@ Isolation and GPU work keep their separate readiness gates.
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and
 [coverage register](HTML_FOUNDATION_COVERAGE.json) replace P1-first scheduling.
-They preserve current work, cover HTML and XHTML, and require actual DOM, form,
-editing, lifecycle and native-component behavior. Their inventory is not a
-conformance score.
+F00 has passed its requirements and baseline gate. F01, F02 and F04 have
+source-bound partial implementations. Required DOM, parser, form, editing,
+lifecycle, native-component and browser integration gates remain open.
 
 The retained P1 package has integrated nested template content, live ParentNode views,
 inert queries, passive HTML and supported native-control import, plain image

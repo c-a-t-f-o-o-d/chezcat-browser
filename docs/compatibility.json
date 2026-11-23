@@ -2,28 +2,59 @@
   "schema": 1,
   "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
   "release_candidate": {
-    "version": "0.82.0-alpha.2",
-    "integrated_through": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-    "tag": "v0.82.0-alpha.2",
-    "tag_source": "14134aba8ac2ab001c8ec13db77f68fa220b1400",
-    "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445",
-    "status": "Immutable candidate failed normal Windows qualification; packaging and publication were not reached, and no alpha.2 release assets were published",
-    "qualification_status": "failed",
-    "failure_stage": "normal native tests",
-    "diagnostic_boundary": "The failure-summary step also rejected its relative output path; failing native test identities and root cause are not established by the public output.",
+    "version": "0.82.0-alpha.4",
+    "integrated_through": "7e0d347a3ef177d6487bc7feae451e4cc20a1c71",
+    "tag": null,
+    "tag_source": null,
+    "workflow_url": null,
+    "status": "F00 release preparation; preflight and exact tagged delivery pending",
+    "qualification_status": "pending",
     "publication_status": "not_published",
-    "verified_downloadable_baseline": "v0.82.0-alpha.1",
-    "measurement_scope": "Existing source-bound workflow records retain their original revisions and are not alpha.2 runtime results",
-    "latest_reported_homepage_checkpoint": {
-      "source_commit": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
-      "integrated_via_pr": 429,
-      "visible_result": "Skeleton remains; usable header, guide and search field are not established",
-      "execution_result": "DOM walker reached its 30-second deadline",
-      "later_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-      "later_source_note": "PR #430 is integrated, but no post-PR #430 live acceptance result is recorded",
-      "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
-    }
+    "verified_downloadable_baseline": "v0.82.0-alpha.1"
   },
+  "previous_release_candidates": [
+    {
+      "version": "0.82.0-alpha.2",
+      "integrated_through": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+      "tag": "v0.82.0-alpha.2",
+      "tag_source": "14134aba8ac2ab001c8ec13db77f68fa220b1400",
+      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445",
+      "status": "Immutable candidate failed normal Windows qualification; packaging and publication were not reached, and no alpha.2 release assets were published",
+      "qualification_status": "failed",
+      "failure_stage": "normal native tests",
+      "diagnostic_boundary": "The failure-summary step also rejected its relative output path; failing native test identities and root cause are not established by the public output.",
+      "publication_status": "not_published",
+      "verified_downloadable_baseline": "v0.82.0-alpha.1",
+      "measurement_scope": "Existing source-bound workflow records retain their original revisions and are not alpha.2 runtime results",
+      "latest_reported_homepage_checkpoint": {
+        "source_commit": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
+        "integrated_via_pr": 429,
+        "visible_result": "Skeleton remains; usable header, guide and search field are not established",
+        "execution_result": "DOM walker reached its 30-second deadline",
+        "later_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+        "later_source_note": "PR #430 is integrated, but no post-PR #430 live acceptance result is recorded",
+        "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
+      }
+    },
+    {
+      "version": "0.82.0-alpha.3",
+      "tag": "v0.82.0-alpha.3",
+      "tag_source": "ff5740d3dba4f549c854996c32e28adb592a8959",
+      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420",
+      "qualification_status": "failed",
+      "publication_status": "not_published",
+      "normal": {
+        "passed": 4445,
+        "failed": 4,
+        "ignored": 1
+      },
+      "serial_diagnostic": {
+        "passed": 4449,
+        "failed": 0,
+        "ignored": 1
+      }
+    }
+  ],
   "recent_original_fixtures": {
     "record_scope": "Reported original-fixture evidence from the linked integrated PRs; not new executions by this documentation review or actual-site acceptance.",
     "selected_component_path": {
@@ -79,6 +110,19 @@
     }
   },
   "current_priority": {
+    "source_commit": "7e0d347a3ef177d6487bc7feae451e4cc20a1c71",
+    "milestone": "F00 verified methodology; F01, F02 and F04 partial",
+    "implementation_scope": "Complete the dependency-ordered HTML/XHTML foundation, then resume the established product roadmap.",
+    "validation_scope": "Keep source-bound native, unchanged browser, connected App, live-site and tagged delivery evidence separate.",
+    "acceptance": "Each package retains its required entry, integration and negative/recovery checks. F00 acceptance covers the fixed inventory, licensed inputs and classified baseline.",
+    "later_stages": [
+      "Real query and results",
+      "Watch navigation and Back",
+      "Advancing decoded video and audio"
+    ],
+    "historical_next_scope": "The earlier P1 and legacy framework backlog remains in previous_p1_priority and the source-bound historical records."
+  },
+  "previous_p1_priority": {
     "source_commit": "ad58c9a2a527fbd140110fb94f1ad5844320deea",
     "milestone": "P1: template preparation and stamping toward the first usable signed-out shell",
     "implementation_scope": "Complete known shared template/import, stable identity and ownership, mutation/observation, styling and input contracts in dependency order.",

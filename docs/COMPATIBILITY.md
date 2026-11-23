@@ -39,6 +39,11 @@ No alpha.2 release assets were published. The source changes and
 original fixtures do not convert the failed homepage checkpoint into a passing
 site result.
 
+The alpha.3 F00 candidate at `ff5740d` failed its hosted normal suite, and
+publication was skipped. The subsequent source fixes are covered by original
+Windows checks. They supply no new live-site measurement. See the
+[release record](RELEASING.md#published-baseline).
+
 ### Recent shared increments
 
 | Integrated source | What was actually exercised | Evidence boundary |
