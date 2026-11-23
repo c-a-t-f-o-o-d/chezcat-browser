@@ -979,6 +979,7 @@
           "requirement": "MIME and local/network/DOMParser routing; resource rules",
           "status": "partial",
           "verification": [
+            "Buffered XHR completion retains the actual raw body under its transferable storage lease through HEADERS_RECEIVED callbacks and their microtasks, then checks current request ownership before shared text decoding. Late MIME and supported responseType selection therefore affect actual text; abort/reopen retires the body without decoding. Successful decoding replaces raw capacity accounting with decoded text capacity and drops raw bytes. Fixed original xhr_headers_decoding_ native and App functions select real header visibility before text, charset/MIME/default-vs-explicit-text precedence, shrinking UTF16 independent output admission, abort/reentry before decoding, exact byte progress and actual native paint/editor/link retention. Existing XHR/request/codec refusal, security and storage cohorts remain selected; no streaming or XML document-response completion is claimed.",
             "Default XHR text completion with no recognized final encoding now determines shared-codec XML declaration or UTF-16 signature encoding only for empty responseType and final XML MIME. MIME overrides without charset preserve transport encoding; unknown override labels can reach XML selection. Explicit text, other MIME types and unknown declaration labels retain UTF-8 fallback; Unicode BOM decode still wins. Original xhr_xml_ functions in script_xhr_tests.rs, app_xhr_tests.rs and text_encoding_xml.rs fix precedence, exact declaration syntax, long scans, byte progress, independent scan/output refusal and recovery, real network/App text, native pixels and stable editor/link checks before execution. Selection borrows bounded response bytes and charges scan work separately; current ownership and existing request security/storage remain required. XML well-formedness/document responses, UTF-32/EBCDIC codecs, late HEADERS_RECEIVED override redecoding and unchanged required browser evidence remain separate. This supplementary increment follows the existing XHR pin and XML 1.0 Fifth Edition section 4.3.3 and Appendix F; the frozen foundation denominator is unchanged.",
             "XHR buffered text completion resolves response and override charset parameters independently: an absent override charset preserves the response label, while an explicit unknown/empty label uses UTF-8 fallback; recognized replacement remains distinct. Three original native completion witnesses and two local App witnesses fix precedence, BOM, suppression, byte-progress, refusal/recovery and connected rendering selections before execution. This does not implement default-response XML declaration sniffing, late HEADERS_RECEIVED override redecoding, document MIME routing, charset prescan/restart or unchanged browser evidence.",
             "The existing network/local HTML/plain entry routes now use all shared Encoding decoder families with exact output admission and cancellation. Encoded input limits remain; decoded UTF-8 is bounded at 2 MiB for network document text, 32 MiB for local HTML and 1 MiB for local plain text. One initial BOM is consumed; plain text never gains markup activation. Four original connected App functions select actual source/title/DOM, geometry/pixels, native editor/link retention, CSP request denial, decoded-expansion refusal/recovery and unchanged XML MIME refusal before execution. CSS/classic-script policies, broader MIME sniffing, DOMParser/XML and required browser evidence remain separate.",
@@ -1022,7 +1023,7 @@
         "Applicable legacy encoders",
         "Document transport/meta charset selection, confidence, sniff and restart",
         "Complete MIME and local/network/DOMParser routing",
-        "Late XHR MIME override redecoding and XML encodings outside the shared codec set",
+        "XML encodings outside the shared codec set and XML document parsing",
         "Required unchanged browser evidence and broader Windows App integration"
       ],
       "open_after_document_decoding_increment": [
@@ -1030,7 +1031,7 @@
         "Document confidence, parser-triggered encoding changes/restart, metadata and inherited/environment encoding policy",
         "Complete MIME and local/network/DOMParser XML routing",
         "Complete linked CSS/classic-script charset policy and decoding integration",
-        "Late XHR MIME override redecoding and XML encodings outside the shared codec set",
+        "XML encodings outside the shared codec set and XML document parsing",
         "Required unchanged browser evidence and broader Windows App integration"
       ],
       "open_after_linked_script_decoding_increment": [

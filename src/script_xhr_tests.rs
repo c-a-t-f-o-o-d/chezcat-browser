@@ -425,8 +425,10 @@ fn xhr_charset_output_refusal_never_delivers_success_and_fresh_request_recovers(
     let (mut doc, mut forms, mut page) = fixture("");
     start_charset_request(&mut doc, &mut forms, &mut page, None);
     let limit = page.state.limits.host.string_bytes;
-    page.state.limits.host.string_bytes = 2;
-    let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, "text/plain;charset=replacement", b"unpublished");
+    // Headers now precede decoding. Admit their native event strings while
+    // refusing the independently expanding 192-byte decoded response.
+    page.state.limits.host.string_bytes = 128;
+    let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, "text/plain;charset=windows-1252", &[0x80;64]);
     page.state.limits.host.string_bytes = limit;
     assert!(outcome.errors > 0, "output refusal must remain recorded");
     assert!(page.report().contains("Native request response storage was refused."));
@@ -504,4 +506,89 @@ fn xhr_xml_default_output_refusal_preserves_failure_and_next_request_recovers() 
     run(&mut doc,&mut forms,&mut page,"r.responseType='';");
     assert_eq!(complete_charset_response(&mut doc,&mut forms,&mut page,"application/xml",bytes).errors,0);
     run(&mut doc,&mut forms,&mut page,&format!("if(r.responseText!=={}||charsetLoads!==1||charsetLoaded!=={})throw 'XML recovered actual bytes';",charset_js_string("<?xml version='1.0' encoding='windows-1252'?><r>\u{81}</r>"),bytes.len()));
+}
+
+#[test]
+fn xhr_headers_decoding_uses_callback_mime_and_response_type_before_text_visibility() {
+    let (mut doc,mut forms,mut page)=fixture("");
+    let bytes=b"<?xml version='1.0' encoding='Shift_JIS'?><r>\x82\xa0</r>";
+    for (initial,kind,override_mime,expected) in [
+        ("text/plain", "text", "text/plain;charset=Shift_JIS", "<?xml version='1.0' encoding='Shift_JIS'?><r>あ</r>"),
+        ("text/plain", "", "application/xml", "<?xml version='1.0' encoding='Shift_JIS'?><r>あ</r>"),
+        ("application/xml", "text", "application/xml", "<?xml version='1.0' encoding='Shift_JIS'?><r>\u{fffd}\u{fffd}</r>"),
+        ("text/plain;charset=windows-1252", "text", "application/xml", "<?xml version='1.0' encoding='Shift_JIS'?><r>‚\u{a0}</r>"),
+        ("text/plain;charset=windows-1252", "", "application/xml;charset=unknown", "<?xml version='1.0' encoding='Shift_JIS'?><r>あ</r>"),
+    ] {
+        start_charset_request(&mut doc,&mut forms,&mut page,None);
+        run(&mut doc,&mut forms,&mut page,&format!(r#"
+var headerCalls=0;
+r.onreadystatechange=function(e){{if(!e.isTrusted||e.target!==r)throw 'native headers state';charsetTrace+=r.readyState+';';if(r.readyState===2){{headerCalls++;if(r.status!==200||r.getResponseHeader('Content-Type')!=={initial:?}||r.responseText!==''||r.response!=='')throw 'real headers before text';r.responseType={kind:?};r.overrideMimeType({override_mime:?});}}}};
+"#));
+        let outcome=complete_charset_response(&mut doc,&mut forms,&mut page,initial,bytes);
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        run(&mut doc,&mut forms,&mut page,&format!("if(r.responseText!=={}||headerCalls!==1||charsetLoads!==1||charsetLoaded!=={}||charsetTrace!=='1;2;3;4;load;end;')throw 'headers selected actual text';",charset_js_string(expected),bytes.len()));
+        assert!(page.state.xhr.records.last().unwrap().response.as_ref().unwrap().response.body.is_empty());
+    }
+}
+
+#[test]
+fn xhr_headers_decoding_admits_shrinking_utf16_only_after_callback_selection() {
+    let (mut doc,mut forms,mut page)=fixture("");
+    start_charset_request(&mut doc,&mut forms,&mut page,None);
+    run(&mut doc,&mut forms,&mut page,r#"
+var headerCalls=0;r.onreadystatechange=function(e){if(!e.isTrusted)throw 'native state';if(r.readyState===2){headerCalls++;r.overrideMimeType('text/plain;charset=utf-16le');}};
+"#);
+    let bytes:Vec<u8>=(0..500).flat_map(|_|[65,0]).collect();
+    let limit=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=600;
+    let outcome=complete_charset_response(&mut doc,&mut forms,&mut page,"text/plain;charset=windows-1252",&bytes);
+    page.state.limits.host.string_bytes=limit;
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    let received=page.state.xhr.records.last().unwrap().response.as_ref().unwrap();
+    assert_eq!(received.text,"A".repeat(500));assert_eq!(received.received_bytes,1000);
+    assert!(received.response.body.is_empty());
+    run(&mut doc,&mut forms,&mut page,"if(headerCalls!==1||charsetLoads!==1||charsetLoaded!==1000)throw 'late shrinking decoder';");
+}
+
+#[test]
+fn xhr_headers_decoding_reopen_or_abort_discards_body_before_decode() {
+    for action in ["r.abort();", "r.open('GET','/new-generation');r.send();"] {
+        let (mut doc,mut forms,mut page)=fixture("");
+        start_charset_request(&mut doc,&mut forms,&mut page,None);
+        run(&mut doc,&mut forms,&mut page,&format!("var switched=false;r.onreadystatechange=function(){{if(r.readyState===2&&!switched){{switched=true;{action}}}}};"));
+        let limit=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=600;
+        let bytes=vec![0x80;1000];
+        let outcome=complete_charset_response(&mut doc,&mut forms,&mut page,"text/plain;charset=windows-1252",&bytes);
+        page.state.limits.host.string_bytes=limit;
+        assert_eq!(outcome.errors,0,"canceled bytes must not decode: {}",page.report());
+        assert!(page.state.xhr.records[0].response.is_none());
+        run(&mut doc,&mut forms,&mut page,"if(!switched||charsetLoads!==0)throw 'old generation delivery';");
+        if action.contains("open") {
+            assert_eq!(page.native_request_pending_count(),1);
+            assert_eq!(complete_charset_response(&mut doc,&mut forms,&mut page,"text/plain",b"NEW").errors,0);
+            run(&mut doc,&mut forms,&mut page,"if(r.responseText!=='NEW'||charsetLoads!==1)throw 'new generation recovery';");
+        } else { assert_eq!(page.native_request_pending_count(),0); }
+    }
+}
+
+#[test]
+fn xhr_headers_decoding_microtasks_select_or_retire_before_output_admission() {
+    for abort in [false,true] {
+        let (mut doc,mut forms,mut page)=fixture("");
+        start_charset_request(&mut doc,&mut forms,&mut page,None);
+        let action=if abort { "r.abort();" } else { "r.overrideMimeType('text/plain;charset=utf-16le');" };
+        run(&mut doc,&mut forms,&mut page,&format!("var selected=0;r.onreadystatechange=function(){{if(r.readyState===2)Promise.resolve().then(function(){{selected++;{action}}});}};"));
+        let bytes:Vec<u8>=(0..500).flat_map(|_|[65,0]).collect();
+        let limit=page.state.limits.host.string_bytes;page.state.limits.host.string_bytes=600;
+        let outcome=complete_charset_response(&mut doc,&mut forms,&mut page,"text/plain;charset=windows-1252",&bytes);
+        page.state.limits.host.string_bytes=limit;
+        assert_eq!(outcome.errors,0,"{}",page.report());
+        run(&mut doc,&mut forms,&mut page,"if(selected!==1)throw 'headers microtask count';");
+        if abort {
+            assert!(page.state.xhr.records[0].response.is_none());
+            run(&mut doc,&mut forms,&mut page,"if(charsetLoads!==0||r.status!==0)throw 'microtask retired bytes';");
+        } else {
+            assert_eq!(page.state.xhr.records[0].response.as_ref().unwrap().text,"A".repeat(500));
+            run(&mut doc,&mut forms,&mut page,"if(charsetLoads!==1||charsetLoaded!==1000)throw 'microtask decoder result';");
+        }
+    }
 }

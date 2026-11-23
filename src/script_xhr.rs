@@ -1193,6 +1193,35 @@ impl Page {
         }
         true
     }
+    fn decode_xhr_response(&mut self, id: usize) -> Result<(), core::Failure> {
+        let record = &self.state.xhr.records[id];
+        let received = record.response.as_ref().ok_or(core::Failure::Storage)?;
+        let label = response_encoding(&mut self.runtime, record, &received.response)
+            .map_err(core::Failure::Network)?;
+        let text = self.runtime.decode_request_text(&received.response.body, label)
+            .map_err(core::Failure::Network)?;
+        if text.len() > self.state.limits.host.string_bytes {
+            return Err(core::Failure::Storage);
+        }
+        let received = self.state.xhr.records[id].response.as_mut().ok_or(core::Failure::Storage)?;
+        received._storage.replace(received.response.body.capacity(), text.capacity(),
+            self.state.limits.capacity.script_storage_bytes).map_err(core::Failure::Network)?;
+        received.response.body = Vec::new();
+        received.text = text;
+        Ok(())
+    }
+
+    fn xhr_completion_failure(&mut self, id: usize, error: core::Failure) -> &'static str {
+        let event = if matches!(error, core::Failure::Timeout) { "timeout" } else { "error" };
+        match error {
+            core::Failure::Network(message) => self.state.log(&format!("XHR request failed: {message}")),
+            core::Failure::Storage => self.state.error("XHR completion", "Native request response storage was refused."),
+            core::Failure::Timeout => {}
+        }
+        self.state.xhr.records[id].response = None;
+        event
+    }
+
     pub(crate) fn complete_native_request(
         &mut self,
         doc: &mut Document,
@@ -1210,41 +1239,19 @@ impl Page {
         let generation = completion.request.id.generation;
         let target = completion.request.id.receiver;
         let result = match completion.result {
-            Ok(mut response) => {
+            Ok(response) => {
                 self.state.log(&format!(
                     "XHR native response: status {}; {} encoded body bytes, {} decoded body bytes.",
-                    response.status,
-                    response.encoded_body_bytes,
-                    response.body.len()
+                    response.status, response.encoded_body_bytes, response.body.len()
                 ));
-                let label = response_encoding(&mut self.runtime, &self.state.xhr.records[id], &response);
-                match label
-                    .and_then(|label| self.runtime.decode_request_text(&response.body, label))
-                {
-                    Ok(text) if text.len() <= self.state.limits.host.string_bytes => {
-                        match completion._storage.take() {
-                            Some(mut storage) => match storage.replace(
-                                response.body.capacity(),
-                                text.capacity(),
-                                self.state.limits.capacity.script_storage_bytes,
-                            ) {
-                                Ok(()) => {
-                                    let received_bytes = response.body.len() as u64;
-                                    response.body = Vec::new();
-                                    Ok(Received {
-                                        received_bytes,
-                                        response,
-                                        text,
-                                        _storage: storage,
-                                    })
-                                }
-                                Err(error) => Err(core::Failure::Network(error)),
-                            },
-                            None => Err(core::Failure::Storage),
-                        }
-                    }
-                    Ok(_) => Err(core::Failure::Storage),
-                    Err(error) => Err(core::Failure::Network(error)),
+                match completion._storage.take() {
+                    Some(storage) => Ok(Received {
+                        received_bytes: response.body.len() as u64,
+                        response,
+                        text: String::new(),
+                        _storage: storage,
+                    }),
+                    None => Err(core::Failure::Storage),
                 }
             }
             Err(error) => Err(error),
@@ -1294,12 +1301,20 @@ impl Page {
                         }
                     }
                 }
+                let mut decode_failure = None;
                 for ready in [2, 3] {
-                    if ready == 3 && loaded == 0 {
-                        continue;
-                    }
                     if self.current_xhr_request(&completion.request).is_none() {
                         break;
+                    }
+                    if ready == 3 {
+                        // HEADERS_RECEIVED callbacks and their microtasks may
+                        // select the MIME/response type, abort or reopen. Only
+                        // the still-current request can decode its raw body.
+                        if let Err(error) = self.decode_xhr_response(id) {
+                            decode_failure = Some(error);
+                            break;
+                        }
+                        if loaded == 0 { continue; }
                     }
                     self.state.xhr.records[id].ready = ready;
                     if !self.dispatch_request_notification(
@@ -1315,43 +1330,29 @@ impl Page {
                         break;
                     }
                 }
-                if self.current_xhr_request(&completion.request).is_some() {
-                    self.dispatch_request_notification(
-                        doc,
-                        forms,
-                        Notification {
-                            target,
-                            generation,
-                            event: "progress",
-                            progress: Some(progress),
-                        },
-                    );
-                }
-                if self.current_xhr_request(&completion.request).is_some() {
-                    Some(("load", progress))
+                if let Some(error) = decode_failure {
+                    Some((self.xhr_completion_failure(id, error), zero()))
                 } else {
-                    None
-                }
-            }
-            Err(error) => {
-                let event = if matches!(error, core::Failure::Timeout) {
-                    "timeout"
-                } else {
-                    "error"
-                };
-                match error {
-                    core::Failure::Network(message) => {
-                        self.state.log(&format!("XHR request failed: {message}"))
+                    if self.current_xhr_request(&completion.request).is_some() {
+                        self.dispatch_request_notification(
+                            doc,
+                            forms,
+                            Notification {
+                                target,
+                                generation,
+                                event: "progress",
+                                progress: Some(progress),
+                            },
+                        );
                     }
-                    core::Failure::Storage => self.state.error(
-                        "XHR completion",
-                        "Native request response storage was refused.",
-                    ),
-                    core::Failure::Timeout => {}
+                    if self.current_xhr_request(&completion.request).is_some() {
+                        Some(("load", progress))
+                    } else {
+                        None
+                    }
                 }
-                self.state.xhr.records[id].response = None;
-                Some((event, zero()))
             }
+            Err(error) => Some((self.xhr_completion_failure(id, error), zero())),
         };
         if let Some((event, progress)) = terminal {
             if self.current_xhr_request(&completion.request).is_some() {
