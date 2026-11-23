@@ -437,3 +437,71 @@ fn xhr_charset_output_refusal_never_delivers_success_and_fresh_request_recovers(
     assert_eq!(outcome.errors, 0, "{}", page.report());
     run(&mut doc, &mut forms, &mut page, "if(r.responseText!=='A\\u20ac'||charsetLoads!==1||charsetErrors!==0||charsetEnds!==1)throw 'fresh charset recovery';");
 }
+
+#[test]
+fn xhr_xml_default_declaration_selection_obeys_final_mime_and_encoding() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    let bytes = b"<?xml version='1.0' encoding='Shift_JIS'?><r>\x82\xa0</r>";
+    let decoded = "<?xml version='1.0' encoding='Shift_JIS'?><r>あ</r>";
+    let utf8 = "<?xml version='1.0' encoding='Shift_JIS'?><r>\u{fffd}\u{fffd}</r>";
+    for (content_type, override_mime, kind, expected) in [
+        ("application/xml", None, "", decoded),
+        ("text/xml", None, "", decoded),
+        ("image/svg+xml", None, "", decoded),
+        ("not a mime", None, "", decoded),
+        ("application/xml;charset=unknown", None, "", decoded),
+        ("text/plain", Some("application/xml"), "", decoded),
+        ("application/xml;charset=utf-8", Some("text/xml;charset=unknown"), "", decoded),
+        ("application/xml", None, "text", utf8),
+        ("text/plain", None, "", utf8),
+        ("application/xml", Some("text/plain"), "", utf8),
+        ("application/xml", Some("not a mime"), "", utf8),
+        ("application/xml;charset=utf-8", None, "", utf8),
+        ("text/plain;charset=utf-8", Some("application/xml"), "", utf8),
+    ] {
+        start_charset_request(&mut doc, &mut forms, &mut page, override_mime);
+        run(&mut doc, &mut forms, &mut page, &format!("r.responseType={kind:?};"));
+        let outcome = complete_charset_response(&mut doc, &mut forms, &mut page, content_type, bytes);
+        assert_eq!(outcome.errors, 0, "{}", page.report());
+        run(&mut doc, &mut forms, &mut page, &format!(
+            "if(r.responseText!=={}||r.response!==r.responseText||r.status!==200||charsetLoads!==1||charsetLoaded!=={}||charsetTrace!=='1;2;3;4;load;end;')throw 'XML native selection';",
+            charset_js_string(expected), bytes.len()));
+    }
+}
+
+#[test]
+fn xhr_xml_default_utf16_signatures_and_bom_use_exact_response_bytes() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    let source = "<?xml version='1.0' encoding='UTF-16'?><r>あ</r>";
+    for big in [false, true] {
+        for bom in [false, true] {
+            let mut bytes = Vec::new();
+            if bom { bytes.extend_from_slice(if big { &[0xfe,0xff] } else { &[0xff,0xfe] }); }
+            for unit in source.encode_utf16() {
+                bytes.extend_from_slice(&if big { unit.to_be_bytes() } else { unit.to_le_bytes() });
+            }
+            start_charset_request(&mut doc, &mut forms, &mut page, None);
+            run(&mut doc, &mut forms, &mut page, "r.responseType='';");
+            assert_eq!(complete_charset_response(&mut doc, &mut forms, &mut page, "application/xml", &bytes).errors, 0);
+            run(&mut doc, &mut forms, &mut page, &format!("if(r.responseText!=={}||charsetLoaded!=={})throw 'XML UTF16 response';", charset_js_string(source), bytes.len()));
+        }
+    }
+}
+
+#[test]
+fn xhr_xml_default_output_refusal_preserves_failure_and_next_request_recovers() {
+    let (mut doc, mut forms, mut page) = fixture("");
+    let bytes=b"<?xml version='1.0' encoding='windows-1252'?><r>\x81</r>";
+    start_charset_request(&mut doc,&mut forms,&mut page,None);
+    run(&mut doc,&mut forms,&mut page,"r.responseType='';");
+    let limit=page.state.limits.host.string_bytes;
+    page.state.limits.host.string_bytes=bytes.len();
+    assert!(complete_charset_response(&mut doc,&mut forms,&mut page,"application/xml",bytes).errors>0);
+    page.state.limits.host.string_bytes=limit;
+    assert!(page.state.xhr.records.last().unwrap().response.is_none());
+    run(&mut doc,&mut forms,&mut page,"if(r.status!==0||r.responseText!==''||charsetLoads!==0)throw 'XML refused success';");
+    start_charset_request(&mut doc,&mut forms,&mut page,None);
+    run(&mut doc,&mut forms,&mut page,"r.responseType='';");
+    assert_eq!(complete_charset_response(&mut doc,&mut forms,&mut page,"application/xml",bytes).errors,0);
+    run(&mut doc,&mut forms,&mut page,&format!("if(r.responseText!=={}||charsetLoads!==1||charsetLoaded!=={})throw 'XML recovered actual bytes';",charset_js_string("<?xml version='1.0' encoding='windows-1252'?><r>\u{81}</r>"),bytes.len()));
+}
