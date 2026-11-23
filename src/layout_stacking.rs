@@ -50,6 +50,40 @@ fn push<T>(v: &mut Vec<T>, value: T) -> Result<(), String> {
     Ok(())
 }
 impl Engine<'_> {
+    pub(super) fn rank_auto_positioned_items(&mut self, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
+        let count = self.doc.nodes.len();
+        if count == 0 { return Ok(()); }
+        if let Some(meter) = budget {
+            meter.work(count.saturating_mul(3).saturating_add(self.layout.items.len()))?;
+            meter.copies(count.saturating_mul(2 * std::mem::size_of::<usize>()))?;
+        }
+        let mut groups = filled(count, usize::MAX)?;
+        let mut stack = reserve(count)?;
+        groups[0] = 0;
+        stack.push(0);
+        let mut next = 0;
+        while let Some(node) = stack.pop() {
+            if self.styles[node].position != Position::Static
+                && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
+                next += 1;
+                groups[node] = next;
+            }
+            for &child in self.doc.nodes[node].children.iter().rev() {
+                if child < count && self.parents[child] == Some(node) && groups[child] == usize::MAX {
+                    groups[child] = groups[node];
+                    stack.push(child);
+                }
+            }
+        }
+        for (index, item) in self.layout.items.iter().enumerate() {
+            let owner = self.paint_owner(item);
+            let group = groups.get(owner).copied().filter(|&g| g != usize::MAX)
+                .ok_or("Positioned paint item has no connected document owner.")?;
+            self.layout.positioned_items[index] = group;
+        }
+        Ok(())
+    }
+
     fn z_eligible(&self, node: usize) -> bool {
         self.styles[node].position != Position::Static
             || self.parents[node]
