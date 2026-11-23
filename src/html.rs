@@ -24,6 +24,8 @@ mod doctype;
 mod document_structure;
 #[path="html_table_construction.rs"]
 mod table_construction;
+#[path="html_active_formatting.rs"]
+mod active_formatting;
 #[path="html_processing_instructions.rs"]
 mod processing_instructions;
 #[path="html_document_mode.rs"]
@@ -372,6 +374,7 @@ fn parse_internal(
     let mut stack = vec![0];
     let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new());
     let mut tables = table_construction::Tables::default();
+    let mut formatting=active_formatting::Formatting::default();
     let mut position = 0;
     let mut title_seen = false;
     // If unsupported foreign recovery escapes through an unrelated ancestor,
@@ -398,6 +401,7 @@ fn parse_internal(
                 let text=decode_entities(&input[position..end]);
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
                 if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit)? {
+                    formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
                     start.text(&mut document,&mut stack,text,node_limit)?;
                 }
                 position=end;continue;
@@ -425,7 +429,8 @@ fn parse_internal(
         ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
-            tables.flush(&mut document,node_limit)?;
+            tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
+            let parent=*stack.last().unwrap();
             let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
             // A comment neither leaves the current tree context nor terminates
             // a checked SVG island. Its data never reenters markup scanning.
@@ -438,7 +443,7 @@ fn parse_internal(
             position+=4+consumed;continue;
         }
         if !checked&&rest.get(..9).is_some_and(|prefix|prefix.eq_ignore_ascii_case("<!doctype")) {
-            tables.flush(&mut document,node_limit)?;
+            tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             let token=doctype::read(&rest[9..],loaded.map(|loaded|loaded.check_cancel))?;
             if initial {
                 if document.nodes.len()==node_limit {if fail_on_capacity{return Err(node_limit_error());}break;}
@@ -455,17 +460,18 @@ fn parse_internal(
         if rest.starts_with("<?") {
             let (token,consumed)=processing_instructions::read(rest,loaded.map(|load|load.check_cancel))?;
             if !matches!(token,processing_instructions::Token::Eof) {
-                tables.flush(&mut document,node_limit)?;
+                tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
                 if document.nodes.len()>=node_limit {
                     if fail_on_capacity {return Err(node_limit_error());}break;
                 }
-                let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
+                let parent=*stack.last().unwrap();
+            let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
                 if let Some(kind)=token.into_kind()? {append_markup_leaf(&mut document,parent,kind)?;}
             }
             position+=consumed;continue;
         }
         if rest.starts_with("<!") {
-            tables.flush(&mut document,node_limit)?;
+            tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             svg.root=None;
             if checked{return Err("HTML fragment declaration/comment tokens are not implemented.".into());}
             if inert_doctype.is_some(){return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());}
@@ -485,7 +491,8 @@ fn parse_internal(
                 if let Some(start)=&mut structure{
                     initial=false;
                     if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit)? {
-                        start.text(&mut document,&mut stack,text,node_limit)?;
+                        formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
+                    start.text(&mut document,&mut stack,text,node_limit)?;
                     }
                     position+=1;continue;
                 }
@@ -501,7 +508,7 @@ fn parse_internal(
         position = tag.end;
         let mut foster=false;
         let structural_parent=if let Some(start)=&mut structure {
-            tables.flush(&mut document,node_limit)?;
+            tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             let active=tables.has_active(&stack);
             if active {
                 match tables.tag(&mut document,&mut stack,&tag,node_limit)? {
@@ -566,6 +573,8 @@ fn parse_internal(
         }
 
         if tag.closing {
+            let parent=*stack.last().unwrap();
+            if structure.is_some() && document.nodes[parent].namespace==Namespace::Html && fragment_formatting(&tag.name) && formatting.end(&document,&mut stack,&tag.name) {continue;}
             if let Some(root) = svg.root {
                 let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
                     matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
@@ -597,6 +606,10 @@ fn parse_internal(
         close_implied(&mut stack, &document, &tag.name);
         if previous_stack.as_ref().is_some_and(|previous| previous[stack.len()..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
             return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
+        }
+        if structure.is_some() && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
+            if matches!(tag.name.as_str(),"a"|"nobr"){formatting.end(&document,&mut stack,&tag.name);}
+            if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
         }
         let parent = if foster {tables.foster_location(&document)?.0} else {structural_parent.unwrap_or_else(||*stack.last().unwrap())};
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
@@ -701,6 +714,7 @@ fn parse_internal(
                 tables.opened(node,parent,slot,stack.len())?;
             }
             stack.push(node);
+            if structure.is_some() && document.nodes[node].namespace==Namespace::Html {formatting.opened(&document,&stack,node)?;}
             if !checked && document.nodes[node].namespace == Namespace::Html &&
                 svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
                 svg.blocked_depth = Some(stack.len());
@@ -709,7 +723,7 @@ fn parse_internal(
         }
     }
 
-    if let Some(start)=&mut structure {tables.flush(&mut document,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
+    if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }

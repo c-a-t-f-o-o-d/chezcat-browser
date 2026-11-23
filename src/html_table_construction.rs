@@ -416,7 +416,13 @@ impl Tables {
         self.open.last_mut().unwrap().slot += 1;
         Ok(())
     }
-    pub(super) fn flush(&mut self, doc: &mut Document, limit: usize) -> Result<(), String> {
+    pub(super) fn flush(
+        &mut self,
+        doc: &mut Document,
+        stack: &mut Vec<usize>,
+        formatting: &mut active_formatting::Formatting,
+        limit: usize,
+    ) -> Result<(), String> {
         let Some(parent) = self.pending_parent.take() else {
             return Ok(());
         };
@@ -424,6 +430,12 @@ impl Tables {
         let foster = std::mem::take(&mut self.nonspace);
         if !foster {
             if !append_text_value(doc, parent, text, limit)? {
+                return Err(limit_error(limit));
+            }
+            return Ok(());
+        }
+        if formatting.reconstruct(doc, stack, limit, Some(self))? {
+            if !append_text_value(doc, *stack.last().unwrap(), text, limit)? {
                 return Err(limit_error(limit));
             }
             return Ok(());
