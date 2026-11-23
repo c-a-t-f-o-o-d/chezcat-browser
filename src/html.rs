@@ -22,6 +22,8 @@ mod svg_namespace;
 mod doctype;
 #[path="html_document_structure.rs"]
 mod document_structure;
+#[path="html_processing_instructions.rs"]
+mod processing_instructions;
 #[path="html_document_mode.rs"]
 mod document_mode;
 #[path="html_element_names.rs"]
@@ -426,11 +428,7 @@ fn parse_internal(
                 if fail_on_capacity{return Err(node_limit_error());}break;
             }
             let data=comments::copy_data(data)?;
-            document.nodes.try_reserve(1).map_err(|_|"Could not reserve HTML comment node.")?;
-            document.nodes[parent].children.try_reserve(1).map_err(|_|"Could not reserve HTML comment child link.")?;
-            let node=document.nodes.len();
-            document.nodes.push(Node{kind:NodeKind::Comment(data.into()),namespace:Namespace::None,children:Vec::new()});
-            document.nodes[parent].children.push(node);
+            append_markup_leaf(&mut document,parent,NodeKind::Comment(data.into()))?;
             position+=4+consumed;continue;
         }
         if !checked&&rest.get(..9).is_some_and(|prefix|prefix.eq_ignore_ascii_case("<!doctype")) {
@@ -447,7 +445,18 @@ fn parse_internal(
             }
             position+=9+token.consumed;continue;
         }
-        if rest.starts_with("<!") || rest.starts_with("<?") {
+        if rest.starts_with("<?") {
+            let (token,consumed)=processing_instructions::read(rest,loaded.map(|load|load.check_cancel))?;
+            if !matches!(token,processing_instructions::Token::Eof) {
+                if document.nodes.len()>=node_limit {
+                    if fail_on_capacity {return Err(node_limit_error());}break;
+                }
+                let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
+                if let Some(kind)=token.into_kind()? {append_markup_leaf(&mut document,parent,kind)?;}
+            }
+            position+=consumed;continue;
+        }
+        if rest.starts_with("<!") {
             svg.root=None;
             if checked{return Err("HTML fragment declaration/comment tokens are not implemented.".into());}
             if inert_doctype.is_some(){return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());}
@@ -731,6 +740,15 @@ fn checked_select_tag(stack: &[usize], document: &Document, incoming: &str, clos
 
 fn fragment_formatting(name: &str) -> bool {
     matches!(name, "a" | "b" | "i" | "em" | "strong" | "u" | "small" | "big" | "code" | "font" | "nobr" | "s" | "strike" | "tt")
+}
+
+fn append_markup_leaf(document:&mut Document,parent:usize,kind:NodeKind)->Result<(),String>{
+    document.nodes.try_reserve(1).map_err(|_|"Cannot reserve native markup leaf.")?;
+    document.nodes[parent].children.try_reserve(1).map_err(|_|"Cannot reserve markup leaf child link.")?;
+    let node=document.nodes.len();
+    document.nodes.push(Node{kind,namespace:Namespace::None,children:Vec::new()});
+    document.nodes[parent].children.push(node);
+    Ok(())
 }
 
 fn append_text(document: &mut Document, parent: usize, source: &str, node_limit: usize) -> Result<bool,String> {

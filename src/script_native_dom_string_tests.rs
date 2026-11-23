@@ -16,6 +16,25 @@ fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){
 mod adjacent;
 
 
+
+#[test]
+fn html_processing_instruction_actual_markup_sinks_keep_owner_aliases_and_inert_data() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var host=document.getElementById('mount'),obs=new MutationObserver(function(){});obs.observe(host,{childList:true});
+host.innerHTML='<?named &amp;<i??><b></b><?xml-stylesheet href=unrequested?>';
+var pi=host.firstChild,blocked=host.lastChild,records=obs.takeRecords();
+if(pi.nodeType!==7||Object.getPrototypeOf(pi)!==ProcessingInstruction.prototype||pi.target!=='named'||pi.data!=='&amp;<i?'||pi.parentNode!==host||pi.ownerDocument!==document||blocked.nodeType!==8||records.length!==1||records[0].addedNodes[0]!==pi)throw 'actual parsed PI/observer';
+var clone=pi.cloneNode(false);if(clone===pi||clone.target!==pi.target||clone.data!==pi.data||clone.parentNode!==null)throw 'native clone';
+var t=document.createElement('template');t.innerHTML='<?P-name my-data?>';var parked=t.content.firstChild;
+if(parked.nodeType!==7||parked.target!=='P-name'||parked.ownerDocument!==t.content.ownerDocument||t.innerHTML!=='<?P-name my-data?>')throw 'real inert fragment PI';
+var imported=document.importNode(parked,true);if(imported.target!=='P-name'||imported.ownerDocument!==document||imported.data!=='my-data')throw 'PI import';
+var inert=new DOMParser().parseFromString('<?before?><html><body><?data x?></body></html>','text/html');
+if(inert.firstChild.nodeType!==7||inert.firstChild.ownerDocument!==inert||inert.body.firstChild.data!=='x'||inert.defaultView!==null)throw 'inert document path';
+"#);
+    assert!(!page.has_navigation_request());
+}
+
 #[test]
 fn native_child_remove_actual_receivers_observers_and_current_parent() {
     let (mut doc,mut forms,mut page)=fixture();

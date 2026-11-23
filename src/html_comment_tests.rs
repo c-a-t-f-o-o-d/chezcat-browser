@@ -40,5 +40,7 @@ fn fragment_comments_raw_contexts_remain_text_and_real_node_limits_still_refuse(
     for context in ["textarea","title","style","script","plaintext"]{let doc=parse_fragment("<!--literal-->",context,true).unwrap();assert!(comments(&doc).is_empty());assert!(matches!(&doc.nodes[1].kind,NodeKind::Text(text)if text=="<!--literal-->"));}
     let loaded=Some(LoadedTree{nodes:2,check_cancel:&||Ok(())});assert!(parse_internal("<!--one--><!--two-->",None,false,loaded,None).unwrap_err().contains("node limit"));
     assert!(parse_fragment(&"<!---->".repeat(MAX_NODES),"div",true).unwrap_err().contains("node limit"));
-    for markup in ["<!DOCTYPE html>","<![CDATA[unsupported]]>","<?pi?>"]{assert!(parse_fragment(markup,"div",true).is_err());}
+    let pi=parse_fragment("<?pi?>","div",true).unwrap();
+    assert!(matches!(&pi.nodes[pi.nodes[0].children[0]].kind,NodeKind::ProcessingInstruction{target,data} if target=="pi" && data.is_empty()));
+    for markup in ["<!DOCTYPE html>","<![CDATA[unsupported]]>","<!unimplemented>"]{assert!(parse_fragment(markup,"div",true).is_err());}
 }
