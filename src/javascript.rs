@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use work_attribution::Kind as WorkKind;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
+#[path="adjacent_interface.rs"]
+pub(crate) mod adjacent_interface;
 #[path="text_split_interface.rs"]
 pub(crate) mod text_split_interface;
 #[path="node_normalize_interface.rs"]
@@ -943,6 +945,15 @@ pub trait Host {
     fn prepare_node_normalize(&mut self,_target:u32)->Result<NativeNormalizeInfo,String>{Err("Native normalization preparation is unavailable.".into())}
     fn commit_node_normalize(&mut self,_target:u32)->Result<(),String>{Err("Native normalization publication is unavailable.".into())}
     fn abort_node_normalize(&mut self,_target:u32){}
+    fn adjacent_receiver_access(&self, _target: u32) -> Result<(), (&'static str, String)> {
+        Err(("NotSupportedError","Adjacent insertion is unavailable.".into()))
+    }
+    fn adjacent_destination(&mut self, _target: u32, _pos: adjacent_interface::Position, _text: bool) -> Result<Option<adjacent_interface::Destination>, (&'static str, String)> {
+        Err(("NotSupportedError","Adjacent insertion is unavailable.".into()))
+    }
+    fn commit_adjacent_text(&mut self, _target: u32, _pos: adjacent_interface::Position, _destination: adjacent_interface::Destination, _text: &Value) -> Result<(), (&'static str, String)> {
+        Err(("NotSupportedError","Adjacent Text insertion is unavailable.".into()))
+    }
     fn prepare_text_split(&mut self,_target:u32,_args:&[Value])->Result<NativeTextSplitInfo,(&'static str,String)>{Err(("NotSupportedError","Native Text split preparation is unavailable.".into()))}
     fn commit_text_split(&mut self,_target:u32)->Result<u32,String>{Err("Native Text split publication is unavailable.".into())}
     fn abort_text_split(&mut self,_target:u32){}
@@ -9182,6 +9193,10 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {
+            host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(w,_)|w)));
+            if let Err((kind,message))=host.adjacent_receiver_access(object) {return Err(self.adjacent_fault(kind,&message));}
+        }
         if method == NODE_VALUE_SET {
             // A retained child may have been detached since this accessor was
             // saved. Resolve its current native owner before invoking toString.
@@ -9198,6 +9213,7 @@ impl Runtime {
             if setter { &args[..args.len().min(1)] } else { &[][..] }
         } else {
             match method {
+                adjacent_interface::TEXT | adjacent_interface::ELEMENT => &args[..args.len().min(2)],
                 ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET | NODE_HAS_CHILDREN => &[][..],
                 ELEMENT_STYLE_SET | SVG_STYLE_SET | NODE_VALUE_SET => &args[..args.len().min(1)],
                 _ => args,
@@ -9300,6 +9316,7 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         if method=="\0Attr.set.value"{let value=self.copy_value(args.first().ok_or_else(||Fault::exception("TypeError","Attr value setter requires one argument."))?)?;self.host_set_native(object,"value",value,host)?;return Ok(Value::Undefined);}
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) { return self.insert_adjacent(object, method, args, host); }
         if let Some((name, true)) = window_relationships::operation(method) {
             return self.set_window_relationship(object, name, args, host);
         }

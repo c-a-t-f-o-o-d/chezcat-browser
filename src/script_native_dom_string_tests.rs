@@ -11,6 +11,10 @@ fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){
 }
 
 
+
+#[path = "script_adjacent_insertion_tests.rs"]
+mod adjacent;
+
 #[test]
 fn native_has_child_nodes_reads_current_topology_without_list_allocation() {
     let (mut doc, mut forms, mut page) = fixture();
