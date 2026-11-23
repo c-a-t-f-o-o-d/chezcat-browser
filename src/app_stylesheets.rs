@@ -904,7 +904,7 @@ document.head.appendChild(sheet);
         let site=Site::new();let mut app=App::new();
         app.stylesheet_limits=crate::css::StylesheetLimits{sheet_bytes:1500,document_bytes:8192,rules:16};
         app.navigate_location(site.location("/initial-latin"),true);wait(&mut app,|app|!app.is_loading());
-        assert!(app.styles.is_empty());assert!(app.events.iter().any(|event|event.contains("decoded UTF-8")),"{:?}",app.events);
+        assert!(app.styles.is_empty());assert!(app.events.iter().any(|event|event.contains("Decoded text exceeds the remaining 1500 byte allowance.")),"{:?}",app.events);
         app.navigate_location(site.location("/home"),true);wait(&mut app,|app|!app.is_loading());
         assert_eq!(app.document.title,"parser-sheet-window");assert_eq!(app.styles.len(),1);
     }
