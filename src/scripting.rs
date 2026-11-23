@@ -5990,6 +5990,19 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         if object == DOCUMENT && property == "title" {
+            // A tree rebuild can refund old index backing. When even all that
+            // credit and the old display buffer cannot fit the incoming value,
+            // refuse before touching the currently charged topology cache.
+            let mut credit=self.doc.title.capacity();
+            if self.state.dirty {
+                credit=credit.saturating_add(self.state.node_state_bytes())
+                    .saturating_add(self.state.order_bytes())
+                    .saturating_add(self.state.tree.ids.capacity().saturating_mul(size_of::<(usize,usize)>()))
+                    .saturating_add(self.state.tree_stack.capacity().saturating_mul(size_of::<tree_order::Visit>()));
+            }
+            if value.bytes()>self.state.retained_limit.saturating_sub(self.state.retained.saturating_sub(credit)) {
+                return Err("Document title exceeds the retained text allowance.".into());
+            }
             self.state.rebuild(self.doc)?;
             if let Some(node)=self.state.tree.title {return self.set_title_text(node_handle(node),&value);}
             let value = self.text(&value)?;
