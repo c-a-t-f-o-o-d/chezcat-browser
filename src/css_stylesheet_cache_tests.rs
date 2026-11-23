@@ -48,6 +48,20 @@ fn large_sheet() -> String {
 }
 
 #[test]
+fn stylesheet_cache_id_candidates_keep_live_ids_full_matching_and_cascade_order() {
+    let mut doc = crate::html::parse("<style>#alpha{opacity:.2}#beta,.selected{opacity:.4}#beta{opacity:.6}#alpha#beta{opacity:0}</style><body><p id=alpha></p><p id=beta></p><p id=other class=selected></p>");
+    let (a, b, other) = (id(&doc, "alpha"), id(&doc, "beta"), id(&doc, "other"));
+    let sources = HashMap::new();
+    let first = compute_with_environment_and_properties_cached(&doc, &sources, None, None, None);
+    assert_eq!((opacity(&first, a), opacity(&first, b), opacity(&first, other)), (0.2, 0.6, 0.4));
+    attribute(&mut doc, a, "id", "beta");
+    let NodeKind::Element { id: current, .. } = &mut doc.nodes[a].kind else { unreachable!() };
+    *current = Some("beta".into());
+    let next = compute_with_environment_and_properties_cached(&doc, &sources, None, None, first.stylesheet_cache.as_ref());
+    assert_eq!((opacity(&next, a), opacity(&next, b), opacity(&next, other)), (0.6, 0.6, 0.4));
+}
+
+#[test]
 fn stylesheet_cache_same_job_inline_mutations_reuse_syntax_with_live_values_and_original_budget() {
     let mut doc = crate::html::parse("<link id=sheet rel=stylesheet><div id=box></div>");
     let sheet = id(&doc, "sheet");

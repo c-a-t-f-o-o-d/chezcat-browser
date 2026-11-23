@@ -1,25 +1,36 @@
-//! Conservative candidates for rules with a mandatory rightmost class.
+//! Conservative candidates for rules with a mandatory rightmost class or ID.
 use super::*;
 use std::borrow::Cow;
 
 const BUCKETS: usize = 64;
-const MAX_CLASS_BYTES: usize = 4096;
+const MAX_KEY_BYTES: usize = 4096;
 
 pub(super) struct RuleCandidates {
     unkeyed: Vec<usize>,
-    classes: [Vec<usize>; BUCKETS],
+    keyed: [Vec<usize>; BUCKETS],
     occupied: u64,
+    has_classes: bool,
+    has_ids: bool,
 }
 
-fn bucket(class: &str) -> usize {
-    let hash = class.bytes().fold(0x811c9dc5u32, |hash, byte| {
+fn bucket(name: &str) -> usize {
+    let hash = name.bytes().fold(0x811c9dc5u32, |hash, byte| {
         (hash ^ u32::from(byte)).wrapping_mul(0x01000193)
     });
     ((hash ^ (hash >> 16)) as usize) % BUCKETS
 }
 
-fn selector_bucket(selector: &Selector) -> Option<usize> {
-    selector.parts.last()?.classes.first().map(|class| bucket(class))
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeyKind { Class, Id }
+
+fn selector_key(selector: &Selector) -> Option<(KeyKind, &str)> {
+    let rightmost = selector.parts.last()?;
+    rightmost.classes.first().map(|class| (KeyKind::Class, class.as_str()))
+        .or_else(|| rightmost.ids.first().map(|id| (KeyKind::Id, id.as_str())))
+}
+
+fn selector_bucket(selector: &Selector) -> Option<(KeyKind, usize)> {
+    selector_key(selector).map(|(kind, name)| (kind, bucket(name)))
 }
 
 fn selected_buckets(mut keys: u64) -> impl Iterator<Item = usize> {
@@ -38,12 +49,13 @@ impl RuleCandidates {
                 (rules.len() * 2 + 4 * (BUCKETS + 1)) * std::mem::size_of::<usize>())?;
         }
         let mut candidates = Self {
-            unkeyed: Vec::new(), classes: std::array::from_fn(|_| Vec::new()), occupied: 0,
+            unkeyed: Vec::new(), keyed: std::array::from_fn(|_| Vec::new()), occupied: 0,
+            has_classes: false, has_ids: false,
         };
         for (index, rule) in rules.iter().enumerate() {
             if let Some(meter) = meter.as_deref_mut() {
                 for selector in &rule.selectors {
-                    let bytes = selector.parts.last().and_then(|part| part.classes.first()).map_or(0, String::len);
+                    let bytes = selector_key(selector).map_or(0, |(_, name)| name.len());
                     meter.work(1 + bytes)?;
                 }
             }
@@ -53,8 +65,12 @@ impl RuleCandidates {
                 rule.selectors.iter().skip(1).all(|selector| selector_bucket(selector) == Some(key))
             });
             match key {
-                Some(key) => {
-                    candidates.classes[key].push(index);
+                Some((kind, key)) => {
+                    match kind {
+                        KeyKind::Class => candidates.has_classes = true,
+                        KeyKind::Id => candidates.has_ids = true,
+                    }
+                    candidates.keyed[key].push(index);
                     candidates.occupied |= 1u64 << key;
                 }
                 None => candidates.unkeyed.push(index),
@@ -68,25 +84,33 @@ impl RuleCandidates {
         mut meter: Option<&mut CssBudget<'_>>,
     ) -> Result<Option<Cow<'_, [usize]>>, String> {
         if self.unkeyed.len() == count { return Ok(None); }
-        let before = meter.as_ref().map_or(usize::MAX, |meter| meter.remaining_work());
-        let mut work = before;
-        let attribute = context.attribute(node, "class", &mut work).unwrap_or("");
-        if let Some(meter) = meter.as_deref_mut() {
-            meter.work(before - work)?;
-            if work == 0 { return Err("CSS selector job work limit reached.".into()); }
+        let mut keys = 0;
+        if self.has_classes {
+            let before = meter.as_ref().map_or(usize::MAX, |meter| meter.remaining_work());
+            let mut work = before;
+            let attribute = context.attribute(node, "class", &mut work).unwrap_or("");
+            if let Some(meter) = meter.as_deref_mut() {
+                meter.work(before - work)?;
+                if work == 0 { return Err("CSS selector job work limit reached.".into()); }
+            }
+            if attribute.len() > MAX_KEY_BYTES { return Ok(None); }
+            if let Some(meter) = meter.as_deref_mut() { meter.work(1 + attribute.len() * 2)?; }
+            for class in attribute.split_ascii_whitespace() { keys |= 1u64 << bucket(class); }
         }
-        if attribute.len() > MAX_CLASS_BYTES { return Ok(None); }
-        if let Some(meter) = meter.as_deref_mut() {
-            meter.work(1 + attribute.len() * 2)?;
+        if self.has_ids {
+            if let Some(meter) = meter.as_deref_mut() { meter.work(1)?; }
+            if let NodeKind::Element { id: Some(id), .. } = &context.doc.nodes[node].kind {
+                if id.len() > MAX_KEY_BYTES { return Ok(None); }
+                if let Some(meter) = meter.as_deref_mut() { meter.work(id.len())?; }
+                keys |= 1u64 << bucket(id);
+            }
         }
-
-        let keys = self.occupied & attribute.split_ascii_whitespace()
-            .fold(0u64, |keys, class| keys | (1u64 << bucket(class)));
+        let keys = self.occupied & keys;
         if keys == 0 { return Ok(Some(Cow::Borrowed(&self.unkeyed))); }
         if let Some(meter) = meter.as_deref_mut() {
             meter.work(4 * keys.count_ones() as usize)?;
         }
-        let added: usize = selected_buckets(keys).map(|key| self.classes[key].len()).sum();
+        let added: usize = selected_buckets(keys).map(|key| self.keyed[key].len()).sum();
         let total = added + self.unkeyed.len();
         if total == count { return Ok(None); }
         let single_bucket = keys.is_power_of_two();
@@ -98,7 +122,7 @@ impl RuleCandidates {
         }
         let mut indices = Vec::with_capacity(total);
         if single_bucket {
-            let mut keyed = self.classes[keys.trailing_zeros() as usize].iter().copied().peekable();
+            let mut keyed = self.keyed[keys.trailing_zeros() as usize].iter().copied().peekable();
             for &index in &self.unkeyed {
                 while keyed.peek().is_some_and(|&next| next < index) {
                     indices.push(keyed.next().unwrap());
@@ -110,7 +134,7 @@ impl RuleCandidates {
         }
         indices.extend_from_slice(&self.unkeyed);
         for key in selected_buckets(keys) {
-            indices.extend_from_slice(&self.classes[key]);
+            indices.extend_from_slice(&self.keyed[key]);
         }
         indices.sort_unstable();
         Ok(Some(Cow::Owned(indices)))

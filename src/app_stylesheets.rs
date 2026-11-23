@@ -448,20 +448,28 @@ mod tests {
             let gate = Arc::new((Mutex::new(false), Condvar::new()));
             let (stop, seen, held) = (stopped.clone(), requests.clone(), gate.clone());
             let worker = std::thread::spawn(move || {
-                let mut workers = Vec::new();
+                // Reuse an idle responder across real connections. A second
+                // connection can still run independently of a held response.
+                let (idle, available) = std::sync::mpsc::channel::<usize>();
+                let mut workers: Vec<(std::sync::mpsc::Sender<TcpStream>, std::thread::JoinHandle<()>)> = Vec::new();
                 for stream in listener.incoming() {
-                    let Ok(mut stream) = stream else { break };
-                    if stop.load(Ordering::Relaxed) {
-                        break;
+                    let Ok(stream) = stream else { break };
+                    if stop.load(Ordering::Relaxed) { break; }
+                    if let Ok(index) = available.try_recv() {
+                        workers[index].0.send(stream).unwrap();
+                        continue;
                     }
-                    let (seen, held) = (seen.clone(), held.clone());
-                    workers.push(std::thread::spawn(move || {
+                    let (sender, inbox) = std::sync::mpsc::channel::<TcpStream>();
+                    let index = workers.len();
+                    let (seen, held, idle) = (seen.clone(), held.clone(), idle.clone());
+                    let serve = move |mut stream: TcpStream| {
                         stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
                         stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
                         let mut request = Vec::new();
                         let mut byte = [0u8; 1];
+                        let mut reader = std::io::BufReader::new(&mut stream);
                         while !request.ends_with(b"\r\n\r\n") && request.len() < 32768 {
-                            if stream.read_exact(&mut byte).is_err() { return }
+                            if reader.read_exact(&mut byte).is_err() { return }
                             request.push(byte[0]);
                         }
                         let request = String::from_utf8_lossy(&request);
@@ -561,9 +569,18 @@ document.head.appendChild(sheet);
                         };
                         let response = format!("HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}", body.len());
                         let _ = stream.write_all(response.as_bytes());
-                    }));
+                    };
+                    let handler = std::thread::spawn(move || {
+                        serve(stream);
+                        while idle.send(index).is_ok() {
+                            let Ok(stream) = inbox.recv() else { break };
+                            serve(stream);
+                        }
+                    });
+                    workers.push((sender, handler));
                 }
-                for worker in workers {
+                for (sender, worker) in workers {
+                    drop(sender);
                     worker.join().unwrap();
                 }
             });
@@ -597,11 +614,24 @@ document.head.appendChild(sheet);
     }
 
     fn wait(app: &mut App, condition: impl Fn(&App) -> bool) {
+        let previous = app.wake.clone();
+        let forward = previous.clone();
+        let (notify, ready) = std::sync::mpsc::sync_channel(1);
+        app.set_load_wake(Arc::new(move || {
+            forward();
+            let _ = notify.try_send(());
+        }));
         let deadline = Instant::now() + Duration::from_secs(6);
         while !condition(app) && Instant::now() < deadline {
             app.poll_load();
-            std::thread::sleep(Duration::from_millis(2));
+            if !condition(app) {
+                // Worker notifications also cover results buffered between
+                // poll and wait. Keep a short tick for timer-driven progress.
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let _ = ready.recv_timeout(remaining.min(Duration::from_millis(2)));
+            }
         }
+        app.set_load_wake(previous);
         assert!(condition(app), "{}\n{:?}", app.document.title, app.events);
     }
 
