@@ -2346,8 +2346,8 @@ impl Runtime {
                 self.units_string(&units).map(Value::String)
             }
             Builtin::StringMethod(method) => {
-                if method == "replaceAll" {
-                    return self.string_replace_all(this, args, host);
+                if matches!(method,"replace"|"replaceAll") {
+                    return self.string_replace_value(this,args,method=="replaceAll",host);
                 }
                 let this = if matches!(method, "toString" | "valueOf") {
                     match self.wrapped_data(&this) {

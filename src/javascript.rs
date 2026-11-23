@@ -6130,76 +6130,6 @@ impl Runtime {
         Ok(pieces.len() >= limit)
     }
 
-    fn replacement_text(
-        &mut self,
-        replacement: &str,
-        found: &regexp::Match,
-        input: &[u16],
-    ) -> Result<String, Fault> {
-        let mut output = String::new();
-        let bytes = replacement.as_bytes();
-        let mut at = 0;
-        while at < bytes.len() {
-            if bytes[at] == b'$' {
-                let next = bytes.get(at + 1).copied();
-                if next == Some(b'<') && !found.named_captures.is_empty() {
-                    if let Some(end) = replacement[at + 2..].find('>') {
-                        let end = at + 2 + end;
-                        let name = &replacement[at + 2..end];
-                        self.work(name.len() + found.named_captures.len())?;
-                        if let Some((_, Some((start, finish)))) =
-                            found.named_captures.iter().find(|(key, _)| key == name)
-                        {
-                            let captured = self.units_string(&input[*start..*finish])?;
-                            self.append_string(&mut output, &captured)?;
-                        }
-                        at = end + 1;
-                        continue;
-                    }
-                }
-                let capture = match next {
-                    Some(b'&') => Some(Some((found.start(), found.end()))),
-                    Some(b'`') => Some(Some((0, found.start()))),
-                    Some(b'\'') => Some(Some((found.end(), input.len()))),
-                    Some(b'0'..=b'9') => {
-                        let first = (next.unwrap() - b'0') as usize;
-                        let second = bytes
-                            .get(at + 2)
-                            .filter(|b| b.is_ascii_digit())
-                            .map(|b| first * 10 + (b - b'0') as usize);
-                        if let Some(number) =
-                            second.filter(|number| *number > 0 && *number < found.captures.len())
-                        {
-                            at += 1;
-                            Some(found.captures[number])
-                        } else if first > 0 && first < found.captures.len() {
-                            Some(found.captures[first])
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(capture) = capture {
-                    if let Some((start, end)) = capture {
-                        let captured = self.units_string(&input[start..end])?;
-                        self.append_string(&mut output, &captured)?;
-                    }
-                    at += 2;
-                    continue;
-                }
-                if next == Some(b'$') {
-                    self.append_string(&mut output, "$")?;
-                    at += 2;
-                    continue;
-                }
-            }
-            let ch = replacement[at..].chars().next().unwrap();
-            self.append_string(&mut output, &replacement[at..at + ch.len_utf8()])?;
-            at += ch.len_utf8();
-        }
-        Ok(output)
-    }
 
     fn error_object(
         &mut self,
@@ -10245,6 +10175,9 @@ impl Runtime {
         if let Value::Host(object) = object {
             let value = self.call_host(object, method, args, host)?;
             return self.checked_value(value);
+        }
+        if matches!(method,"replace"|"replaceAll") && object.is_string() {
+            return self.string_replace_value(object,args,method=="replaceAll",host);
         }
         if let Value::StringUnits(ref units) = object {
             return match method {
