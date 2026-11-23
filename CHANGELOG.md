@@ -43,6 +43,10 @@ downloads and records the earlier unsuccessful candidates.
 
 ## 0.82.0-alpha.3
 
+**Delivery outcome.** The immutable tag identifies `ff5740d3dba4f549c854996c32e28adb592a8959`.
+The [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) failed in the normal native suite.
+Publication was skipped and no alpha.3 assets were delivered.
+
 ### HTML foundation baseline
 
 F00 established the [foundation plan](docs/HTML_FOUNDATION_PLAN.md), a fixed

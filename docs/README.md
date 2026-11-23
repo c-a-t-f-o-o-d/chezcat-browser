@@ -55,7 +55,8 @@ including integrated changes through PR #430 and release preparation in PR #431.
 Its [change summary](../CHANGELOG.md#0820-alpha2) describes the source scope;
 [Windows release qualification and verified delivery](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 stopped at the normal native-test stage. No alpha.2 packages were published.
-The subsequent alpha.3 tag at `ff5740d` also failed Windows qualification.
+The subsequent [alpha.3 qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
+at `ff5740d` also failed the Windows normal suite.
 Its build and the four hosted capacity failures are recorded in the
 [release history](RELEASING.md#published-baseline). The alpha.4 source includes
 the adapter and capacity corrections. F00 acceptance covers requirements and

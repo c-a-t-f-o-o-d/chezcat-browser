@@ -60,12 +60,18 @@ downloaded distribution before treating this candidate as a published build.
 
 The immutable `v0.82.0-alpha.3` tag identifies `ff5740d3dba4f549c854996c32e28adb592a8959`.
 The [hosted normal run](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
-reported 4,445 passes, four failures and one ignored adapter. The four failures
-involved child lists, dynamic scripts, element attributes and stylesheet
-requests. The serial diagnostic reported 4,449 passes and one ignored test.
-The complete normal-run gate requires zero ignored cases. Publication was
-skipped. Subsequent source integrates a real normal adapter test and repairs
-for the capacity workloads. Local checks do not retroactively qualify alpha.3.
+reported 4,445 passes, four failures and one ignored adapter. The failures
+involved child-list identities, dynamic script execution, element attribute
+backing and the dynamic stylesheet queue. Its serial diagnostic reported
+4,449 passes and one ignored test. Normal qualification requires zero ignored
+cases. The build failed and publication was skipped.
+
+[PR #496](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/496) made the
+adapter a meaningful normal test while preserving the frozen case catalog.
+[PR #497](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/497) reduced
+DOM and stylesheet work while retaining request counts, trust checks and
+deadlines. The local normal suite on its source tree passed all 4,454 tests.
+A later tagged build must establish its own delivery evidence.
 
 ### Historical alpha.2 candidate
 

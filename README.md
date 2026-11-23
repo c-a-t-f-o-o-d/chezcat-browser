@@ -63,7 +63,7 @@ These are **implemented slices, not complete standards support**. The
 | :--- | :--- | :--- |
 | **A fixed downloadable snapshot** | [📦 0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
 | **F00 release preparation** | [Foundation baseline notes](CHANGELOG.md#0820-alpha4) | Source version `0.82.0-alpha.4` is in preparation. Tagged qualification and verified delivery are pending. |
-| **The tagged alpha.3 attempt** | [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) | The normal suite failed. Publication was skipped. |
+| **The tagged alpha.3 attempt** | [F00 baseline notes](CHANGELOG.md#0820-alpha3) and [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) | The normal suite failed. Publication was skipped. |
 | **The tagged alpha.2 attempt** | [🔬 Validation record](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) | Exact source `14134ab`; the normal Windows test stage failed. No alpha.2 release assets were published. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
