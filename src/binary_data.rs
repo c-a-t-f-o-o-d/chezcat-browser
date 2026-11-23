@@ -1381,22 +1381,15 @@ impl Runtime {
                     .first()
                     .is_none_or(|value| matches!(value, Value::Undefined))
                 {
-                    ",".into()
+                    Value::String(",".into())
                 } else {
                     let value = self.copy_value(&args[0])?;
                     let value = self.primitive_with_hint(value, true, host)?;
                     self.work(value.bytes())?;
-                    value.script_text()?
+                    Self::array_join_primitive(value)?
                 };
-                let mut result = String::new();
-                for index in 0..length {
-                    if index > 0 {
-                        self.append_string(&mut result, &separator)?;
-                    }
-                    let number = self.typed_read(view, index)?;
-                    self.append_string(&mut result, &number_text(number))?;
-                }
-                self.checked_value(Value::String(result))
+                let result = self.array_like_join(id, length, &separator, host)?;
+                self.checked_value(result)
             }
             "indexOf" | "includes" | "lastIndexOf" => {
                 if length == 0 {
@@ -1708,6 +1701,10 @@ impl Runtime {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "typed_array_join_utf16_tests.rs"]
+mod typed_array_join_utf16_tests;
 
 #[cfg(test)]
 mod tests {
