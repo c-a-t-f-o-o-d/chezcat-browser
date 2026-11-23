@@ -1,7 +1,8 @@
 //! Original native bitmap-domain joint backing and genuine owner acceptance.
 use super::*;
 fn page(spare:usize)->(Document,Forms,Page){
-    let markup=format!("<html><body>{}</body></html>","<p></p>".repeat(252));
+    // Exactly 255 native nodes include the Document and three structural elements.
+    let markup=format!("<html><head></head><body>{}</body></html>","<p></p>".repeat(255-4));
     let mut doc=crate::html::parse_loaded_document(&markup,&||Ok(())).unwrap();assert_eq!(doc.nodes.len(),255);
     let mut nodes=Vec::new();nodes.try_reserve_exact(doc.nodes.len()+spare).unwrap();nodes.append(&mut doc.nodes);doc.nodes=nodes;
     doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();

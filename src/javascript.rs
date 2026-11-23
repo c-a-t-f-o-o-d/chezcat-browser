@@ -562,6 +562,10 @@ pub(crate) const DOM_IMPLEMENTATION_CREATE_HTML_DOCUMENT: &str = "\0DOMImplement
 pub(crate) const DOM_IMPLEMENTATION_HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
 pub(crate) const DOM_IMPLEMENTATION_CREATE_DOCUMENT: &str = "\0DOMImplementation.createDocument";
 pub(crate) const DOM_IMPLEMENTATION_CREATE_DOCTYPE: &str = "\0DOMImplementation.createDocumentType";
+pub(crate) const ELEMENT_REMOVE: &str = "\0Element.remove";
+pub(crate) const CHARACTER_REMOVE: &str = "\0CharacterData.remove";
+pub(crate) const DOCTYPE_REMOVE: &str = "\0DocumentType.remove";
+pub(crate) fn child_remove_operation(method:&str)->bool {matches!(method,ELEMENT_REMOVE|CHARACTER_REMOVE|DOCTYPE_REMOVE)}
 pub(crate) const NODE_HAS_CHILDREN: &str = "\0Node.hasChildNodes";
 pub(crate) const NODE_VALUE_GET: &str = "\0Node.get.nodeValue";
 pub(crate) const NODE_VALUE_SET: &str = "\0Node.set.nodeValue";
@@ -961,6 +965,7 @@ pub trait Host {
     fn document_location_owner(&self, _target:u32)->Option<u32>{None}
     fn document_location_access(&self,_caller:Option<u32>,_target:u32)->Result<(),String>{Err("Unknown Document location owner.".into())}
     fn document_location_value(&mut self,_caller:Option<u32>,_target:u32)->Result<Value,String>{Err("No native Document location.".into())}
+    fn child_removal_parent(&mut self,_node:u32)->Result<Option<u32>,String>{Err("Native ChildNode removal is unavailable.".into())}
     fn adjacent_receiver_access(&self, _target: u32) -> Result<(), (&'static str, String)> {
         Err(("NotSupportedError","Adjacent insertion is unavailable.".into()))
     }
@@ -9198,7 +9203,7 @@ impl Runtime {
         } else {
             match method {
                 adjacent_interface::TEXT | adjacent_interface::ELEMENT => &args[..args.len().min(2)],
-                ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET | NODE_HAS_CHILDREN => &[][..],
+                ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET | NODE_HAS_CHILDREN | ELEMENT_REMOVE | CHARACTER_REMOVE | DOCTYPE_REMOVE => &[][..],
                 ELEMENT_STYLE_SET | SVG_STYLE_SET | NODE_VALUE_SET => &args[..args.len().min(1)],
                 _ => args,
             }
@@ -9299,6 +9304,12 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         if method=="\0Attr.set.value"{let value=self.copy_value(args.first().ok_or_else(||Fault::exception("TypeError","Attr value setter requires one argument."))?)?;self.host_set_native(object,"value",value,host)?;return Ok(Value::Undefined);}
+        if child_remove_operation(method) {
+            if let Some(parent)=host.child_removal_parent(object).map_err(Fault::new)? {
+                self.call_host(parent,"removeChild",&[Value::Host(object)],host)?;
+            }
+            return Ok(Value::Undefined);
+        }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) { return self.insert_adjacent(object, method, args, host); }
         if let Some((name, true)) = window_relationships::operation(method) {
             return self.set_window_relationship(object, name, args, host);

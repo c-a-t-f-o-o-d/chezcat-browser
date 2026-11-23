@@ -60,8 +60,7 @@ at `ff5740d` also failed the Windows normal suite.
 Its build and the four hosted capacity failures are recorded in the
 [release history](RELEASING.md#published-baseline). The alpha.4 source includes
 the adapter and capacity corrections. F00 acceptance covers requirements and
-the fixed baseline. F01, F02 and F04 remain partial, and the required browser
-groups await their harness. The [coverage register](HTML_FOUNDATION_COVERAGE.json)
+the fixed baseline. Current development has partial F01, F02, F04 and F05 work. All 21 required browser files have been attempted. The register records the measured results and files still missing a terminal report. The [coverage register](HTML_FOUNDATION_COVERAGE.json)
 tracks these distinctions.
 
 ### Current reading path

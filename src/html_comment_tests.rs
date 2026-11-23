@@ -16,7 +16,14 @@ fn fragment_comments_document_inert_and_fragment_paths_keep_real_order_without_d
     for doc in [parse(markup),parse_loaded_document(markup,&||Ok(())).unwrap(),parse_inert_html(markup,100,&||Ok(())).unwrap().0,parse_fragment(markup,"template",true).unwrap()]{
         assert_eq!(comments(&doc),vec!["lead","雪 &amp;\ntwo","last"]);
         assert!(matches!(doc.nodes[doc.nodes[0].children[0]].kind,NodeKind::Comment(_)));
-        let div=doc.nodes[0].children[1];assert_eq!(doc.nodes[div].children.len(),4);assert_eq!(doc.nodes[doc.nodes[div].children[1]].namespace,Namespace::None);
+        let div=doc.nodes.iter().position(|n|matches!(&n.kind,NodeKind::Element{tag,..} if tag=="div")).unwrap();
+        let second=doc.nodes[0].children[1];
+        if second!=div {
+            assert!(matches!(&doc.nodes[second].kind,NodeKind::Element{tag,..} if tag=="html"));
+            let body=doc.nodes[second].children.iter().copied().find(|&n|matches!(&doc.nodes[n].kind,NodeKind::Element{tag,..} if tag=="body")).unwrap();
+            assert_eq!(doc.nodes[body].children,[div]);
+        }
+        assert_eq!(doc.nodes[div].children.len(),4);assert_eq!(doc.nodes[doc.nodes[div].children[1]].namespace,Namespace::None);
     }
     let loaded=parse_loaded_document("<!--x\0y-->",&||Ok(())).unwrap();assert_eq!(comments(&loaded),vec!["x\u{fffd}y"]);
 }

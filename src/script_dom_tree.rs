@@ -234,7 +234,7 @@ impl State {
                 let other=state_bytes.checked_add(tree.ids.capacity()*size_of::<(usize,usize)>()).and_then(|bytes|bytes.checked_add(id_min))
                     .ok_or("DOM order/ID joint backing overflow.")?;
                 self.push_tree_order(&mut tree.order,node,other)?;
-                if name == "body" && tree.body.is_none() {
+                if tree.body.is_none() && (name=="body" || name=="frameset" && parent==tree.document_element && parent.is_some_and(|p|tag(doc,p)=="html" && doc.nodes[p].namespace==crate::html::Namespace::Html) && doc.nodes[node].namespace==crate::html::Namespace::Html) {
                     tree.body = Some(node);
                 }
                 if name=="title" && doc.nodes[node].namespace==crate::html::Namespace::Html && tree.title.is_none() {tree.title=Some(node);}

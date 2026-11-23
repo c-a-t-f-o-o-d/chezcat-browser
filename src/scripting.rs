@@ -3104,6 +3104,9 @@ impl Bridge<'_> {
         }
         if property=="text" && self.title_receiver(object) {return true;}
         if script_anchor_url::property(property) && self.native_anchor(object) {return true;}
+        if property=="remove" && (self.collection_interface_receiver(object)==Some(false)||self.character_data_receiver(object)||self.doctype_receiver(object)) {
+            return !self.form_named_control(object,property);
+        }
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3894,6 +3897,7 @@ impl Host for Bridge<'_> {
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) && self.event_target_interface(object){return Some(object);}
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) && self.event_target_interface(object) {return Some(object);}
         if anchor_url_interface::operation(method).is_some() && self.event_target_interface(object) {return Some(object);}
+        if crate::javascript::child_remove_operation(method) && self.event_target_interface(object) {return Some(object);}
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4193,6 +4197,11 @@ impl Host for Bridge<'_> {
         }
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
         if anchor_url_interface::operation(method).is_some() {return self.native_node_access(object);}
+        if crate::javascript::child_remove_operation(method) {
+            self.native_node_access(object)?;
+            if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child document mutation requires its lifecycle hooks.".into()));}
+            return Ok(());
+        }
         if meta_operation(method).is_some() { return self.validate_meta(object); }
         if let Some((_,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return self.validate_aria_reflection(object,setter);}
         if let Some((_,setter))=crate::javascript::html_reflection_interface::operation(method){return self.validate_html_reflection(object,setter);}
@@ -4641,6 +4650,13 @@ impl Host for Bridge<'_> {
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.event_target_interface(object) && self.title_receiver(receiver);}
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) {return self.event_target_interface(object)&&self.document_location_owner(receiver).is_some();}
         if anchor_url_interface::operation(method).is_some() {return self.event_target_interface(object)&&self.native_anchor(receiver);}
+        if crate::javascript::child_remove_operation(method) {
+            return self.event_target_interface(object) && match method {
+                crate::javascript::ELEMENT_REMOVE=>self.collection_interface_receiver(receiver)==Some(false),
+                crate::javascript::CHARACTER_REMOVE=>self.character_data_receiver(receiver),
+                _=>self.doctype_receiver(receiver),
+            };
+        }
         if meta_operation(method).is_some() { return self.event_target_interface(object) && self.meta_receiver(receiver); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
@@ -5894,6 +5910,12 @@ impl Host for Bridge<'_> {
         if self.inert_document(target){return Ok(Value::Null);}
         let owner=self.document_location_owner(target).unwrap();
         self.frame_context(owner).map(|context|Value::Host(context.location)).ok_or("Child Document location is unavailable.".into())
+    }
+    fn child_removal_parent(&mut self,object:u32)->Result<Option<u32>,String>{
+        self.native_node_access(object).map_err(|(_,message)|message)?;
+        if self.inert_node_type(object).is_some(){return Ok(self.inert_observation_parent(object));}
+        let node=self.dom_node(object)?;
+        Ok(self.state.tree.parents[node].map(|parent|if parent==0{DOCUMENT}else{node_handle(parent)}))
     }
     fn adjacent_receiver_access(&self,target:u32)->Result<(),(&'static str,String)>{self.adjacent_access(target)}
     fn adjacent_destination(&mut self,target:u32,pos:adjacent_interface::Position,text:bool)->Result<Option<adjacent_interface::Destination>,(&'static str,String)>{self.resolve_adjacent(target,pos,text)}

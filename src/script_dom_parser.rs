@@ -11,111 +11,14 @@ fn element_named(nodes: &[Node], index: usize, names: &[&str]) -> bool {
         && matches!(&node.kind, NodeKind::Element { tag, .. } if names.contains(&tag.as_str()))
 }
 
-fn append_element(nodes: &mut Vec<Node>, tag: &str) -> Result<usize, String> {
-    nodes
-        .try_reserve(1)
-        .map_err(|_| "Cannot reserve an HTML document element.")?;
-    let index = nodes.len();
-    nodes.push(Node {
-        kind: NodeKind::Element {expanded_name:Vec::new(),
-            tag: tag.into(),
-            id: None,
-            href: None,
-            attrs: Vec::new(),
-        },
-        namespace: crate::html::Namespace::Html,
-        children: Vec::new(),
-    });
-    Ok(index)
-}
-
-fn blank_text(node: &Node) -> bool {
-    matches!(&node.kind, NodeKind::Text(text) if text.bytes().all(|b| matches!(b,b' '|b'\t'|b'\n'|b'\r'|0x0c)))
-}
-
-fn document_elements(nodes: &mut Vec<Node>) -> Result<(usize, usize, usize), String> {
-    let mut roots = std::mem::take(&mut nodes[0].children);
-    let explicit_html = roots
-        .iter()
-        .copied()
-        .find(|&index| element_named(nodes, index, &["html"]));
-    let html;
-    let siblings;
-    if let Some(index) = explicit_html {
-        html = index;
-        if roots.iter().any(|&id| {
-            id != html && !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_))
-        }) {
-            return Err("HTML recovery outside the document element is unsupported.".into());
-        }
-        roots.retain(|&id| !blank_text(&nodes[id]));
-        siblings = std::mem::take(&mut nodes[html].children);
-    } else {
-        html = append_element(nodes, "html")?;
-        let first = roots
-            .iter()
-            .position(|&id| {
-                !blank_text(&nodes[id]) && !matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_))
-            })
-            .unwrap_or(roots.len());
-        siblings = roots.split_off(first);
-        roots.retain(|&id| matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_)));
-        roots.push(html);
-    }
-    let explicit_head = siblings
-        .iter()
-        .copied()
-        .find(|&id| element_named(nodes, id, &["head"]));
-    let explicit_body = siblings
-        .iter()
-        .copied()
-        .find(|&id| element_named(nodes, id, &["body", "frameset"]));
-    let head = match explicit_head {
-        Some(id) => id,
-        None => append_element(nodes, "head")?,
+fn document_elements(nodes: &[Node]) -> Result<(usize, usize, usize), String> {
+    let child = |parent: usize, names: &[&str]| {
+        nodes[parent].children.iter().copied().find(|&n| element_named(nodes,n,names))
     };
-    let body = match explicit_body {
-        Some(id) => id,
-        None => append_element(nodes, "body")?,
-    };
-    let mut html_children = vec![head];
-    let mut in_body = false;
-    for id in siblings {
-        if id == head {
-            if in_body {
-                return Err("Misplaced HTML head is unsupported.".into());
-            }
-        } else if id == body {
-            if in_body {
-                return Err("Misplaced HTML body is unsupported.".into());
-            }
-            in_body = true;
-        } else if element_named(nodes, id, &["html", "head", "body", "frameset"]) {
-            return Err("Duplicate HTML document elements are unsupported.".into());
-        } else if !in_body && matches!(nodes[id].kind, NodeKind::Comment(_) | NodeKind::DocumentType(_)) {
-            html_children.push(id);
-        } else if !in_body && blank_text(&nodes[id]) {
-            // Whitespace before the ordinary body token has no visible node here.
-        } else if !in_body
-            && explicit_head.is_none()
-            && element_named(
-                nodes,
-                id,
-                &[
-                    "base", "link", "meta", "noscript", "style", "script", "title",
-                ],
-            )
-        {
-            nodes[head].children.push(id);
-        } else {
-            in_body = true;
-            nodes[body].children.push(id);
-        }
-    }
-    html_children.push(body);
-    nodes[0].children = roots;
-    nodes[html].children = html_children;
-    Ok((html, head, body))
+    let html=child(0,&["html"]).ok_or("Missing parsed HTML document element.")?;
+    let head=child(html,&["head"]).ok_or("Missing parsed HTML head.")?;
+    let body=child(html,&["body","frameset"]).ok_or("Missing parsed HTML body or frameset.")?;
+    Ok((html,head,body))
 }
 
 impl Bridge<'_> {
@@ -142,14 +45,14 @@ impl Bridge<'_> {
             return Err("Inert DOM identity limit reached.".into());
         }
         let deadline = self.state.execution_deadline;
-        let (mut parsed, doctype_position) =
+        let (parsed, doctype_position) =
             crate::html::parse_inert_html(markup, available - 1, &|| {
                 if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     return Err("HTML document parsing time limit reached.".into());
                 }
                 Ok(())
             })?;
-        let (html, head, body) = document_elements(&mut parsed.nodes)?;
+        let (html, head, body) = document_elements(&parsed.nodes)?;
         let count = parsed
             .nodes
             .len()
@@ -290,7 +193,7 @@ mod tests {
     use super::*;
     fn identity_fixture()->(Document,Forms,Page){let mut doc=crate::html::parse("<!doctype html><html><body></body></html>");doc.scripting_enabled=true;let mut forms=Forms::new(&doc);let mut page=Page::new();assert_eq!(page.start(&mut doc,&mut forms,&[]).errors,0);(doc,forms,page)}
     fn identity_source()->(Document,Option<usize>,(usize,usize,usize)){
-        let(mut parsed,dtype)=crate::html::parse_inert_html("<!doctype html><html><head><title>owned</title></head><body><a href=\"#target\">data</a><!--marker--></body></html>",100,&||Ok(())).unwrap();let roots=document_elements(&mut parsed.nodes).unwrap();for node in &mut parsed.nodes{if let NodeKind::Element{tag,href,..}=&mut node.kind{if tag=="a"{tag.reserve(128);href.as_mut().unwrap().reserve(256);}}}(parsed,dtype,roots)
+        let(mut parsed,dtype)=crate::html::parse_inert_html("<!doctype html><html><head><title>owned</title></head><body><a href=\"#target\">data</a><!--marker--></body></html>",100,&||Ok(())).unwrap();let roots=document_elements(&parsed.nodes).unwrap();for node in &mut parsed.nodes{if let NodeKind::Element{tag,href,..}=&mut node.kind{if tag=="a"{tag.reserve(128);href.as_mut().unwrap().reserve(256);}}}(parsed,dtype,roots)
     }
     #[test]
     fn domparser_node_identity_exact_owned_capacities_joint_backing_and_projected_parent_records(){

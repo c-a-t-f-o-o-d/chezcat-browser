@@ -20,6 +20,8 @@ mod foundation_adapter;
 mod svg_namespace;
 #[path="html_doctype.rs"]
 mod doctype;
+#[path="html_document_structure.rs"]
+mod document_structure;
 #[path="html_document_mode.rs"]
 mod document_mode;
 #[path="html_element_names.rs"]
@@ -364,6 +366,7 @@ fn parse_internal(
         return Ok(document);
     }
     let mut stack = vec![0];
+    let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new());
     let mut position = 0;
     let mut title_seen = false;
     // If unsupported foreign recovery escapes through an unrelated ancestor,
@@ -382,6 +385,16 @@ fn parse_internal(
         let rest = &input[position..];
         if !rest.starts_with('<') {
             let end = position + rest.find('<').unwrap_or(rest.len());
+            if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
+                if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
+                svg.root = None;
+            }
+            if let Some(start)=&mut structure {
+                let text=decode_entities(&input[position..end]);
+                if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
+                start.text(&mut document,&mut stack,text,node_limit)?;
+                position=end;continue;
+            }
             let before_root=context.is_none()&&parent==0&&!document.nodes[0].children.iter().any(|&node|matches!(document.nodes[node].kind,NodeKind::Element{..}));
             if before_root {
                 let source=&input[position..end];let trimmed=source.trim_start_matches(|ch:char|ch.is_ascii()&&tag_space(ch as u8,true));
@@ -389,10 +402,7 @@ fn parse_internal(
             }
             if initial {initial=false;}
 
-            if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
-                if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
-                svg.root = None;
-            }
+
             let appended = if checked {
                 let mut text = decode_entities(&input[position..end]);
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
@@ -408,6 +418,7 @@ fn parse_internal(
         ignore_fragment_lf = None;
 
         if let Some(comment) = rest.strip_prefix("<!--") {
+            let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
             // A comment neither leaves the current tree context nor terminates
             // a checked SVG island. Its data never reenters markup scanning.
             let (data,consumed)=comments::token(comment);
@@ -443,7 +454,7 @@ fn parse_internal(
             position+=rest.find('>').map_or(rest.len(),|end|end+1);continue;
         }
 
-        let tag = match read_tag_mode(input, position, checked) {
+        let mut tag = match read_tag_mode(input, position, checked) {
             TagToken::Complete(tag) => tag,
             TagToken::Incomplete => break,
             TagToken::Unsupported(error) => return Err(error.into()),
@@ -453,6 +464,10 @@ fn parse_internal(
                 }
                 svg.root = None;
                 if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
+                if let Some(start)=&mut structure{
+                    initial=false;start.text(&mut document,&mut stack,"<".into(),node_limit)?;
+                    position+=1;continue;
+                }
                 if !append_text(&mut document, parent, "<", node_limit)? {
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
@@ -463,6 +478,13 @@ fn parse_internal(
         };
         if initial {initial=false;}
         position = tag.end;
+        let structural_parent=if let Some(start)=&mut structure {
+            match start.tag(&mut document,&mut stack,&mut tag,node_limit,loaded.unwrap().check_cancel)? {
+                document_structure::Action::Consumed=>continue,
+                document_structure::Action::AtHead(head)=>Some(head),
+                document_structure::Action::Normal=>None,
+            }
+        }else{None};
 
         let empty_table = checked && tag.name == "table";
         let starts_template_svg = template_svg && tag.name == "svg" && !tag.closing;
@@ -542,7 +564,7 @@ fn parse_internal(
         if previous_stack.as_ref().is_some_and(|previous| previous[stack.len()..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
             return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
         }
-        let parent = *stack.last().unwrap();
+        let parent = structural_parent.unwrap_or_else(||*stack.last().unwrap());
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {
             uncertain_foreign_recovery = true;
         }
@@ -564,7 +586,7 @@ fn parse_internal(
             && !uncertain_foreign_recovery && svg.root.is_none()
             && matches!(document.nodes[parent].namespace, Namespace::None | Namespace::Html);
         let raw = html_raw || matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
-        let void = is_void(&tag.name);
+        let void = is_void(&tag.name) || structure.is_some() && matches!(tag.name.as_str(),"basefont"|"bgsound"|"frame");
         let nesting_full = !raw && !void && !svg_empty && stack.len() == MAX_DEPTH;
         if document.nodes.len() == node_limit || nesting_full {
             if checked { return Err("HTML fragment node/depth limit reached.".into()); }
@@ -649,6 +671,7 @@ fn parse_internal(
         }
     }
 
+    if let Some(start)=&mut structure {start.finish(&mut document,&mut stack,node_limit)?;}
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
@@ -1340,11 +1363,15 @@ mod tests {
             let body = format!("<b data-q='x'>é&amp;</b></{tag}more>\r\n\0tail");
             let source = format!("<{tag}>{body}</{} ><p>after</p>", tag.to_ascii_uppercase());
             let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
-            let root = doc.nodes[0].children[0];
+            let html=doc.nodes[0].children[0];
+            let head=doc.nodes[html].children[0];let body_node=doc.nodes[html].children[1];
+            let parent=if tag=="noframes" {head}else{body_node};
+            let root=doc.nodes[parent].children[0];
+            assert!(matches!(&doc.nodes[root].kind,NodeKind::Element{tag:name,..} if name==tag));
             let [child] = doc.nodes[root].children.as_slice() else { panic!("expected one {tag} text child") };
             let expected = body.replace("\r\n", "\n").replace('\0', "\u{fffd}");
             assert!(matches!(&doc.nodes[*child].kind, NodeKind::Text(data) if data == &expected));
-            let tail = doc.nodes[0].children[1];
+            let tail = *doc.nodes[body_node].children.last().unwrap();
             assert!(matches!(&doc.nodes[tail].kind, NodeKind::Element { tag, .. } if tag == "p"));
             assert!(parse(&format!("<{tag}></{tag}>")).nodes[1].children.is_empty());
             let unfinished = parse(&format!("<{tag}>literal <i> and &amp;"));
@@ -1368,7 +1395,8 @@ mod tests {
         let limit = LoadedTree { nodes: 2, check_cancel: &|| Ok(()) };
         assert!(parse_internal("<iframe>x</iframe>", None, false, Some(limit), None).is_err());
         let fresh = parse_loaded_document("<iframe>x</iframe>", &|| Ok(())).unwrap();
-        assert_eq!(fresh.nodes.len(), 3);
+        assert_eq!(fresh.nodes.len(), 6);
+        assert_eq!(parse_internal("<iframe>x</iframe>",None,false,Some(LoadedTree{nodes:5,check_cancel:&||Ok(())}),None).unwrap_err(),"HTML document node limit reached (5 nodes).");
     }
 
     #[test]
@@ -1620,18 +1648,25 @@ mod tests {
     fn loaded_document_keeps_the_tail_beyond_the_internal_node_bound() {
         let source = format!("{}<p id=tail>wide document</p>", "<br>".repeat(MAX_NODES));
         let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
-        assert_eq!(doc.nodes.len(), MAX_NODES + 3);
-        assert_eq!(doc.attr(MAX_NODES + 1, "id"), Some("tail"));
+        assert_eq!(doc.nodes.len(), MAX_NODES + 6);
+        let html = doc.nodes[0].children[0];
+        let body = doc.nodes[html].children[1];
+        assert_eq!(doc.nodes[body].children.len(), MAX_NODES + 1);
+        assert_eq!(doc.attr(*doc.nodes[body].children.last().unwrap(), "id"), Some("tail"));
     }
 
     #[test]
     fn loaded_document_reports_limits_and_cancellation_instead_of_returning_a_prefix() {
-        let loaded = Some(LoadedTree { nodes: 3, check_cancel: &|| Ok(()) });
-        assert_eq!(parse_internal("<br><br>", None, false, loaded, None).unwrap().nodes.len(), 3);
+        let small = Some(LoadedTree { nodes: 3, check_cancel: &|| Ok(()) });
+        assert_eq!(parse_internal("<br><br>", None, false, small, None).unwrap_err(),
+            "HTML document node limit reached (3 nodes).");
+        // The document, html, head and body take four genuine identities.
+        let loaded = Some(LoadedTree { nodes: 6, check_cancel: &|| Ok(()) });
+        assert_eq!(parse_internal("<br><br>", None, false, loaded, None).unwrap().nodes.len(), 6);
         for source in ["<br><br><br>", "<br><br>tail", "<br><textarea>tail</textarea>"] {
             assert_eq!(
                 parse_internal(source, None, false, loaded, None).unwrap_err(),
-                "HTML document node limit reached (3 nodes)."
+                "HTML document node limit reached (6 nodes)."
             );
         }
         let deep = "<div>".repeat(MAX_DEPTH);

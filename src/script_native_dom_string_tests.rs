@@ -15,6 +15,28 @@ fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){
 #[path = "script_adjacent_insertion_tests.rs"]
 mod adjacent;
 
+
+#[test]
+fn native_child_remove_actual_receivers_observers_and_current_parent() {
+    let (mut doc,mut forms,mut page)=fixture();
+    run(&mut doc,&mut forms,&mut page,r#"
+var parent=document.getElementById('mount'),e=document.createElement('div'),t=document.createTextNode('text'),c=document.createComment('keep'),rows=parent.childNodes;
+parent.appendChild(e);parent.appendChild(t);parent.appendChild(c);
+var rem=Element.prototype.remove,ct=CharacterData.prototype.remove,dt=DocumentType.prototype.remove;
+var d=Object.getOwnPropertyDescriptor(Element.prototype,'remove');if(rem===ct||rem===dt||rem.length||!d.writable||!d.configurable||!d.enumerable||document.remove!==undefined)throw 'canonical ChildNode functions';
+var o=new MutationObserver(function(){});o.observe(parent,{childList:true});
+var calls=0,unused={toString:function(){calls++;return 'unused';}};
+if(rem.call(e,unused)!==undefined||e.isConnected||e.parentNode!==null||rows[0]!==t)throw 'remove real element';
+ct.call(t);var changes=o.takeRecords();
+if(calls||changes.length!==2||changes[0].target!==parent||changes[0].removedNodes[0]!==e||changes[0].nextSibling!==t||changes[1].removedNodes[0]!==t||changes[1].nextSibling!==c||rows.length!==1)throw 'observer edges';
+e.remove();t.remove();if(o.takeRecords().length)throw 'detached second remove';
+var wrong=false;try{rem.call(c);}catch(err){wrong=err instanceof TypeError;}if(!wrong)throw 'Element brand';
+var owner=document.implementation.createHTMLDocument('owner'),held=owner.doctype;
+dt.call(held);if(owner.doctype!==null||held.parentNode!==null||held.ownerDocument!==owner)throw 'current inert document owner';
+var branch=owner.createElement('section'),value=owner.createTextNode('v');branch.appendChild(value);value.remove();if(value.parentNode!==null||branch.hasChildNodes()||value.ownerDocument!==owner)throw 'inert text removal';
+"#);
+}
+
 #[test]
 fn native_has_child_nodes_reads_current_topology_without_list_allocation() {
     let (mut doc, mut forms, mut page) = fixture();
