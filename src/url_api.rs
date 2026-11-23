@@ -1,7 +1,7 @@
 //! Original bounded, local URL and URLSearchParams values.
 //! This module implements the HTTP(S) part of the WHATWG URL API. It neither
 //! fetches resources nor changes the browser's stricter network URL parser.
-//! Non-HTTP(S) schemes and IDNA conversion remain explicit capability failures.
+//! Non-HTTP(S) URL records and IDNA conversion remain explicit capability failures.
 //! Source: https://url.spec.whatwg.org/#api (algorithms, not engine source).
 
 use super::{
@@ -668,7 +668,8 @@ fn parse_url(input: &str, base: Option<&Url>) -> Result<Url, ParseError> {
 }
 
 // Pure component mutation shared by URL values and hyperlink reflection. A
-// false result is a parser-state no-op, so callers retain their original value.
+// false result leaves the URL record unchanged; a hyperlink setter can still
+// reflect that record's serialization into its content attribute.
 fn mutate_component(value: &mut Url, name: &str, text: &str) -> Result<bool, ParseError> {
     if text.len() > MAX_URL_BYTES {
         return Err(ParseError::Limit("URL length limit reached (16 KiB)."));
@@ -698,9 +699,15 @@ fn mutate_component(value: &mut Url, name: &str, text: &str) -> Result<bool, Par
                 value.secure = false;
             } else if name.eq_ignore_ascii_case("https") {
                 value.secure = true;
-            } else if scheme(&format!("{name}:")).is_some() {
+            } else if name.eq_ignore_ascii_case("file")
+                && (!value.username.is_empty() || !value.password.is_empty() || value.port.is_some())
+            {
+                return Ok(false);
+            } else if ["ftp", "file", "ws", "wss"].iter().any(|special| name.eq_ignore_ascii_case(special)) {
                 return Err(ParseError::Unsupported("URL values support only HTTP(S) schemes."));
             } else {
+                // All represented records are special. Nonspecial targets and
+                // malformed scheme prefixes both leave those records unchanged.
                 return Ok(false);
             }
             if value.port == Some(value.default_port()) {
@@ -779,7 +786,8 @@ pub(crate) fn project(raw: &str, base: Option<&str>, property: &str) -> Result<O
 }
 
 /// Mutate one HTTP(S) URL component and return a serialized href to reflect.
-/// None preserves the raw attribute on an invalid URL or parser-state no-op.
+/// None preserves the raw attribute on an invalid URL or other component no-op.
+/// Protocol setters reflect a parsed record even when its scheme is unchanged.
 /// The href setter itself is raw reflection and does not call this helper.
 pub(crate) fn mutate(raw: &str, base: Option<&str>, property: &str, input: &str) -> Result<Option<String>, String> {
     if !matches!(property, "protocol" | "username" | "password" | "host" | "hostname" | "port" | "pathname" | "search" | "hash") {
@@ -790,7 +798,7 @@ pub(crate) fn mutate(raw: &str, base: Option<&str>, property: &str, input: &str)
     }
     let Some(mut value) = optional_projection(parse_projected_url(raw, base))? else { return Ok(None); };
     match optional_projection(mutate_component(&mut value, property, input))? {
-        Some(true) => Ok(Some(value.href())),
+        Some(changed) if changed || property == "protocol" => Ok(Some(value.href())),
         _ => Ok(None),
     }
 }
@@ -1661,6 +1669,14 @@ mod usv_tests;
 mod usv_boundary_tests;
 
 #[cfg(test)]
+#[path = "url_protocol_tests.rs"]
+mod protocol_tests;
+
+#[cfg(test)]
+#[path = "url_protocol_boundary_tests.rs"]
+mod protocol_boundary_tests;
+
+#[cfg(test)]
 mod projection_tests {
     use super::{mutate, project, MAX_URL_BYTES};
 
@@ -1729,9 +1745,10 @@ mod projection_tests {
     fn anchor_url_mutation_preserves_raw_on_invalid_url_and_component_noop() {
         let raw = "../raw";
         let base = Some("https://EXAMPLE.test:443/a/page");
-        for (property, input) in [("port", "invalid"), ("hostname", "other.test:80"), ("host", ""), ("protocol", "1http")] {
+        for (property, input) in [("port", "invalid"), ("hostname", "other.test:80"), ("host", "")] {
             assert_eq!(mutate(raw, base, property, input).unwrap(), None, "{property}");
         }
+        assert_eq!(mutate(raw, base, "protocol", "1http").unwrap().as_deref(), Some("https://example.test/raw"));
         assert_eq!(mutate("https://[bad/", None, "hash", "x").unwrap(), None);
         assert_eq!(mutate(raw, base, "hash", "#x").unwrap().as_deref(), Some("https://example.test/raw#x"));
         assert!(mutate(raw, base, "protocol", "ftp").unwrap_err().contains("only HTTP(S)"));
