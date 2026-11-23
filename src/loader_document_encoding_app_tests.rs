@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 #[path = "loader_script_encoding_app_tests.rs"]
 mod script_encoding_tests;
 
+#[path = "loader_stylesheet_encoding_app_tests.rs"]
+mod stylesheet_encoding_tests;
+
 struct Response {
     path: &'static str,
     content_type: &'static str,

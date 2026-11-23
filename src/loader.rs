@@ -16,6 +16,8 @@ mod document_encoding;
 #[path = "script_encoding.rs"]
 mod script_encoding;
 pub(crate) use script_encoding::{decode_script, script_fallback};
+#[path = "stylesheet_encoding.rs"]
+mod stylesheet_encoding;
 #[cfg(test)]
 #[path = "loader_document_encoding_app_tests.rs"]
 mod document_encoding_app_tests;
@@ -1280,7 +1282,7 @@ fn load_critical_resources(
     loaded.document.scripting_enabled=loaded.scripting_blocked.is_none();
     let inert = inert_nodes(&loaded.document, loaded.scripting_blocked.is_none());
     let script_inert = inert_nodes(&loaded.document, true);
-    let mut cache = HashMap::<(ResourceKey, bool, Option<String>), ResourceOutcome>::new();
+    let mut cache = HashMap::<(ResourceKey, bool, Option<String>, &'static str), ResourceOutcome>::new();
     let mut style_bases = HashMap::<usize, Location>::new();
     let mut css_usage=css::StylesheetUsage::default();
     let mut script_bytes=loaded.scripts.iter().map(|script|script.source.len()).sum::<usize>();
@@ -1407,10 +1409,11 @@ fn load_critical_resources(
                     http::check_stylesheet_request(origin, url, same_origin_only)?;
                 }
             }
+            let css_environment = stylesheet_encoding::environment(&loaded.document, node);
             let key = (kind == "CSS")
                 .then(|| ResourceKey::new(kind, &resolved))
                 .flatten()
-                .map(|key| (key, same_origin_only, csp::nonce(&loaded.document, node).map(str::to_owned)));
+                .map(|key| (key, same_origin_only, csp::nonce(&loaded.document, node).map(str::to_owned), css_environment.name()));
             if let Some(outcome) = key.as_ref().and_then(|key| cache.get(key)).cloned() {
                 // A cached redirect chain belongs to this element's complete
                 // authorization, not just its URL or a previous owner's nonce.
@@ -1563,14 +1566,15 @@ fn load_critical_resources(
                 };
                 (
                     navigation::read_limited(path, limit)?,
-                    if kind == "CSS" { "charset=utf-8".to_owned() } else { String::new() },
+                    String::new(),
                     resolved.clone(),
                 )
             };
             check_cancel(cancel)?;
             let resolved_name = resolved_location.display();
             if kind == "CSS" {
-                let source = decode_text(&bytes, &encoding, false)?;
+                let output_limit = stylesheet_limits.sheet_bytes.min(stylesheet_limits.document_bytes.saturating_sub(css_usage.bytes));
+                let source = stylesheet_encoding::decode(&bytes, &encoding, Some(css_environment), output_limit, &|| check_cancel(cancel))?;
                 css_usage=stylesheet_limits.accept(&source,css_usage)?;
                 loaded.styles.insert(node, source);
                 style_bases.insert(node, resolved_location);
