@@ -1453,10 +1453,19 @@ document.title='inner-html-descriptor-ok';
 fn native_element_expandos_preserve_unsupported_native_and_enumeration_boundaries() {
     let (mut doc,mut forms,mut page,outcome)=page("<div id=p></div><iframe id=inert srcdoc=x></iframe>",&["var p=document.getElementById('p');p.customProbe=1;"]);
     assert_eq!(outcome.errors,0,"{}",page.report());
-    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'outerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'content',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
+    for operation in ["p.getBoxQuads;","Object.defineProperty(p,'outerHTML',{value:'x'});","Object.defineProperty(document.createElement('input'),'files',{value:[]});","Object.defineProperty(document.createElement('blockquote'),'cite',{value:'https://example.test/'});","Object.defineProperty(document.createElement('meta'),'charset',{value:'x'});","Object.defineProperty(document.createElement('link'),'as',{value:'script'});","Object.setPrototypeOf(p,Array.prototype);","for(var key in p){};"] {
         let outcome=page.console_eval(&mut doc,&mut forms,operation);
         assert_eq!(outcome.errors,1,"{operation}: {}",page.report());
     }
+    let shadow = page.console_eval(&mut doc, &mut forms, r#"
+var meta=document.createElement('meta'), content=Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype,'content');
+meta.content='native';
+Object.defineProperty(meta,'content',{value:'author',configurable:true});
+if(!Object.hasOwn(meta,'content')||meta.content!=='author'||meta.getAttribute('content')!=='native'||content.get.call(meta)!=='native')throw 'own shadow leaves native metadata intact';
+delete meta.content;
+if(Object.hasOwn(meta,'content')||meta.content!=='native')throw 'restored inherited metadata';
+"#);
+    assert_eq!(shadow.errors, 0, "{}", page.report());
     let outcome=page.console_eval(&mut doc,&mut forms,"if(p.id!=='p'||p.customProbe!==1)throw 'recovery';");
     assert_eq!(outcome.errors,0,"{}",page.report());
     let inert=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("inert")).unwrap();

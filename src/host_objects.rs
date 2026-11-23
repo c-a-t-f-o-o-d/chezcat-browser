@@ -609,6 +609,11 @@ impl Runtime {
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
             }
+            if name == "HTMLMetaElement" {
+                for &(property, _, get, set) in html_reflection_interface::META {
+                    self.define_host_attribute(prototype, window, property, get, Some(set))?;
+                }
+            }
             if name == "HTMLSlotElement" {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }

@@ -548,7 +548,7 @@ impl Bridge<'_> {
     // Only real lower-case null-namespace HTML attributes have native effects.
     pub(super) fn public_dom_attribute(&mut self,node:usize,name:AttributeName,value:Option<DomString>,input:InputPreparation)->Result<(),String>{
         if value.as_ref().is_some_and(|v|v.raw_units().is_some()) {
-            if !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (self.doc.nodes[node].namespace!=crate::html::Namespace::Html || !name.namespace.is_empty() || !name.qualified.starts_with("data-")) {return Err("Unpaired attribute DOMString integration currently requires passive HTML data metadata.".into());}
+            if !self.meta_content_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (self.doc.nodes[node].namespace!=crate::html::Namespace::Html || !name.namespace.is_empty() || !name.qualified.starts_with("data-")) {return Err("Unpaired attribute DOMString integration currently requires passive HTML data metadata.".into());}
             self.attribute_dom_named_prepared(node,name,value,input)
         }else{self.public_attribute_prepared(node,name,value.map(|v|v.into_parts().0),input)}
     }
@@ -612,7 +612,7 @@ impl Bridge<'_> {
         let tab_index=key=="tabindex"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html;
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !placeholder_attribute && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
-            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute && !tab_index {
+            && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute && !tab_index && !self.meta_content_attribute(node, &name) {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
