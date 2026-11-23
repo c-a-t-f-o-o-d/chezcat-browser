@@ -1590,6 +1590,27 @@ if(reads!==2||cd.body.childNodes.length||list!==cd.childNodes||Object.getPrototy
         assert_eq!(result.errors, 0, "{}", page.report());
     }
 
+
+    #[test]
+    fn document_factory_validation_borrowed_method_uses_captured_exception_realm() {
+        let source=format!("{CREATE}{}",r#"
+var method=w.DOMImplementation.prototype.createDocumentType, ChildDOM=w.DOMException,rootDOM=DOMException, matched=false;
+try{method.call(document.implementation,'bad>','','');}catch(e){
+ matched=Object.getPrototypeOf(e)===ChildDOM.prototype&&e instanceof ChildDOM&&!(e instanceof rootDOM)&&e.code===ChildDOM.INVALID_CHARACTER_ERR;
+}
+if(!matched)throw 'exception realm for borrowed doctype factory';
+var uses=0,name={toString:function(){uses++;return 'safe';}};
+var fromChild=w.Function('method','impl','name','return method.call(impl,name,"","");');
+if(fromChild(method,document.implementation,name).name!=='safe'||uses!==1)throw 'same origin recovery';
+"#);
+        let (mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::address("https://other.test/",&crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"fromChild(method,document.implementation,name);").errors,1);
+        assert!(page.report().contains("same-origin"),"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(uses!==1)throw 'denied conversion';").errors,0);
+    }
+
     #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"

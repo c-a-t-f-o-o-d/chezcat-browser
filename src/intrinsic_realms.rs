@@ -252,6 +252,7 @@ impl Runtime {
                 if host.event_target_interface(handle) {runtime.define_xhr_interfaces(handle).map_err(Fault::new)?;}
                 if let Some(constants)=host.node_interface_constants(handle) {
                     runtime.define_node_interfaces(handle,constants,None).map_err(Fault::new)?;
+                    runtime.define_inert_document_interfaces(handle).map_err(Fault::new)?;
                     runtime.define_media_interfaces(handle).map_err(Fault::new)?;
                     runtime.define_range_interfaces(handle).map_err(Fault::new)?;
                 }

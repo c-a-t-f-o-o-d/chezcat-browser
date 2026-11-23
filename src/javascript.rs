@@ -549,6 +549,11 @@ pub(crate) const PARENT_NODE_GETTERS: [(&str, &str); 4] = [
     ("lastElementChild", "\0ParentNode.get.lastElementChild"),
     ("childElementCount", "\0ParentNode.get.childElementCount"),
 ];
+pub(crate) const DOCUMENT_IMPLEMENTATION_GET: &str = "\0Document.get.implementation";
+pub(crate) const DOM_IMPLEMENTATION_CREATE_HTML_DOCUMENT: &str = "\0DOMImplementation.createHTMLDocument";
+pub(crate) const DOM_IMPLEMENTATION_HAS_FEATURE: &str = "\0DOMImplementation.hasFeature";
+pub(crate) const DOM_IMPLEMENTATION_CREATE_DOCUMENT: &str = "\0DOMImplementation.createDocument";
+pub(crate) const DOM_IMPLEMENTATION_CREATE_DOCTYPE: &str = "\0DOMImplementation.createDocumentType";
 pub(crate) const NODE_HAS_CHILDREN: &str = "\0Node.hasChildNodes";
 pub(crate) const NODE_VALUE_GET: &str = "\0Node.get.nodeValue";
 pub(crate) const NODE_VALUE_SET: &str = "\0Node.set.nodeValue";
@@ -9297,18 +9302,17 @@ impl Runtime {
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
             if (method=="\0CharacterData.substringData"||character_data_interface::operation(method).is_some()||method==text_split_interface::METHOD)&&kind=="IndexSizeError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
-            if matches!(method,"createElement"|"createElementNS"|"\0DOMImplementation.createDocument")&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if dom_exception::factory_validation(method, kind) {
+                return Err(Fault::thrown(self.native_dom_exception(kind, &message)?));
+            }
             if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")&&matches!(kind,"InUseAttributeError"|"NotFoundError"|"WrongDocumentError"|"NotSupportedError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
-            if matches!(method,DOCUMENT_CREATE_ATTRIBUTE|DOCUMENT_CREATE_ATTRIBUTE_NS)&&matches!(kind,"InvalidCharacterError"|"NamespaceError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild")&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && matches!(method, CREATE_CDATA_SECTION | DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
-                || kind == "InvalidCharacterError"
-                    && matches!(method, CREATE_PROCESSING_INSTRUCTION | "ProcessingInstruction")
+                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));

@@ -2,7 +2,7 @@
 use super::*;
 #[path="script_xml_doctype_adoption.rs"]
 mod doctype_adoption;
-pub(in crate::scripting) const CREATE:&str="\0DOMImplementation.createDocument";
+pub(in crate::scripting) use crate::javascript::DOM_IMPLEMENTATION_CREATE_DOCUMENT as CREATE;
 impl Bridge<'_>{
     fn document_element_named(&self,element:u32,namespace:crate::html::Namespace,name:&str)->bool{
         match self.inert_import_source(element){Some(ImportSource::Element(tag))=>namespace==crate::html::Namespace::Html&&tag==name,Some(ImportSource::Parsed{node,..})=>node.namespace==namespace&&matches!(&node.kind,NodeKind::Element{tag,..} if tag==name),_=>false}

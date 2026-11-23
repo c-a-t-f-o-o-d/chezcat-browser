@@ -224,10 +224,10 @@
       "status": "partial",
       "scope": "required",
       "browser_runtime_observation": {
-        "source_commit": "3cc640b7367889de59b241c9000437b57aad64e0",
+        "source_commit": "fee3f8ce84f9fb543ee44f0bdb547bc1202892e5",
         "selected_files_attempted": 21,
         "files_with_terminal_summary": 10,
-        "files_with_details_rendered": 6,
+        "files_with_details_rendered": 9,
         "files_without_terminal_summary": 11,
         "reported_subtests_passed": 440,
         "reported_subtests_failed": 714,
@@ -237,7 +237,7 @@
           "reported_subtests_failed": 726,
           "change": "All six unchanged subtests in each of Document-createComment.html and Document-createTextNode.html subsequently passed."
         },
-        "scope": "Unmodified pinned pages and original scripts loaded in the Windows App. Four additional terminal summaries reported counts before detail rendering failed. Files without a terminal summary have no measured result totals."
+        "scope": "Unmodified pinned pages and original scripts loaded in the Windows App. On 3cc640b, six of the ten terminal summaries rendered details. With adjacent insertion, nine show details. The remaining summary reaches the existing host work limit while rendering. Files without a terminal summary have no measured result totals."
       },
       "source_anchors": [
         "src/html.rs",
