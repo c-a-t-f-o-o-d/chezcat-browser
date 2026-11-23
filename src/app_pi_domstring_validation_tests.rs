@@ -15,6 +15,9 @@ if(host.firstChild.nodeType!==3||host.firstChild.data!=='BeforeRow'||table.local
 var formatOwner=document.getElementById('format-owner'),firstLink=formatOwner.firstChild.firstChild,secondLink=formatOwner.lastChild;
 if(firstLink===secondLink||secondLink.localName!=='a'||firstLink.textContent!=='First'||secondLink.textContent!=='Second'||secondLink.parentNode!==formatOwner||secondLink.getAttribute('href')!=='#end'||secondLink.getAttribute('data-marker')!=='one')throw 'native reconstructed anchor';
 secondLink.setAttribute('data-marker','two');if(firstLink.getAttribute('data-marker')!=='one')throw 'aliased formatting attribute';
+</script><style>#adopt-p a{position:absolute;left:260px;top:65px;display:block;width:100px;height:30px;background:#154783}</style><section id=adopt-owner><a href=#end>First<p id=adopt-p>Adopted</a>Outside</p></section><script>
+var adoptedHost=document.getElementById('adopt-owner'),adoptedBlock=document.getElementById('adopt-p'),adoptedLink=adoptedBlock.firstChild;
+if(adoptedHost.lastChild!==adoptedBlock||adoptedHost.firstChild===adoptedLink||adoptedHost.firstChild.textContent!=='First'||adoptedLink.textContent!=='Adopted'||adoptedBlock.lastChild.data!=='Outside'||adoptedLink.getAttribute('href')!=='#end')throw 'adopted native block edge';
 </script></body></html>"#).unwrap();
     let mut app=App::new();app.resize(480,320);app.set_javascript_enabled(true);app.open(&file.0);
     assert!(!app.failed&&!app.is_loading(),"{}",app.status);
@@ -32,6 +35,8 @@ secondLink.setAttribute('data-marker','two');if(firstLink.getAttribute('data-mar
     let canvas=app.draw();assert_eq!(canvas.pixels[(app.content_top()+140-app.scroll) as usize*canvas.width+200]&0xffffff,0x123456);
     let value=&app.forms.controls[&field].value;assert_eq!((value.text(),value.cursor,value.anchor,value.offset),editing);
     assert_eq!(app.page.link_node_at(280,20),Some(go));
+    let adopted=app.document.nodes[id(&app,"adopt-p")].children[0];
+    assert_eq!(app.page.link_node_at(280,75),Some(adopted),"reparented link hit in its rendered box");
     let y=app.content_top()+20-app.scroll;let (_,hit)=app.primary_anchor_down(280,y,false);
     let (_,default)=app.release_anchor_pointer(hit,280,y,false,crate::scripting::AnchorMouseInput::default());
     let Some(crate::app::anchor::AnchorDefault::Link(target,_))=default else {panic!("real link")};

@@ -1086,6 +1086,7 @@
         "src/html_document_structure.rs",
         "src/html_table_construction.rs",
         "src/html_active_formatting.rs",
+        "src/html_formatting_adoption.rs",
         "src/html_svg_namespace.rs"
       ],
       "contracts": [
