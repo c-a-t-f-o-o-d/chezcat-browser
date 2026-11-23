@@ -54,7 +54,7 @@ document.getElementById('run').onclick=function(e){if(!e.isTrusted)throw 'native
     );
     app.pointer_down(x, y, false);
     app.pointer_up(x, y);
-    assert_eq!(app.document.title, "Sandbox metadata changed");
+    assert_eq!(app.document.title, "Sandbox metadata changed", "{}", app.scripting.as_ref().unwrap().report());
     assert_eq!(
         app.scripting.as_ref().unwrap().error_count(),
         0,

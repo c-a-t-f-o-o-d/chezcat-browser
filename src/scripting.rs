@@ -4126,7 +4126,7 @@ impl Host for Bridge<'_> {
         }
         if let Some((_, setter)) = crate::javascript::window_relationships::operation(method) {
             if !self.event_target_interface(object) { return Err(("TypeError", "Expected a Window receiver.".into())); }
-            self.frame_window_access(self.state.navigation_incumbent.or(Some(WINDOW)), object).map_err(|e| ("SecurityError", e))?;
+            self.window_relationship_access(object).map_err(|e| ("SecurityError", e))?;
             if setter && object != WINDOW { return Err(("NotSupportedError", "Child Window relationship writes are unavailable.".into())); }
             return Ok(());
         }
@@ -6114,7 +6114,7 @@ impl Host for Bridge<'_> {
             };
         }
         if let Some((name, false)) = crate::javascript::window_relationships::operation(method) {
-            self.frame_window_access(self.state.navigation_incumbent.or(Some(WINDOW)), object)?;
+            self.window_relationship_access(object)?;
             if object == WINDOW {
                 return Ok(if matches!(name, "parent" | "top") { Value::Host(WINDOW) } else { Value::Null });
             }

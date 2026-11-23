@@ -247,6 +247,12 @@ impl Bridge<'_> {
         })
     }
 
+    pub(super) fn window_relationship_access(&self, target: u32) -> Result<(), String> {
+        let caller = self.state.navigation_incumbent.unwrap_or(WINDOW);
+        if caller == WINDOW && target == WINDOW { return Ok(()); }
+        self.frame_window_access(Some(caller), target)
+    }
+
     pub(super) fn frame_window_access(&self, caller: Option<u32>, target: u32) -> Result<(), String> {
         let origin = |handle| {
             if handle == WINDOW { self.state.location.as_ref().map(|view| &view.source) }
