@@ -300,7 +300,9 @@ and the executable identity when a dirty build needs exact reproduction.
 
 For ordinary PRs, compile where relevant and run the small reproduction or tests
 that exercise the change. Include a targeted negative check for a changed security
-or resource boundary. The complete offline verifier runs for each release candidate.
+or resource boundary. For release qualification, select the existing license
+receipt directory as described in the [build guide](docs/BUILDING.md#choose-the-right-verification-scope),
+then run the complete offline verifier.
 
 ```powershell
 python tools/verify_offline.py

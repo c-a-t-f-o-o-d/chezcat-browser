@@ -87,8 +87,14 @@ performance comparisons or release qualification.
 | **Physical devices / public sites** | Separate explicitly scoped checks | Not inferred from routine offline verification |
 | **Named release** | [Release procedure](RELEASING.md) | Fully accepted milestone or a specific release request |
 
+The full verifier needs the location of the existing receipt explicitly,
+including when it is in the default Windows directory. If you keep it elsewhere,
+select that external directory instead.
+
 ```powershell
-python tools/verify_offline.py
+$env:CHEZCAT_LICENSE_RECEIPT_DIR = Join-Path $env:LOCALAPPDATA 'ChezCat\License'
+python tools/accept_license.py --check
+if ($LASTEXITCODE -eq 0) { python tools/verify_offline.py }
 ```
 
 The complete gate uses bounded child-process cleanup and records source-input maps
