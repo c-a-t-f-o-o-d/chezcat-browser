@@ -1204,10 +1204,12 @@
         "F05",
         "F06"
       ],
-      "status": "planned",
+      "status": "partial",
       "scope": "required",
       "source_anchors": [
         "src/script_inner_html.rs",
+        "src/html_active_formatting.rs",
+        "src/html_formatting_adoption.rs",
         "src/script_dom_parser.rs",
         "src/script_inert_content.rs",
         "src/script_template_imports.rs"
@@ -1216,14 +1218,14 @@
         {
           "id": "F07.01",
           "requirement": "Full-document DOMParser/document parse entries versus contextual fragments, with actual mode/scripting/namespace state",
-          "status": "unassessed",
+          "status": "partial",
           "verification": [],
           "dependency_details": []
         },
         {
           "id": "F07.02",
           "requirement": "HTML serializer and template/foreign/raw-text semantics",
-          "status": "unassessed",
+          "status": "partial",
           "verification": [],
           "dependency_details": []
         },
@@ -1237,7 +1239,7 @@
         {
           "id": "F07.04",
           "requirement": "Prepublication failure containment, specified observable mutation/callback ordering, and genuine allowed activation",
-          "status": "unassessed",
+          "status": "partial",
           "verification": [],
           "dependency_details": []
         }

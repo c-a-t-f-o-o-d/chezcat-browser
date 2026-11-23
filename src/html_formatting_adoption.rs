@@ -137,9 +137,10 @@ impl Topology {
         }
         self.linked(node, parent)
     }
-    pub(in crate::html) fn verify(
+    pub(in crate::html) fn finish(
         &mut self,
-        doc: &Document,
+        doc: &mut Document,
+        fragment: bool,
         check: &dyn Fn() -> Result<(), String>,
     ) -> Result<(), String> {
         if self.parents.is_empty() {
@@ -151,6 +152,14 @@ impl Topology {
         path.try_reserve_exact(MAX_DEPTH + 1)
             .map_err(|_| "Cannot verify adopted tree depth.")?;
         path.push((0usize, 0usize));
+        // Fragment publication consumes parent-before-child records for
+        // depth, resources, native forms and owner-preserving insertion.
+        // Reuse the parser-only index for the old-to-preorder permutation.
+        if fragment {
+            self.linked(doc.nodes.len() - 1, UNKNOWN)?;
+            self.parents.fill(UNKNOWN);
+            self.parents[0] = 0;
+        }
         let mut visited = 1;
         while let Some((parent, next)) = path.last_mut() {
             let Some(&child) = doc.nodes[*parent].children.get(*next) else {
@@ -163,6 +172,12 @@ impl Topology {
                     "HTML document nesting limit reached ({MAX_DEPTH} open nodes)."
                 ));
             }
+            if fragment {
+                if self.parents[child] != UNKNOWN {
+                    return Err("Duplicate native fragment edge.".into());
+                }
+                self.parents[child] = visited;
+            }
             visited += 1;
             if visited % 512 == 0 {
                 check()?;
@@ -174,6 +189,34 @@ impl Topology {
         }
         if visited != doc.nodes.len() {
             return Err("Unreachable native node after HTML adoption.".into());
+        }
+        if fragment {
+            let order = &mut self.parents;
+            for node in &mut doc.nodes {
+                for child in &mut node.children {
+                    *child = order[*child];
+                }
+            }
+            for flags in [&mut doc.nonce_unsafe_nodes, &mut doc.withheld_inline_styles] {
+                if flags.is_empty() {
+                    continue;
+                }
+                let mut moved = HashSet::new();
+                moved
+                    .try_reserve(flags.len())
+                    .map_err(|_| "Cannot remap fragment resource flags.")?;
+                moved.extend(flags.iter().map(|&node| order[node]));
+                *flags = moved;
+            }
+            // All IDs are private staging indices. No DOM identity has been
+            // allocated yet. Swap node records in place without cloning them.
+            for i in 0..order.len() {
+                while order[i] != i {
+                    let j = order[i];
+                    doc.nodes.swap(i, j);
+                    order.swap(i, j);
+                }
+            }
         }
         Ok(())
     }

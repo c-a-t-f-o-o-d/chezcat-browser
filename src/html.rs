@@ -322,6 +322,7 @@ fn parse_internal(
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
     let fail_on_capacity = checked || loaded.is_some();
+    let formatting_limits=loaded.unwrap_or(LoadedTree{nodes:node_limit,check_cancel:&||Ok(())});
     let node_limit_error = || if checked {
         "HTML fragment node limit reached.".into()
     } else {
@@ -417,7 +418,8 @@ fn parse_internal(
             let appended = if checked {
                 let mut text = decode_entities(&input[position..end]);
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
-                append_text_value(&mut document, parent, text, node_limit)?
+                if !text.is_empty(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
+                append_text_value(&mut document, *stack.last().unwrap(), text, node_limit)?
             } else { append_text(&mut document, parent, &input[position..end], node_limit)? };
             if !appended {
                 if fail_on_capacity { return Err(node_limit_error()); }
@@ -496,7 +498,8 @@ fn parse_internal(
                     }
                     position+=1;continue;
                 }
-                if !append_text(&mut document, parent, "<", node_limit)? {
+                if checked {formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
+                if !append_text(&mut document, *stack.last().unwrap(), "<", node_limit)? {
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
@@ -536,7 +539,7 @@ fn parse_internal(
             let scope = &stack[scope_start..];
             checked_select_tag(scope, &document, &tag.name, tag.closing)?;
             if template_svg && tag.name=="template" && svg.root.is_none() && tag.closing {
-                if scope_start>0 {stack.truncate(scope_start);}continue;
+                if scope_start>0 {stack.truncate(scope_start);formatting.clear_to_marker();}continue;
             }
             if tag.name == "textarea" && (tag.closing || tag.self_closing || !tag.clean_syntax) {
                 return Err("HTML fragment TEXTAREA requires an ordinary start tag and a matching end tag.".into());
@@ -562,19 +565,13 @@ fn parse_internal(
             }
             if tag.closing {
                 if tag.name == "br" || tag.name == "p" && !scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if tag == "p")) { return Err("HTML fragment special end-tag recovery is not implemented.".into()); }
-                if let Some(position) = scope.iter().rposition(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
-                    if position > 0 && (fragment_formatting(&tag.name) && position + 1 != scope.len() || scope[position+1..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
-                        return Err("HTML fragment formatting-element reconstruction is not implemented.".into());
-                    }
-                }
-            } else if fragment_formatting(&tag.name) && scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: name, ..} if name == &tag.name)) {
-                return Err("HTML fragment nested formatting recovery is not implemented.".into());
+
             }
         }
 
         if tag.closing {
             let parent=*stack.last().unwrap();
-            if structure.is_some() && document.nodes[parent].namespace==Namespace::Html && fragment_formatting(&tag.name) && formatting.end(&mut document,&mut stack,&tag.name,&mut tables,loaded.unwrap())? {continue;}
+            if fail_on_capacity && (parent==0 || document.nodes[parent].namespace==Namespace::Html) && fragment_formatting(&tag.name) && formatting.end(&mut document,&mut stack,&tag.name,&mut tables,formatting_limits)? {continue;}
             if let Some(root) = svg.root {
                 let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
                     matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
@@ -590,7 +587,7 @@ fn parse_internal(
             if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
                 if index > 0 {
                     if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
-                    if structure.is_some() && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
+                    if fail_on_capacity && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
                     if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
                         && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
                     {
@@ -603,16 +600,12 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
-        let previous_stack = checked.then(|| stack.clone());
         close_implied(&mut stack, &document, &tag.name);
-        if previous_stack.as_ref().is_some_and(|previous| previous[stack.len()..].iter().any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if fragment_formatting(tag)))) {
-            return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
-        }
-        if structure.is_some() && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
-            if tag.name=="a"{formatting.end(&mut document,&mut stack,&tag.name,&mut tables,loaded.unwrap())?;}
+        if fail_on_capacity && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
+            if tag.name=="a"{formatting.end(&mut document,&mut stack,&tag.name,&mut tables,formatting_limits)?;}
             let table_foster=foster;
             if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
-            if tag.name=="nobr" && formatting.close_nested_nobr(&mut document,&mut stack,&mut tables,loaded.unwrap())? {
+            if tag.name=="nobr" && formatting.close_nested_nobr(&mut document,&mut stack,&mut tables,formatting_limits)? {
                 foster=table_foster && table_construction::foster_target(&document,*stack.last().unwrap());
                 if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
             }
@@ -721,7 +714,7 @@ fn parse_internal(
                 tables.opened(node,parent,slot,stack.len())?;
             }
             stack.push(node);
-            if structure.is_some() && document.nodes[node].namespace==Namespace::Html {formatting.opened(&document,&stack,node)?;}
+            if fail_on_capacity && document.nodes[node].namespace==Namespace::Html {formatting.opened(&document,&stack,node)?;}
             if !checked && document.nodes[node].namespace == Namespace::Html &&
                 svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
                 svg.blocked_depth = Some(stack.len());
@@ -730,7 +723,8 @@ fn parse_internal(
         }
     }
 
-    if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;formatting.topology.verify(&document,loaded.unwrap().check_cancel)?;}
+    if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
+    formatting.topology.finish(&mut document,checked,formatting_limits.check_cancel)?;
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
