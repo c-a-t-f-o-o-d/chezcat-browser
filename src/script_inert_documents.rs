@@ -964,51 +964,71 @@ impl Bridge<'_> {
 
     pub(super) fn template_html(&mut self, object: u32) -> Result<Value, String> {
         if self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Xml{return Err("XML template fragment parsing/serialization requires the XML backend; no HTML substitute is used.".into());}
-        use script_inner_html::{append, escaped, raw_text, write_open_tag};
+        use script_inner_html::{Markup, raw_text, serializes_as_void};
 
         let Value::Host(root) = self.template_content(object)? else { unreachable!() };
-        let mut output = String::new();
+        let mut output = Markup::new();
         let mut pending = Vec::new();
         let children = self.inert_children(root).ok_or("Template fragment is unavailable.")?;
         pending.try_reserve(children.len()).map_err(|_| "Cannot reserve template serialization.")?;
         pending.extend(children.iter().rev().map(|&child| (child, false, false)));
         while let Some((handle, end, raw)) = pending.pop() {
             self.state.work(1)?;
-            let Kind::Parsed { source, .. } = self.state.inert_documents.node(handle)
-                .ok_or("Template serialization node is unavailable.")?.kind else {
-                return Err("Unsupported inert template serialization node.".into());
-            };
-            let generated = match source {
-                ParsedSource::Generated(index) => Some(Rc::clone(&self.state.inert_documents.generated[index].node)),
+            let kind = &self.state.inert_documents.node(handle).ok_or("Template serialization node is unavailable.")?.kind;
+            let source = match kind {
+                Kind::Parsed { source, .. } => Some(*source),
                 _ => None,
             };
+            let generated;
+            let direct;
             let node = match source {
-                ParsedSource::Loaded(index) => &self.doc.nodes[index],
-                ParsedSource::Generated(_) => generated.as_deref().unwrap(),
+                Some(ParsedSource::Loaded(index)) => &self.doc.nodes[index],
+                Some(ParsedSource::Generated(index)) => {
+                    generated = Rc::clone(&self.state.inert_documents.generated[index].node);
+                    &*generated
+                }
+                None => {
+                    // Direct factory records live in the mutable arena. Copy only
+                    // the current payload before charging output or opening a nested template.
+                    let bytes = match kind {
+                        Kind::Text(text) => text.used_bytes(),
+                        Kind::Element(tag) => tag.len(),
+                        Kind::ProcessingInstruction { target, data } => target.len().saturating_add(data.used_bytes()),
+                        _ => return Err("Unsupported inert template serialization node.".into()),
+                    };
+                    self.state.copies(bytes)?;
+                    let kind = match &self.state.inert_documents.node(handle).unwrap().kind {
+                        Kind::Text(text) => NodeKind::Text(text.try_clone()?),
+                        Kind::Element(tag) => NodeKind::Element {
+                            tag: script_clone_node::copy_text(tag)?, expanded_name: Vec::new(),
+                            id: None, href: None, attrs: Vec::new(),
+                        },
+                        Kind::ProcessingInstruction { target, data } => NodeKind::ProcessingInstruction {
+                            target: script_clone_node::copy_text(target)?, data: data.try_clone()?,
+                        },
+                        _ => unreachable!(),
+                    };
+                    direct = Node { namespace: crate::html::Namespace::Html, kind, children: Vec::new() };
+                    &direct
+                }
             };
             match &node.kind {
-                NodeKind::Text(text) | NodeKind::Cdata(text) => escaped(self.state, &mut output, text.scalar()?, false, raw)?,
-                NodeKind::Comment(data) => {
-                    for piece in ["<!--", data.scalar()?, "-->"] { append(self.state, &mut output, piece)?; }
-                }
-                NodeKind::ProcessingInstruction { target, data } => {
-                    for piece in ["<?", target, " ", data.scalar()?, "?>"] { append(self.state, &mut output, piece)?; }
-                }
+                NodeKind::Text(text) | NodeKind::Cdata(text) => output.escaped(self.state, text.view(), false, raw)?,
+                NodeKind::Comment(data) => output.wrapped(self.state, "<!--", data, "-->")?,
+                NodeKind::ProcessingInstruction { target, data } => output.processing_instruction(self.state, target, data)?,
                 NodeKind::DocumentFragment => return Err("Nested fragment serialization is unavailable.".into()),
-                NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut output,piece)?;}},
+                NodeKind::DocumentType(data)=>{output.wrapped(self.state, "<!DOCTYPE ", &data.name, ">")?;},
                 NodeKind::Element { tag, attrs, expanded_name, .. } => {
-                    if crate::html::element_names::raw_name(expanded_name){return Err("Scalar HTML serialization of raw Element names remains unsupported.".into());}
                     if !matches!(node.namespace, crate::html::Namespace::Html | crate::html::Namespace::Svg) {
                         return Err("Template serialization of foreign elements is unavailable.".into());
                     }
-                    if end {
-                        for piece in ["</", tag, ">"] { append(self.state, &mut output, piece)?; }
-                        continue;
-                    }
-                    write_open_tag(self.state, &mut output, tag, attrs)?;
-                    if crate::html::is_void(tag) { continue; }
-                    let raw = raw_text(tag, self.doc.scripting_enabled);
-                    let children_owner = if tag == "template" {
+                    let local = crate::html::element_names::local(node.namespace, tag, expanded_name)?;
+                    if end { output.close_tag(self.state, local)?; continue; }
+                    output.open_tag(self.state, local, attrs)?;
+                    let html = node.namespace == crate::html::Namespace::Html;
+                    if html && serializes_as_void(tag) { continue; }
+                    let raw = html && raw_text(tag, self.doc.scripting_enabled);
+                    let children_owner = if html && tag == "template" {
                         let Value::Host(fragment) = self.template_content(handle)? else { unreachable!() };
                         fragment
                     } else { handle };
@@ -1019,7 +1039,7 @@ impl Bridge<'_> {
                 }
             }
         }
-        Ok(Value::String(output))
+        output.finish(self.state)
     }
 
     pub(super) fn set_template_html(&mut self, object: u32, markup: &str) -> Result<(), String> {

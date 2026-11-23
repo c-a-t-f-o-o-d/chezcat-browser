@@ -99,6 +99,19 @@ pub(super) fn canonical(units: Vec<u16>, limit: usize) -> Result<Value, Fault> {
 }
 
 impl Value {
+    // Concatenating adjacent native Text nodes can repair a surrogate pair.
+    pub(crate) fn from_host_string_units(
+        units: Vec<u16>, limit: usize, admit_copy: impl FnOnce(usize) -> Result<(), String>,
+    ) -> Result<Self, String> {
+        match scalar_bytes(&units, limit).map_err(|fault| fault.message)? {
+            Some(bytes) => {
+                admit_copy(bytes)?;
+                scalar_value(&units, bytes).map_err(|fault| fault.message)
+            }
+            None => Ok(Self::StringUnits(units)),
+        }
+    }
+
     pub(super) fn is_string(&self) -> bool {
         matches!(self, Self::String(_) | Self::StringUnits(_))
     }

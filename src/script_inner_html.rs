@@ -3,50 +3,16 @@
 //! until document teardown. Unsupported contexts never commit a parsed prefix.
 use super::*;
 
-pub(super) fn append(state: &mut State, out: &mut String, text: &str) -> Result<(), String> {
-    if out.len().checked_add(text.len()).is_none_or(|len| len > state.limits.host.string_bytes) { return Err("HTML serialization exceeds the host string limit.".into()); }
-    state.copies(text.len())?;
-    out.try_reserve(text.len()).map_err(|_| "HTML serialization reservation failed.")?;
-    out.push_str(text);
-    Ok(())
-}
-
-pub(super) fn escaped(state: &mut State, out: &mut String, text: &str, attribute: bool, raw: bool) -> Result<(), String> {
-    state.work(text.len())?;
-    if raw { return append(state, out, text); }
-    for ch in text.chars() {
-        let mut encoded = [0u8; 4];
-        let text = match ch { '&' => "&amp;", '\u{a0}' => "&nbsp;", '<' => "&lt;", '>' => "&gt;", '"' if attribute => "&quot;", _ => ch.encode_utf8(&mut encoded) };
-        append(state, out, text)?;
-    }
-    Ok(())
-}
+#[path = "script_markup_output.rs"]
+mod output;
+pub(super) use output::Markup;
 
 pub(super) fn raw_text(name: &str, scripting: bool) -> bool {
     matches!(name, "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") || name == "noscript" && scripting
 }
 
-pub(super) fn write_open_tag(state: &mut State, out: &mut String, tag: &str, attrs: &[crate::html::Attribute]) -> Result<(), String> {
-    append(state, out, "<")?;
-    append(state, out, tag)?;
-    state.work(attrs.len())?;
-    for attr in attrs {
-        append(state, out, " ")?;
-        let prefix = match attr.name.namespace_uri().and_then(|uri|uri.scalar().ok()) {
-            Some("http://www.w3.org/XML/1998/namespace") => Some("xml:"),
-            Some("http://www.w3.org/2000/xmlns/") if attr.name.local() != "xmlns" => Some("xmlns:"),
-            Some("http://www.w3.org/2000/xmlns/") => Some(""),
-            Some("http://www.w3.org/1999/xlink") => Some("xlink:"),
-            _ => None,
-        };
-        if let Some(prefix) = prefix { append(state, out, prefix)?; append(state, out, attr.name.local().scalar()?)?; }
-        else { append(state, out, attr.name.qualified.scalar()?)?; }
-        append(state, out, "=\"")?;
-        escaped(state, out, attr.value.scalar()?, true, false)?;
-        append(state, out, "\"")?;
-    }
-    append(state, out, ">")?;
-    Ok(())
+pub(super) fn serializes_as_void(name: &str) -> bool {
+    crate::html::is_void(name) || matches!(name, "basefont" | "bgsound" | "frame" | "keygen")
 }
 
 impl Bridge<'_> {
@@ -54,6 +20,7 @@ impl Bridge<'_> {
     pub(super) fn serialize_html(&mut self, node: usize, include_element: bool) -> Result<Value, String> {
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("HTML serialization requires known HTML namespace provenance.".into()); }
         if tag(self.doc, node) == "template" { return Err("Template content serialization is not implemented.".into()); }
+        if !include_element && serializes_as_void(tag(self.doc, node)) { return Ok(Value::String(String::new())); }
         let mut stack: Vec<_> = if include_element {
             vec![(node, false, false)]
         } else {
@@ -62,35 +29,27 @@ impl Bridge<'_> {
             let raw = raw_text(tag(self.doc, node), self.doc.scripting_enabled);
             children.iter().rev().map(|&child| (child, false, raw)).collect()
         };
-        let mut out = String::new();
+        let mut out = Markup::new();
         while let Some((node, end, raw)) = stack.pop() {
             self.state.work(1)?;
             let item = &self.doc.nodes[node];
             match &item.kind {
-                NodeKind::DocumentType(data)=>{for piece in ["<!DOCTYPE ",data.name.scalar()?,">"]{append(self.state,&mut out,piece)?;}},
+                NodeKind::DocumentType(data)=>{out.wrapped(self.state, "<!DOCTYPE ", &data.name, ">")?;},
                 NodeKind::DocumentFragment => {
                     self.state.work(item.children.len())?;
                     stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));
                 }
-                NodeKind::Text(text) | NodeKind::Cdata(text) => escaped(self.state, &mut out, text.scalar()?, false, raw)?,
+                NodeKind::Text(text) | NodeKind::Cdata(text) => out.escaped(self.state, text.view(), false, raw)?,
                 NodeKind::Comment(data) => {
-                    self.state.work(data.len())?;
-                    append(self.state, &mut out, "<!--")?;
-                    append(self.state, &mut out, data.scalar()?)?;
-                    append(self.state, &mut out, "-->")?;
+                    out.wrapped(self.state, "<!--", data, "-->")?;
                 }
-                NodeKind::ProcessingInstruction { target, data } => {
-                    self.state.work(target.len().saturating_add(data.len()))?;
-                    for piece in ["<?", target, " ", data.scalar()?, "?>"] {
-                        append(self.state, &mut out, piece)?;
-                    }
-                }
+                NodeKind::ProcessingInstruction { target, data } => out.processing_instruction(self.state, target, data)?,
                 NodeKind::Element { tag, attrs, expanded_name, .. } => {
-                    if crate::html::element_names::raw_name(expanded_name){return Err("Scalar HTML serialization of raw Element names remains unsupported.".into());}
                     if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
-                    if end { append(self.state, &mut out, "</")?; append(self.state, &mut out, tag)?; append(self.state, &mut out, ">")?; continue; }
-                    write_open_tag(self.state, &mut out, tag, attrs)?;
-                    if !crate::html::is_void(tag) {
+                    let local = crate::html::element_names::local(item.namespace, tag, expanded_name)?;
+                    if end { out.close_tag(self.state, local)?; continue; }
+                    out.open_tag(self.state, local, attrs)?;
+                    if !serializes_as_void(tag) {
                         self.state.work(item.children.len())?;
                         stack.push((node, true, false));
                         let raw = raw_text(tag, self.doc.scripting_enabled);
@@ -99,7 +58,7 @@ impl Bridge<'_> {
                 }
             }
         }
-        Ok(Value::String(out))
+        out.finish(self.state)
     }
 
     pub(super) fn set_inner_html(&mut self, node: usize, source: &str) -> Result<(), String> {

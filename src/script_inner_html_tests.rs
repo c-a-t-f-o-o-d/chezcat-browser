@@ -11,6 +11,55 @@ fn run(markup: &str, source: &str) -> (Document, Forms, Page, Outcome) {
 }
 
 #[test]
+fn markup_serialization_exact_units_escape_pair_join_and_live_template_records() {
+    let (_, _, page, result) = run("<html><body><div id=root></div><template id=t><b>old</b></template></body></html>", r#"
+var root=document.getElementById('root'), raw='\ud800', tail='\udfff', ns='http://www.w3.org/1999/xhtml';
+var local='n'+raw, node=document.createElementNS(ns,'p:'+local);
+node.setAttribute('data-mark',raw+'&"<>'+tail);
+node.appendChild(document.createTextNode(raw+'&<>\u00a0'+tail));
+node.appendChild(document.createComment(raw+'<>'));
+root.appendChild(node);
+var expected='<'+local+' data-mark="'+raw+'&amp;&quot;&lt;&gt;'+tail+'">'+raw+'&amp;&lt;&gt;&nbsp;'+tail+'<!--'+raw+'<>--></'+local+'>';
+if(node.outerHTML!==expected||root.innerHTML!==expected||root.innerHTML.charCodeAt(2)!==0xd800)throw 'exact native markup';
+var pair=document.createElement('div');
+pair.appendChild(document.createTextNode('\ud83d'));pair.appendChild(document.createTextNode('\ude00'));
+if(pair.innerHTML!=='\ud83d\ude00'||pair.innerHTML.length!==2)throw 'joined nodes repair pair';
+var t=document.getElementById('t'),b=t.content.firstChild;
+b.textContent=raw+'&';b.setAttribute('data-test',tail+'<');
+if(t.innerHTML!=='<b data-test="'+tail+'&lt;">'+raw+'&amp;</b>')throw 'live template records';
+var attrName='a'+raw;b.setAttributeNS('urn:mark','p:'+attrName,'v');
+if(t.innerHTML!=='<b data-test="'+tail+'&lt;" p:'+attrName+'="v">'+raw+'&amp;</b>')throw 'expanded Attr name';
+var plain=b.ownerDocument.createElement('i');plain.appendChild(b.ownerDocument.createTextNode(tail));b.appendChild(plain);
+if(t.innerHTML!=='<b data-test="'+tail+'&lt;" p:'+attrName+'="v">'+raw+'&amp;<i>'+tail+'</i></b>')throw 'factory template descendants';
+var blank=document.createElement('br');blank.appendChild(document.createTextNode('unserialized'));if(blank.innerHTML!==''||blank.outerHTML!=='<br>')throw 'void children';
+var literal=document.createElement('style');literal.textContent=raw+'<>&';if(literal.innerHTML!==raw+'<>&')throw 'raw text context';
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn markup_serialization_raw_size_and_copy_refusal_recovers_without_tree_changes() {
+    let (mut doc, mut forms, mut page, initial) = run("<div id=n></div>",
+        r"document.getElementById('n').textContent='a\ud800&';");
+    assert_eq!(initial.errors, 0, "{}", page.report());
+    let node = (0..doc.nodes.len()).find(|&n| doc.attr(n,"id")==Some("n")).unwrap();
+    let children = doc.nodes[node].children.clone();
+    let retained = page.state.retained;
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let expected = [97, 0xd800, 38, 97, 109, 112, 59];
+    bridge.state.limits.host.string_bytes = expected.len() * 2 - 1;
+    assert!(bridge.serialize_html(node, false).unwrap_err().contains("string limit"));
+    bridge.state.limits.host.string_bytes += 1;
+    let budget = bridge.state.copy_work;
+    bridge.state.copy_work = 1;
+    assert!(bridge.serialize_html(node, false).unwrap_err().contains("work limit"));
+    assert_eq!(bridge.doc.nodes[node].children, children);
+    assert_eq!(bridge.state.retained, retained);
+    bridge.state.copy_work = budget;
+    assert!(matches!(bridge.serialize_html(node, false), Ok(Value::StringUnits(u)) if u == expected));
+}
+
+#[test]
 fn outer_html_serializes_the_element_and_its_current_tree() {
     let (_, _, page, outcome) = run("<html><body><input id=editor value=seed></body></html>", r#"
         var nav = document.createElement('nav'), copy = nav.cloneNode(true);
