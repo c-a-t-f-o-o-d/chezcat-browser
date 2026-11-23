@@ -1765,7 +1765,7 @@ fn tokenize_for_parse(
             use template_literals::Part;
             let initial = ch == '`';
             at += 1;
-            let (text, tail) = template_literals::chunk(source, &mut at, start, capacity.string_bytes)?;
+            let (text, tail) = template_literals::chunk(source, &mut at, start, capacity.string_bytes, deadline)?;
             let part = match (initial, tail) {
                 (true, true) => Part::NoSubstitution,
                 (true, false) => {
@@ -1894,11 +1894,12 @@ fn tokenize_for_parse(
                             .at(source, at - 1))
                         }
                         'x' | 'u' => {
-                            let count = if escaped == 'x' { 2 } else { 4 };
-                            let first = hex_escape(source, &mut at, count)?;
+                            let first = if escaped == 'u' {
+                                unicode_escape(source, &mut at, deadline)?
+                            } else { hex_escape(source, &mut at, 2)? };
                             if (0xd800..=0xdbff).contains(&first) && source[at..].starts_with("\\u") {
                                 let mut next = at + 2;
-                                let low = hex_escape(source, &mut next, 4)?;
+                                let low = unicode_escape(source, &mut next, deadline)?;
                                 if (0xdc00..=0xdfff).contains(&low) {
                                     at = next;
                                     let scalar = 0x10000 + ((first - 0xd800) << 10) + low - 0xdc00;
@@ -2034,6 +2035,40 @@ fn compilation_storage_and_deadline_reject_before_program_registration() {
     assert_eq!(error.message, "Script compilation deadline reached.");
     assert!(error.exception.is_none());
 }
+
+// The caller has consumed the u. Both forms produce UTF-16 string
+// values; the caller decides how to represent possible surrogate units.
+fn unicode_escape(source: &str, at: &mut usize, deadline: Option<Instant>) -> Result<u32, Fault> {
+    if source.as_bytes().get(*at) != Some(&b'{') { return hex_escape(source, at, 4); }
+    *at += 1; // Opening brace after the already-consumed backslash-u.
+    let start = *at;
+    let mut value = 0u32;
+    while let Some(digit) = source
+        .as_bytes()
+        .get(*at)
+        .and_then(|b| (*b as char).to_digit(16))
+    {
+        value = value.saturating_mul(16).saturating_add(digit);
+        *at += 1;
+        if (*at-start) % 65_536 == 0 { check_compilation_deadline(deadline).map_err(|e| e.at(source, *at))?; }
+        if value > 0x10ffff {
+            return Err(
+                Fault::exception("SyntaxError", "Unicode code point is out of range.")
+                    .at(source, start),
+            );
+        }
+    }
+    if *at == start || source.as_bytes().get(*at) != Some(&b'}') {
+        return Err(
+            Fault::exception("SyntaxError", "Invalid braced Unicode escape.").at(source, start),
+        );
+    }
+    *at += 1;
+    Ok(value)
+}
+
+/// Scan exactly one chunk, after the opening backtick or closing substitution
+/// brace. The boolean says whether a backtick (rather than ${) ended it.
 
 fn hex_escape(source: &str, at: &mut usize, count: usize) -> Result<u32, Fault> {
     let end = at.saturating_add(count);

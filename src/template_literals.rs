@@ -70,36 +70,7 @@ fn push_cooked(text: &mut String, high: &mut Option<u32>, value: u32, string_lim
     Ok(())
 }
 
-fn braced_unicode(source: &str, at: &mut usize) -> Result<u32, Fault> {
-    *at += 1; // Opening brace after the already-consumed backslash-u.
-    let start = *at;
-    let mut value = 0u32;
-    while let Some(digit) = source
-        .as_bytes()
-        .get(*at)
-        .and_then(|b| (*b as char).to_digit(16))
-    {
-        value = value.saturating_mul(16).saturating_add(digit);
-        *at += 1;
-        if value > 0x10ffff {
-            return Err(
-                Fault::exception("SyntaxError", "Unicode code point is out of range.")
-                    .at(source, start),
-            );
-        }
-    }
-    if *at == start || source.as_bytes().get(*at) != Some(&b'}') {
-        return Err(
-            Fault::exception("SyntaxError", "Invalid braced Unicode escape.").at(source, start),
-        );
-    }
-    *at += 1;
-    Ok(value)
-}
-
-/// Scan exactly one chunk, after the opening backtick or closing substitution
-/// brace. The boolean says whether a backtick (rather than ${) ended it.
-pub(super) fn chunk(source: &str, at: &mut usize, start: usize, string_limit: usize) -> Result<(String, bool), Fault> {
+pub(super) fn chunk(source: &str, at: &mut usize, start: usize, string_limit: usize, deadline: Option<std::time::Instant>) -> Result<(String, bool), Fault> {
     let bytes = source.as_bytes();
     let mut text = String::new();
     let mut high = None;
@@ -143,8 +114,7 @@ pub(super) fn chunk(source: &str, at: &mut usize, start: usize, string_limit: us
                     .at(source, position))
                 }
                 'x' => super::hex_escape(source, at, 2)?,
-                'u' if bytes.get(*at) == Some(&b'{') => braced_unicode(source, at)?,
-                'u' => super::hex_escape(source, at, 4)?,
+                'u' => super::unicode_escape(source, at, deadline)?,
                 other => other as u32,
             }
         } else if ch == '\r' {
@@ -334,6 +304,44 @@ mod tests {
                 .to_text(),
             "ok"
         );
+    }
+
+
+    #[test]
+    fn quoted_unicode_code_point_escapes_both_delimiters_utf16_pairs_and_dynamic_source() {
+        succeeds(r#"
+var pair='\ud83d\udc31';
+if('\u{1F431}'!==pair||"\u{00001f431}"!==pair||'\u{10ffff}'.length!==2||'\u{0}'.charCodeAt(0)!==0)throw 'scalar escapes';
+if('\uD83D\u{dc31}'!==pair||'\u{D83D}\uDC31'!==pair||'\u{D83D}\u{DC31}'!==pair)throw 'mixed pairs';
+if('\u{D800}'.charCodeAt(0)!==0xd800||"\u{dfff}a".charCodeAt(0)!==0xdfff||'\u{D800}\u{41}'.charCodeAt(1)!==65)throw 'isolated or non-pair';
+if(Function("return '\\u{10400}';")()!=='\uD801\uDC00'||'\x41\u0042\u{43}'!=='ABC')throw 'dynamic or fixed escapes';
+'ok';
+"#);
+    }
+
+    #[test]
+    fn quoted_unicode_code_point_escapes_syntax_and_exact_limits() {
+        use crate::javascript::{limits, tokenize_with_capacity, unicode_escape};
+        let mut capacity=limits::REGRESSION_CAPACITIES;
+        for source in [r"'\u{}'",r#""\u{110000}""#,r"'\u{000000110000}'",r"'\u{a z}'",r"'\u{1_2}'",r"'\u{+4}'",r"'\u{10'",r"'\x{41}'",r"'\uD800\u{}'"] {
+            let err=tokenize_with_capacity(source,&mut 0,capacity).err().expect("invalid escape accepted");
+            assert!(err.exception.is_some()&&err.location.is_some(),"{source}: {}",err.display());
+        }
+        capacity.string_bytes=4;
+        assert!(tokenize_with_capacity(r"'\u{00000001F431}'",&mut 0,capacity).is_ok());
+        assert!(tokenize_with_capacity(r"'\u{d83d}\uDC31'",&mut 0,capacity).is_ok());
+        capacity.string_bytes=3;
+        let err=tokenize_with_capacity(r"'\u{1F431}'",&mut 0,capacity).err().unwrap();
+        assert!(err.exception.is_none() && err.message.contains("String limit"));
+        capacity.string_bytes=2;
+        assert!(tokenize_with_capacity(r"'\u{d800}'",&mut 0,capacity).is_ok());
+        capacity.string_bytes=1;
+        assert!(tokenize_with_capacity(r"'\u{d800}'",&mut 0,capacity).is_err());
+        assert!(tokenize_with_capacity(r"'\u{41}'",&mut 0,capacity).is_ok());
+        let padded=format!("{{{}41}}","0".repeat(70_000));
+        assert_eq!(unicode_escape(&padded,&mut 0,None).unwrap(),65);
+        let refused=unicode_escape(&padded,&mut 0,Some(std::time::Instant::now())).unwrap_err();
+        assert!(refused.exception.is_none() && refused.message.contains("deadline"));
     }
 
     #[test]
