@@ -16,7 +16,7 @@
 
 ## Release Horizon
 
-**Public source moves frequently. Named releases move only on owner request.**
+**Each fully accepted milestone advances to named release preparation.**
 Milestone IDs below describe work, not reserved versions, deadlines, or promises
 of complete framework support.
 
@@ -46,10 +46,10 @@ explicit related programs; required dependencies cannot be counted as passes.
 Isolation and GPU work keep their separate readiness gates.
 
 > [!IMPORTANT]
-> **Owner-gated releases.** Completing a feature, merging a PR, or passing CI does
-> not trigger a release. Named releases require an explicit owner request and the
-> existing validation and publication procedure. A failed required gate blocks
-> the corresponding promotion or publication.
+> **Milestone delivery.** A milestone reaches acceptance after its required
+> contracts and integrations pass. Its named release must then pass the
+> exact-source validation and publication procedure. Record any failed delivery
+> gate against that candidate.
 
 ---
 
@@ -276,7 +276,7 @@ Neither depends on supporting every website first.
 
 Development PRs use focused checks. Trusted pushes run source privacy and
 configuration checks. Full regression, offline journeys and package verification
-belong to owner-requested releases.
+belong to release qualification.
 
 | State | ID | Deliverable | Exit criteria |
 | :--- | :--- | :--- | :--- |
@@ -310,7 +310,7 @@ Documentation separates these concerns:
 | [COMPATIBILITY.md](COMPATIBILITY.md) + [catalogue](compatibility.json) | Versioned, measured application outcomes |
 | [FEATURE_CONTRACTS.md](FEATURE_CONTRACTS.md) | Lasting behavior and acceptance requirements |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current system boundaries |
-| [RELEASING.md](RELEASING.md) | Owner-requested delivery procedure |
+| [RELEASING.md](RELEASING.md) | Milestone qualification and delivery procedure |
 
 Documentation updates describe changed behavior and its limits. Keep production
 original Rust/std-only, preserve security boundaries, and retain

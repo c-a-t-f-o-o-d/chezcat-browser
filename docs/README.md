@@ -20,7 +20,7 @@
 | 🧪 **[Compatibility](COMPATIBILITY.md)** | Actual pinned application outcomes, separated by stage |
 | 🏗️ **[Architecture](ARCHITECTURE.md)** | Ownership, processes, resources and rendering boundaries |
 | 🔨 **[Build guide](BUILDING.md)** | Prerequisites, acceptance, local builds and verification |
-| 📦 **[Development and releases](RELEASING.md)** | Focused development checks and owner-requested release verification |
+| 📦 **[Development and releases](RELEASING.md)** | Focused development checks, milestone acceptance and release verification |
 | 📐 **[Feature contracts](FEATURE_CONTRACTS.md)** | Navigable index into the complete preserved acceptance requirements |
 
 ## Policies and provenance
@@ -75,5 +75,5 @@ The current YouTube observation remains a skeleton. Merged engine changes and
 passing original fixtures are useful progress, but they do not establish a
 working homepage, search journey or playback.
 
-Named releases require an explicit owner request and the checks in the
+Fully accepted milestones proceed through the checks in the
 [release procedure](RELEASING.md).

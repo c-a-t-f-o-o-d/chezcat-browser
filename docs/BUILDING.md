@@ -83,9 +83,9 @@ performance comparisons or release qualification.
 | :--- | :--- | :--- |
 | **Ordinary edits** | Focused affected tests and relevant security negatives | Proves the changed behavior, not a complete integration pass |
 | **Native suite** | `python tools/capture_tests.py --toolchain 1.99.1` | Normal Windows test results for the actual source/configuration |
-| **Owner-requested release verification** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
+| **Release qualification** | `python tools/verify_offline.py` | Normal tests, optimized build, PE checks, and required local App journeys |
 | **Physical devices / public sites** | Separate explicitly scoped checks | Not inferred from routine offline verification |
-| **Named release** | [Release procedure](RELEASING.md) | Only for an explicit owner-requested publication |
+| **Named release** | [Release procedure](RELEASING.md) | Fully accepted milestone or a specific release request |
 
 ```powershell
 python tools/verify_offline.py

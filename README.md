@@ -67,9 +67,9 @@ These are **implemented slices, not complete standards support**. The
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
 > [!IMPORTANT]
-> **New source does not update an old download.** Published release assets remain
-> unchanged. Named releases are created only on explicit owner request; ordinary
-> commits, PRs, CI runs, and development builds do not require a release.
+> **Named releases follow fully accepted milestones.** Each release must pass the
+> exact-source delivery checks and public download verification. The table above
+> distinguishes the verified download from subsequent development on main.
 
 **`0.82.0-alpha.1` is the verified download.** All four published files match
 their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da62053c`.
@@ -291,7 +291,7 @@ and the executable identity when a dirty build needs exact reproduction.
 
 For ordinary PRs, compile where relevant and run the small reproduction or tests
 that exercise the change. Include a targeted negative check for a changed security
-or resource boundary. The complete offline verifier runs for an owner-requested release.
+or resource boundary. The complete offline verifier runs for each release candidate.
 
 ```powershell
 python tools/verify_offline.py

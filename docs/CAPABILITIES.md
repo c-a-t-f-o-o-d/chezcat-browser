@@ -68,7 +68,7 @@ for actual supported source behavior.
 | **Profile and storage** | Settings, bookmarks, optional history, staged downloads, guarded local roots, memory-only cookies | No general site storage, service workers, or persistent cookies; local files are not encrypted vaults |
 | **About / identity** | Full descriptive version/source/state/kind, offline license access, allowlisted Copy data | Metadata is not signing/authentication; App copy capture alone does not prove OS clipboard delivery |
 | **License acceptance** | Full offline terms, explicit personal/organization acceptance, strict minimal external receipts, same-text reuse, changed-terms/decline/write-failure refusal | Records a local choice—not verified identity, organizational authority, or an online account |
-| **Build and delivery** | Zero third-party production Cargo dependencies, pinned tools, generated resources, portable ZIP and offline gates | Installer and update discovery/upgrade remain planned; releases require owner requests |
+| **Build and delivery** | Zero third-party production Cargo dependencies, pinned tools, generated resources, portable ZIP and offline gates | Installer and update discovery/upgrade remain planned. Accepted milestones proceed through exact-source release qualification |
 | **Isolation** | Checked ownership, worker retirement/cancellation, explicit FFI boundaries and watchdogs | One process; no OS renderer sandbox or whole-process memory sandbox |
 
 ## DOM and JavaScript
