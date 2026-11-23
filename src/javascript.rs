@@ -515,6 +515,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("input", "HTMLInputElement"),
     ("meta", "HTMLMetaElement"),
     ("script", "HTMLScriptElement"),
+    ("link", "HTMLLinkElement"),
     ("slot", "HTMLSlotElement"),
     ("template", "HTMLTemplateElement"),
     ("textarea", "HTMLTextAreaElement"),

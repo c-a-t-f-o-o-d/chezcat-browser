@@ -155,3 +155,33 @@ document.getElementById('probe').textContent='Parsed source retained';document.t
     let mut app=open(&site,"/page");assert_eq!(app.document.title,"Parsed source retained","{}",app.activity_report());
     assert_painted_document(&app,"Parsed source retained");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
 }
+
+#[test]
+fn charset_interface_app_saved_accessors_drive_exact_native_metadata() {
+    let source=document("","waiting",false)+r#"<script id=parsed type=application/x-inert charset=seed></script><link id=sheet charset=link-seed><script>
+for(var entry of [[document.getElementById('parsed'),HTMLScriptElement.prototype],[document.getElementById('sheet'),HTMLLinkElement.prototype]]){
+var node=entry[0],saved=Object.getOwnPropertyDescriptor(entry[1],'charset');if(!saved)throw 'missing canonical charset';
+var attr=node.getAttributeNode('charset'),observer=new MutationObserver(function(){});observer.observe(node,{attributes:true,attributeOldValue:true,attributeFilter:['charset']});
+saved.set.call(node,'\ud800\ufffd');var records=observer.takeRecords();if(node.charset!==attr.value||saved.get.call(node)!=='\ud800\ufffd'||records.length!==1||records[0].oldValue!==(node.localName==='script'?'seed':'link-seed'))throw 'native exact metadata';
+Object.defineProperty(node,'charset',{configurable:true,value:'author'});saved.set.call(node,'native');if(node.charset!=='author'||attr.value!=='native')throw 'own shadow';delete node.charset;observer.disconnect();
+}
+document.getElementById('probe').textContent='Canonical charset metadata';document.title='Canonical charset metadata';
+</script>"#;
+    let site=Site::new(vec![Response{path:"/page",content_type:"text/html;charset=utf-8",headers:"",body:source.into_bytes()}]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"Canonical charset metadata","{}",app.activity_report());
+    assert_painted_document(&app,"Canonical charset metadata");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page"]);
+}
+
+#[test]
+fn charset_interface_app_native_setter_retains_prepared_script_fallback() {
+    let source=document("","waiting",false)+r#"<script>
+var saved=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'charset');if(!saved)throw 'missing canonical script charset';
+var s=document.createElement('script');saved.set.call(s,'Shift_JIS');s.src='/source';document.body.appendChild(s);saved.set.call(s,'Shift_JIS\ud800');
+</script>"#;
+    let site=Site::new(vec![
+        Response{path:"/page",content_type:"text/html;charset=windows-1252",headers:"",body:source.into_bytes()},
+        Response{path:"/source",content_type:"text/javascript",headers:"",body:script_bytes(&[0x82,0xa0])},
+    ]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"あ","{}",app.activity_report());
+    assert_painted_document(&app,"あ");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
+}
