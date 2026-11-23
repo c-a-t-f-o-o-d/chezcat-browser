@@ -67,6 +67,9 @@ impl State {
         } else {
             node_handle(parent)
         };
+        self.ranges_insert_handle(parent,index,count);
+    }
+    pub(super) fn ranges_insert_handle(&mut self, parent:u32, index:usize, count:usize) {
         for range in &mut self.ranges {
             for point in [&mut range.start, &mut range.end] {
                 if point.node == parent && point.offset > index {

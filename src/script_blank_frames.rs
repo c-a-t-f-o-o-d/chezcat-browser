@@ -1526,6 +1526,25 @@ if(read(d.get,window)!==window)throw 'same origin caller';
     }
 
 
+
+    #[test]
+    fn adjacent_insertion_saved_caller_and_initial_child_refuse_before_conversion() {
+        let source=format!("{CREATE}{}",r#"
+var root=document.createElement('div'),whereReads=0,textReads=0;
+var where={toString:function(){whereReads++;return 'beforeend';}}, text={toString:function(){textReads++;return 'safe';}};
+var put=w.Function('root','where','value','return Element.prototype.insertAdjacentText.call(root,where,value);');
+put(root,where,text);if(root.firstChild.data!=='safe')throw 'same origin insertion';
+var body=w.document.body;
+"#);
+        let (mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"Element.prototype.insertAdjacentText.call(body,where,text);").errors,1);
+        page.set_location(&crate::navigation::address("https://other.test/",&crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"put(root,where,text);").errors,1);
+        assert!(page.report().contains("same-origin"),"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(whereReads!==1||textReads!==1||root.childNodes.length!==1)throw 'denied conversion or tree edit';").errors,0);
+    }
+
     #[test]
     fn native_node_value_child_document_noop_and_saved_origin_before_conversion() {
         let source = format!("{CREATE}{}", r#"

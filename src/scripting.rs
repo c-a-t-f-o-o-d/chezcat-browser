@@ -17,6 +17,7 @@ use crate::dom_string::DomString;
 #[cfg(test)]
 #[path="script_native_dom_string_tests.rs"]
 mod native_dom_string_tests;
+use crate::javascript::adjacent_interface;
 use crate::javascript::html_reflection_interface::{meta_attribute, meta_operation};
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
@@ -3079,6 +3080,9 @@ impl Bridge<'_> {
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
         if matches!(property, "nodeValue" | "hasChildNodes") && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
+        if matches!(property,"insertAdjacentText"|"insertAdjacentElement") && self.collection_interface_receiver(object)==Some(false) {
+            return !self.form_named_control(object,property);
+        }
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3608,6 +3612,7 @@ impl Host for Bridge<'_> {
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
         if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return index==0 || method==adjacent_interface::TEXT && index==1;}
         if let Some((query, _)) = dom_collections::operation(method) { return index < query.arity(); }
         index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
             ||(script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
@@ -3643,6 +3648,8 @@ impl Host for Bridge<'_> {
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
         if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{&[(0,true),(1,true)]}else{&[(0,true)]};}
+        if method==adjacent_interface::TEXT {return &[(0,true),(1,true)];}
+        if method==adjacent_interface::ELEMENT {return &[(0,true)];}
         if let Some((query, _)) = dom_collections::operation(method) {
             return if query == dom_collections::Query::Namespace { &[(0,true),(1,true)] } else { &[(0,true)] };
         }
@@ -3772,6 +3779,7 @@ impl Host for Bridge<'_> {
         if script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(1);}
         if script_attr::node_method(method){return Some(if method=="getAttributeNodeNS"{2}else{1});}
         if let Some(ns)=script_attr::factory_operation(method){return Some(if ns{2}else{1});}
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return Some(2);}
         if let Some((query, _)) = dom_collections::operation(method) { return Some(query.arity()); }
         if method==xml_documents::CREATE{return Some(2);}
         if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
@@ -3852,6 +3860,7 @@ impl Host for Bridge<'_> {
             && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::window_relationships::operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) && self.event_target_interface(object) { return Some(object); }
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) && self.event_target_interface(object) {return Some(object);}
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -3933,6 +3942,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method==adjacent_interface::ELEMENT {return &[1];}
         if method==script_position::METHOD{return &[0];}
         if script_inert_documents::node_equality::operation(method){return &[0];}
         if method=="replaceChild"&&self.inert_replace_receiver(object){return &[0,1];}
@@ -3969,6 +3979,7 @@ impl Host for Bridge<'_> {
         if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
         if let Some((_,setter))=script_attr::member_operation(method){return usize::from(setter);}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{2}else{1};}
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return 2;}
         if let Some((query, _)) = dom_collections::operation(method) { return query.arity(); }
         if method==xml_documents::CREATE{return 2;}
         if element_names::namespace_method(method){return 1;}
@@ -4135,6 +4146,16 @@ impl Host for Bridge<'_> {
             if !self.event_target_interface(object) { return Err(("TypeError", "Expected a Window receiver.".into())); }
             self.window_relationship_access(object).map_err(|e| ("SecurityError", e))?;
             if setter && object != WINDOW { return Err(("NotSupportedError", "Child Window relationship writes are unavailable.".into())); }
+            return Ok(());
+        }
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {
+            self.adjacent_access(object)?;
+            if args.len()<2 {return Err(("TypeError","Adjacent insertion requires two arguments.".into()));}
+            if method==adjacent_interface::ELEMENT {
+                let Some(Value::Host(child))=args.get(1) else{return Err(("TypeError","Expected an Element to insert.".into()))};
+                if self.collection_interface_receiver(*child)!=Some(false) {return Err(("TypeError","Expected an Element to insert.".into()));}
+                self.native_node_access(*child)?;
+            }
             return Ok(());
         }
         if meta_operation(method).is_some() { return self.validate_meta(object); }
@@ -4581,6 +4602,7 @@ impl Host for Bridge<'_> {
             return self.event_target_interface(object) && (self.attr_element_receiver(receiver) || self.template_receiver(receiver));
         }
         if crate::javascript::window_relationships::operation(method).is_some() { return self.event_target_interface(object) && self.event_target_interface(receiver); }
+        if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return self.event_target_interface(object) && self.collection_interface_receiver(receiver)==Some(false);}
         if meta_operation(method).is_some() { return self.event_target_interface(object) && self.meta_receiver(receiver); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
@@ -5814,6 +5836,9 @@ impl Host for Bridge<'_> {
     fn prepare_node_normalize(&mut self,target:u32)->Result<crate::javascript::NativeNormalizeInfo,String>{self.prepare_shared_normalize(target)}
     fn commit_node_normalize(&mut self,target:u32)->Result<(),String>{self.commit_shared_normalize(target)}
     fn abort_node_normalize(&mut self,target:u32){self.abort_shared_normalize(target);}
+    fn adjacent_receiver_access(&self,target:u32)->Result<(),(&'static str,String)>{self.adjacent_access(target)}
+    fn adjacent_destination(&mut self,target:u32,pos:adjacent_interface::Position,text:bool)->Result<Option<adjacent_interface::Destination>,(&'static str,String)>{self.resolve_adjacent(target,pos,text)}
+    fn commit_adjacent_text(&mut self,target:u32,pos:adjacent_interface::Position,dest:adjacent_interface::Destination,text:&Value)->Result<(),(&'static str,String)>{self.publish_adjacent_text(target,pos,dest,text)}
     fn prepare_text_split(&mut self,target:u32,args:&[Value])->Result<crate::javascript::NativeTextSplitInfo,(&'static str,String)>{self.prepare_native_text_split(target,args)}
     fn commit_text_split(&mut self,target:u32)->Result<u32,String>{self.commit_native_text_split(target)}
     fn abort_text_split(&mut self,target:u32){self.abort_native_text_split(target);}

@@ -365,6 +365,8 @@ impl Runtime {
                     }
                 }
                 if name=="Element" {
+                    self.define_canvas_operation(prototype,window,"insertAdjacentText",super::adjacent_interface::TEXT,2)?;
+                    self.define_canvas_operation(prototype,window,"insertAdjacentElement",super::adjacent_interface::ELEMENT,2)?;
                     self.define_host_attribute(prototype, window, "innerHTML",
                         ELEMENT_INNER_HTML_GET, Some(ELEMENT_INNER_HTML_SET))?;
                     for (key, getter, setter) in [
