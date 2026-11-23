@@ -105,6 +105,23 @@ pub(super) fn reconstructs_on_start(tag: &str) -> bool {
     )
 }
 
+fn scope_boundary(doc: &Document, node: usize) -> bool {
+    doc.nodes[node].namespace != Namespace::Html
+        || matches!(
+            element(doc, node).0,
+            "applet"
+                | "caption"
+                | "html"
+                | "table"
+                | "td"
+                | "th"
+                | "marquee"
+                | "object"
+                | "select"
+                | "template"
+        )
+}
+
 fn special_html(name: &str) -> bool {
     matches!(
         name,
@@ -373,21 +390,10 @@ impl Formatting {
                 self.entries.remove(index);
                 return Ok(true);
             }
-            if stack[entry.depth + 1..].iter().any(|&n| {
-                doc.nodes[n].namespace != Namespace::Html
-                    || matches!(
-                        element(doc, n).0,
-                        "html"
-                            | "table"
-                            | "template"
-                            | "caption"
-                            | "td"
-                            | "th"
-                            | "object"
-                            | "applet"
-                            | "marquee"
-                    )
-            }) {
+            if stack[entry.depth + 1..]
+                .iter()
+                .any(|&n| scope_boundary(doc, n))
+            {
                 return Ok(true);
             }
             let depth = entry.depth;
@@ -417,20 +423,7 @@ impl Formatting {
         for depth in (1..stack.len()).rev() {
             let node = stack[depth];
             let name = element(doc, node).0;
-            if doc.nodes[node].namespace != Namespace::Html
-                || matches!(
-                    name,
-                    "html"
-                        | "table"
-                        | "td"
-                        | "th"
-                        | "caption"
-                        | "template"
-                        | "object"
-                        | "applet"
-                        | "marquee"
-                )
-            {
+            if scope_boundary(doc, node) {
                 break;
             }
             if name == "nobr" {

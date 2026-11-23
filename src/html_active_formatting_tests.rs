@@ -217,3 +217,20 @@ fn active_formatting_nested_nobr_uses_open_element_scope_after_reconstruction() 
     );
     assert_eq!(kids(&doc, doc.nodes[body].children[2]), ["#new"]);
 }
+
+#[test]
+fn formatting_adoption_select_scope_keeps_the_owning_formatting_element_open() {
+    let source = "<font><select><option>a</option></font><option>b</select>after</font>end";
+    for doc in [
+        parse_loaded_document(source, &|| Ok(())).unwrap(),
+        parse_inert_html(source, 32, &|| Ok(())).unwrap().0,
+    ] {
+        let body = first(&doc, "body");
+        assert_eq!(kids(&doc, body), ["font", "#end"]);
+        assert_eq!(kids(&doc, first(&doc, "font")), ["select", "#after"]);
+        let select = first(&doc, "select");
+        assert_eq!(kids(&doc, select), ["option", "option"]);
+        assert_eq!(kids(&doc, doc.nodes[select].children[0]), ["#a"]);
+        assert_eq!(kids(&doc, doc.nodes[select].children[1]), ["#b"]);
+    }
+}
