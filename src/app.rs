@@ -6010,6 +6010,9 @@ mod literal_prototype_tests;
 #[cfg(test)]
 #[path = "app_string_concat_tests.rs"]
 mod string_concat_tests;
+#[cfg(test)]
+#[path = "app_string_last_index_utf16_tests.rs"]
+mod string_last_index_utf16_tests;
 
 #[cfg(test)]
 #[path = "app_hidden_input_tests.rs"]
