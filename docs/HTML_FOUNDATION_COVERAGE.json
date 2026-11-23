@@ -224,20 +224,20 @@
       "status": "partial",
       "scope": "required",
       "browser_runtime_observation": {
-        "source_commit": "7973cbccb8bb24ca19096b2561cbef85d14936ae",
+        "source_commit": "e19c1c4c2ebdefc60095491ae1a2b0d15abaeb85",
         "selected_files_attempted": 21,
         "files_with_terminal_summary": 10,
         "files_with_details_rendered": 9,
         "files_without_terminal_summary": 11,
-        "reported_subtests_passed": 451,
-        "reported_subtests_failed": 703,
+        "reported_subtests_passed": 561,
+        "reported_subtests_failed": 593,
         "earlier_observation": {
           "source_commit": "09a88b13b516356ed59330db9ee5831568574034",
           "reported_subtests_passed": 428,
           "reported_subtests_failed": 726,
           "change": "All six unchanged subtests in each of Document-createComment.html and Document-createTextNode.html subsequently passed."
         },
-        "scope": "Unmodified pinned pages and original scripts loaded in the Windows App. On 3cc640b, six of the ten terminal summaries rendered details. With adjacent insertion, nine show details. On fee3f8c the terminal reports totaled 440 passes and 714 failures. Canonical factory errors restored the two remaining doctype subtests on d64c668. Head/title identities subsequently restored nine HTML document factory subtests on 7973cbc. The remaining summary reaches the existing host work limit while rendering. Files without a terminal summary have no measured result totals."
+        "scope": "Unmodified pinned pages and original scripts loaded in the Windows App. On 3cc640b, six of the ten terminal summaries rendered details. With adjacent insertion, nine show details. On fee3f8c the terminal reports totaled 440 passes and 714 failures. Canonical factory errors restored the two remaining doctype subtests on d64c668. Head/title identities restored nine HTML document factory subtests on 7973cbc (451 pass, 703 fail). Document location and inert hyperlink changes on e19c1c4 restored 110 more subtests, including all 13 HTML document factory subtests. The remaining summary reaches the existing host work limit while rendering. Files without a terminal summary have no measured result totals."
       },
       "source_anchors": [
         "src/html.rs",
