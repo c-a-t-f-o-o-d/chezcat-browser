@@ -51,7 +51,7 @@ fn reflect_get_namespace_descriptors_native_identity_and_author_mutation() {
         var tag = Object.getOwnPropertyDescriptor(Reflect, Symbol.toStringTag);
         if (tag.value !== 'Reflect' || tag.writable || tag.enumerable || !tag.configurable ||
             Object.prototype.toString.call(Reflect) !== '[object Reflect]') throw 'namespace tag';
-        if (Reflect.construct !== undefined || Reflect.ownKeys !== undefined)
+        if (Reflect.construct !== undefined || typeof Reflect.ownKeys !== 'function')
             throw 'unimplemented surface';
         var failures = 0;
         try { new get({}, 'x'); } catch (e) { if (e.name === 'TypeError') failures++; }

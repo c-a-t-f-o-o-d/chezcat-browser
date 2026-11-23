@@ -3923,6 +3923,7 @@ enum Builtin {
     Proxy,
     ReflectGet,
     ReflectSet,
+    ReflectOwnKeys,
     Symbol(symbols::Op),
     Binary(binary_data::Op),
     Collection(collections::Op),
@@ -9819,6 +9820,9 @@ impl Runtime {
             Some(Function::Native(Builtin::ReflectSet)) => {
                 return self.reflect_set(args, host);
             }
+            Some(Function::Native(Builtin::ReflectOwnKeys)) => {
+                return self.reflect_own_keys(args, host);
+            }
             Some(Function::Bound(_)) => {
                 let (target, arguments, receiver) = self.bound_arguments(index, args, true)?;
                 return self.call_value(Value::Function(target), &arguments, receiver, host);
@@ -10559,7 +10563,7 @@ impl Runtime {
             Builtin::Function => self.function_constructor(args, host),
             Builtin::AsyncFunction => self.async_function_constructor(args, None, host),
             Builtin::GeneratorFunction => self.dynamic_function_constructor(args, FunctionKind::Generator, None, host),
-            Builtin::Proxy | Builtin::ReflectGet | Builtin::ReflectSet
+            Builtin::Proxy | Builtin::ReflectGet | Builtin::ReflectSet | Builtin::ReflectOwnKeys
             | Builtin::ObjectStatic(_)
             | Builtin::ObjectMethod(_)
             | Builtin::FunctionMethod(_)

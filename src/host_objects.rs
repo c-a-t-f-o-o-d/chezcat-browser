@@ -1593,7 +1593,7 @@ mod expando_tests {
         let mut host=Native {enabled:true,reads:0};
         runtime.execute("element.customProbe=17;element[Symbol('own')]=23;",&mut host).unwrap();
         host.enabled=false;
-        for source in ["element.customProbe;","Object.keys(element);","Object.getOwnPropertyNames(element);","Object.getOwnPropertySymbols(element);","Object.assign({},element);"] {
+        for source in ["element.customProbe;","Object.keys(element);","Object.getOwnPropertyNames(element);","Object.getOwnPropertySymbols(element);","Object.assign({},element);","Reflect.ownKeys(element);"] {
             runtime.begin_job();
             let error=runtime.execute(source,&mut host).unwrap_err();
             assert!(error.contains("no longer accessible"),"{source}: {error}");
@@ -1601,5 +1601,7 @@ mod expando_tests {
         assert_eq!(host.reads,0);
         host.enabled=true;runtime.begin_job();
         assert_eq!(runtime.execute("element.customProbe;",&mut host).unwrap().to_number(),17.0);
+        runtime.begin_job();assert_eq!(runtime.execute("Reflect.ownKeys(element).length;",&mut host).unwrap().to_number(),2.0);
+        assert_eq!(host.reads,0);
     }
 }

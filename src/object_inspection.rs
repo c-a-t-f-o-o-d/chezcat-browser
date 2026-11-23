@@ -21,27 +21,7 @@ impl Runtime {
             return self.inspection_string(method, value);
         }
         let ordinary = Ordinary::from_value(value);
-        let keys = if let Some(object) = ordinary {
-            let id = self.ordinary_id(object)?;
-            self.inspection_string_keys(id)?
-        } else if let Value::Host(handle) = value {
-            self.ensure_native_expando(*handle,host,false)?;
-            if self.is_browser_global(*handle) {
-                self.window_keys(false, false, host)?
-            } else if host.document_location_owner(*handle).is_some() {
-                self.document_own_string_keys(*handle,false,host)?
-            } else if host.indexed_iteration_owner(*handle).is_some() {
-                self.indexed_host_keys(*handle,false,false,host)?
-            } else if let Some(&id) = self.host_objects.get(handle) {
-                self.inspection_string_keys(id)?
-            } else {
-                // The Host contract supplies only its explicitly supported
-                // own names. Unsupported native objects still fail closed.
-                self.host_keys(*handle, false, host)?
-            }
-        } else {
-            Vec::new() // Number, Boolean and Symbol primitives have no own keys.
-        };
+        let keys=self.inspection_own_string_keys(value,host)?;
         if method == "getOwnPropertyNames" {
             let result = self.new_object(Some(keys.len()))?;
             for (index, key) in keys.into_iter().enumerate() {
@@ -144,6 +124,34 @@ impl Runtime {
             index += 1;
         }
         Ok(Value::Object(result))
+    }
+
+    // Shared own-name snapshot retains native ownership and explicit Proxy
+    // enumeration refusal. Callers handle primitive string boxing separately.
+    pub(super) fn inspection_own_string_keys(&mut self,value:&Value,host:&mut dyn Host)->Result<Vec<StringKey>,Fault> {
+        let ordinary = Ordinary::from_value(value);
+        let keys = if let Some(object) = ordinary {
+            let id = self.ordinary_id(object)?;
+            self.inspection_string_keys(id)?
+        } else if let Value::Host(handle) = value {
+            self.ensure_native_expando(*handle,host,false)?;
+            if self.is_browser_global(*handle) {
+                self.window_keys(false, false, host)?
+            } else if host.document_location_owner(*handle).is_some() {
+                self.document_own_string_keys(*handle,false,host)?
+            } else if host.indexed_iteration_owner(*handle).is_some() {
+                self.indexed_host_keys(*handle,false,false,host)?
+            } else if let Some(&id) = self.host_objects.get(handle) {
+                self.inspection_string_keys(id)?
+            } else {
+                // The Host contract supplies only its explicitly supported
+                // own names. Unsupported native objects still fail closed.
+                self.host_keys(*handle, false, host)?
+            }
+        } else {
+            Vec::new() // Number, Boolean and Symbol primitives have no own keys.
+        };
+        Ok(keys)
     }
 
     fn inspection_string_keys(&mut self, id: usize) -> Result<Vec<StringKey>, Fault> {
