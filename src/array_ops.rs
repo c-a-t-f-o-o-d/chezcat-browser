@@ -10,6 +10,18 @@ use super::{
 };
 use std::cmp::Ordering;
 
+#[path = "array_join_text.rs"]
+mod join_text;
+use join_text::JoinOutput;
+
+#[cfg(test)]
+#[path = "array_join_utf16_tests.rs"]
+mod utf16_join_tests;
+
+#[cfg(test)]
+#[path = "array_join_utf16_boundary_tests.rs"]
+mod utf16_join_boundary_tests;
+
 struct FlattenFrame {
     id: usize,
     length: usize,
@@ -57,12 +69,12 @@ impl Runtime {
         &mut self,
         id: usize,
         length: usize,
-        separator: &str,
+        separator: &Value,
         host: &mut dyn Host,
-    ) -> Result<String, Fault> {
+    ) -> Result<Value, Fault> {
         self.step()?;
         if self.active_array_joins.contains(&id) {
-            return Ok(String::new());
+            return Ok(Value::String(String::new()));
         }
         #[cfg(test)]
         if self.limits.test_call_depth.is_some_and(|limit| self.active_array_joins.len() >= limit) {
@@ -81,7 +93,7 @@ impl Runtime {
             // length there is no index to inspect, including on prototypes.
             if zero_shortcut && length == 0 {
                 self.work(0)?;
-                return Ok(String::new());
+                return Ok(Value::String(String::new()));
             }
             // Preserve the original hole-only fast path. Prototype indices
             // count too, since even a hole can expose an inherited getter.
@@ -124,31 +136,40 @@ impl Runtime {
                 parent = self.objects[object].prototype;
             }
             if !has_indices {
-                let bytes = length.saturating_sub(1).saturating_mul(separator.len());
-                if bytes > self.limits.capacity.string_bytes {
-                    return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
-                }
-                self.work(bytes)?;
-                return Ok(separator.repeat(length.saturating_sub(1)));
+                return JoinOutput::repeat(self, separator, length.saturating_sub(1));
             }
-            let mut output = String::new();
-            for index in 0..length {
-                if index != 0 {
-                    self.append_string(&mut output, separator)?;
+            let mut output = JoinOutput::new();
+            let result = (|| {
+                for index in 0..length {
+                    if index != 0 {
+                        output.append(self, separator)?;
+                    }
+                    let value = self.get_property_with_host(id, &index.to_string(), host)?;
+                    let text = self.array_join_element(value, host)?;
+                    output.append(self, &text)?;
                 }
-                let value = self.get_property_with_host(id, &index.to_string(), host)?;
-                let text = self.array_join_element(value, host)?;
-                self.append_string(&mut output, &text)?;
-            }
-            Ok(output)
+                output.finish(self)
+            })();
+            output.release(self)?;
+            result
         })();
         self.active_array_joins.pop();
         result
     }
 
-    fn array_join_element(&mut self, value: Value, host: &mut dyn Host) -> Result<String, Fault> {
+    pub(super) fn array_join_primitive(value: Value) -> Result<Value, Fault> {
+        // Observable ToPrimitive has already completed. Only the original
+        // null/undefined element is omitted; a converted nullish value keeps
+        // its normal spelling, and Symbols retain their TypeError.
+        match value {
+            Value::String(_) | Value::StringUnits(_) => Ok(value),
+            _ => value.script_text().map(Value::String),
+        }
+    }
+
+    fn array_join_element(&mut self, value: Value, host: &mut dyn Host) -> Result<Value, Fault> {
         if matches!(value, Value::Undefined | Value::Null) {
-            return Ok(String::new());
+            return Ok(Value::String(String::new()));
         }
         if matches!(value, Value::Host(_)) {
             // Actual-array join has never granted native conversion. Ordinary
@@ -162,12 +183,12 @@ impl Runtime {
             _ => None,
         };
         let Some(id) = array else {
-            return self.primitive_with_hint(value, true, host)?.script_text();
+            return Self::array_join_primitive(self.primitive_with_hint(value, true, host)?);
         };
         if let Some(primitive) =
             self.primitive_exotic(value.clone(), primitive_conversion::Hint::String, host)?
         {
-            return primitive.script_text();
+            return Self::array_join_primitive(primitive);
         }
         // OrdinaryToPrimitive's string-hint order, retaining the captured
         // callable and reading valueOf only if toString did not yield a
@@ -188,7 +209,7 @@ impl Runtime {
                     Some(Function::Native(Builtin::ArrayMethod("join")))))
                 {
                     let length = self.array_like_length(id, host)?;
-                    Value::String(self.array_join(id, length, ",", host)?)
+                    self.array_join(id, length, &Value::String(",".into()), host)?
                 } else if matches!(join, Value::Function(_)) {
                     self.call_value(join, &[], value.clone(), host)?
                 } else {
@@ -201,7 +222,7 @@ impl Runtime {
                 primitive,
                 Value::Object(_) | Value::Function(_) | Value::Host(_)
             ) {
-                return self.checked_value(primitive)?.script_text();
+                return Self::array_join_primitive(self.checked_value(primitive)?);
             }
         }
         Err(Fault::exception(
@@ -470,22 +491,26 @@ impl Runtime {
         &mut self,
         id: usize,
         length: usize,
-        separator: &str,
+        separator: &Value,
         host: &mut dyn Host,
-    ) -> Result<String, Fault> {
-        let mut output = String::new();
-        for index in 0..length {
-            self.step()?;
-            if index != 0 {
-                self.append_string(&mut output, separator)?;
+    ) -> Result<Value, Fault> {
+        let mut output = JoinOutput::new();
+        let result = (|| {
+            for index in 0..length {
+                self.step()?;
+                if index != 0 {
+                    output.append(self, separator)?;
+                }
+                let value = self.get_property_with_host(id, &index.to_string(), host)?;
+                if !matches!(value, Value::Null | Value::Undefined) {
+                    let text = Self::array_join_primitive(self.primitive_with_hint(value, true, host)?)?;
+                    output.append(self, &text)?;
+                }
             }
-            let value = self.get_property_with_host(id, &index.to_string(), host)?;
-            if !matches!(value, Value::Null | Value::Undefined) {
-                let text = self.primitive_with_hint(value, true, host)?.script_text()?;
-                self.append_string(&mut output, &text)?;
-            }
-        }
-        Ok(output)
+            output.finish(self)
+        })();
+        output.release(self)?;
+        result
     }
     fn array_has_index(&mut self, id: usize, index: usize) -> Result<bool, Fault> {
         Ok(self
@@ -1192,7 +1217,7 @@ if(caught!==2)throw 'catchable conversion';
                 runtime.begin_job();
                 let before = (runtime.steps, runtime.copy_bytes, runtime.job_deadline);
                 let expected = (0..32).map(|i| i.to_string()).collect::<String>();
-                for _ in 0..1000 { assert_eq!(runtime.array_join(array, 32, "", &mut NoHost).unwrap(), expected); }
+                for _ in 0..1000 { assert_eq!(runtime.array_join(array, 32, &Value::String(String::new()), &mut NoHost).unwrap().to_text(), expected); }
                 assert!(runtime.active_array_joins.is_empty());
                 assert_eq!(runtime.job_deadline, before.2);
                 observations.push((before.0 - runtime.steps, before.1 - runtime.copy_bytes));
@@ -1242,13 +1267,13 @@ var shrinking=[1,2];if(shrinking.join({toString:function(){shrinking.length=1;re
                 _ => { runtime.steps = 256; runtime.job_deadline = std::time::Instant::now() - std::time::Duration::from_secs(1); }
             }
             let before = (runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.value_bytes, runtime.bindings, runtime.job_deadline);
-            let error = runtime.array_join(array, 1, "", &mut NoHost).unwrap_err();
+            let error = runtime.array_join(array, 1, &Value::String(String::new()), &mut NoHost).unwrap_err();
             assert!(error.exception.is_none() && error.message.contains("limit"), "{error:?}");
             assert!(runtime.active_array_joins.is_empty());
             assert_eq!((runtime.functions.len(), runtime.objects.len(), runtime.environments.len(), runtime.value_bytes, runtime.bindings, runtime.job_deadline), before);
             if failure == "copy" { assert!(runtime.string_work_failure_report().unwrap().contains("category=array-join-preflight; requested=9; remaining-before=8")); }
             runtime.begin_job();
-            assert_eq!(runtime.array_join(array, 1, "", &mut NoHost).unwrap(), "1");
+            assert_eq!(runtime.array_join(array, 1, &Value::String(String::new()), &mut NoHost).unwrap().to_text(), "1");
         }
     }
 
@@ -1261,7 +1286,7 @@ var shrinking=[1,2];if(shrinking.join({toString:function(){shrinking.length=1;re
             let Value::Object(array) = runtime.array_from_values(&[]).unwrap() else { unreachable!() };
             runtime.begin_job();
             let before = (runtime.steps, runtime.copy_bytes, runtime.job_deadline);
-            for _ in 0..1000 { assert_eq!(runtime.array_join(array, 0, "", &mut NoHost).unwrap(), ""); }
+            for _ in 0..1000 { assert_eq!(runtime.array_join(array, 0, &Value::String(String::new()), &mut NoHost).unwrap().to_text(), ""); }
             observations.push((before.0 - runtime.steps, before.1 - runtime.copy_bytes));
             assert_eq!(runtime.job_deadline, before.2);
             assert!(runtime.active_array_joins.is_empty());
