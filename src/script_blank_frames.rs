@@ -1628,6 +1628,29 @@ assign(set,native,value);if(native.text!=='actual'||effects!==1)throw 'same orig
         assert_eq!(page.console_eval(&mut doc,&mut forms,"if(effects!==1||native.text!=='actual')throw 'denied conversion';").errors,0);
     }
 
+
+    #[test]
+    fn document_location_and_inert_anchor_child_location_identity_origin_and_teardown() {
+        let source=format!("{CREATE}{}",r#"
+var cd=w.document,childLocation=cd.location,sd=Object.getOwnPropertyDescriptor(cd,'location'),md=Object.getOwnPropertyDescriptor(document,'location');
+if(childLocation!==w.location||childLocation===window.location||sd.get===md.get||sd.configurable||sd.get.call(cd)!==w.location||md.get.call(cd)!==w.location)throw 'actual child Location';
+var owner=document.implementation.createHTMLDocument('inert'),anchor=owner.createElement('a'),reads=0;
+var set=w.Function('node','value','return Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype,"href").set.call(node,value);');
+var value={toString:function(){reads++;return 'https://example.test/ok';}};
+set(anchor,value);if(reads!==1||anchor.href!=='https://example.test/ok')throw 'same origin anchor';
+"#);
+        let(mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::address("https://other.test/", &crate::navigation::Location::home()).unwrap());
+        for denied in ["md.get.call(cd);","set(anchor,value);","Object.getOwnPropertyDescriptor(cd,'location');"] {
+            assert_eq!(page.console_eval(&mut doc,&mut forms,denied).errors,1,"{denied}: {}",page.report());
+        }
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(reads!==1)throw 'denied conversion';").errors,0);
+        page.set_location(&crate::navigation::address("https://example.test/parent/page", &crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"document.body.removeChild(f);").errors,0);
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"md.get.call(cd);").errors,1);
+    }
+
     #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"

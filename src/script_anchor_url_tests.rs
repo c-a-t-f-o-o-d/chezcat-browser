@@ -1,6 +1,60 @@
 //! Original HTML hyperlink API reductions, independent of framework source.
 use super::*;
 
+
+#[test]
+fn document_location_and_inert_anchor_reselect_current_base_after_conversion_and_adoption() {
+    let (mut doc,mut forms,mut page)=fixture_page(Page::new());
+    run(&mut doc,&mut forms,&mut page,r#"
+var doc1=document.implementation.createHTMLDocument('one'),doc2=document.implementation.createHTMLDocument('two');
+var base=doc1.createElement('base'),next=doc2.createElement('base');
+base.setAttribute('href','https://first.test/path/');doc1.head.appendChild(base);
+next.setAttribute('href','https://second.test/current/');doc2.head.appendChild(next);
+var a=doc1.createElement('a');a.setAttribute('href','leaf');var attr=a.getAttributeNode('href');
+if(a.href!=='https://first.test/path/leaf')throw 'first base';
+doc2.adoptNode(a);if(a.ownerDocument!==doc2||a.href!=='https://second.test/current/leaf'||attr.ownerElement!==a)throw 'current owner base';
+var order=0;a.search={toString:function(){order++;next.setAttribute('href','https://third.test/dir/');return 'q=\u00e4';}};
+if(order!==1||a.href!=='https://third.test/dir/leaf?q=%C3%A4'||a.search!=='?q=%C3%A4'||attr.value!==a.href)throw 'reentrant URL component';
+var wrong=false;try{Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype,'port').set.call(doc1.body,{toString:function(){order++;return '8';}});}catch(e){wrong=e instanceof TypeError;}if(order!==1||!wrong)throw 'anchor brand before conversion';
+"#);
+}
+
+#[test]
+fn document_location_and_inert_anchor_storage_refusal_keeps_attribute_and_recovers() {
+    let (mut doc,mut forms,mut page)=fixture_page(Page::new());
+    run(&mut doc,&mut forms,&mut page,"var owner=document.implementation.createHTMLDocument(''),a=owner.createElement('a');a.href='https://example.test/source';var held=a.getAttributeNode('href'),obs=new MutationObserver(function(){});obs.observe(a,{attributes:true});");
+    let limit=page.state.retained_limit;
+    page.state.retained_limit=page.state.retained;
+    let before=(page.state.dom_commits,page.state.retained);
+    assert_eq!(page.console_eval(&mut doc,&mut forms,"a.hash='new-and-longer';").errors,1);
+    assert_eq!((page.state.dom_commits,page.state.retained),before);
+    page.state.retained_limit=limit;
+    run(&mut doc,&mut forms,&mut page,"if(held.value!=='https://example.test/source'||obs.takeRecords().length)throw 'partial mutation';a.hash='ok';if(held.value!=='https://example.test/source#ok'||obs.takeRecords().length!==1)throw 'recovered mutation';");
+}
+
+#[test]
+fn document_location_and_inert_anchor_native_owners_and_forwarding_boundaries() {
+    let (mut doc,mut forms,mut page)=fixture_page(Page::new());
+    run(&mut doc,&mut forms,&mut page,r#"
+var owner=document.implementation.createHTMLDocument('URL'),xml=new Document(),m=Object.getOwnPropertyDescriptor(document,'location'),i=Object.getOwnPropertyDescriptor(owner,'location');
+if(document.location!==window.location||owner.location!==null||xml.location!==null||!('location' in owner)||!Object.hasOwn(owner,'location')||Object.keys(owner).indexOf('location')<0||Object.getOwnPropertyNames(owner).indexOf('location')<0)throw 'Document location identity and own slot';
+if(i.configurable||!i.enumerable||i.get!==m.get||i.set!==m.set||i.get.call(owner)!==null||m.get.call(document)!==window.location||i.get.length||i.set.length!==1||Object.hasOwn(Document.prototype,'location'))throw 'unforgeable descriptor';
+var no=false;try{Object.defineProperty(owner,'location',{value:7});}catch(e){no=e instanceof TypeError;}if(!no||delete owner.location)throw 'protected presence';
+Object.defineProperty(owner,'location',i);
+var reads=0,value={toString:function(){reads++;return '#unused';}};no=false;
+try{owner.location=value;}catch(e){no=e instanceof TypeError;}if(reads||!no||owner.location!==null)throw 'inactive setter';
+no=false;try{i.get.call({});}catch(e){no=e instanceof TypeError;}if(!no)throw 'Document brand';
+var a=owner.createElement('a'),d=Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype,'href'),obs=new MutationObserver(function(){});
+obs.observe(a,{attributes:true,attributeOldValue:true});a.href='http://example.org/?\u00e4';
+if(a.href!=='http://example.org/?%C3%A4'||a.getAttribute('href')!=='http://example.org/?\u00e4'||a.origin!=='http://example.org'||a.protocol!=='http:'||a.hostname!=='example.org')throw 'parsed and raw hyperlink';
+a.hash='fragment';a.pathname='/x y';if(a.href!=='http://example.org/x%20y?%C3%A4#fragment'||a.getAttribute('href')!==a.href)throw 'component mutation';
+var records=obs.takeRecords();if(records.length!==3||records[0].target!==a||records[0].attributeName!=='href'||records[1].oldValue!=='http://example.org/?\u00e4')throw 'observed href mutations';
+a.href='https://example.org/\ud800';if(a.getAttribute('href')!=='https://example.org/\ufffd'||a.href!=='https://example.org/%EF%BF%BD')throw 'IDL USV input';
+a.setAttribute('href','https://example.org/\udfff');if(d.get.call(a)!=='https://example.org/%EF%BF%BD'||a.getAttribute('href').charCodeAt(a.getAttribute('href').length-1)!==0xdfff)throw 'raw Attr and USV projection';
+var missing=owner.createElement('a');missing.port='10';if(missing.getAttribute('href')!==null||missing.href!==''||missing.protocol!==':')throw 'absent href';
+"#);
+}
+
 fn fixture() -> (Document, Forms, Page) {
     fixture_page(Page::for_test())
 }

@@ -18,6 +18,7 @@ use crate::dom_string::DomString;
 #[path="script_native_dom_string_tests.rs"]
 mod native_dom_string_tests;
 use crate::javascript::adjacent_interface;
+use crate::javascript::anchor_url_interface;
 use crate::javascript::html_reflection_interface::{meta_attribute, meta_operation};
 use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
@@ -3102,6 +3103,7 @@ impl Bridge<'_> {
             return !self.form_named_control(object,property);
         }
         if property=="text" && self.title_receiver(object) {return true;}
+        if script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3221,6 +3223,7 @@ impl Host for Bridge<'_> {
     }
 
     fn observed_attribute_setter(&self, target: u32, property: &str) -> Option<&'static str> {
+        if property!="origin" && script_anchor_url::property(property) && self.native_anchor(target) {return Some("href");}
         if self.meta_member(target, property) { return meta_attribute(property); }
         if self.aria_reflection_attribute(target,property){return crate::javascript::aria_reflection_interface::property(property);}
         if self.html_reflection_receiver(target){if let Some(name)=crate::javascript::html_reflection_interface::attribute(property){return Some(name);}}
@@ -3496,6 +3499,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if self.meta_member(object, property) { return true; }
@@ -3544,6 +3548,7 @@ impl Host for Bridge<'_> {
     fn nullable_scalar_setter(&self,object:u32,property:&str)->bool{property=="hidden"&&self.html_reflection_receiver(object)}
     fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if self.aria_reflection_attribute(object,property){return true;}
         if self.meta_member(object, property) { return true; }
@@ -3599,6 +3604,7 @@ impl Host for Bridge<'_> {
         }
         if method == NODE_VALUE_SET && self.text_content_receiver(object) { return Some("nodeValue"); }
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
+        if let Some((name,true))=anchor_url_interface::operation(method){return self.native_anchor(object).then_some(name);}
         if method==TITLE_TEXT_SET && self.title_receiver(object) {return Some("text");}
         if method == HTML_SLOT_NAME_SET && self.html_slot_receiver(object) {return Some("name");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
@@ -3656,6 +3662,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return true; }
         if self.meta_member(object, property) { return true; }
@@ -3885,6 +3892,8 @@ impl Host for Bridge<'_> {
         if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) && self.event_target_interface(object) { return Some(object); }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) && self.event_target_interface(object) {return Some(object);}
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) && self.event_target_interface(object){return Some(object);}
+        if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) && self.event_target_interface(object) {return Some(object);}
+        if anchor_url_interface::operation(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4183,6 +4192,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
+        if anchor_url_interface::operation(method).is_some() {return self.native_node_access(object);}
         if meta_operation(method).is_some() { return self.validate_meta(object); }
         if let Some((_,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return self.validate_aria_reflection(object,setter);}
         if let Some((_,setter))=crate::javascript::html_reflection_interface::operation(method){return self.validate_html_reflection(object,setter);}
@@ -4629,6 +4639,8 @@ impl Host for Bridge<'_> {
         if crate::javascript::window_relationships::operation(method).is_some() { return self.event_target_interface(object) && self.event_target_interface(receiver); }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return self.event_target_interface(object) && self.collection_interface_receiver(receiver)==Some(false);}
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.event_target_interface(object) && self.title_receiver(receiver);}
+        if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) {return self.event_target_interface(object)&&self.document_location_owner(receiver).is_some();}
+        if anchor_url_interface::operation(method).is_some() {return self.event_target_interface(object)&&self.native_anchor(receiver);}
         if meta_operation(method).is_some() { return self.event_target_interface(object) && self.meta_receiver(receiver); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
@@ -5866,6 +5878,23 @@ impl Host for Bridge<'_> {
     fn prepare_node_normalize(&mut self,target:u32)->Result<crate::javascript::NativeNormalizeInfo,String>{self.prepare_shared_normalize(target)}
     fn commit_node_normalize(&mut self,target:u32)->Result<(),String>{self.commit_shared_normalize(target)}
     fn abort_node_normalize(&mut self,target:u32){self.abort_shared_normalize(target);}
+    fn document_location_owner(&self, target:u32)->Option<u32>{
+        if target==DOCUMENT || self.inert_document(target) {return Some(WINDOW);}
+        self.frame_contains_node(target).and_then(|(owner,node)|(node==0).then_some(owner))
+    }
+    fn document_location_access(&self,caller:Option<u32>,target:u32)->Result<(),String>{
+        let owner=self.document_location_owner(target).ok_or("Document location requires a genuine Document.")?;
+        if caller.or(Some(WINDOW))!=Some(owner){self.frame_window_access(caller.or(Some(WINDOW)),owner)?;}
+        if owner!=WINDOW {self.contains_child_document(owner)?;}
+        Ok(())
+    }
+    fn document_location_value(&mut self,caller:Option<u32>,target:u32)->Result<Value,String>{
+        self.document_location_access(caller,target)?;
+        if target==DOCUMENT {return self.location_handle();}
+        if self.inert_document(target){return Ok(Value::Null);}
+        let owner=self.document_location_owner(target).unwrap();
+        self.frame_context(owner).map(|context|Value::Host(context.location)).ok_or("Child Document location is unavailable.".into())
+    }
     fn adjacent_receiver_access(&self,target:u32)->Result<(),(&'static str,String)>{self.adjacent_access(target)}
     fn adjacent_destination(&mut self,target:u32,pos:adjacent_interface::Position,text:bool)->Result<Option<adjacent_interface::Destination>,(&'static str,String)>{self.resolve_adjacent(target,pos,text)}
     fn commit_adjacent_text(&mut self,target:u32,pos:adjacent_interface::Position,dest:adjacent_interface::Destination,text:&Value)->Result<(),(&'static str,String)>{self.publish_adjacent_text(target,pos,dest,text)}
@@ -5881,6 +5910,7 @@ impl Host for Bridge<'_> {
         }
         if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(());}
         if property=="text" && self.title_receiver(object) {return self.set_title_text(object,&value);}
+        if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object){return self.anchor_reflection_set(object,property,&value);}
         if self.meta_member(object, property) { return self.meta_set(object, meta_attribute(property).unwrap(), &value); }
         if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
         if crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return self.html_reflection_set(object,property,&value);}
@@ -6272,6 +6302,7 @@ impl Host for Bridge<'_> {
         }
         if method == NODE_HAS_CHILDREN { return self.has_child_nodes(object); }
         if method==TITLE_TEXT_GET {return self.title_child_text(object,false).map(Self::dom_string_owned);}
+        if let Some((name,false))=anchor_url_interface::operation(method){return self.anchor_reflection_get(object,name);}
         if method == NODE_VALUE_GET { return self.canonical_node_value(object); }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };

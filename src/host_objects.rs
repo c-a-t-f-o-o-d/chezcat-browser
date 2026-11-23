@@ -614,6 +614,11 @@ impl Runtime {
             if name == "HTMLTitleElement" {
                 self.define_host_attribute(prototype,window,"text",super::TITLE_TEXT_GET,Some(super::TITLE_TEXT_SET))?;
             }
+            if name=="HTMLAnchorElement" {
+                for &(property,get,set) in super::anchor_url_interface::MEMBERS {
+                    self.define_host_attribute(prototype,window,property,get,set)?;
+                }
+            }
             if name == "HTMLMetaElement" {
                 for &(property, _, get, set) in html_reflection_interface::META {
                     self.define_host_attribute(prototype, window, property, get, Some(set))?;
@@ -1178,8 +1183,11 @@ impl Runtime {
         &mut self,
         handle: u32,
         name: &str,
-        host: &dyn Host,
+        host: &mut dyn Host,
     ) -> Result<Option<Ordinary>,Fault> {
+        if name=="location" {
+            if let Some(slot)=self.document_location_slot(handle,host)? {return Ok(Some(slot));}
+        }
         let native=host.owns_property(handle,name);
         self.ensure_native_expando(handle,host,!native)?;
         Ok((!native)
@@ -1403,6 +1411,7 @@ impl Runtime {
     ) -> Result<Vec<String>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
+        if !inherited && host.document_location_owner(handle).is_some() {return self.document_own_string_keys(handle,true,host);}
         // Fresh ordinary native instances already own their real unforgeable
         // slots before any string/symbol read. Publish the metered store for
         // own inspection too; ensure still requires explicit owner/provenance.
