@@ -21,7 +21,7 @@
   "inventory_sha256": "fab85750e2b70405ae507a7b4996d634b5efe56814922edf1a7084fa7a28029a",
   "input_manifest_sha256": "69a7e819f8a2c15cec236e42235196f08acaab0a437662087e7be7ee812b3429",
   "witnesses_sha256": "2231a6e19905ad3a837a54d8b0b02301db6d068d50dcfd095df2f7458c4537de",
-  "enumerator_sha256": "1387922c92a373609869f0d39088fa4ce07bc6d7bba3390797a8fb567a3e817c",
+  "enumerator_sha256": "fe7e0dbf8a06c9cfd71fbfe91d800ffca0c794e4f33f2b91d16d994bd673b7f6",
   "normative_pins": {
     "html": {
       "revision": "0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce",

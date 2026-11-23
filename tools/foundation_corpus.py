@@ -208,7 +208,7 @@ def execute(exe,case,folder,timeout=5):
     except UnicodeError:return dict(outcome='harness_blocked',reason='F01: native scalar parser entry cannot accept unpaired UTF-16 input')
     env=dict(os.environ,CHEZCAT_FOUNDATION_REQUEST=str(request),CHEZCAT_VERIFICATION_ROOT=str(folder))
     try:
-        result=subprocess.run([str(exe),WORKER,'--exact','--ignored','--test-threads=1'],env=env,
+        result=subprocess.run([str(exe),WORKER,'--exact','--include-ignored','--test-threads=1'],env=env,
             stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=timeout)
     except subprocess.TimeoutExpired as error:return dict(outcome='timeout',reason='native worker deadline',raw=(error.stdout or b'').decode('utf-8','replace'))
     except OSError as error:return dict(outcome='harness_blocked',reason='missing/unlaunchable native worker: '+str(error))

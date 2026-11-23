@@ -112,17 +112,42 @@ fn evaluate(lines:&[&str])->Result<(&'static str,String),String> {
     }
 }
 
-#[test]
-#[ignore = "Explicit confined native corpus adapter; run through tools/foundation_corpus.py"]
-fn native_parser_data_adapter()->Result<(),String> {
+fn reply(raw: &str) -> String {
+    let lines: Vec<_> = raw.strip_suffix('\n').unwrap_or(raw).split('\n').collect();
+    let (status, value) = evaluate(&lines)
+        .unwrap_or_else(|error| ("harness_blocked", format!("adapter_request: {error}")));
+    format!("CHEZCAT-NATIVE-PARSER-1\n{status}\ndiagnostics-unavailable\n{}\n", encode(&value))
+}
+
+fn exchange(request_path: std::ffi::OsString) -> Result<(), String> {
     let root=std::path::PathBuf::from(std::env::var_os("CHEZCAT_VERIFICATION_ROOT").ok_or("Missing verification root.")?)
         .canonicalize().map_err(|e|e.to_string())?;
-    let request=std::path::PathBuf::from(std::env::var_os("CHEZCAT_FOUNDATION_REQUEST").ok_or("Missing adapter request.")?)
+    let request=std::path::PathBuf::from(request_path)
         .canonicalize().map_err(|e|e.to_string())?;
     if !request.starts_with(&root)||request==root {return Err("Adapter request escaped verification storage.".into());}
     let raw=std::fs::read_to_string(&request).map_err(|e|e.to_string())?;
-    let lines:Vec<_>=raw.strip_suffix('\n').unwrap_or(&raw).split('\n').collect();
-    let (status,value)=evaluate(&lines).unwrap_or_else(|error|("harness_blocked",format!("adapter_request: {error}")));
-    let result=format!("CHEZCAT-NATIVE-PARSER-1\n{status}\ndiagnostics-unavailable\n{}\n",encode(&value));
-    std::fs::write(request.with_extension("out"),result).map_err(|e|e.to_string())
+    std::fs::write(request.with_extension("out"),reply(&raw)).map_err(|e|e.to_string())
+}
+
+#[test]
+fn native_parser_data_adapter() -> Result<(), String> {
+    // Only an explicitly selected worker may consume a filesystem request.
+    // The ordinary suite exercises the identical parser and wire response in memory.
+    const WORKER: &str = "html::foundation_adapter::native_parser_data_adapter";
+    if std::env::args_os().any(|a| a == "--exact") && std::env::args_os().any(|a| a == WORKER) {
+        if let Some(request) = std::env::var_os("CHEZCAT_FOUNDATION_REQUEST") {
+            return exchange(request);
+        }
+    }
+    let request = format!("CHEZCAT-NATIVE-PARSER-1\ntree\nfragment\noff\n{}\n{}\n{}\n",
+        encode("http://www.w3.org/1999/xhtml"), encode("div"), encode("<b a='x'>A&amp;B</b>"));
+    let expected = "| <b>\n|   a=\"x\"\n|   \"A&B\"\n";
+    let result = reply(&request);
+    let lines: Vec<_> = result.lines().collect();
+    assert_eq!(lines.len(), 4);
+    assert_eq!(&lines[..3], &["CHEZCAT-NATIVE-PARSER-1", "tree", "diagnostics-unavailable"]);
+    assert_eq!(decode(lines[3])?, expected);
+    assert_eq!(reply("malformed\n"), format!("CHEZCAT-NATIVE-PARSER-1\nharness_blocked\ndiagnostics-unavailable\n{}\n",
+        encode("adapter_request: Malformed native parser request.")));
+    Ok(())
 }
