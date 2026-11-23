@@ -10,8 +10,8 @@
   },
   "files": {
     "mouse-event.html": {
-      "bytes": 9470,
-      "sha256": "ba7d10e6e9bc803446f832c93aba31d1c16c81d044081f9c3d4e4b24f19d9722"
+      "bytes": 9607,
+      "sha256": "022028c1e43141882961fc5f9dfeb9c4312b926de09227329d8ce9602652155f"
     }
   },
   "revisions": [
@@ -19,6 +19,11 @@
       "change": "The existing CustomEvent absent-global guard now requires its implemented genuine constructor; original UI/Mouse slot, dispatch, native and owner assertions are retained.",
       "previous_html_sha256": "887ec67d4d5576308015a8b550bf41cbc979e2c3e67739ad3cf933e74275be1d",
       "html_sha256": "ba7d10e6e9bc803446f832c93aba31d1c16c81d044081f9c3d4e4b24f19d9722"
+    },
+    {
+      "change": "Verify the implemented KeyboardEvent constructor and prototype chain while preserving the PointerEvent absence check.",
+      "previous_html_sha256": "ba7d10e6e9bc803446f832c93aba31d1c16c81d044081f9c3d4e4b24f19d9722",
+      "html_sha256": "022028c1e43141882961fc5f9dfeb9c4312b926de09227329d8ce9602652155f"
     }
   ]
 }

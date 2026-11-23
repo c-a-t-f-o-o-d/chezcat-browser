@@ -25,15 +25,15 @@ including the integrated feature changes through `1de1f24` and release preparati
 The [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 failed at the normal Windows test stage; packaging/publication were not reached
 and no alpha.2 release assets exist. Alpha.1 remains the verified download.
-The immutable alpha.3 F00 candidate at `ff5740d` also failed its hosted normal
-suite. Publication was skipped. Subsequent source through `7e0d347` includes
-the normal adapter and concurrent capacity repairs. F01, F02 and F04 retain open integration and
-conformance requirements. The verified download remains alpha.1.
+The immutable alpha.3 candidate at `ff5740d` also failed its hosted normal
+suite. Publication was skipped. The `0.82.0-alpha.4` source prepares F00
+with the adapter and capacity repairs integrated through `7e0d347`. F01, F02 and F04 retain open integration and
+conformance requirements. Tagged delivery and download verification are pending.
 The matrix describes implemented source slices; earlier measurements keep their
 recorded revisions and do not become alpha.2 runtime results. See the
 [change summary](../CHANGELOG.md) and [release procedure](RELEASING.md).
 
-**Development source after the tag:** [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433)
+**Earlier development source after the alpha.2 tag:** [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433)
 at `ce464a4` adds passive HTML content replacement, and
 [PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434) at `117bbb5`
 preserves newly created inert Text identities through supported promotion.

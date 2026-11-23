@@ -7,8 +7,8 @@
   },
   "files": {
     "ui-event.html": {
-      "bytes": 8547,
-      "sha256": "804dd91b2bf024adf28ba69b2e997f579ea28249a0d216320765ef1177d78324"
+      "bytes": 8761,
+      "sha256": "cde2fd23621d627d92761992a5b804dd716eedfd0b794203c193bc41328420a9"
     }
   },
   "revisions": [
@@ -16,6 +16,11 @@
       "change": "The existing CustomEvent absent-global guard now requires its implemented genuine constructor; original UI/Mouse slot, dispatch, native and owner assertions are retained.",
       "previous_html_sha256": "1d503fb8e019ef3d9e32f795abb8fff86342cf33be0c4d4e50dafc7057317397",
       "html_sha256": "804dd91b2bf024adf28ba69b2e997f579ea28249a0d216320765ef1177d78324"
+    },
+    {
+      "change": "Verify the implemented KeyboardEvent constructor and prototype chain, including the trusted keyboard input receiver.",
+      "previous_html_sha256": "804dd91b2bf024adf28ba69b2e997f579ea28249a0d216320765ef1177d78324",
+      "html_sha256": "cde2fd23621d627d92761992a5b804dd716eedfd0b794203c193bc41328420a9"
     }
   ]
 }

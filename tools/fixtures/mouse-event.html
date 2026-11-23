@@ -22,7 +22,7 @@ for(var name of ['initMouseEvent','getModifierState']){
 }
 var badBrands=0;try{getClient.call({});}catch(error){if(error.name==='TypeError')badBrands++;}
 try{getClient.call(new UIEvent('ui-only'));}catch(error){if(error.name==='TypeError')badBrands++;}
-if(badBrands!==2||typeof KeyboardEvent!=='undefined'||typeof CustomEvent!=='function'||typeof PointerEvent!=='undefined')throw Error('Real Mouse brand and deferred constructors');
+if(badBrands!==2||typeof KeyboardEvent!=='function'||Object.getPrototypeOf(KeyboardEvent)!==UIEvent||Object.getPrototypeOf(KeyboardEvent.prototype)!==UIEvent.prototype||typeof CustomEvent!=='function'||typeof PointerEvent!=='undefined')throw Error('Real Mouse brand, keyboard ancestry and unavailable PointerEvent');
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);
 var childWindow=frame.contentWindow,ChildC=childWindow.MouseEvent,ChildP=ChildC.prototype;
 if(ChildC===C||ChildP===P||Object.getPrototypeOf(ChildC)!==childWindow.UIEvent||Object.getPrototypeOf(ChildP)!==childWindow.UIEvent.prototype)throw Error('Canonical child Mouse roots');

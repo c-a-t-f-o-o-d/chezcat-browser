@@ -50,9 +50,11 @@ different states. Report only the state actually reached.
 
 ## Current release candidate
 
-F00 has met its requirements, input-lock and parser-baseline criteria. Its first
-tagged release candidate did not pass qualification. The verified download
-remains alpha.1 while the corrected source is being preflighted.
+`0.82.0-alpha.4` prepares the F00 requirements and parser-baseline milestone.
+The [changelog](../CHANGELOG.md#0820-alpha4) identifies the release scope and
+the [register](HTML_FOUNDATION_COVERAGE.json) retains the unresolved parser
+cases and required browser measurements. Verify exact tagged delivery and the
+downloaded distribution before treating this candidate as a published build.
 
 ### Historical alpha.3 candidate
 

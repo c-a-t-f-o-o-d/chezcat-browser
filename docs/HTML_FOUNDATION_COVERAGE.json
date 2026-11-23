@@ -214,7 +214,7 @@
       "prerequisites_for_core": [
         "F00"
       ],
-      "status": "planned",
+      "status": "partial",
       "scope": "required",
       "source_anchors": [
         "src/html.rs",
@@ -611,7 +611,7 @@
         {
           "id": "F01.04",
           "requirement": "Stable ownership, template owners, handles and mutation sink",
-          "status": "unassessed",
+          "status": "partial",
           "verification": [],
           "dependency_details": [],
           "detail_requirements": [
@@ -720,7 +720,7 @@
         {
           "id": "F01.05",
           "requirement": "Fallible reservation, publication and rollback",
-          "status": "unassessed",
+          "status": "partial",
           "verification": [],
           "dependency_details": [],
           "detail_requirements": [

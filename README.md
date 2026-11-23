@@ -62,6 +62,7 @@ These are **implemented slices, not complete standards support**. The
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
 | **A fixed downloadable snapshot** | [📦 0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **F00 release preparation** | [Foundation baseline notes](CHANGELOG.md#0820-alpha4) | Source version `0.82.0-alpha.4` is in preparation. Tagged qualification and verified delivery are pending. |
 | **The tagged alpha.3 attempt** | [F00 baseline notes](CHANGELOG.md#0820-alpha3) and [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) | The normal suite failed. Publication was skipped. |
 | **The tagged alpha.2 attempt** | [🔬 Validation record](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) | Exact source `14134ab`; the normal Windows test stage failed. No alpha.2 release assets were published. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
@@ -91,6 +92,13 @@ roadmap items, not advertised delivery options. The CI badge reports source
 privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
+
+**Current foundation source.** F00 has a verified requirement register, pinned
+inputs and executable native baseline. Integrated work now includes document
+encoding metadata, exact UTF-16 live class collections, current-tree paint and
+hit order, and literal HTML iframe fallback Text. The adapter and capacity
+repairs pass the local normal suite at `7e0d347`. The [capability matrix](docs/CAPABILITIES.md)
+records open XML, MIME, tokenizer, DOM and browser-harness requirements.
 
 *Snapshot: November 21, 2026 · tagged source `14134ab`; release candidate
 `0.82.0-alpha.2`.*
@@ -132,7 +140,7 @@ The previously reviewed signed-out YouTube check on `cad5f7c` shows a skeleton
 and reaches a script deadline during DOM traversal. PR #430 improves one original
 traversal fixture; a usable YouTube homepage or playback has not been demonstrated.
 
-### Next: a complete document foundation
+### Active document foundation
 
 | Now | Product work retained | Wider programs |
 | :--- | :--- | :--- |
@@ -292,7 +300,9 @@ and the executable identity when a dirty build needs exact reproduction.
 
 For ordinary PRs, compile where relevant and run the small reproduction or tests
 that exercise the change. Include a targeted negative check for a changed security
-or resource boundary. The complete offline verifier runs for each release candidate.
+or resource boundary. For release qualification, select the existing license
+receipt directory as described in the [build guide](docs/BUILDING.md#choose-the-right-verification-scope),
+then run the complete offline verifier.
 
 ```powershell
 python tools/verify_offline.py

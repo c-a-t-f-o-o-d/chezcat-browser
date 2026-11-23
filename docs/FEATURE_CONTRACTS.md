@@ -45,6 +45,10 @@ failed at the normal Windows test stage, before packages or publication. No
 alpha.2 assets were published. This changes no acceptance requirement or
 historical measurement; the verified downloadable baseline remains `0.82.0-alpha.1`.
 
+The immutable alpha.3 F00 candidate also failed hosted normal verification.
+The alpha.4 source includes the normal adapter and capacity repairs. See the
+[release record](RELEASING.md#published-baseline) for delivery evidence.
+
 The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md) and its
 [coverage register](HTML_FOUNDATION_COVERAGE.json) now govern active development.
 They include native Custom Elements and Shadow DOM as foundation work. The
