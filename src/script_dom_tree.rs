@@ -308,13 +308,25 @@ impl Page {
 }
 
 impl Bridge<'_> {
-    // Document parsing can retain markup-shaped iframe fallback instead of
-    // the single raw Text node required by HTML. Those arena entries have no
-    // public child identity. Empty iframes have a known, ordinary child list.
+    pub(super) fn iframe_raw_text_child(&self, parent: usize) -> Option<usize> {
+        let item = self.doc.nodes.get(parent)?;
+        if item.namespace != crate::html::Namespace::Html || tag(self.doc, parent) != "iframe" { return None; }
+        let [child] = item.children.as_slice() else { return None; };
+        matches!(self.doc.nodes.get(*child)?.kind, NodeKind::Text(_)).then_some(*child)
+    }
+
+    pub(super) fn accessible_iframe_text(&self, node: usize) -> bool {
+        self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
+            self.state.tree.active.get(parent) == Some(&true) && self.iframe_raw_text_child(parent) == Some(node))
+    }
+
+    // Only publish the represented raw Text child or the empty child list.
+    // Other physical shapes still require their own representation/guards.
     pub(super) fn check_iframe_child_topology(&self, node: usize) -> Result<(), String> {
         let item = self.doc.nodes.get(node).ok_or("Invalid child topology owner.")?;
         if !item.children.is_empty() && item.namespace == crate::html::Namespace::Html
             && matches!(&item.kind, NodeKind::Element { tag, .. } if tag == "iframe")
+            && self.iframe_raw_text_child(node).is_none()
         {
             return Err("Iframe fallback child topology requires raw-text document parsing.".into());
         }
@@ -466,8 +478,8 @@ impl Bridge<'_> {
         // connects. Its containing resource still owns all content mutations.
         if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_))
             && self.state.dom.connected.get(node)==Some(&true)
-            && self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
-                tag(self.doc,parent)=="script" || self.created_html_style(parent)) {
+            && (self.accessible_iframe_text(node) || self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
+                tag(self.doc,parent)=="script" || self.created_html_style(parent))) {
             return true;
         }
         if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }

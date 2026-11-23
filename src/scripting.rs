@@ -2670,10 +2670,11 @@ impl Bridge<'_> {
             self.state.work(1)?;
             if node != root
                 && dom_tree::inert_dom_tag(tag(self.doc, node), self.doc.scripting_enabled)
+                && self.iframe_raw_text_child(node).is_none()
             {
                 continue;
             }
-            if !self.state.tree.active[node] && !self.state.detached_nodes.contains(&node) {
+            if !self.state.tree.active[node] && !self.state.detached_nodes.contains(&node) && !self.accessible_iframe_text(node) {
                 continue;
             }
             if let NodeKind::Text(text) | NodeKind::Cdata(text) = &self.doc.nodes[node].kind {

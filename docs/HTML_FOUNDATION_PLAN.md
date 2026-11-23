@@ -173,8 +173,9 @@ licenses in any source archive that includes it.
 Representative retained parser witnesses include omitted html/head/body,
 head-to-body transition, table text foster parenting and implied tbody, formatting
 reconstruction across p, iframe raw text, and multi-code-point character references.
-These are known source defects that can schedule work immediately. A live YouTube
-exception is not required to rediscover them.
+These witnesses preserve the original baseline. The loaded iframe case now has
+a native raw-text producer. The coverage register tracks the remaining parser
+and integration requirements.
 
 ## Coverage boundaries: every HTML chapter has a disposition
 
