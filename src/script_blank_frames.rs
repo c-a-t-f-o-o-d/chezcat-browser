@@ -1532,6 +1532,7 @@ if(read(d.get,window)!==window)throw 'same origin caller';
 var d=Object.getOwnPropertyDescriptor(Node.prototype,'nodeValue'),cd=f.contentDocument,reads=0;
 var input={toString:function(){reads++;return 'noop';}}, put=w.Function('set','target','value','set.call(target,value);');
 if(d.get.call(cd)!==null||cd.documentElement.nodeValue!==null)throw 'initial child roots';
+var childPredicate=w.Node.prototype.hasChildNodes;if(!childPredicate.call(cd)||!cd.documentElement.hasChildNodes()||cd.body.hasChildNodes())throw 'actual child predicate';
 put(d.set,document,input);d.set.call(cd.body,input);
 var list=cd.childNodes,root=cd.documentElement;
 if(reads!==2||cd.body.childNodes.length||list!==cd.childNodes||Object.getPrototypeOf(list)!==w.NodeList.prototype||list.length!==1||list.item(0)!==root||root.childNodes[0]!==cd.head||root.childNodes[1]!==cd.body)throw 'native child noop and current child nodes';
@@ -1539,7 +1540,7 @@ if(reads!==2||cd.body.childNodes.length||list!==cd.childNodes||Object.getPrototy
         let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
         assert_eq!(result.errors, 0, "{}", page.report());
         page.set_location(&crate::navigation::address("https://other.test/", &crate::navigation::Location::home()).unwrap());
-        for denied in ["d.get.call(cd);", "put(d.set,document,input);", "d.set.call(cd,input);", "list.length;"] {
+        for denied in ["d.get.call(cd);", "put(d.set,document,input);", "d.set.call(cd,input);", "list.length;", "childPredicate.call(document);", "Node.prototype.hasChildNodes.call(cd);"] {
             let result = page.console_eval(&mut doc, &mut forms, denied);
             assert_eq!(result.errors, 1, "{}", page.report());
             assert!(page.report().contains("same-origin"), "{}", page.report());

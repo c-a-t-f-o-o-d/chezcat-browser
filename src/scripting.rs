@@ -22,7 +22,7 @@ use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
-    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_VALUE_GET, NODE_VALUE_SET, NODE_TRAVERSAL_GETTERS};
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_VALUE_GET, NODE_VALUE_SET, NODE_HAS_CHILDREN, NODE_TRAVERSAL_GETTERS};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -3078,7 +3078,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
-        if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
+        if matches!(property, "nodeValue" | "hasChildNodes") && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3851,7 +3851,7 @@ impl Host for Bridge<'_> {
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::window_relationships::operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
-        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET) && self.event_target_interface(object) { return Some(object); }
+        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) && self.event_target_interface(object) { return Some(object); }
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4121,7 +4121,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && matches!(method, "DOMImplementation" | "DocumentType" | "XMLDocument") {
             return Err(("TypeError", "Illegal inert DOM interface constructor.".into()));
         }
-        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET) { return self.native_node_access(object); }
+        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) { return self.native_node_access(object); }
         if matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
             if !self.text_content_receiver(object) {
                 return Err(("TypeError", "The textContent accessor requires a Node.".into()));
@@ -4667,7 +4667,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
             return self.node_traversal_receiver(receiver);
         }
-        if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET | NODE_VALUE_GET | NODE_VALUE_SET) {
+        if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET | NODE_VALUE_GET | NODE_VALUE_SET | NODE_HAS_CHILDREN) {
             return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return self.node_identity_receiver(receiver);}
@@ -6199,6 +6199,7 @@ impl Host for Bridge<'_> {
         if let Some(property) = node_traversal_property(method) {
             return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
+        if method == NODE_HAS_CHILDREN { return self.has_child_nodes(object); }
         if method == NODE_VALUE_GET { return self.canonical_node_value(object); }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };

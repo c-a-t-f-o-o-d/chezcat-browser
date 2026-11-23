@@ -10,6 +10,29 @@ fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){
     assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());
 }
 
+
+#[test]
+fn native_has_child_nodes_reads_current_topology_without_list_allocation() {
+    let (mut doc, mut forms, mut page) = fixture();
+    let old_lists = page.state.node_lists.len();
+    run(&mut doc, &mut forms, &mut page, r#"
+var has=Node.prototype.hasChildNodes,desc=Object.getOwnPropertyDescriptor(Node.prototype,'hasChildNodes');
+if(has.length||!desc.writable||!desc.configurable||!desc.enumerable||!document.hasChildNodes())throw 'native predicate';
+var el=document.createElement('div'),t=document.createTextNode('text'),c=document.createComment('comment'),frag=document.createDocumentFragment(),attr=document.createAttribute('data-check');
+if(el.hasChildNodes()||t.hasChildNodes()||c.hasChildNodes()||frag.hasChildNodes()||attr.hasChildNodes())throw 'actual empty lists';
+frag.appendChild(el);el.appendChild(c);if(!has.call(frag)||!has.call(el)||c.hasChildNodes())throw 'real children';
+el.removeChild(c);if(el.hasChildNodes()||!frag.hasChildNodes())throw 'immediate removal';
+var xml=document.implementation.createDocument(null,'Root'),root=xml.documentElement;
+if(!xml.hasChildNodes()||root.hasChildNodes()||xml.createCDATASection('data').hasChildNodes()||xml.createProcessingInstruction('output','value').hasChildNodes())throw 'XML and data roots';
+var template=document.createElement('template');template.innerHTML='<b>child</b>';if(template.hasChildNodes()||!template.content.hasChildNodes()||!template.content.firstChild.hasChildNodes())throw 'separate template contents';
+var wrong=false;try{has.call({});}catch(e){wrong=e instanceof TypeError;}if(!wrong)throw 'brand';
+var unused={toString:function(){throw 'extra argument converted';}};if(!has.call(xml,unused))throw 'extra argument';
+Object.defineProperty(Node.prototype,'hasChildNodes',{value:17,configurable:true});if(document.hasChildNodes!==17||has.call(el))throw 'canonical override';
+delete Node.prototype.hasChildNodes;if(typeof document.hasChildNodes!=='undefined')throw 'deleted resurrection';Object.defineProperty(Node.prototype,'hasChildNodes',desc);
+"#);
+    assert_eq!(page.state.node_lists.len(), old_lists);
+}
+
 #[test]
 fn native_node_value_descriptor_reads_current_owners_and_preserves_nondata_children() {
     let (mut doc, mut forms, mut page) = fixture();
