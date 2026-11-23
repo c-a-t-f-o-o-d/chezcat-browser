@@ -1,16 +1,129 @@
-//! Annex B substring-by-count, using the engine's explicit UTF-16 result boundary.
-//! https://tc39.es/ecma262/#sec-string.prototype.substr
+//! Exact UTF-16 slice, substring and Annex B substring-by-count results.
+//! https://tc39.es/ecma262/#sec-string.prototype.slice
 use super::{Fault, Host, Runtime, Value, WorkKind};
 
+#[derive(Clone, Copy)]
+enum SliceInput<'a> {
+    Scalar(&'a str),
+    Units(&'a [u16]),
+}
+
 impl Runtime {
-    pub(super) fn string_substr(&mut self, text: &str, args: &[Value], host: &mut dyn Host) -> Result<Value,Fault> {
-        self.work_as(text.len().saturating_mul(3),WorkKind::StringMethodInput)?;
-        let units: Vec<_> = text.encode_utf16().collect();
-        let size = units.len();
-        let start = self.binary_relative(args.first(),size,0,host)?;
-        let length = self.binary_integer(args.get(1),size as f64,host)?.clamp(0.0,size as f64) as usize;
-        let end = start.saturating_add(length).min(size);
-        self.units_string(&units[start..end]).map(Value::String)
+    pub(super) fn string_slice_value(
+        &mut self, value: &Value, method: &str, args: &[Value], host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        let input = match value {
+            Value::String(text) => SliceInput::Scalar(text),
+            Value::StringUnits(units) => SliceInput::Units(units),
+            _ => return Err(Fault::new("String slicing requires an already converted string.")),
+        };
+        self.string_slice_input(input, method, args, host)
+    }
+
+    fn string_slice_input(
+        &mut self, input: SliceInput<'_>, method: &str, args: &[Value], host: &mut dyn Host,
+    ) -> Result<Value, Fault> {
+        self.step()?;
+        // The receiver conversion has completed. Keep this immutable value
+        // and its native length across both ordered numeric conversions.
+        let size = match input {
+            SliceInput::Scalar(text) => {
+                self.work_as(text.len(), WorkKind::StringMethodInput)?;
+                text.encode_utf16().count()
+            }
+            SliceInput::Units(units) => units.len(),
+        };
+        let (start, end) = match method {
+            "slice" => {
+                let start = self.binary_relative(args.first(), size, 0, host)?;
+                let end = self.binary_relative(args.get(1), size, size, host)?;
+                (start, end.max(start))
+            }
+            "substring" => {
+                let start = self.binary_integer(args.first(), 0.0, host)?.clamp(0.0, size as f64) as usize;
+                let end = self.binary_integer(args.get(1), size as f64, host)?.clamp(0.0, size as f64) as usize;
+                (start.min(end), start.max(end))
+            }
+            "substr" => {
+                let start = self.binary_relative(args.first(), size, 0, host)?;
+                let length = self.binary_integer(args.get(1), size as f64, host)?.clamp(0.0, size as f64) as usize;
+                (start, start.saturating_add(length).min(size))
+            }
+            _ => return Err(Fault::new("Unknown string slicing method.")),
+        };
+        // Even an empty result follows the end/count conversion above.
+        if start == end { return self.checked_value(Value::String(String::new())); }
+        let count = end - start;
+        match input {
+            SliceInput::Scalar(text) => {
+                // Skipping a UTF-16 prefix still scans UTF-8. A complete
+                // receiver scan bounds each selected-range traversal, while
+                // storage is reserved only for the selected final result.
+                self.string_slice_output(text.encode_utf16().skip(start).take(count), count, text.len())
+            }
+            SliceInput::Units(units) => {
+                self.string_slice_output(units[start..end].iter().copied(), count, count.saturating_mul(2))
+            }
+        }
+    }
+
+    fn string_slice_workspace_fault(&self) -> Fault {
+        Fault::new(format!("String slicing workspace limit reached ({} bytes).", self.limits.heap.retained_values))
+    }
+
+    fn string_slice_output<I: Iterator<Item = u16> + Clone>(
+        &mut self, units: I, count: usize, scan_bytes: usize,
+    ) -> Result<Value, Fault> {
+        self.work_as(scan_bytes, WorkKind::StringMethodInput)?;
+        let mut scalar = true;
+        let mut scalar_bytes = 0usize;
+        for decoded in char::decode_utf16(units.clone()) {
+            self.step()?;
+            let Ok(ch) = decoded else { scalar = false; break; };
+            scalar_bytes = scalar_bytes.checked_add(ch.len_utf8()).ok_or_else(|| self.string_limit_fault())?;
+        }
+        let bytes = if scalar { scalar_bytes } else {
+            count.checked_mul(2).ok_or_else(|| self.string_limit_fault())?
+        };
+        if bytes > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
+        let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+        if bytes > available { return Err(self.string_slice_workspace_fault()); }
+        self.work_as(scan_bytes, WorkKind::StringMethodInput)?;
+        self.work_as(bytes, WorkKind::ConversionOutput)?;
+        let mut owned = 0usize;
+        let result = (|| {
+            let value = if scalar {
+                let mut text = String::new();
+                text.try_reserve_exact(bytes).map_err(|_| Fault::new("String slicing allocation failed."))?;
+                let capacity = text.capacity();
+                if capacity > available { return Err(self.string_slice_workspace_fault()); }
+                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_slice_workspace_fault())?;
+                owned = capacity;
+                for decoded in char::decode_utf16(units) {
+                    self.step()?;
+                    text.push(decoded.expect("validated string slice UTF-16"));
+                }
+                Value::String(text)
+            } else {
+                let mut output = Vec::new();
+                output.try_reserve_exact(count).map_err(|_| Fault::new("String slicing allocation failed."))?;
+                let capacity = output.capacity().checked_mul(2).ok_or_else(|| self.string_slice_workspace_fault())?;
+                if capacity > available { return Err(self.string_slice_workspace_fault()); }
+                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_slice_workspace_fault())?;
+                owned = capacity;
+                for unit in units {
+                    self.step()?;
+                    output.push(unit);
+                }
+                Value::StringUnits(output)
+            };
+            self.checked_value(value)
+        })();
+        // Only the result backing belongs to this operation. Callback
+        // publications completed before it was reserved and keep their charges.
+        self.value_bytes = self.value_bytes.checked_sub(owned)
+            .ok_or_else(|| Fault::new("String slicing workspace refund accounting failed."))?;
+        result
     }
 }
 
@@ -75,16 +188,16 @@ String.prototype.substr=f;if('abc'.substr(1,1)!=='b')throw 'restore';
 "#,&mut NoHost).unwrap();
     }
     #[test]
-    fn annex_b_substr_keeps_work_and_unrepresentable_surrogate_failures_explicit() {
+    fn annex_b_substr_retains_split_pairs_and_keeps_work_refusal_recoverable() {
         let mut runtime=Runtime::for_test();
-        let error=runtime.execute("'A😀Z'.substr(1,1);",&mut NoHost).unwrap_err();
-        assert!(error.contains("lone UTF-16 surrogate"),"{error}");
+        let result=runtime.execute("'A😀Z'.substr(1,1);",&mut NoHost).unwrap();
+        assert!(matches!(result, Value::StringUnits(units) if units==[0xd83d]));
         runtime.begin_job();
         assert_eq!(runtime.execute("'A😀Z'.substr(1,2);",&mut NoHost).unwrap().to_text(),"😀");
         runtime.constrain_job(usize::MAX,0,usize::MAX,std::time::Instant::now()+std::time::Duration::from_secs(10));
-        let error=runtime.string_substr("abc",&[],&mut NoHost).unwrap_err().display();
+        let error=runtime.string_slice_value(&Value::String("abc".into()),"substr",&[],&mut NoHost).unwrap_err().display();
         assert!(error.contains("String/copy work limit"),"{error}");
         runtime.begin_job();
-        assert_eq!(runtime.string_substr("abc",&[Value::Number(1.0)],&mut NoHost).unwrap().to_text(),"bc");
+        assert_eq!(runtime.string_slice_value(&Value::String("abc".into()),"substr",&[Value::Number(1.0)],&mut NoHost).unwrap().to_text(),"bc");
     }
 }
