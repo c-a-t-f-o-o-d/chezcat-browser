@@ -2,8 +2,8 @@
 //! stacks and the enclosing Runtime's object, retained-value and work budgets.
 //! Callback walks retain source snapshots and real holders without recursive
 //! native traversal. Parsing preserves exact UTF-16 strings, keys and source
-//! tokens; serialization escapes unpaired units. Raw-unit indentation is not
-//! implemented.
+//! tokens; serialization escapes unpaired units in quoted data and preserves
+//! exact indentation code units.
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
@@ -596,9 +596,166 @@ struct WriteFrame {
     scratch_bytes: usize,
 }
 
+enum Gap {
+    Scalar { bytes: [u8; 30], length: usize },
+    Units { units: [u16; 10], length: usize },
+}
+
+impl Gap {
+    fn from_value(runtime: &mut Runtime, value: Option<&Value>) -> Result<Self, Fault> {
+        let mut units = [0; 10];
+        let mut length = 0;
+        match value {
+            Some(Value::Number(value)) => {
+                length = if value.is_nan() { 0 } else { value.clamp(0.0, 10.0) as usize };
+                units[..length].fill(0x20);
+            }
+            Some(Value::String(text)) => {
+                for unit in text.encode_utf16().take(units.len()) {
+                    units[length] = unit;
+                    length += 1;
+                }
+            }
+            Some(Value::StringUnits(text)) => {
+                length = text.len().min(units.len());
+                units[..length].copy_from_slice(&text[..length]);
+            }
+            _ => (),
+        }
+        runtime.work_as(length * 2, WorkKind::CharacterScan)?;
+        let mut bytes = [0; 30];
+        let mut scalar_length = 0;
+        for character in char::decode_utf16(units[..length].iter().copied()) {
+            let Ok(character) = character else { return Ok(Self::Units { units, length }); };
+            let mut encoded = [0; 4];
+            let text = character.encode_utf8(&mut encoded).as_bytes();
+            bytes[scalar_length..scalar_length + text.len()].copy_from_slice(text);
+            scalar_length += text.len();
+        }
+        Ok(Self::Scalar { bytes, length: scalar_length })
+    }
+
+    fn is_empty(&self) -> bool {
+        match self { Self::Scalar { length, .. } | Self::Units { length, .. } => *length == 0 }
+    }
+
+    fn append(&self, runtime: &mut Runtime, output: &mut WriteOutput) -> Result<(), Fault> {
+        match self {
+            Self::Scalar { bytes, length } => output.append_scalar(
+                runtime, std::str::from_utf8(&bytes[..*length]).expect("encoded JSON indentation"),
+            ),
+            Self::Units { units, length } => output.append_raw_gap(runtime, &units[..*length]),
+        }
+    }
+}
+
+struct WriteOutput {
+    buffer: StringBuffer,
+}
+
+impl Default for WriteOutput {
+    fn default() -> Self { Self { buffer: StringBuffer::Scalar(String::new()) } }
+}
+
+impl WriteOutput {
+    fn scratch_fault(runtime: &Runtime) -> Fault {
+        Fault::new(format!("JSON stringify output scratch limit reached ({} bytes).", runtime.limits.heap.retained_values))
+    }
+
+    fn reserve_scalar(runtime: &mut Runtime, output: &mut String, required: usize) -> Result<(), Fault> {
+        let limit = runtime.limits.capacity.string_bytes;
+        if required > limit { return Err(runtime.string_limit_fault()); }
+        if required <= output.capacity() { return Ok(()); }
+        let old = output.capacity();
+        let available = runtime.limits.heap.retained_values.saturating_sub(runtime.json_scratch_bytes);
+        let maximum = limit.min(old.saturating_add(available));
+        if required > maximum { return Err(Self::scratch_fault(runtime)); }
+        let target = required.max(old.saturating_mul(2).min(maximum));
+        runtime.work(output.len())?;
+        output.try_reserve_exact(target - output.len())
+            .map_err(|_| Fault::new("Unable to allocate JSON serialization text."))?;
+        if output.capacity() > maximum { return Err(Self::scratch_fault(runtime)); }
+        runtime.charge_json_scratch(output.capacity() - old, "stringify output")
+    }
+
+    fn reserve_units(runtime: &mut Runtime, output: &mut Vec<u16>, required: usize) -> Result<(), Fault> {
+        let limit = runtime.limits.capacity.string_bytes / 2;
+        if required > limit { return Err(runtime.string_limit_fault()); }
+        if required <= output.capacity() { return Ok(()); }
+        let old = output.capacity();
+        let available = runtime.limits.heap.retained_values.saturating_sub(runtime.json_scratch_bytes);
+        let maximum = limit.min(old.saturating_add(available / 2));
+        if required > maximum { return Err(Self::scratch_fault(runtime)); }
+        let target = required.max(old.saturating_mul(2).min(maximum));
+        runtime.work(output.len().saturating_mul(2))?;
+        output.try_reserve_exact(target - output.len())
+            .map_err(|_| Fault::new("Unable to allocate JSON serialization units."))?;
+        if output.capacity() > maximum { return Err(Self::scratch_fault(runtime)); }
+        runtime.charge_json_scratch((output.capacity() - old) * 2, "stringify output")
+    }
+
+    fn append_scalar(&mut self, runtime: &mut Runtime, added: &str) -> Result<(), Fault> {
+        match &mut self.buffer {
+            StringBuffer::Scalar(output) => {
+                let required = output.len().checked_add(added.len()).ok_or_else(|| runtime.string_limit_fault())?;
+                if required > runtime.limits.capacity.string_bytes { return Err(runtime.string_limit_fault()); }
+                runtime.work_as(added.len(), WorkKind::ConversionOutput)?;
+                Self::reserve_scalar(runtime, output, required)?;
+                output.push_str(added);
+            }
+            StringBuffer::Units(output) => {
+                runtime.work_as(added.len(), WorkKind::CharacterScan)?;
+                let count = added.encode_utf16().count();
+                let required = output.len().checked_add(count).ok_or_else(|| runtime.string_limit_fault())?;
+                if required > runtime.limits.capacity.string_bytes / 2 { return Err(runtime.string_limit_fault()); }
+                runtime.work_as(count.saturating_mul(2), WorkKind::ConversionOutput)?;
+                Self::reserve_units(runtime, output, required)?;
+                output.extend(added.encode_utf16());
+            }
+        }
+        Ok(())
+    }
+
+    fn append_raw_gap(&mut self, runtime: &mut Runtime, added: &[u16]) -> Result<(), Fault> {
+        if let StringBuffer::Scalar(previous) = &self.buffer {
+            runtime.work_as(previous.len(), WorkKind::CharacterScan)?;
+            let required = previous.encode_utf16().count().checked_add(added.len())
+                .ok_or_else(|| runtime.string_limit_fault())?;
+            if required > runtime.limits.capacity.string_bytes / 2 { return Err(runtime.string_limit_fault()); }
+            runtime.work_as(required.saturating_mul(2), WorkKind::ConversionOutput)?;
+            let mut output = Vec::new();
+            // Both allocations remain reserved until promotion drops the
+            // scalar prefix. Nested JSON callbacks retain this scratch charge.
+            Self::reserve_units(runtime, &mut output, required)?;
+            output.extend(previous.encode_utf16());
+            output.extend_from_slice(added);
+            let old = previous.capacity();
+            self.buffer = StringBuffer::Units(output);
+            runtime.json_scratch_bytes -= old;
+        } else if let StringBuffer::Units(output) = &mut self.buffer {
+            let required = output.len().checked_add(added.len()).ok_or_else(|| runtime.string_limit_fault())?;
+            if required > runtime.limits.capacity.string_bytes / 2 { return Err(runtime.string_limit_fault()); }
+            runtime.work_as(added.len().saturating_mul(2), WorkKind::ConversionOutput)?;
+            Self::reserve_units(runtime, output, required)?;
+            output.extend_from_slice(added);
+        }
+        Ok(())
+    }
+
+    fn into_value(self) -> Value {
+        match self.buffer {
+            StringBuffer::Scalar(output) => Value::String(output),
+            // Only an emitted raw gap selects this representation. JSON
+            // syntax surrounds each indent, so at least one unpaired unit
+            // remains even when adjacent gap repetitions repair a pair.
+            StringBuffer::Units(output) => Value::StringUnits(output),
+        }
+    }
+}
+
 #[derive(Default)]
 struct Writer {
-    output: String,
+    output: WriteOutput,
     frames: Vec<WriteFrame>,
     ancestors: BTreeSet<usize>,
 }
@@ -891,24 +1048,24 @@ impl Runtime {
         self.create_data_property(holder, key.into_property_key(), value, host)
     }
 
-    fn json_quote(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
+    fn json_quote(&mut self, output: &mut WriteOutput, text: &str) -> Result<(), Fault> {
         self.json_quote_chars(output, text.chars().map(Ok))
     }
 
-    fn json_quote_key(&mut self, output: &mut String, key: &StringKey) -> Result<(), Fault> {
+    fn json_quote_key(&mut self, output: &mut WriteOutput, key: &StringKey) -> Result<(), Fault> {
         match key {
             StringKey::Scalar(name) => self.json_quote(output, name),
             StringKey::Units(units) => self.json_quote_chars(output, char::decode_utf16(units.iter().copied())),
         }
     }
 
-    fn json_quote_chars(&mut self, output: &mut String, chars: impl Iterator<Item=Result<char, std::char::DecodeUtf16Error>>) -> Result<(), Fault> {
-        self.append_string(output, "\"")?;
+    fn json_quote_chars(&mut self, output: &mut WriteOutput, chars: impl Iterator<Item=Result<char, std::char::DecodeUtf16Error>>) -> Result<(), Fault> {
+        output.append_scalar(self, "\"")?;
         for character in chars {
             let ch = match character {
                 Ok(ch) => ch,
                 Err(error) => {
-                    self.append_string(output, &format!("\\u{:04x}", error.unpaired_surrogate()))?;
+                    output.append_scalar(self, &format!("\\u{:04x}", error.unpaired_surrogate()))?;
                     continue;
                 }
             };
@@ -923,21 +1080,21 @@ impl Runtime {
                 _ => None,
             };
             if let Some(escaped) = escaped {
-                self.append_string(output, escaped)?;
+                output.append_scalar(self, escaped)?;
             } else if ch < '\u{20}' {
-                self.append_string(output, &format!("\\u{:04x}", ch as u32))?;
+                output.append_scalar(self, &format!("\\u{:04x}", ch as u32))?;
             } else {
-                self.append_string(output, ch.encode_utf8(&mut [0; 4]))?;
+                output.append_scalar(self, ch.encode_utf8(&mut [0; 4]))?;
             }
         }
-        self.append_string(output, "\"")
+        output.append_scalar(self, "\"")
     }
 
-    fn json_indent(&mut self, output: &mut String, gap: &str, depth: usize) -> Result<(), Fault> {
+    fn json_indent(&mut self, output: &mut WriteOutput, gap: &Gap, depth: usize) -> Result<(), Fault> {
         if !gap.is_empty() {
-            self.append_string(output, "\n")?;
+            output.append_scalar(self, "\n")?;
             for _ in 0..depth {
-                self.append_string(output, gap)?;
+                gap.append(self, output)?;
             }
         }
         Ok(())
@@ -953,16 +1110,16 @@ impl Runtime {
         let Writer { output, frames, ancestors } = writer;
         match value {
             Value::Null | Value::Undefined | Value::Function(_) | Value::Symbol(_) => {
-                self.append_string(output, "null")
+                output.append_scalar(self, "null")
             }
-            Value::Bool(value) => self.append_string(output, if value { "true" } else { "false" }),
+            Value::Bool(value) => output.append_scalar(self, if value { "true" } else { "false" }),
             Value::Number(value) => {
                 let text = if value.is_finite() {
                     number_text(value)
                 } else {
                     "null".into()
                 };
-                self.append_string(output, &text)
+                output.append_scalar(self, &text)
             }
             Value::String(value) => self.json_quote(output, &value),
             Value::BigInt(_) => Err(Fault::exception("TypeError", "JSON.stringify cannot serialize a BigInt.")),
@@ -998,7 +1155,7 @@ impl Runtime {
                     self.json_scratch_bytes - previous_frame_bytes, "stringify",
                 )?;
                 self.json_scratch_bytes += frames.capacity() * size_of::<WriteFrame>() - previous_frame_bytes;
-                self.append_string(output, if length.is_some() { "[" } else { "{" })?;
+                output.append_scalar(self, if length.is_some() { "[" } else { "{" })?;
                 ancestors.insert(id);
                 frames.push(WriteFrame {
                     id,
@@ -1051,10 +1208,18 @@ impl Runtime {
             Some(super::primitive_wrappers::Data::BigInt(value)) => Ok(Value::BigInt(value.clone())),
             Some(super::primitive_wrappers::Data::String { .. }) => {
                 let primitive = self.primitive_with_hint(value, true, host)?;
-                self.checked_value(Value::String(primitive.script_text()?))
+                self.json_string_primitive(primitive)
             }
             _ => Ok(value),
         }
+    }
+
+    fn json_string_primitive(&mut self, value: Value) -> Result<Value, Fault> {
+        let value = match value {
+            Value::String(_) | Value::StringUnits(_) => value,
+            value => Value::String(value.script_text()?),
+        };
+        self.checked_value(value)
     }
 
     fn json_property_list(
@@ -1165,35 +1330,11 @@ impl Runtime {
             {
                 let value = self.copy_value(value)?;
                 let value = self.primitive_with_hint(value, true, host)?;
-                Some(self.checked_value(Value::String(value.script_text()?))?)
+                Some(self.json_string_primitive(value)?)
             }
             _ => None,
         };
-        let gap = match converted_space.as_ref().or(args.get(2)) {
-            Some(Value::Number(value)) => " ".repeat(if value.is_nan() {
-                0
-            } else {
-                value.clamp(0.0, 10.0) as usize
-            }),
-            Some(Value::StringUnits(_)) => return Err(Fault::new("JSON indentation containing unpaired UTF-16 surrogates is not implemented.")),
-            Some(Value::String(value)) => {
-                let mut units = 0;
-                let mut gap = String::new();
-                for ch in value.chars() {
-                    if units == 10 {
-                        break;
-                    }
-                    units += ch.len_utf16();
-                    if units > 10 {
-                        return Err(Fault::new("JSON indentation ending in a lone UTF-16 surrogate is not implemented."));
-                    }
-                    gap.push(ch);
-                }
-                self.work(gap.len())?;
-                gap
-            }
-            _ => String::new(),
-        };
+        let gap = Gap::from_value(self, converted_space.as_ref().or(args.get(2)))?;
         let holder = self.new_object(None)?;
         let value = self.copy_value(value)?;
         self.store_property(holder, "".into(), value, Some((true, true, true)))?;
@@ -1245,13 +1386,13 @@ impl Runtime {
                     continue;
                 }
                 if frame.wrote {
-                    self.append_string(output, ",")?;
+                    output.append_scalar(self, ",")?;
                 }
                 frame.wrote = true;
                 self.json_indent(output, &gap, writer.frames.len() + 1)?;
                 if !array {
                     self.json_quote_key(output, &key)?;
-                    self.append_string(output, if gap.is_empty() { ":" } else { ": " })?;
+                    output.append_scalar(self, if gap.is_empty() { ":" } else { ": " })?;
                 }
                 writer.frames.push(frame);
                 self.json_write_value(value, &mut writer, property_list.is_some())?;
@@ -1259,12 +1400,12 @@ impl Runtime {
                 if frame.wrote {
                     self.json_indent(output, &gap, writer.frames.len())?;
                 }
-                self.append_string(output, if array { "]" } else { "}" })?;
+                output.append_scalar(self, if array { "]" } else { "}" })?;
                 writer.ancestors.remove(&frame.id);
                 self.json_scratch_bytes -= frame.scratch_bytes;
             }
         }
-        self.checked_value(Value::String(writer.output))
+        self.checked_value(writer.output.into_value())
     }
 }
 
@@ -1275,6 +1416,14 @@ mod utf16_tests;
 #[cfg(test)]
 #[path = "json_utf16_boundary_tests.rs"]
 mod utf16_boundary_tests;
+
+#[cfg(test)]
+#[path = "json_stringify_utf16_tests.rs"]
+mod json_stringify_utf16_tests;
+
+#[cfg(test)]
+#[path = "json_stringify_utf16_boundary_tests.rs"]
+mod json_stringify_utf16_boundary_tests;
 
 #[cfg(test)]
 mod tests {
