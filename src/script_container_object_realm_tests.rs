@@ -118,7 +118,7 @@ if(Object.getPrototypeOf(H)!==w.HTMLElement||Object.getPrototypeOf(B)!==w.HTMLEl
 if(Object.getPrototypeOf(childHtml)!==HP||Object.getPrototypeOf(childBody)!==BP||childHtml.constructor!==H||childBody.constructor!==B)throw 'actual immediate interfaces';
 if(!(childHtml instanceof H)||!(childBody instanceof B)||!(childHtml instanceof w.HTMLElement)||!(childBody instanceof w.Element)||childHtml instanceof HTMLHtmlElement||childBody instanceof HTMLBodyElement)throw 'owner interface instanceof';
 if(childHtml.toString!==childStringify||childBody.toString!==childStringify||read(document.body)!==stringify||childStringify===stringify)throw 'owner intrinsic lookup';
-if(childDocument.head[tag]!==undefined)throw 'unpromoted head acquired a symbol backing';
+if(Object.getPrototypeOf(childDocument.head)!==w.HTMLHeadElement.prototype||childDocument.head[tag]!=='HTMLHeadElement'||childDocument.head.toString()!=='[object HTMLHeadElement]'||Object.hasOwn(childDocument.head,tag))throw 'genuine inherited child head identity';
 for(var n of [childHtml,childBody]){
  var expected=n===childHtml?'HTMLHtmlElement':'HTMLBodyElement';
  if(n[tag]!==expected||n.toString()!=='[object '+expected+']'||stringify.call(n)!=='[object '+expected+']'||invoke(stringify,n)!=='[object '+expected+']')throw 'real child tag';
@@ -238,8 +238,8 @@ fn container_object_realms_child_construction_and_own_storage_remain_unimplement
         "new w.DocumentFragment();",
         "childDocument.createElement('div');",
         "childDocument.createElementNS('http://www.w3.org/1999/xhtml','div');",
-        "Object.getPrototypeOf(childDocument.head);",
-        "childDocument.head.toString();",
+        "Object.defineProperty(childDocument.head,'toString',{value:function(){return 'unavailable';}});",
+        "Object.defineProperty(childDocument.head,Symbol.toStringTag,{value:'unavailable',configurable:true});",
         "childBody.innerHTML='<div>unavailable</div>';",
         "childBody.arbitraryContainerState=17;",
         "childBody.toString=17;",

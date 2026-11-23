@@ -1611,6 +1611,23 @@ if(fromChild(method,document.implementation,name).name!=='safe'||uses!==1)throw 
         assert_eq!(page.console_eval(&mut doc,&mut forms,"if(uses!==1)throw 'denied conversion';").errors,0);
     }
 
+
+    #[test]
+    fn html_head_title_element_child_realm_ownership_and_before_conversion_access() {
+        let source=format!("{CREATE}{}",r#"
+if(Object.getPrototypeOf(w.document.head)!==w.HTMLHeadElement.prototype||w.document.head instanceof HTMLHeadElement)throw 'genuine child head';
+var native=document.createElement('title'),set=Object.getOwnPropertyDescriptor(w.HTMLTitleElement.prototype,'text').set, effects=0;
+var assign=w.Function('set','target','value','return set.call(target,value);'), value={toString:function(){effects++;return 'actual';}};
+assign(set,native,value);if(native.text!=='actual'||effects!==1)throw 'same origin title';
+"#);
+        let (mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        page.set_location(&crate::navigation::address("https://other.test/",&crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"assign(set,native,value);").errors,1);
+        assert!(page.report().contains("same-origin"),"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(effects!==1||native.text!=='actual')throw 'denied conversion';").errors,0);
+    }
+
     #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"

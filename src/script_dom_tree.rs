@@ -237,6 +237,7 @@ impl State {
                 if name == "body" && tree.body.is_none() {
                     tree.body = Some(node);
                 }
+                if name=="title" && doc.nodes[node].namespace==crate::html::Namespace::Html && tree.title.is_none() {tree.title=Some(node);}
                 if name == "head" && tree.head.is_none() {
                     tree.head = Some(node);
                 }
