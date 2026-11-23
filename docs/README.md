@@ -45,8 +45,8 @@ release, and a model test is not a live-site outcome. Follow the exact source or
 build identity attached to each result.
 
 The verified downloadable baseline is
-[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1),
-from tagged source `f2e1823266a7c08c89bce7293572d801da62053c`. Download and runtime
+[v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4),
+from tagged source `122d0b7de5988493481dc4bed168d01969eef488`. Download and runtime
 checks are recorded alongside earlier releases in the [release history](RELEASING.md#published-baseline).
 
 The `v0.82.0-alpha.2` tag identifies source

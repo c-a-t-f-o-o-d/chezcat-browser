@@ -206,7 +206,14 @@
       "note": "Prerequisites select core implementation order; integration-dependent contracts can remain blocked while later producers are implemented. A package core checkpoint is not full package acceptance.",
       "integration_prerequisites": [],
       "evidence_selection_status": "F00 input/selection/native-baseline methodology gate complete. Required native correctness failures and unavailable token/diagnostic/script/namespace entries remain owned by F01/F04/F05/F07/F10. The fixed 21-file F01 unchanged-browser selection remains required; F06/F10 must enumerate and execute its subtests before that package closes.",
-      "milestone_state": "verified"
+      "milestone_state": "verified",
+      "verified_delivery": {
+        "version": "0.82.0-alpha.4",
+        "tag": "v0.82.0-alpha.4",
+        "source_commit": "122d0b7de5988493481dc4bed168d01969eef488",
+        "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4",
+        "checksums_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS"
+      }
     },
     {
       "id": "F01",

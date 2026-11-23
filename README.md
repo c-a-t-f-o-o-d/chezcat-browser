@@ -9,13 +9,13 @@
 *From network bytes to page pixels—networking, JavaScript, DOM, layout,
 rendering, and selected media decoding.*
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.4&color=0e7490&style=flat-square)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)
 [![Windows x64](https://img.shields.io/static/v1?label=Platform&message=Windows%20x64&color=2563eb&style=flat-square)](docs/BUILDING.md)
 [![Production Cargo dependencies](https://img.shields.io/static/v1?label=Production%20Cargo%20dependencies&message=0&color=6d28d9&style=flat-square)](docs/ARCHITECTURE.md)
 [![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 [![License](https://img.shields.io/static/v1?label=License&message=CSAPUL%201.1&color=64748b&style=flat-square)](LICENSE)
 
-**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
+**[📦 Download](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)** · **[🗺️ Roadmap](docs/ROADMAP.md)** · **[🔨 Build](#build)** · **[🧪 Compatibility](docs/COMPATIBILITY.md)** · **[📖 Documentation](#documentation)**
 
 </div>
 
@@ -61,8 +61,8 @@ These are **implemented slices, not complete standards support**. The
 
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
-| **F00 release preparation** | [Foundation baseline notes](CHANGELOG.md#0820-alpha4) | Source version `0.82.0-alpha.4` is in preparation. Tagged qualification and verified delivery are pending. |
+| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
+| **F00 foundation baseline** | [Release notes](CHANGELOG.md#0820-alpha4) and [checksums](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS) | Verified Windows runtime and matching source archive from `122d0b7`. |
 | **The tagged alpha.3 attempt** | [F00 baseline notes](CHANGELOG.md#0820-alpha3) and [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) | The normal suite failed. Publication was skipped. |
 | **The tagged alpha.2 attempt** | [🔬 Validation record](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) | Exact source `14134ab`; the normal Windows test stage failed. No alpha.2 release assets were published. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
@@ -73,9 +73,7 @@ These are **implemented slices, not complete standards support**. The
 > exact-source delivery checks and public download verification. The table above
 > distinguishes the verified download from subsequent development on main.
 
-**`0.82.0-alpha.1` is the verified download.** All four published files match
-their recorded digests for tagged source `f2e1823266a7c08c89bce7293572d801da62053c`.
-[Download and runtime checks](docs/RELEASING.md#published-baseline)
+**`0.82.0-alpha.4` is the verified download.** All four public assets matched the recorded hashes. The extracted Windows runtime passed startup and the original App/input journey for tagged source `122d0b7de5988493481dc4bed168d01969eef488`. [Download and runtime checks](docs/RELEASING.md#published-baseline)
 
 **Tagged candidate `0.82.0-alpha.2`** identifies source
 `14134aba8ac2ab001c8ec13db77f68fa220b1400`, including the integrated changes through
@@ -83,8 +81,7 @@ PR #430 and release preparation in PR #431. Its
 [source notes](CHANGELOG.md#0820-alpha2) describe the scope. The
 [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 stopped at the normal test stage; packaging and publication were not reached.
-**Alpha.2 is not a published download.** The tag remains fixed, and alpha.1 remains
-the verified downloadable baseline. See the [release record](docs/RELEASING.md#current-release-candidate)
+**Alpha.2 is not a published download.** Its failed tag remains fixed. See the [release record](docs/RELEASING.md#current-release-candidate)
 for the unresolved failure and recovery rules.
 
 Commit-identified development downloads and a possible `dev` channel remain

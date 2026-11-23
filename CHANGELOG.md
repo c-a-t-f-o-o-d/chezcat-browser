@@ -17,7 +17,9 @@
 
 ## 0.82.0-alpha.4
 
-This candidate covers the accepted F00 requirements and native parser baseline.
+**Verified delivery.** [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) was published for source `122d0b7de5988493481dc4bed168d01969eef488`. The [tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) qualified the build and packages. All four downloaded assets matched their SHA-256 digests, and the extracted runtime passed startup and the original App/input journey. [Checksums](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS) · [Asset sizes and SHA-256 values](docs/RELEASING.md#verified-0820-alpha4-assets).
+
+This release covers the accepted F00 requirements and native parser baseline.
 The [foundation register](docs/HTML_FOUNDATION_COVERAGE.json) retains the original
 10,968 native case modes and the 21 browser-file groups awaiting their harness.
 F01 document representation, F02 encoding and F04 tokenization are partial.

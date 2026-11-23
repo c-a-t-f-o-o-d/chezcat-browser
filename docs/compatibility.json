@@ -4,13 +4,14 @@
   "release_candidate": {
     "version": "0.82.0-alpha.4",
     "integrated_through": "7e0d347a3ef177d6487bc7feae451e4cc20a1c71",
-    "tag": null,
-    "tag_source": null,
-    "workflow_url": null,
-    "status": "F00 release preparation; preflight and exact tagged delivery pending",
-    "qualification_status": "pending",
-    "publication_status": "not_published",
-    "verified_downloadable_baseline": "v0.82.0-alpha.1"
+    "tag": "v0.82.0-alpha.4",
+    "tag_source": "122d0b7de5988493481dc4bed168d01969eef488",
+    "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981",
+    "status": "Published F00 release; all four public assets and the extracted runtime independently verified.",
+    "qualification_status": "passed",
+    "publication_status": "published_verified",
+    "verified_downloadable_baseline": "v0.82.0-alpha.4",
+    "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4"
   },
   "previous_release_candidates": [
     {

@@ -43,7 +43,7 @@ including integrated feature work through `1de1f24` and release preparation.
 Its [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 failed at the normal Windows test stage, before packages or publication. No
 alpha.2 assets were published. This changes no acceptance requirement or
-historical measurement; the verified downloadable baseline remains `0.82.0-alpha.1`.
+historical measurement; the verified downloadable baseline is [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).
 
 The immutable alpha.3 F00 candidate also failed hosted normal verification.
 The alpha.4 source includes the normal adapter and capacity repairs. See the

@@ -17,18 +17,20 @@
 > contract, not complete standards or website support. Local tests, App journeys,
 > physical devices, and live services are different evidence scopes.
 
-**Published prerelease 0.82.0-alpha.1** is tagged at `f2e1823` and includes the integrated features measured through `6089546`. The preceding prerelease is 0.81.0-alpha.3 at `57cc1d5`. [Release downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) · [Source comparison](https://github.com/c-a-t-f-o-o-d/chezcat-browser/compare/v0.81.0-alpha.3...v0.82.0-alpha.1)
+**Published prerelease [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)** includes the accepted F00 baseline and partial foundation implementations through `122d0b7`. See the [verified download and extracted-runtime record](RELEASING.md#published-baseline).
+
+**Earlier published prerelease 0.82.0-alpha.1** is tagged at `f2e1823` and includes the integrated features measured through `6089546`. The preceding prerelease is 0.81.0-alpha.3 at `57cc1d5`. [Release downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) · [Source comparison](https://github.com/c-a-t-f-o-o-d/chezcat-browser/compare/v0.81.0-alpha.3...v0.82.0-alpha.1)
 
 **Tagged candidate 0.82.0-alpha.2** identifies
 [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
 including the integrated feature changes through `1de1f24` and release preparation.
 The [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 failed at the normal Windows test stage; packaging/publication were not reached
-and no alpha.2 release assets exist. Alpha.1 remains the verified download.
+and no alpha.2 release assets exist. Alpha.1 was the verified download at the time.
 The immutable alpha.3 candidate at `ff5740d` also failed its hosted normal
-suite. Publication was skipped. The `0.82.0-alpha.4` source prepares F00
+suite. Publication was skipped. The `0.82.0-alpha.4` release delivers F00
 with the adapter and capacity repairs integrated through `7e0d347`. F01, F02 and F04 retain open integration and
-conformance requirements. Tagged delivery and download verification are pending.
+conformance requirements. The tagged build, four public assets and extracted offline runtime passed delivery verification.
 The matrix describes implemented source slices; earlier measurements keep their
 recorded revisions and do not become alpha.2 runtime results. See the
 [change summary](../CHANGELOG.md) and [release procedure](RELEASING.md).

@@ -48,13 +48,9 @@ checks. See [feature contracts](FEATURE_CONTRACTS.md) and [capabilities](CAPABIL
 Source integration, green CI, development-runtime delivery and publication are
 different states. Report only the state actually reached.
 
-## Current release candidate
+## Current verified release
 
-`0.82.0-alpha.4` prepares the F00 requirements and parser-baseline milestone.
-The [changelog](../CHANGELOG.md#0820-alpha4) identifies the release scope and
-the [register](HTML_FOUNDATION_COVERAGE.json) retains the unresolved parser
-cases and required browser measurements. Verify exact tagged delivery and the
-downloaded distribution before treating this candidate as a published build.
+**[v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) is the verified F00 release.** The immutable tag resolves to `122d0b7de5988493481dc4bed168d01969eef488`. The [tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) passed build and publication. All four downloaded assets matched their recorded SHA-256 hashes. Source export, runtime manifest, Windows PE/resources and the extracted offline App/input journey were verified independently. F01, F02 and F04 retain open integration requirements.
 
 ### Historical alpha.3 candidate
 
@@ -73,6 +69,8 @@ DOM and stylesheet work while retaining request counts, trust checks and
 deadlines. The local normal suite on its source tree passed all 4,454 tests.
 A later tagged build must establish its own delivery evidence.
 
+<a id="current-release-candidate"></a>
+
 ### Historical alpha.2 candidate
 
 The immutable `v0.82.0-alpha.2` tag identifies
@@ -82,7 +80,7 @@ prepared in PR #431. The
 [tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 failed at the normal native-test stage. The optimized build, package checks,
 publication and downloaded-byte verification were not reached. **No alpha.2
-release assets were published; alpha.1 remains the verified download.**
+release assets were published.**
 
 The failure-summary step also rejected its relative output path, so this run's
 public output does not identify the failing native tests or their root cause.
@@ -98,6 +96,7 @@ Development source after the tag, including PR #433, is not part of this attempt
 
 | Snapshot | Recorded outcome |
 | :--- | :--- |
+| **[v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)** | F00 baseline from `122d0b7`. Four public assets and the extracted runtime verified. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) |
 | **v0.82.0-alpha.3** | Immutable F00 candidate `ff5740d`. Hosted normal qualification failed; publication was skipped. [Validation attempt](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) |
 | **v0.82.0-alpha.2** | Immutable candidate at `14134aba8ac2ab001c8ec13db77f68fa220b1400`. Normal Windows test stage failed; failure-summary reporting also failed. Packaging was not reached and publication was skipped. No release assets. [Validation attempt](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) |
 | **[v0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)** | Published from `f2e1823266a7c08c89bce7293572d801da62053c`. All four downloads matched their public digests. Both archives and the release notes passed verification. The extracted browser started and completed the App input journey. [Tagged workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
@@ -105,6 +104,17 @@ Development source after the tag, including PR #433, is not part of this attempt
 | **v0.81.0-alpha.2** | Published from `36adf20`, with runtime/source ZIPs, `publication.json`, `SHA256SUMS`, and downloaded/extracted verification |
 | **v0.81.0-alpha.1** | Immutable validation candidate; runtime documentation-link failure stopped publication. Tag retained, no release assets published |
 | **Earlier published releases** | Keep their original source, assets, licensing and valid grants unchanged |
+
+### Verified 0.82.0-alpha.4 assets
+
+Published 2026-11-23T03:38:28Z for source `122d0b7de5988493481dc4bed168d01969eef488`.
+
+| Download | Bytes | SHA-256 |
+| --- | ---: | --- |
+| [ChezCat-windows-x64.zip](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/ChezCat-windows-x64.zip) | 5,973,478 | `9836529372b7add8d42b775aa8090fc87df7550925ff3f586739730b3dcf315b` |
+| [ChezCat-source.zip](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/ChezCat-source.zip) | 8,149,751 | `a70d23c6303d325d8194a553a4d921fcc8046c6953fe2a552cb949c3a265bbbf` |
+| [publication.json](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/publication.json) | 2,967 | `1847f813d456781903056761aa9053a448f0a2f5d36199395d994e962c2f5a7d` |
+| [SHA256SUMS](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS) | 261 | `96b86115862b91f132db39de9afc3ddff4b929cfe1fe71f7a9e3df9603fd989e` |
 
 Independent checks of the downloaded alpha.1 runtime also verified PE identity,
 the actual on-wire HTTP User-Agent, CLI help, and displayed About information
