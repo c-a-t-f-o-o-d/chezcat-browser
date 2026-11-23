@@ -999,7 +999,7 @@ fn build_viewport_with_fonts_inner(
     if let Some(meter) = budget.as_deref_mut() {
         engine.grid_budget.settle(meter)?;
     }
-    let fixed_boxes = engine.mark_fixed();
+    let (fixed_boxes, positioned_groups) = engine.mark_fixed();
     engine.finish_client_boxes();
     engine.finish_offset_parents();
     engine.finish_border_rects(&fixed_boxes);
@@ -1083,7 +1083,7 @@ fn build_viewport_with_fonts_inner(
         .clamp(16, MAX_HEIGHT);
     engine.finish_decorations();
     if !engine.order_explicit_stacking(budget.as_deref_mut())? {
-        engine.order_positioned_paint(budget.as_deref_mut())?;
+        engine.order_positioned_paint(positioned_groups, budget.as_deref_mut())?;
     }
     engine.filter_visibility_paint(budget.as_deref_mut())?;
     engine.finish_opacity();
@@ -1588,19 +1588,21 @@ impl Engine<'_> {
         }
     }
 
-    fn mark_fixed(&mut self) -> Vec<bool> {
+    fn mark_fixed(&mut self) -> (Vec<bool>, usize) {
         self.layout.fixed_runs = vec![false; self.layout.runs.len()];
         self.layout.fixed_items = vec![false; self.layout.items.len()];
         self.layout.fixed_controls = vec![false; self.layout.controls.len()];
         self.layout.fixed_anchors = vec![false; self.layout.anchors.len()];
         self.layout.fixed_hits = vec![false; self.atoms.len()];
         self.layout.positioned_items = vec![0; self.layout.items.len()];
+        let mut positioned_groups = 0;
         for (node, span) in self.spans.iter().enumerate() {
             if (self.styles[node].position == Position::Static && !self.transform_establishes_cb(node))
                 || !matches!(self.doc.nodes[node].kind, NodeKind::Element { .. })
             {
                 continue;
             }
+            positioned_groups += 1;
             if let Some(span) = span {
                 self.layout.positioned_items[span.start.items..span.end.items].fill(node + 1);
             }
@@ -1622,7 +1624,7 @@ impl Engine<'_> {
                 boxes[node] = true;
             }
         }
-        boxes
+        (boxes, positioned_groups)
     }
 
     fn clip_parent(&self, node: usize) -> Option<usize> {
@@ -1745,13 +1747,13 @@ impl Engine<'_> {
         }
     }
 
-    fn order_positioned_paint(&mut self, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
+    fn order_positioned_paint(&mut self, positioned_groups: usize, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
         if self.pending.is_empty() && self.relatives.is_empty() && self.translated_ranks.is_empty() {
             return Ok(());
         }
         // Opacity/transform contexts already supply scene ranks. The ordinary
         // positioned path also needs the current tree order after a DOM move.
-        if self.translated_ranks.is_empty() {
+        if positioned_groups > 1 && self.translated_ranks.is_empty() {
             self.rank_auto_positioned_items(budget)?;
         }
         let items = std::mem::take(&mut self.layout.items);
