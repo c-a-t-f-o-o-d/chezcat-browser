@@ -2,6 +2,7 @@
 //! are never reconstructed. Removed controls retain native identity and values.
 use super::*;
 
+#[derive(Default)]
 pub(crate) struct SelectFormPlan {
     pub(crate) additions: BTreeMap<usize, Control>,
     pub(crate) metadata: Vec<(usize, Option<usize>, bool, usize)>,

@@ -47,6 +47,15 @@ impl Bridge<'_> {
     }
     pub(super) fn prepare_select_form_change(&mut self, fragment: Option<(&Document, usize)>,
         overrides: &[(usize, Option<usize>)]) -> Result<forms::SelectFormPlan, String> {
+        // An empty, non-control subtree cannot contain an existing control or
+        // a newly inserted input/button. Its parent change needs no form plan.
+        if fragment.is_none() {
+            self.state.work(overrides.len())?;
+            if overrides.iter().all(|&(node, _)| self.doc.nodes.get(node).is_some_and(|n| n.children.is_empty())
+                && !self.forms.controls.contains_key(&node) && !self.fresh_text_input(node) && !self.fresh_button(node)) {
+                return Ok(forms::SelectFormPlan::default());
+            }
+        }
         let mut created_inputs = Vec::new();
         let mut created_buttons = Vec::new();
         self.state.work(self.doc.nodes.len())?;
@@ -82,7 +91,7 @@ impl Bridge<'_> {
         let new_control = fragment.is_some_and(|(doc, _)| (1..doc.nodes.len()).any(|node|
             matches!(tag(doc, node), "select" | "textarea" | "button") || forms::fragment_text_input(doc, node) || forms::fragment_checkbox_input(doc, node)));
         if affected.is_empty() && !new_control && created_inputs.is_empty() && created_buttons.is_empty() {
-            return Ok(forms::SelectFormPlan { additions: std::collections::BTreeMap::new(), metadata: Vec::new(), radio_checked: Vec::new(), retained_bytes: 0 });
+            return Ok(forms::SelectFormPlan::default());
         }
         let extra = fragment.map_or(0, |(doc, _)| doc.nodes.len().saturating_sub(1));
         if fragment.is_some_and(|(_, base)| base != self.doc.nodes.len()) { return Err("Select fragment identity base changed.".into()); }

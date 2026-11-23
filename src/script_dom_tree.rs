@@ -1359,6 +1359,47 @@ impl Bridge<'_> {
         Ok(Value::Host(outgoing))
     }
 
+    // An anonymous visible leaf can use already-paid order capacity. Retain
+    // the normal rebuild for moves, indexed IDs, inert parents, and subtrees.
+    fn leaf_append_order_slot(&mut self, parent: usize, child: usize, required_copy: usize) -> Result<Option<usize>, String> {
+        let tree = &self.state.tree;
+        if self.state.dirty || tree.order.len() == tree.order.capacity()
+            || !tree.active[parent] || !self.state.dom.connected[parent] || self.state.dom.connected[child]
+            || tree.parents[child].is_some() || !self.doc.nodes[child].children.is_empty() || parent == 0 {
+            return Ok(None);
+        }
+        let parent_name = tag(self.doc, parent);
+        let child_name = tag(self.doc, child);
+        if inert_dom_tag(parent_name, self.doc.scripting_enabled) || matches!(child_name, "body" | "head")
+            || (inert_dom_tag(child_name, self.doc.scripting_enabled)
+                && !exposes_inert_host(child_name, self.doc.nodes[child].namespace)) {
+            return Ok(None);
+        }
+        let anchor = match self.doc.nodes[parent].children.last() {
+            Some(&last) if tree.active[last] && self.doc.nodes[last].children.is_empty() => last,
+            None => parent,
+            _ => return Ok(None),
+        };
+        let fields = match &self.doc.nodes[child].kind {
+            NodeKind::Element { attrs, .. } => attrs.len(),
+            _ => 0,
+        };
+        let worst_work = tree.order.len().saturating_add(tree.ids.len()).saturating_add(fields).saturating_add(1);
+        if worst_work > self.state.host_work { return Ok(None); }
+        if self.state.index_id_text(self.doc, child)?.is_some_and(|id| !id.is_empty()) { return Ok(None); }
+        let order = &self.state.tree.order;
+        let suffix = order.iter().rev().position(|&node| node == anchor);
+        let length = order.len();
+        self.state.work(suffix.map_or(length, |n| n + 1))?;
+        let Some(suffix) = suffix else { return Ok(None); };
+        let ids = if suffix == 0 { 0 } else { self.state.tree.ids.len() };
+        let copy = suffix.saturating_add(ids).saturating_add(1).saturating_mul(size_of::<usize>());
+        if copy > self.state.copy_work.saturating_sub(required_copy) { return Ok(None); }
+        self.state.work(ids)?;
+        self.state.copies(copy)?;
+        Ok(Some(length - suffix))
+    }
+
     fn mutate_dom_tree(
         &mut self,
         parent: usize,
@@ -1465,6 +1506,9 @@ impl Bridge<'_> {
             self.state.work(old_parent.map_or(0,|source|self.doc.nodes[source].children.len()))?;
             old_parent.and_then(|source|self.doc.nodes[source].children.iter().position(|&node|node==child))
         };
+        let order_slot = if method == "appendChild" {
+            self.leaf_append_order_slot(parent, child, copied)?
+        } else { None };
         self.state.replace_storage(0,bytes,copied)?;
         if let (Some(source),Some(index))=(old_parent,source_position) {self.state.ranges_remove(source,index,1,&descendants);}
         if let Some(mut children) = child_growth {
@@ -1506,7 +1550,19 @@ impl Bridge<'_> {
         self.commit_blank_frames(&descendants, frames);
         self.commit_image_connections(image_plans);
         self.state.dom_committed();
-        self.state.dirty = true;
+        if let Some(at) = order_slot.filter(|_| !self.state.dirty) {
+            let tree = &mut self.state.tree;
+            if at != tree.order.len() {
+                for (_, ordinal) in &mut tree.ids {
+                    if *ordinal >= at { *ordinal += 1; }
+                }
+            }
+            tree.order.insert(at, child);
+            tree.active[child] = true;
+            tree.sibling_slots[child] = self.doc.nodes[parent].children.len() - 1;
+        } else {
+            self.state.dirty = true;
+        }
         if was_connected || connected {
             self.state.layout_changed();
         }
