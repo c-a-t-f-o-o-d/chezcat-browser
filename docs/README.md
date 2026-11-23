@@ -62,6 +62,10 @@ inert HTML/custom/style and SVG constructors. PR #437/#438 add clone/import
 identity reservation, and PR #439 adds genuine Event author chains. These are outside the
 tagged candidate; their exact scope is recorded in [capabilities](CAPABILITIES.md).
 
+The subsequent [alpha.3 qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
+failed the normal suite and skipped publication. F00 baseline acceptance,
+current engine work and verified delivery are tracked in the [release record](RELEASING.md#published-baseline).
+
 ### Current reading path
 
 | Question | Read next |
