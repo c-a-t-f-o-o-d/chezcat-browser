@@ -22,7 +22,7 @@ use crate::javascript::{Host, Runtime, Value,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
     HTML_SLOT_NAME_GET, HTML_SLOT_NAME_SET, HTML_TEMPLATE_CONTENT_GET, PROCESSING_INSTRUCTION_TARGET_GET,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
-    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS};
+    NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_VALUE_GET, NODE_VALUE_SET, NODE_TRAVERSAL_GETTERS};
 
 #[path = "script_promises.rs"]
 mod script_promises;
@@ -3078,6 +3078,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
+        if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.meta_member(object, property) { return true; }
@@ -3226,7 +3227,7 @@ impl Host for Bridge<'_> {
             return Some(WINDOW);
         }
         if self.message_instance(object).is_some() { return Some(WINDOW); }
-        self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.node_list_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
+        self.range_owner(object).or_else(||self.ordinary_event_owner(object)).or_else(||self.abort_instance(object).map(|(owner, _)| owner)).or_else(||self.standalone_target_owner(object)).or_else(||self.node_list_owner(object)).or_else(||(object==DOCUMENT||self.element_expando_receiver(object)||self.fragment_receiver(object)||self.collection_receiver(object)||self.canvas_context_receiver(object)).then_some(WINDOW))}
     fn ordinary_native_fallback(&self,object:u32,property:&str)->bool {
         if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
@@ -3281,7 +3282,7 @@ impl Host for Bridge<'_> {
         if let Some(window)=self.computed_style_owner(object) {return Some(crate::javascript::NativeAncestry {window,constructor:None});}
         if self.named_map_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"NamedNodeMap"))});}
         if let Some(window)=self.collection_owner_window(object){return Some(crate::javascript::NativeAncestry{window,constructor:Some((window,"HTMLCollection"))});}
-        if self.node_list_receiver(object) {return Some(crate::javascript::NativeAncestry {window:WINDOW,constructor:Some((WINDOW,"NodeList"))});}
+        if let Some(window) = self.node_list_owner(object) { return Some(crate::javascript::NativeAncestry { window, constructor:Some((window,"NodeList")) }); }
         if let Some(window)=self.event_owner(object) {
             // Subclass immediate prototypes stay opaque; this is their genuine
             // implemented Event ancestry, as with the existing Node suffixes.
@@ -3450,7 +3451,8 @@ impl Host for Bridge<'_> {
         if let Some((owner, _))=self.abort_instance(object) {return Some(owner);}
         if let Some(window)=self.frame_instance_window(object) {return Some(window);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
-        if self.namespace_receiver(object) || self.node_list_receiver(object) {return Some(WINDOW);}
+        if let Some(window) = self.node_list_owner(object) { return Some(window); }
+        if self.namespace_receiver(object) {return Some(WINDOW);}
         self.location_instance_owner(object).or_else(||(matches!(object,DOCUMENT|CONSOLE|PERFORMANCE|PERFORMANCE_TIMING|HISTORY) || self.named_map_receiver(object) || self.attr_receiver(object) || self.media_element_receiver(object)).then_some(WINDOW))
     }
     fn bounding_rect_snapshot(&mut self, object: u32) -> Option<Result<[f64; 4], String>> {
@@ -3471,6 +3473,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if self.meta_member(object, property) { return true; }
         if self.aria_reflection_attribute(object,property){return true;}
         if self.placeholder_member(object,property){return true;}
@@ -3523,7 +3526,7 @@ impl Host for Bridge<'_> {
         if property=="style"&&self.html_element_receiver(object){return true;}
         if self.placeholder_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return property=="responseType";}
-        if property=="textContent"&&self.text_content_receiver(object){return true;}
+        if matches!(property, "textContent" | "nodeValue") && self.text_content_receiver(object) { return true; }
         if property=="name"&&self.html_slot_receiver(object){return true;}
         if self.mutation_observation_target(object)==Some(true)&&matches!(property,"data"|"nodeValue"){return true;}
         if matches!(self.inert_node_type(object),Some(3|4|7|8)) && matches!(property,"data"|"nodeValue"|"textContent"){return true;}
@@ -3569,6 +3572,7 @@ impl Host for Bridge<'_> {
         if method == ELEMENT_INNER_HTML_SET && (self.attr_element_receiver(object) || self.template_receiver(object)) {
             return Some("innerHTML");
         }
+        if method == NODE_VALUE_SET && self.text_content_receiver(object) { return Some("nodeValue"); }
         if method == NODE_TEXT_CONTENT_SET && self.text_content_receiver(object) {return Some("textContent");}
         if method == HTML_SLOT_NAME_SET && self.html_slot_receiver(object) {return Some("name");}
         if method == script_content_editable::SET && self.content_editable_receiver(object) {return Some("contentEditable");}
@@ -3625,6 +3629,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if property == "nodeValue" && self.text_content_receiver(object) { return true; }
         if self.meta_member(object, property) { return true; }
         self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent")
             ||self.attr_receiver(object)&&matches!(property,"value"|"nodeValue"|"textContent")
@@ -3846,6 +3851,7 @@ impl Host for Bridge<'_> {
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::window_relationships::operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
+        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET) && self.event_target_interface(object) { return Some(object); }
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -3874,7 +3880,7 @@ impl Host for Bridge<'_> {
         {
             return Some(object);
         }
-        if self.node_list_receiver(object) && matches!(method,"item"|"forEach") {return Some(WINDOW);}
+        if matches!(method,"item"|"forEach") { if let Some(window) = self.node_list_owner(object) { return Some(window); } }
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return Some(object);}
@@ -4115,6 +4121,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && matches!(method, "DOMImplementation" | "DocumentType" | "XMLDocument") {
             return Err(("TypeError", "Illegal inert DOM interface constructor.".into()));
         }
+        if matches!(method, NODE_VALUE_GET | NODE_VALUE_SET) { return self.native_node_access(object); }
         if matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
             if !self.text_content_receiver(object) {
                 return Err(("TypeError", "The textContent accessor requires a Node.".into()));
@@ -4345,6 +4352,7 @@ impl Host for Bridge<'_> {
     ) -> Result<(), (&'static str, String)> {
         if self.xhr_index(object).is_some(){return self.xhr_validate_set(object,property,value);}
 
+        if property == "nodeValue" && self.text_content_receiver(object) { self.native_node_access(object)?; }
         if self.meta_member(object, property) { return self.validate_meta(object); }
         if self.aria_reflection_attribute(object,property){return self.validate_aria_reflection(object,true);}
         if crate::javascript::html_reflection_interface::property(property).is_some() && self.html_reflection_receiver(object){return self.validate_html_reflection(object,true);}
@@ -4659,7 +4667,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object) && node_traversal_property(method).is_some() {
             return self.node_traversal_receiver(receiver);
         }
-        if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET) {
+        if self.event_target_interface(object) && matches!(method, NODE_TEXT_CONTENT_GET | NODE_TEXT_CONTENT_SET | NODE_VALUE_GET | NODE_VALUE_SET) {
             return self.text_content_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method,"\0Node.get.nodeType"|"\0Node.get.nodeName") {return self.node_identity_receiver(receiver);}
@@ -4756,7 +4764,7 @@ impl Host for Bridge<'_> {
     }
 
     fn indexed_iteration_owner(&self, object:u32)->Option<u32> {
-        self.collection_owner_window(object).or_else(||(self.node_list_receiver(object)||self.named_map_receiver(object)).then_some(WINDOW))
+        self.collection_owner_window(object).or_else(|| self.node_list_owner(object)).or_else(||self.named_map_receiver(object).then_some(WINDOW))
     }
 
     fn own_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
@@ -5812,6 +5820,10 @@ impl Host for Bridge<'_> {
     fn prepare_character_data_edit(&mut self,target:u32,method:&str,args:&[Value])->Result<crate::javascript::NativeCharacterDataEdit,String>{self.native_character_edit(target,method,args)}
     fn set_character_data_splice(&mut self,target:u32,value:Value,offset:usize,removed:usize,inserted:usize)->Result<(),String>{self.write_character_splice(target,value,offset,removed,inserted)}
     fn set(&mut self, object: u32, property: &str, value: Value) -> Result<(), String> {
+        if property == "nodeValue" && self.text_content_receiver(object) {
+            self.native_node_access(object).map_err(|(_, message)| message)?;
+            if !self.attr_receiver(object) && !self.character_data_receiver(object) { return Ok(()); }
+        }
         if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){self.state.work(1)?;return Ok(());}
         if self.meta_member(object, property) { return self.meta_set(object, meta_attribute(property).unwrap(), &value); }
         if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
@@ -6187,6 +6199,7 @@ impl Host for Bridge<'_> {
         if let Some(property) = node_traversal_property(method) {
             return self.get_with_caller(self.state.navigation_incumbent, object, property);
         }
+        if method == NODE_VALUE_GET { return self.canonical_node_value(object); }
         if method == NODE_TEXT_CONTENT_GET {
             return if object == DOCUMENT { Ok(Value::Null) } else { self.get(object, "textContent") };
         }

@@ -428,6 +428,9 @@ impl Bridge<'_> {
         let (index, offset) = frame_handle(handle)?;
         let result = (|| {
             self.frame_window_access(caller, window(index))?;
+            if property == "childNodes" && self.frame_contains_node(handle).is_some() {
+                return self.create_frame_child_list(handle);
+            }
             if script_element_properties::ordinary_interface_member(property)
                 && self.frame_concrete_html_interface(handle).is_some() {
                 // These are inherited ordinary properties of the exact owner
@@ -1520,6 +1523,51 @@ if(read(d.get,window)!==window)throw 'same origin caller';
         let result = page.console_eval(&mut doc, &mut forms, "read(d.get,window);");
         assert_eq!(result.errors, 1, "{}", page.report());
         assert!(page.report().contains("same-origin"), "{}", page.report());
+    }
+
+
+    #[test]
+    fn native_node_value_child_document_noop_and_saved_origin_before_conversion() {
+        let source = format!("{CREATE}{}", r#"
+var d=Object.getOwnPropertyDescriptor(Node.prototype,'nodeValue'),cd=f.contentDocument,reads=0;
+var input={toString:function(){reads++;return 'noop';}}, put=w.Function('set','target','value','set.call(target,value);');
+if(d.get.call(cd)!==null||cd.documentElement.nodeValue!==null)throw 'initial child roots';
+put(d.set,document,input);d.set.call(cd.body,input);
+var list=cd.childNodes,root=cd.documentElement;
+if(reads!==2||cd.body.childNodes.length||list!==cd.childNodes||Object.getPrototypeOf(list)!==w.NodeList.prototype||list.length!==1||list.item(0)!==root||root.childNodes[0]!==cd.head||root.childNodes[1]!==cd.body)throw 'native child noop and current child nodes';
+"#);
+        let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        page.set_location(&crate::navigation::address("https://other.test/", &crate::navigation::Location::home()).unwrap());
+        for denied in ["d.get.call(cd);", "put(d.set,document,input);", "d.set.call(cd,input);", "list.length;"] {
+            let result = page.console_eval(&mut doc, &mut forms, denied);
+            assert_eq!(result.errors, 1, "{}", page.report());
+            assert!(page.report().contains("same-origin"), "{}", page.report());
+        }
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "if(reads!==2)throw 'late denial';").errors, 0);
+        page.set_location(&crate::navigation::address("https://example.test/parent/page", &crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "document.body.removeChild(f);").errors, 0);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "d.get.call(cd);").errors, 1);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "d.set.call(cd,input);").errors, 1);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "list.item(0);").errors, 1);
+        assert_eq!(page.console_eval(&mut doc, &mut forms, "if(reads!==2)throw 'detached conversion';").errors, 0);
+    }
+
+
+    #[test]
+    fn native_node_value_child_list_storage_refusal_has_no_partial_identity() {
+        let source = format!("{CREATE}var cd=f.contentDocument;");
+        let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        let before = (page.state.node_lists.len(), page.state.dom.inert_child_lists.len(), page.state.retained);
+        let limit = page.state.retained_limit;
+        page.state.retained_limit = page.state.retained;
+        let result = page.console_eval(&mut doc, &mut forms, "cd.childNodes;");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert_eq!((page.state.node_lists.len(), page.state.dom.inert_child_lists.len(), page.state.retained), before);
+        page.state.retained_limit = limit;
+        let result = page.console_eval(&mut doc, &mut forms, "var children=cd.childNodes;if(children!==cd.childNodes||children[0]!==cd.documentElement)throw 'child list recovery';");
+        assert_eq!(result.errors, 0, "{}", page.report());
     }
 
     #[test]

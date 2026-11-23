@@ -3,7 +3,7 @@ use super::*;
 pub(in crate::scripting) const METHOD:&str="\0CharacterData.substringData";
 pub(super) fn unsigned_long(value:Option<&Value>)->Result<usize,String>{let Some(Value::Number(value))=value else{return Err("CharacterData offset/count requires converted Numbers.".into());};Ok(if !value.is_finite()||*value==0.0{0}else{value.trunc().rem_euclid(4294967296.0) as u32 as usize})}
 impl Bridge<'_>{
- pub(super) fn character_data_source(&self,object:u32)->Option<&DomString>{
+ pub(in crate::scripting) fn character_data_source(&self,object:u32)->Option<&DomString>{
   if let Some(node)=self.state.inert_documents.node(object){return match &node.kind{Kind::Text(data)|Kind::ProcessingInstruction{data,..}=>Some(data),Kind::Parsed{source,..}=>self.parsed_source(*source)?.0.kind.character_dom_string(),_=>None};}
   let node=node_index(object).filter(|&node|self.dom_accessible(node))?;self.doc.nodes.get(node)?.kind.character_dom_string()
  }

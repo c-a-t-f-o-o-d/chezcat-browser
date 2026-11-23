@@ -374,6 +374,16 @@ impl Bridge<'_> {
         self.node_identity_receiver(object) || self.frame_contains_node(object).is_some()
     }
 
+    pub(super) fn canonical_node_value(&mut self, object: u32) -> Result<Value, String> {
+        self.native_node_access(object).map_err(|(_, message)| message)?;
+        if self.attr_receiver(object) { return self.attr_get(object, "value"); }
+        let Some(data) = self.character_data_source(object) else { return Ok(Value::Null); };
+        let bytes = data.logical_bytes();
+        if bytes > self.state.limits.host.string_bytes { return Err("Node value exceeds the host string allowance.".into()); }
+        self.state.copies(bytes)?;
+        Self::dom_string_copy(self.character_data_source(object).unwrap())
+    }
+
     pub(super) fn document_node_get(&mut self,property:&str)->Result<Option<Value>,String> {
         if !document_node_property(property) {return Ok(None);}
         Ok(Some(match property {
