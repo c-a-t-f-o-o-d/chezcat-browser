@@ -100,3 +100,16 @@ fn active_formatting_charges_clones_and_preserves_checked_fragment_refusal() {
     assert_eq!(doc.nodes.len(), before);
     assert_eq!(stack, [0, body]);
 }
+
+#[test]
+fn active_formatting_marker_survives_unrelated_table_pop_until_explicit_clear() {
+    let doc = parse_loaded_document("<a><table><marquee></table><a>", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["a"]);
+    let outer = doc.nodes[body].children[0];
+    assert_eq!(kids(&doc, outer), ["marquee", "table", "a"]);
+    let doc = parse_loaded_document("<a><marquee><i>held</marquee><a>outside", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["a", "a"]);
+    assert_eq!(kids(&doc, doc.nodes[body].children[1]), ["#outside"]);
+}

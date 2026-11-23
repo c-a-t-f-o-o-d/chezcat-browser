@@ -492,7 +492,7 @@ fn parse_internal(
                     initial=false;
                     if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit)? {
                         formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
-                    start.text(&mut document,&mut stack,text,node_limit)?;
+                        start.text(&mut document,&mut stack,text,node_limit)?;
                     }
                     position+=1;continue;
                 }
@@ -511,7 +511,7 @@ fn parse_internal(
             tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             let active=tables.has_active(&stack);
             if active {
-                match tables.tag(&mut document,&mut stack,&tag,node_limit)? {
+                match tables.tag(&mut document,&mut stack,&tag,node_limit,&mut formatting)? {
                     table_construction::Action::Consumed=>continue,
                     table_construction::Action::Foster=>foster=true,
                     table_construction::Action::Normal=>{}
@@ -522,7 +522,7 @@ fn parse_internal(
                 document_structure::Action::AtHead(head)=>Some(head),
                 document_structure::Action::Normal=>None,
             };
-            if !active && matches!(tables.tag(&mut document,&mut stack,&tag,node_limit)?,table_construction::Action::Consumed){continue;}
+            if !active && matches!(tables.tag(&mut document,&mut stack,&tag,node_limit,&mut formatting)?,table_construction::Action::Consumed){continue;}
             parent
         }else{None};
 
@@ -590,6 +590,7 @@ fn parse_internal(
             if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
                 if index > 0 {
                     if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
+                    if structure.is_some() && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
                     if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
                         && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
                     {

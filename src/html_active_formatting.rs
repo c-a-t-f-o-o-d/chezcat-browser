@@ -10,15 +10,10 @@ struct Entry {
     node: usize,
     depth: usize,
 }
-struct Marker {
-    node: usize,
-    depth: usize,
-    start: usize,
-}
 #[derive(Default)]
 pub(super) struct Formatting {
     entries: Vec<Entry>,
-    markers: Vec<Marker>,
+    markers: Vec<usize>,
     copied: usize,
 }
 
@@ -116,16 +111,14 @@ fn copy_string(s: &str) -> Result<String, String> {
 }
 
 impl Formatting {
-    fn sync(&mut self, stack: &[usize]) -> usize {
-        while self
-            .markers
-            .last()
-            .is_some_and(|m| stack.get(m.depth) != Some(&m.node))
-        {
-            let marker = self.markers.pop().unwrap();
-            self.entries.truncate(marker.start);
-        }
-        self.markers.last().map_or(0, |m| m.start)
+    // A table can pop a fostered element without executing that element's
+    // end-tag rule. Its marker stays until an insertion mode clears it.
+    pub(super) fn clear_to_marker(&mut self) {
+        self.entries.truncate(self.markers.pop().unwrap_or(0));
+    }
+
+    fn start(&self) -> usize {
+        self.markers.last().copied().unwrap_or(0)
     }
 
     pub(super) fn opened(
@@ -139,17 +132,12 @@ impl Formatting {
             tag,
             "caption" | "td" | "th" | "template" | "applet" | "marquee" | "object"
         ) {
-            self.sync(stack);
             self.markers
                 .try_reserve(1)
                 .map_err(|_| "Cannot reserve formatting marker.")?;
-            self.markers.push(Marker {
-                node,
-                depth: stack.len() - 1,
-                start: self.entries.len(),
-            });
+            self.markers.push(self.entries.len());
         } else if fragment_formatting(tag) {
-            let start = self.sync(stack);
+            let start = self.start();
             // The three-entry limit compares the complete unordered attribute
             // set. Parser-created HTML attributes here are scalar, unqualified
             // and already de-duplicated by the tokenizer.
@@ -206,16 +194,34 @@ impl Formatting {
     // stack leaves younger formatting entries available for reconstruction.
     // Full adoption-agency block reparenting is a separate tree operation.
     pub(super) fn end(&mut self, doc: &Document, stack: &mut Vec<usize>, tag: &str) -> bool {
-        let start = self.sync(stack);
+        let start = self.start();
         let Some(offset) = self.entries[start..]
             .iter()
             .rposition(|e| element(doc, e.node).0 == tag)
         else {
-            return self.markers.last().is_some_and(|m| {
-                !stack[m.depth + 1..]
-                    .iter()
-                    .any(|&n| element(doc, n).0 == tag)
-            });
+            for &n in stack.iter().rev() {
+                let name = element(doc, n).0;
+                if name == tag {
+                    return false;
+                }
+                if doc.nodes[n].namespace != Namespace::Html
+                    || matches!(
+                        name,
+                        "html"
+                            | "table"
+                            | "td"
+                            | "th"
+                            | "caption"
+                            | "template"
+                            | "applet"
+                            | "object"
+                            | "marquee"
+                    )
+                {
+                    break;
+                }
+            }
+            return true;
         };
         let index = start + offset;
         let entry = &self.entries[index];
@@ -256,7 +262,7 @@ impl Formatting {
         if self.entries.is_empty() {
             return Ok(false);
         }
-        let start = self.sync(stack);
+        let start = self.start();
         let mut first = self.entries.len();
         while first > start {
             let e = &self.entries[first - 1];

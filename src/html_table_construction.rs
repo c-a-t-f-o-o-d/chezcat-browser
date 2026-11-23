@@ -174,6 +174,7 @@ impl Tables {
         stack: &mut Vec<usize>,
         tag: &Tag,
         limit: usize,
+        formatting: &mut active_formatting::Formatting,
     ) -> Result<Action, String> {
         let n = tag.name.as_str();
         let end = tag.closing;
@@ -199,6 +200,7 @@ impl Tables {
                 Mode::Cell => {
                     if end && matches!(n, "td" | "th") {
                         if n == current {
+                            formatting.clear_to_marker();
                             stack.truncate(depth);
                         }
                         return Ok(Action::Consumed);
@@ -208,6 +210,7 @@ impl Tables {
                             && matches!(n, "table" | "tr" | "tbody" | "tfoot" | "thead")
                             && stack[table.depth..depth].iter().any(|&i| name(doc, i) == n);
                     if close {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         continue;
                     }
@@ -219,10 +222,12 @@ impl Tables {
                 }
                 Mode::Caption => {
                     if end && n == "caption" {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         return Ok(Action::Consumed);
                     }
                     if !end && part(n) || end && n == "table" {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         continue;
                     }
