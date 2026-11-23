@@ -3073,6 +3073,7 @@ impl Bridge<'_> {
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
+        if self.canonical_collection_member(object, property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.aria_reflection_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
@@ -3225,7 +3226,7 @@ impl Host for Bridge<'_> {
         if self.canonical_attribute_factory_member(object,property){return false;}
         if self.canonical_collection_member(object,property){return false;}
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
-            || matches!(self.inert_node_type(object),Some(1|9))&&matches!(property,"getElementsByTagName"|"getElementsByClassName")
+            || matches!(self.inert_node_type(object),Some(1|9))&&matches!(property,"getElementsByTagName"|"getElementsByTagNameNS"|"getElementsByClassName")
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
@@ -3592,8 +3593,8 @@ impl Host for Bridge<'_> {
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
         if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
-        index==0&&dom_collections::operation(method).is_some()
-            ||index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
+        if let Some((query, _)) = dom_collections::operation(method) { return index < query.arity(); }
+        index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
             ||(script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
             ||index==0&&matches!(method,"getAttribute"|"getAttributeNode"|"setAttribute"|"removeAttribute"|"hasAttribute")
             ||index==1&&matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS")
@@ -3625,7 +3626,9 @@ impl Host for Bridge<'_> {
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
         if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{&[(0,true),(1,true)]}else{&[(0,true)]};}
-        if dom_collections::operation(method).is_some(){return &[(0,true)];}
+        if let Some((query, _)) = dom_collections::operation(method) {
+            return if query == dom_collections::Query::Namespace { &[(0,true),(1,true)] } else { &[(0,true)] };
+        }
         if method==xml_documents::CREATE{return &[(0,true),(1,true)];}
         if element_names::namespace_method(method){return &[(0,true)];}
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
@@ -3752,7 +3755,7 @@ impl Host for Bridge<'_> {
         if script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(1);}
         if script_attr::node_method(method){return Some(if method=="getAttributeNodeNS"{2}else{1});}
         if let Some(ns)=script_attr::factory_operation(method){return Some(if ns{2}else{1});}
-        if dom_collections::operation(method).is_some(){return Some(1);}
+        if let Some((query, _)) = dom_collections::operation(method) { return Some(query.arity()); }
         if method==xml_documents::CREATE{return Some(2);}
         if method==script_inert_documents::CREATE_DOCTYPE{return Some(3);}
         if self.class_list_receiver(object)&&method=="supports" {return Some(1);}
@@ -3883,6 +3886,7 @@ impl Host for Bridge<'_> {
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
     fn nullable_string_argument(&self, object: u32, method: &str, index: usize) -> bool {
+        if index == 0 && matches!(dom_collections::operation(method), Some((dom_collections::Query::Namespace, _))) { return true; }
         if method=="getAttributeNodeNS"&&index==0{return true;}
         if script_attr::factory_operation(method)==Some(true)&&index==0{return true;}
         if method==xml_documents::CREATE&&index==0{return true;}
@@ -3945,7 +3949,7 @@ impl Host for Bridge<'_> {
         if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
         if let Some((_,setter))=script_attr::member_operation(method){return usize::from(setter);}
         if let Some(ns)=script_attr::factory_operation(method){return if ns{2}else{1};}
-        if dom_collections::operation(method).is_some(){return 1;}
+        if let Some((query, _)) = dom_collections::operation(method) { return query.arity(); }
         if method==xml_documents::CREATE{return 2;}
         if element_names::namespace_method(method){return 1;}
         if method==character_substring::METHOD{return 2;}
@@ -4047,7 +4051,12 @@ impl Host for Bridge<'_> {
         if script_attr::member_operation(method).is_some(){return if self.attr_receiver(object){Ok(())}else{Err(("TypeError","Attr operation requires a genuine Attr.".into()))};}
         if self.attr_receiver(object)&&dom_tree::node_mutation_method(method){return Err(if method=="removeChild"{("NotFoundError","An Attr has no children.".into())}else{("HierarchyRequestError","An Attr cannot contain children.".into())});}
         if let Some(ns)=script_attr::factory_operation(method){return self.validate_attribute_factory(object,args,ns);}
-        if let Some((_,document))=dom_collections::operation(method){return if self.collection_interface_receiver(object)==Some(document){Ok(())}else{Err(("TypeError","Live collection method requires its genuine Document or Element receiver.".into()))};}
+        if let Some((_, document)) = dom_collections::operation(method) {
+            if self.collection_interface_receiver(object) != Some(document) {
+                return Err(("TypeError", "Live collection method requires its genuine Document or Element receiver.".into()));
+            }
+            return self.native_node_access(object);
+        }
         if method==xml_documents::CREATE{return self.validate_xml_document_factory(args);}
         if method=="createElement"&&self.inert_document(object){if let Some(name)=args.first(){if !script_attribute_names::valid_element_local_name_dom(script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid element local name.".into()));}}}
 
@@ -4415,7 +4424,7 @@ impl Host for Bridge<'_> {
     fn method(&self, object: u32, property: &str) -> Option<&'static str> {
         if self.canonical_attribute_node_member(object,property)||script_attr::node_method(property)&&self.form_named_control(object,property){return None;}
         if self.canonical_attribute_factory_member(object,property){return None;}
-        if matches!(property,"getElementsByTagName"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
+        if matches!(property,"getElementsByTagName"|"getElementsByTagNameNS"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
         if self.canonical_collection_member(object,property){return None;}
         if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
@@ -6069,7 +6078,15 @@ impl Host for Bridge<'_> {
         if script_attr::node_method(method){return match method{"getAttributeNode"=>self.get_attribute_node(object,args),"getAttributeNodeNS"=>self.get_attribute_node_ns(object,args),"removeAttributeNode"=>self.remove_attribute_node(object,args),_=>self.set_attribute_node(object,args)};}
         if let Some((name,setter))=script_attr::member_operation(method){return if setter{Err("Attr setters require the native conversion transaction.".into())}else{self.attr_get(object,name)};}
         if let Some(ns)=script_attr::factory_operation(method){return self.create_attribute_for_document(object,args,ns);}
-        if let Some((name,_))=dom_collections::operation(method){let value=args.first().ok_or("A live collection operation requires one argument.")?;return if name=="getElementsByTagName"{self.create_tag_collection(object,value)}else{self.create_class_collection(object,value)};}
+        if let Some((query, _)) = dom_collections::operation(method) {
+            self.native_node_access(object).map_err(|(_, message)| message)?;
+            let value = args.first().ok_or("A live collection operation requires an argument.")?;
+            return match query {
+                dom_collections::Query::Tag => self.create_tag_collection(object, value),
+                dom_collections::Query::Class => self.create_class_collection(object, value),
+                dom_collections::Query::Namespace => self.create_namespace_collection(object, args),
+            };
+        }
         if let Some((name,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return if setter{Err("ARIA setters require the native conversion transaction.".into())}else{self.aria_reflection_get(object,name)};}
         if let Some((name,setter))=crate::javascript::html_reflection_interface::operation(method){return if setter{Err("HTML reflection setters require the native conversion transaction.".into())}else{self.html_reflection_get(object,name)};}
         if method=="XMLHttpRequest"&&self.event_target_interface(object){return self.xhr_new(object);}
