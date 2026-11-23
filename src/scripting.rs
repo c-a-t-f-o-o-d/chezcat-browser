@@ -2500,7 +2500,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires passive data metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.stylesheet_charset_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3665,6 +3665,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if property=="charset" && node_index(object).is_some_and(|node|self.dom_stylesheet(node)) {return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return true; }

@@ -125,3 +125,36 @@ fn dynamic_stylesheet_encoding_raw_completion_capacity_and_retirement() {
     assert_eq!(app.scripting.as_ref().unwrap().error_count(),0);
     assert_eq!(app.dynamic_stylesheets.as_ref().unwrap().state.0.lock().unwrap().completed_payload,0);
 }
+
+#[test]
+fn link_charset_domstring_app_exact_reflection_attribute_and_observation() {
+    let site=Site::new();let mut app=ready(&site,"/encoding-page");
+    eval(&mut app,r#"
+var sheet=document.createElement('link');sheet.charset='Shift_JIS';document.head.appendChild(sheet);
+var attr=sheet.getAttributeNode('charset'),observer=new MutationObserver(function(){});
+observer.observe(sheet,{attributes:true,attributeOldValue:true,attributeFilter:['charset']});
+var calls=0;sheet.charset={toString:function(){calls++;sheet.setAttribute('charset','during');return 'x\ud800';}};
+var records=observer.takeRecords();
+if(calls!==1||sheet.charset!=='x\ud800'||attr.value!==sheet.charset||sheet.getAttribute('charset')!==sheet.charset||records.length!==2||records[0].oldValue!=='Shift_JIS'||records[1].oldValue!=='during'||records[1].target!==sheet)throw 'exact LINK reflection and old value';
+attr.value='\udfff';records=observer.takeRecords();
+if(sheet.charset!=='\udfff'||records.length!==1||records[0].oldValue!=='x\ud800'||sheet.getAttributeNode('charset')!==attr)throw 'live raw Attr';
+sheet.setAttribute('charset','\ud800\ufffd');records=observer.takeRecords();
+if(sheet.charset!=='\ud800\ufffd'||records.length!==1||records[0].oldValue!=='\udfff')throw 'raw content attribute';
+var replacement=document.createAttribute('charset');replacement.value='\udfff\ud800';sheet.setAttributeNode(replacement);records=observer.takeRecords();
+if(sheet.charset!=='\udfff\ud800'||attr.ownerElement!==null||replacement.ownerElement!==sheet||records.length!==1||records[0].oldValue!=='\ud800\ufffd')throw 'raw Attr attachment';
+sheet.removeAttribute('charset');records=observer.takeRecords();
+if(sheet.charset!==''||replacement.ownerElement!==null||records.length!==1||records[0].oldValue!=='\udfff\ud800')throw 'raw removal';
+sheet.charset='Shift_JIS';document.title='Charset metadata retained';
+"#);
+    assert_eq!(app.document.title,"Charset metadata retained");assert_eq!(app.pending_stylesheets,0);
+    assert_eq!(site.requests.lock().unwrap().as_slice(),["/encoding-page"]);
+}
+
+#[test]
+fn link_charset_domstring_app_raw_label_uses_live_document_fallback() {
+    let site=Site::new();let mut app=ready(&site,"/encoding-sjis-page");
+    request(&mut app,"/encoding-sjis.css","windows-1252");let completion=take_base_completion(&app);
+    queue_base_change(&mut app,r#"sheet.charset='Shift_JIS\ud800';if(sheet.charset.charCodeAt(9)!==0xd800)throw 'raw label';"#);
+    assert!(app.accept_dynamic_stylesheet(completion));wait(&mut app,|app|!app.is_loading());assert_app(&mut app);
+    assert_eq!(site.requests.lock().unwrap().iter().filter(|path|path.as_str()=="/encoding-sjis.css").count(),1);
+}
