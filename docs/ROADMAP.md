@@ -2,7 +2,7 @@
 
 # 🐱 ChezCat Browser — Development Roadmap
 
-[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.1&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1)
+[![Published prerelease](https://img.shields.io/static/v1?label=Published&message=0.82.0-alpha.4&color=0e7490)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)
 [![Development focus](https://img.shields.io/static/v1?label=Focus&message=Web%20compatibility&color=6d28d9)](#active--upcoming-milestones)
 [![Main source privacy and configuration](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml/badge.svg?branch=main&event=push)](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/workflows/offline.yml)
 
@@ -22,11 +22,12 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
-| **F00 release preparation** | `0.82.0-alpha.4` prepares the accepted requirements and parser-baseline milestone with the normal-suite and capacity repairs. See the [change summary](../CHANGELOG.md#0820-alpha4). | Exact tagged qualification, publication and downloaded-asset verification pending |
+| **F00 delivery** | Requirements, pinned inputs, executable adapter and classified historical baseline. | [Verified release and asset hashes](RELEASING.md#published-baseline) |
 | **Failed F00 candidate** | `0.82.0-alpha.3` at `ff5740d`. The hosted normal run had four failures and one ignored test. | [Qualification failed and publication was skipped](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) |
 | **Failed validation candidate** | `0.82.0-alpha.2` identifies [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400), including integrated feature changes through `1de1f24` and release preparation. See the [change summary](../CHANGELOG.md). | [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) failed at normal native tests; no packages or release assets were published |
-| **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
-| **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
+| **Current prerelease** | [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4), tagged at `122d0b7`. The runtime/source ZIPs, publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) |
+| **Earlier verified prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
+| **Earlier 0.81 prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
 | **Public `main`** | F00 baseline and partial F01/F02/F04 implementation, including verified integration of the capacity repairs at `7e0d347`. | Source development continues through the [foundation register](HTML_FOUNDATION_COVERAGE.json). |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |

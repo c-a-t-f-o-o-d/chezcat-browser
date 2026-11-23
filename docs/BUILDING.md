@@ -165,7 +165,7 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-The source package version is `0.82.0-alpha.4` for the F00 foundation baseline.
+The verified F00 release is [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4), source `122d0b7de5988493481dc4bed168d01969eef488`. Extract the Windows runtime ZIP with its resources together. [Asset hashes and runtime evidence](RELEASING.md#published-baseline)
 The earlier alpha.3 candidate at `ff5740d` failed hosted normal qualification.
 The [release record](RELEASING.md#published-baseline) identifies the verified download.
 The earlier immutable `0.82.0-alpha.2` tag identifies

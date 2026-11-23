@@ -364,10 +364,7 @@ changes after this snapshot require their own rechecks.
 
 ## Current scorecard
 
-The verified downloadable baseline remains **0.82.0-alpha.1**, tagged at
-`f2e1823`; its downloaded archives, publication metadata and extracted runtime
-passed their release checks. Tagged candidate **0.82.0-alpha.2** at `14134ab`
-failed normal Windows qualification before publication and has no release assets.
+The verified downloadable baseline is **[0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)**, tagged at `122d0b7de5988493481dc4bed168d01969eef488`. Checksum and extracted-runtime verification apply to that exact build. The previously verified alpha.1 build at `f2e1823` retains its own measured results. Alpha.2 and alpha.3 failed tagged qualification and have no published assets. Earlier framework measurements remain bound to their recorded source.
 [Release history](RELEASING.md#published-baseline)
 
 The framework results below are the latest recorded results for each named

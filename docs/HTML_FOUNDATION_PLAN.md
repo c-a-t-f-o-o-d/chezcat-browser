@@ -16,7 +16,7 @@ The HTML/XHTML document foundation precedes the saved YouTube shell, search,
 navigation and playback milestones. Required parser and DOM behavior is selected
 from the [coverage register](HTML_FOUNDATION_COVERAGE.json).
 
-F00 has met its requirements, input-lock and baseline criteria. The original
+F00 met its requirements, input-lock and baseline criteria and was delivered in [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4). The original
 source-bound native results retain their failures and harness gaps. F01 now has
 shared native document, node, namespace and UTF-16 operations; F02 has shared
 decoders and initial document charset selection; F04 has a partial raw-text
