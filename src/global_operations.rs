@@ -1,9 +1,9 @@
-//! Ordinary public slots for explicitly selected host operations.
+//! Global object declarations for selected native operations and Window attributes.
 //!
 //! Capability identity lives in the function arena, not in the public name.
 //! Replacing or deleting a property never reinstalls a hidden native binding.
 //! References: Web IDL operations and ECMA-262 2026 Global Environment Records.
-//! Native attributes, scheduler capabilities and host prototypes are not widened.
+//! Each registered name follows its current own descriptor during declaration.
 
 use super::{Fault, Runtime, Value};
 

@@ -1480,6 +1480,42 @@ if(borrowed(mainQuery,document,keyArg)[0]!==document.body||keyReads!==1)throw 's
         assert_eq!(result.errors, 0, "{}", page.report());
     }
 
+
+    #[test]
+    fn top_level_window_relationships_global_identity_descriptors_and_replacement() {
+        let source = format!("{CREATE}{}", r#"
+var parent;if(self!==window||self.parent!==window||window.top!==window||opener!==null||frameElement!==null)throw 'top-level relationships';
+var pd=Object.getOwnPropertyDescriptor(window,'parent'), td=Object.getOwnPropertyDescriptor(window,'top');
+var od=Object.getOwnPropertyDescriptor(window,'opener'), fd=Object.getOwnPropertyDescriptor(window,'frameElement');
+if(!pd.enumerable||!pd.configurable||pd.set.length!==1||pd.get.length!==0||td.configurable||td.set!==undefined||!td.enumerable||!fd.configurable||fd.set!==undefined)throw 'Window descriptors';
+if(pd.get.call(w)!==window||td.get.call(w)!==window||fd.get.call(w)!==f||od.get.call(w)!==null)throw 'child receiver topology';
+var bad=false;try{pd.get.call(document);}catch(e){bad=e instanceof TypeError;}if(!bad)throw 'Window brand';
+var marker={};parent=marker;if(window.parent!==marker||pd.get.call(window)!==window||!Object.getOwnPropertyDescriptor(window,'parent').writable)throw 'replaceable parent';
+if(delete window.top||window.top!==window)throw 'unforgeable top';
+opener=null;if(Object.getOwnPropertyDescriptor(window,'opener').get!==od.get)throw 'null disown';
+window.opener=marker;if(opener!==marker||od.get.call(window)!==null)throw 'opener replacement';
+delete window.parent;if('parent' in window)throw 'deleted replacement';
+Object.defineProperty(window,'parent',pd);if(parent!==window)throw 'restored parent';
+"#);
+        let (_, _, page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+    }
+
+    #[test]
+    fn top_level_window_relationships_saved_child_caller_respects_origin() {
+        let source = format!("{CREATE}{}", r#"
+var d=Object.getOwnPropertyDescriptor(window,'parent');
+var read=w.Function('get','target','return get.call(target);');
+if(read(d.get,window)!==window)throw 'same origin caller';
+"#);
+        let (mut doc, mut forms, mut page, result) = start(&source, &crate::csp::PolicySet::default());
+        assert_eq!(result.errors, 0, "{}", page.report());
+        page.set_location(&crate::navigation::address("https://other.test/", &crate::navigation::Location::home()).unwrap());
+        let result = page.console_eval(&mut doc, &mut forms, "read(d.get,window);");
+        assert_eq!(result.errors, 1, "{}", page.report());
+        assert!(page.report().contains("same-origin"), "{}", page.report());
+    }
+
     #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"
