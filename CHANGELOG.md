@@ -15,6 +15,40 @@
 > original gaps and release-time procedures do not override the current roadmap
 > or imply that later source changes are present in an old download.
 
+## 0.82.0-alpha.3
+
+### HTML foundation baseline
+
+F00 established the [foundation plan](docs/HTML_FOUNDATION_PLAN.md), a fixed
+[coverage register](docs/HTML_FOUNDATION_COVERAGE.json), licensed and hashed
+inputs, and an original native parser-data adapter. The recorded baseline on
+`2a1e171` classified 10,968 case modes. It reported 3 passes, 3,537 failures
+and 7,428 cases blocked by missing harness support. The register retains those
+original outcomes. The 21 required browser-file groups still need their own
+runtime enumeration and execution.
+
+### Browser changes included in this source
+
+- Network and local HTML and plain-text documents retain the selected decoder.
+  Document encoding getters report its canonical name.
+- Live class collections compare exact UTF-16 tokens and respect the current
+  document mode when a root moves between documents.
+- Automatic positioned paint and pointer hits follow live document order after
+  reparenting. Inspector tree folding preserves the separate doctype row.
+- Native prototype getters and setters allocate their callable identities on
+  demand in the declaring realm. The fixed 1,024-function, one-MiB test now
+  completes both child contexts, deliberate refusal, and recovery.
+- HTML iframe, xmp, noembed and noframes fallback produces literal Text nodes.
+  The previously failing original loaded-iframe corpus witness now passes.
+
+The integrated source for these changes is
+[`ad301ea`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ad301ea45eb49d217212f30a56f645531c486836).
+Its tested tree passed 4,449 normal Windows tests. The one ignored test is the
+separately invoked corpus adapter. All eight frozen F01 witnesses and the
+original F04 iframe witness passed through that adapter. F01, F02 and F04
+remain partial. The packaging record and checksums identify delivered assets
+after the exact tagged build completes.
+
 ## 0.82.0-alpha.2
 
 Consolidated JavaScript, DOM, rendering, resource and capacity improvements since

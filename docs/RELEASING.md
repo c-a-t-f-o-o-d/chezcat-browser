@@ -50,6 +50,16 @@ different states. Report only the state actually reached.
 
 ## Current release candidate
 
+`0.82.0-alpha.3` prepares the accepted F00 foundation baseline for tagged
+qualification. F00 records the fixed inputs, native adapter and source-bound
+baseline. Its unresolved parser cases and browser harness dependencies remain
+in the [coverage register](HTML_FOUNDATION_COVERAGE.json). The
+[change summary](../CHANGELOG.md#0820-alpha3) includes the partial foundation
+work integrated since that baseline. Delivery awaits the exact tagged gates
+and verification of the downloaded assets.
+
+### Historical alpha.2 candidate
+
 The immutable `v0.82.0-alpha.2` tag identifies
 `14134aba8ac2ab001c8ec13db77f68fa220b1400`, including merged source through PR #430
 and the matching Cargo/resource versions and [change summary](../CHANGELOG.md#0820-alpha2)

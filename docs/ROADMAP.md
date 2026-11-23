@@ -22,6 +22,7 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
+| **F00 release preparation** | `0.82.0-alpha.3` packages the accepted requirements and parser-baseline milestone. See the [change summary](../CHANGELOG.md#0820-alpha3). | Exact tagged qualification, publication and downloaded-asset verification pending |
 | **Failed validation candidate** | `0.82.0-alpha.2` identifies [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400), including integrated feature changes through `1de1f24` and release preparation. See the [change summary](../CHANGELOG.md). | [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) failed at normal native tests; no packages or release assets were published |
 | **Current prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
 | **Previous prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
