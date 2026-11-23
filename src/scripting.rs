@@ -1199,7 +1199,7 @@ impl Page {
                 .expect("fixed host global");
         }
         runtime
-            .bind_browser_global(WINDOW)
+            .bind_top_level_browser_global(WINDOW)
             .expect("fixed browser global");
         let mut state = State::new();
         state.limits = limits;
@@ -3845,6 +3845,7 @@ impl Host for Bridge<'_> {
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
+        if crate::javascript::window_relationships::operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if meta_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::html_reflection_interface::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4121,6 +4122,12 @@ impl Host for Bridge<'_> {
             if method == NODE_TEXT_CONTENT_SET && self.is_frame_handle(object) {
                 return Err(("NotSupportedError", "Blank child native writes are not implemented.".into()));
             }
+            return Ok(());
+        }
+        if let Some((_, setter)) = crate::javascript::window_relationships::operation(method) {
+            if !self.event_target_interface(object) { return Err(("TypeError", "Expected a Window receiver.".into())); }
+            self.window_relationship_access(object).map_err(|e| ("SecurityError", e))?;
+            if setter && object != WINDOW { return Err(("NotSupportedError", "Child Window relationship writes are unavailable.".into())); }
             return Ok(());
         }
         if meta_operation(method).is_some() { return self.validate_meta(object); }
@@ -4565,6 +4572,7 @@ impl Host for Bridge<'_> {
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET) {
             return self.event_target_interface(object) && (self.attr_element_receiver(receiver) || self.template_receiver(receiver));
         }
+        if crate::javascript::window_relationships::operation(method).is_some() { return self.event_target_interface(object) && self.event_target_interface(receiver); }
         if meta_operation(method).is_some() { return self.event_target_interface(object) && self.meta_receiver(receiver); }
         if crate::javascript::aria_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.aria_reflection_receiver(receiver);}
         if crate::javascript::html_reflection_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.html_reflection_receiver(receiver);}
@@ -6104,6 +6112,15 @@ impl Host for Bridge<'_> {
                 dom_collections::Query::Class => self.create_class_collection(object, value),
                 dom_collections::Query::Namespace => self.create_namespace_collection(object, args),
             };
+        }
+        if let Some((name, false)) = crate::javascript::window_relationships::operation(method) {
+            self.window_relationship_access(object)?;
+            if object == WINDOW {
+                return Ok(if matches!(name, "parent" | "top") { Value::Host(WINDOW) } else { Value::Null });
+            }
+            if name == "opener" && self.frame_context(object).is_some() { return Ok(Value::Null); }
+            return self.frame_get_with_caller(self.state.navigation_incumbent.or(Some(WINDOW)), object, name)
+                .ok_or("Unknown Window relationship receiver.")?;
         }
         if let Some((_, attr, setter)) = meta_operation(method) { return if setter { Err("Meta setters require the native conversion transaction.".into()) } else { self.meta_get(object, attr) }; }
         if let Some((name,_,setter))=crate::javascript::aria_reflection_interface::operation(method){return if setter{Err("ARIA setters require the native conversion transaction.".into())}else{self.aria_reflection_get(object,name)};}

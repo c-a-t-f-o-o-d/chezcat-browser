@@ -176,6 +176,8 @@ mod runtime_diagnostics;
 mod string_substr;
 #[path = "string_concat.rs"]
 mod string_concat;
+#[path = "window_relationships.rs"]
+pub(crate) mod window_relationships;
 #[path = "string_units.rs"]
 mod string_units;
 #[cfg(test)]
@@ -9286,6 +9288,9 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         if method=="\0Attr.set.value"{let value=self.copy_value(args.first().ok_or_else(||Fault::exception("TypeError","Attr value setter requires one argument."))?)?;self.host_set_native(object,"value",value,host)?;return Ok(Value::Undefined);}
+        if let Some((name, true)) = window_relationships::operation(method) {
+            return self.set_window_relationship(object, name, args, host);
+        }
         if method=="\0Element.getAttributeNames" {
             let names=host.attribute_name_snapshot(object).map_err(Fault::new)?;
             if names.len()>self.limits.heap.object_properties{return Err(Fault::new("Attribute names exceed the array/property allowance."));}
