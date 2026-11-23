@@ -456,7 +456,8 @@ impl Formatting {
             first -= 1;
         }
         if first == self.entries.len()
-            || doc.nodes[*stack.last().unwrap()].namespace != Namespace::Html
+            || *stack.last().unwrap() != 0
+                && doc.nodes[*stack.last().unwrap()].namespace != Namespace::Html
         {
             return Ok(false);
         }

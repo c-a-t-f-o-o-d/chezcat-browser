@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn fragment_formatting_stages_repaired_tree_in_preorder_and_preserves_nonce_flags() {
+    let doc=parse_fragment("<b>before<div><script nonce=a nonce=b>0</script>inside</b>outside</div><script nonce=c>1</script>","div",true).unwrap();
+    assert_eq!(kids(&doc, 0), ["b", "div", "script"]);
+    let block = doc.nodes[0].children[1];
+    assert_eq!(kids(&doc, block), ["b", "#outside"]);
+    let replacement = doc.nodes[block].children[0];
+    assert_eq!(kids(&doc, replacement), ["script", "#inside"]);
+    let script = doc.nodes[replacement].children[0];
+    assert_eq!(doc.nonce_unsafe_nodes.len(), 1);
+    assert!(doc.nonce_unsafe_nodes.contains(&script));
+    assert!(!doc.nonce_unsafe_nodes.contains(&doc.nodes[0].children[2]));
+    let mut stack = vec![0];
+    let mut order = Vec::new();
+    while let Some(n) = stack.pop() {
+        order.push(n);
+        stack.extend(doc.nodes[n].children.iter().rev().copied());
+    }
+    assert!(order.into_iter().eq(0..doc.nodes.len()));
+}
+
+#[test]
+fn fragment_formatting_reconstructs_after_implied_end_and_keeps_nested_template_scope() {
+    let doc = parse_fragment("<p><b>one<div>two</div>three", "div", true).unwrap();
+    assert_eq!(kids(&doc, 0), ["p", "div", "b"]);
+    let div = doc.nodes[0].children[1];
+    assert_eq!(kids(&doc, div), ["b"]);
+    assert_eq!(kids(&doc, doc.nodes[div].children[0]), ["#two"]);
+    let doc = parse_fragment(
+        "<p><b>outer<template><i>held</b></template>end",
+        "template",
+        true,
+    )
+    .unwrap();
+    let outer = first(&doc, "b");
+    assert_eq!(kids(&doc, outer), ["#outer", "template", "#end"]);
+    assert!(
+        parse_fragment(
+            "<b><svg><foreignObject></foreignObject></svg>",
+            "template",
+            true
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn formatting_adoption_inner_loop_retains_original_chain_and_moves_three_replacements() {
     let doc = parse_loaded_document("<div><a><b><u><i><code><div></a>", &|| Ok(())).unwrap();
     let outer = first(&doc, "div");
@@ -159,7 +205,7 @@ fn active_formatting_limits_equivalent_entries_with_unordered_attributes() {
     assert!(matches!(&doc.nodes[chain].kind,NodeKind::Text(t) if t=="B"));
 }
 #[test]
-fn active_formatting_charges_clones_and_preserves_checked_fragment_refusal() {
+fn active_formatting_charges_clones_and_preserves_checked_fragment_limits() {
     let source = "<p><b>X</p>Y";
     let doc = parse_inert_html(source, 9, &|| Ok(())).unwrap().0;
     assert_eq!(doc.nodes.len(), 9);
@@ -168,7 +214,13 @@ fn active_formatting_charges_clones_and_preserves_checked_fragment_refusal() {
             .unwrap_err()
             .contains("node limit")
     );
-    assert!(parse_fragment("<b><i></b>", "div", false).is_err());
+    let at_eof = parse_fragment("<b><i></b>", "div", false).unwrap();
+    assert_eq!(kids(&at_eof, 0), ["b"]);
+    assert_eq!(kids(&at_eof, at_eof.nodes[0].children[0]), ["i"]);
+    let fragment = parse_fragment("<b><i></b>X", "div", false).unwrap();
+    assert_eq!(kids(&fragment, 0), ["b", "i"]);
+    assert_eq!(kids(&fragment, fragment.nodes[0].children[1]), ["#X"]);
+    assert!(parse_fragment("<table><tr><td>X", "div", false).is_err());
     let mut doc = parse_loaded_document("<p><b data-x=1234>A", &|| Ok(())).unwrap();
     let b = first(&doc, "b");
     let body = first(&doc, "body");

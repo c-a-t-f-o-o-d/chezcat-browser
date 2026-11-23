@@ -20,6 +20,36 @@ fn click(app:&mut App,name:&str) {
 fn editor(app:&App,node:usize)->(String,usize,usize,usize,bool,Option<usize>) {
     let c=&app.forms.controls[&node];(c.value.text(),c.value.cursor,c.value.anchor,c.value.offset,c.dirty_value,c.owner)
 }
+
+#[test]
+fn fragment_formatting_actual_app_replacement_keeps_editor_and_hits_adopted_link(){
+    struct Fixture(PathBuf);
+    impl Drop for Fixture{fn drop(&mut self){let _=std::fs::remove_file(&self.0);}}
+    let file=Fixture(std::env::temp_dir().join(format!("chezcat-format-fragment-{}.html",std::process::id())));
+    std::fs::write(&file.0,r##"<!doctype html><html><head><title>Fragment ready</title><style>
+    body{margin:0;background:white}#editor{position:absolute;left:20px;top:20px;width:140px;height:28px}
+    #build{position:absolute;left:200px;top:20px;width:100px;height:28px}
+    #live p a{position:absolute;left:20px;top:100px;width:140px;height:30px;display:block;background:#346298}
+    </style></head><body><input id=editor value=seed><button id=build type=button>Build</button><div id=live></div><div id=end></div>
+    <script>document.getElementById('build').onclick=function(e){
+      if(!e.isTrusted)throw 'trusted build';var live=document.getElementById('live');
+      live.innerHTML='<a href="#end">First<p>Adopted</a>Outside</p>';
+      if(live.children.length!==2||live.firstChild.textContent!=='First'||live.lastChild.firstChild===live.firstChild||
+         live.lastChild.firstChild.textContent!=='Adopted'||live.lastChild.lastChild.data!=='Outside')throw 'real fragment tree';
+      document.title='Fragment applied';
+    };</script></body></html>"##).unwrap();
+    let mut app=App::new();app.resize(480,320);app.set_javascript_enabled(true);app.open(&file.0);clean(&app);
+    click(&mut app,"editor");app.paste("edited");let field=id(&app,"editor");let saved=editor(&app,field);
+    click(&mut app,"build");assert_eq!(app.document.title,"Fragment applied");assert_eq!(editor(&app,field),saved);
+    let block=app.document.nodes[id(&app,"live")].children[1];let link=app.document.nodes[block].children[0];
+    assert_eq!(app.page.link_node_at(140,117),Some(link));
+    let y=app.content_top()+117-app.scroll;let canvas=app.draw();
+    assert_eq!(canvas.pixels[y as usize*canvas.width+140]&0xffffff,0x346298);
+    let(_,hit)=app.primary_anchor_down(140,y,false);
+    let(_,action)=app.release_anchor_pointer(hit,140,y,false,crate::scripting::AnchorMouseInput::default());
+    let Some(crate::app::anchor::AnchorDefault::Link(target,_))=action else{panic!("missing native link default")};
+    app.open_link_target(target);assert_eq!(app.location.fragment,"end");clean(&app);
+}
 fn output_pixels(app:&App,expected:&str)->Vec<u32> {
     let rect=app.page.border_rects[id(app,"out")].unwrap();
     assert_eq!((rect.x,rect.y,rect.width,rect.height),(20,100,300,40));

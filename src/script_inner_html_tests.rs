@@ -167,7 +167,15 @@ fn inner_html_context_and_parser_limits_do_not_commit_a_prefix() {
     for context in ["table", "tr", "select", "svg"] {
         assert!(crate::html::parse_fragment("<b>x</b>", context, true).is_err(), "{context}");
     }
-    for source in ["<!bogus>","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><p>x</b>y","<p><b>x<div>y","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
+    let (_,_,page,result)=run("<div id=root></div>",r#"
+var root=document.getElementById('root');
+root.innerHTML='<b><p>x</b>y';
+if(root.innerHTML!=='<b></b><p><b>x</b>y</p>')throw 'adopted fragment block';
+root.innerHTML='<p><b>x<div>y';
+if(root.innerHTML!=='<p><b>x</b></p><div><b>y</b></div>')throw 'implied-close reconstruction';
+"#);
+    assert_eq!(result.errors,0,"{}",page.report());
+    for source in ["<!bogus>","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
     }
     let vt = crate::html::parse_fragment("<img src\u{b}='/not-a-source'>", "div", true).unwrap();
@@ -330,4 +338,37 @@ document.title='native select comment markers';
     assert_eq!(outcome.errors,0,"{}",page.report());assert_eq!(doc.title,"native select comment markers");assert_eq!(forms.controls.len(),2);assert!(!page.state.images.has_changes());
     let choice=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("choice")).unwrap();let options=&forms.controls[&choice].select.as_ref().unwrap().options;
     assert_eq!(options.len(),1);assert_eq!(options[0].label,"onetwo");assert_eq!(options[0].value,"onetwo");
+}
+#[test]
+fn fragment_formatting_inner_html_uses_native_order_independent_attributes_and_template_owner(){
+    let (_,_,page,out)=run("<html><body><div id=root></div><template id=t></template></body></html>",r##"
+var root=document.getElementById('root'),tpl=document.getElementById('t'),calls=0;
+var observer=new MutationObserver(function(rs){if(rs.length!==1||rs[0].target!==root||rs[0].addedNodes.length!==2||rs[0].addedNodes[1]!==root.lastChild)throw 'fragment record';calls++;});
+observer.observe(root,{childList:true});
+root.innerHTML='<a href="#x">1<p>2</a>3</p>';
+if(root.innerHTML!=='<a href="#x">1</a><p><a href="#x">2</a>3</p>')throw 'fragment order '+root.innerHTML;
+var first=root.firstChild,copy=root.lastChild.firstChild;if(first===copy||copy.ownerDocument!==document||copy.parentNode!==root.lastChild)throw 'fragment identity';
+copy.setAttribute('data-copy','yes');if(first.hasAttribute('data-copy'))throw 'aliased attribute';
+tpl.innerHTML='<b>one<div>two</b>three</div>';
+var t=tpl.content,sub=t.lastChild.firstChild;if(t.firstChild===sub||sub.ownerDocument!==t.ownerDocument||sub.textContent!=='two'||t.lastChild.lastChild.data!=='three')throw 'template fragment identity';
+if(tpl.innerHTML!=='<b>one</b><div><b>two</b>three</div>')throw 'template serialization';
+Promise.resolve().then(function(){if(calls!==1)throw 'missing mutation delivery';});
+"##);
+    assert_eq!(out.errors,0,"{}",page.report());
+}
+
+#[test]
+fn fragment_formatting_adopted_depth_refuses_before_publication_and_allows_recovery(){
+    let source=format!("{}<div id=root><i>old</i></div>{}","<div>".repeat(122),"</div>".repeat(122));
+    let(mut doc,mut forms,mut page,out)=run(&source,"");
+    assert_eq!(out.errors,0,"{}",page.report());
+    let root=(0..doc.nodes.len()).find(|&i|doc.attr(i,"id")==Some("root")).unwrap();
+    let original=doc.nodes[root].children.clone();let count=doc.nodes.len();
+    let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
+    let error=bridge.set_inner_html(root,"<a>prefix<p><span><b>deep</b></span></a></p>").unwrap_err();
+    assert!(error.contains("depth limit"),"{error}");
+    assert_eq!(bridge.doc.nodes.len(),count);assert_eq!(bridge.doc.nodes[root].children,original);
+    assert_eq!(bridge.state.tree.parents[original[0]],Some(root));
+    bridge.set_inner_html(root,"<i>ok</i>").unwrap();
+    assert_ne!(bridge.doc.nodes[root].children,original);
 }
