@@ -185,3 +185,17 @@ var s=document.createElement('script');saved.set.call(s,'Shift_JIS');s.src='/sou
     let mut app=open(&site,"/page");assert_eq!(app.document.title,"あ","{}",app.activity_report());
     assert_painted_document(&app,"あ");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
 }
+
+
+#[test]
+fn inert_charset_app_exact_owner_metadata_drives_native_paint_without_activation(){
+    let source=document("","waiting",false)+r#"<script>
+var owner=document.implementation.createHTMLDocument('metadata'),s=owner.createElement('script'),l=owner.createElement('link');s.charset='\ud800';l.charset='\udfff';
+var attr=s.getAttributeNode('charset'),copy=s.cloneNode(false),observer=new MutationObserver(function(){});observer.observe(l,{attributes:true,attributeOldValue:true,attributeFilter:['charset']});l.charset='seed';l.charset='\udfff';var records=observer.takeRecords();
+if(s.charset!==attr.value||copy.charset!==s.charset||copy===s||s.ownerDocument!==owner||l.ownerDocument!==owner||records.length!==2||records[0].oldValue!=='\udfff'||records[1].oldValue!=='seed')throw 'actual inert charset metadata';
+var result='Inert charset '+s.charset.charCodeAt(0)+'/'+l.charset.charCodeAt(0);document.getElementById('probe').textContent=result;document.title=result;
+</script>"#;
+    let site=Site::new(vec![Response{path:"/page",content_type:"text/html;charset=utf-8",headers:"",body:source.into_bytes()}]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"Inert charset 55296/57343","{}",app.activity_report());
+    assert_painted_document(&app,"Inert charset 55296/57343");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page"]);
+}

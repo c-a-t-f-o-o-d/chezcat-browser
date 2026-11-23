@@ -26,8 +26,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn charset_member(&self, object: u32, property: &str) -> bool {
-        property == "charset" && self.inert_node_type(object).is_none()
-            && !self.is_frame_handle(object) && self.charset_interface(object).is_some()
+        property == "charset" && !self.is_frame_handle(object) && self.charset_interface(object).is_some()
     }
 
     pub(super) fn validate_charset(&self, object: u32, interface: &str) -> Result<(), (&'static str, String)> {
@@ -35,8 +34,8 @@ impl Bridge<'_> {
             return Err(("TypeError", format!("Charset accessor requires a genuine {interface}.")));
         }
         self.native_node_access(object)?;
-        if self.inert_node_type(object).is_some() || self.is_frame_handle(object) {
-            return Err(("NotSupportedError", "Charset accessors require the main document owner in this reflection subset.".into()));
+        if self.is_frame_handle(object) {
+            return Err(("NotSupportedError", "Child charset access requires its document lifecycle hooks.".into()));
         }
         Ok(())
     }
@@ -44,13 +43,32 @@ impl Bridge<'_> {
     pub(super) fn charset_reflection_get(&mut self, object: u32) -> Result<Value, String> {
         let interface = self.charset_interface(object).ok_or("Charset getter requires a genuine resource element.")?;
         self.validate_charset(object, interface).map_err(|(_, message)| message)?;
+        if self.inert_node_type(object).is_some() {
+            let count = self.element_attribute_source(object).ok_or("Missing inert charset attribute source.")?.len();
+            self.state.work(count.saturating_mul("charset".len() + 1))?;
+            let Some(value) = self.inert_charset_value(object) else { return self.string(""); };
+            let bytes = value.logical_bytes();
+            if bytes > self.state.limits.host.string_bytes { return Err("Charset attribute exceeds the host string allowance.".into()); }
+            self.state.copies(bytes)?;
+            return Self::dom_string_copy(self.inert_charset_value(object).unwrap());
+        }
         let node = self.dom_node(object)?;
         self.resource_charset_get(node)
+    }
+
+    fn inert_charset_value(&self, object: u32) -> Option<&DomString> {
+        self.element_attribute_source(object)?.iter().find(|attr| attr.name.html_is("charset")).map(|attr| &attr.value)
     }
 
     pub(super) fn charset_reflection_set(&mut self, object: u32, value: &Value) -> Result<(), String> {
         let interface = self.charset_interface(object).ok_or("Charset setter requires a genuine resource element.")?;
         self.validate_charset(object, interface).map_err(|(_, message)| message)?;
+        if self.inert_node_type(object).is_some() {
+            let value = self.dom_text(value)?;
+            self.state.copies("charset".len())?;
+            let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text("charset")?);
+            return self.write_inert_dom_attribute_ns(object, name, Some(value));
+        }
         let node = self.dom_node(object)?;
         self.resource_charset_set(node, value)
     }
