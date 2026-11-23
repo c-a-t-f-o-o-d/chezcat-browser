@@ -609,8 +609,13 @@ fn parse_internal(
             return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
         }
         if structure.is_some() && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
-            if matches!(tag.name.as_str(),"a"|"nobr"){formatting.end(&document,&mut stack,&tag.name);}
+            if tag.name=="a"{formatting.end(&document,&mut stack,&tag.name);}
+            let table_foster=foster;
             if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
+            if tag.name=="nobr" && formatting.close_nested_nobr(&document,&mut stack) {
+                foster=table_foster && table_construction::foster_target(&document,*stack.last().unwrap());
+                if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
+            }
         }
         let parent = if foster {tables.foster_location(&document)?.0} else {structural_parent.unwrap_or_else(||*stack.last().unwrap())};
         if was_foreign && document.nodes[parent].namespace != Namespace::UnknownForeign {

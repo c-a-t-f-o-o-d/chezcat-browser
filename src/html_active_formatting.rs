@@ -101,6 +101,95 @@ pub(super) fn reconstructs_on_start(tag: &str) -> bool {
     )
 }
 
+fn special_html(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "applet"
+            | "area"
+            | "article"
+            | "aside"
+            | "base"
+            | "basefont"
+            | "bgsound"
+            | "blockquote"
+            | "body"
+            | "br"
+            | "button"
+            | "caption"
+            | "center"
+            | "col"
+            | "colgroup"
+            | "dd"
+            | "details"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dt"
+            | "embed"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "frame"
+            | "frameset"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "head"
+            | "header"
+            | "hgroup"
+            | "hr"
+            | "html"
+            | "iframe"
+            | "img"
+            | "input"
+            | "keygen"
+            | "li"
+            | "link"
+            | "listing"
+            | "main"
+            | "marquee"
+            | "menu"
+            | "meta"
+            | "nav"
+            | "noembed"
+            | "noframes"
+            | "noscript"
+            | "object"
+            | "ol"
+            | "p"
+            | "param"
+            | "plaintext"
+            | "pre"
+            | "script"
+            | "search"
+            | "section"
+            | "select"
+            | "source"
+            | "style"
+            | "summary"
+            | "table"
+            | "tbody"
+            | "td"
+            | "template"
+            | "textarea"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "title"
+            | "tr"
+            | "track"
+            | "ul"
+            | "wbr"
+            | "xmp"
+    )
+}
+
 fn copy_string(s: &str) -> Result<String, String> {
     let mut value = String::new();
     value
@@ -204,20 +293,7 @@ impl Formatting {
                 if name == tag {
                     return false;
                 }
-                if doc.nodes[n].namespace != Namespace::Html
-                    || matches!(
-                        name,
-                        "html"
-                            | "table"
-                            | "td"
-                            | "th"
-                            | "caption"
-                            | "template"
-                            | "applet"
-                            | "object"
-                            | "marquee"
-                    )
-                {
+                if doc.nodes[n].namespace != Namespace::Html || special_html(name) {
                     break;
                 }
             }
@@ -250,6 +326,38 @@ impl Formatting {
         self.entries.remove(index);
         stack.truncate(depth);
         true
+    }
+
+    // A nested nobr uses the open-element scope, which can still contain
+    // an older nobr even when a formatting marker hides its list entry.
+    pub(super) fn close_nested_nobr(&mut self, doc: &Document, stack: &mut Vec<usize>) -> bool {
+        for depth in (1..stack.len()).rev() {
+            let node = stack[depth];
+            let name = element(doc, node).0;
+            if doc.nodes[node].namespace != Namespace::Html
+                || matches!(
+                    name,
+                    "html"
+                        | "table"
+                        | "td"
+                        | "th"
+                        | "caption"
+                        | "template"
+                        | "object"
+                        | "applet"
+                        | "marquee"
+                )
+            {
+                break;
+            }
+            if name == "nobr" {
+                if !self.end(doc, stack, "nobr") {
+                    stack.truncate(depth);
+                }
+                return true;
+            }
+        }
+        false
     }
 
     pub(super) fn reconstruct(

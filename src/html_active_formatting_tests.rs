@@ -113,3 +113,22 @@ fn active_formatting_marker_survives_unrelated_table_pop_until_explicit_clear() 
     assert_eq!(kids(&doc, body), ["a", "a"]);
     assert_eq!(kids(&doc, doc.nodes[body].children[1]), ["#outside"]);
 }
+
+#[test]
+fn active_formatting_nested_nobr_uses_open_element_scope_after_reconstruction() {
+    let doc = parse_loaded_document("<nobr><table><marquee></table><nobr>", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["nobr", "nobr"]);
+    assert_eq!(
+        kids(&doc, doc.nodes[body].children[0]),
+        ["marquee", "table"]
+    );
+    let doc = parse_loaded_document("<p><nobr>old</p><nobr>new", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["p", "nobr", "nobr"]);
+    assert_eq!(
+        kids(&doc, doc.nodes[body].children[1]),
+        Vec::<String>::new()
+    );
+    assert_eq!(kids(&doc, doc.nodes[body].children[2]), ["#new"]);
+}

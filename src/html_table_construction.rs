@@ -53,6 +53,9 @@ fn space(b: u8) -> bool {
 fn table_parent(s: &str) -> bool {
     section(s) || matches!(s, "table" | "tr")
 }
+pub(super) fn foster_target(doc: &Document, node: usize) -> bool {
+    table_parent(name(doc, node))
+}
 fn limit_error(n: usize) -> String {
     format!("HTML document node limit reached ({n} nodes).")
 }
