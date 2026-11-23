@@ -626,6 +626,7 @@ impl Bridge<'_> {
         let Some(node) = node_index(object).filter(|&node| node < self.doc.nodes.len()) else {
             return false;
         };
+        if property=="charset" && self.resource_charset_element(node) {return true;}
         if self.html_text_reflection(node,property).is_some() {return true;}
         if property != "origin" && self.anchor_url_property(node, property) { return true; }
         self.dom_script(node)
@@ -774,6 +775,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         let node = self.dom_node(node_handle(node))?;
+        if property=="charset" && self.resource_charset_element(node) {return Ok(Some(true));}
         if self.anchor_url_property(node, property) { return Ok(Some(true)); }
         if self.style_text_attribute(object, property) { return Ok(Some(true)); }
         if property=="src"&&tag(self.doc,node)=="script"&&self.doc.nodes[node].namespace==crate::html::Namespace::Html {return Ok(Some(true));}
@@ -872,6 +874,7 @@ impl Bridge<'_> {
             if let Some(text)=text{return Self::dom_string_value(self.state,text).map(Some);}
             if matches!(property,"nodeValue"|"textContent"){return Ok(Some(Value::Null));}
         }
+        if property=="charset" && self.resource_charset_element(node) {return self.resource_charset_get(node).map(Some);}
         if self.anchor_url_property(node, property) { return self.anchor_url_get(node, property).map(Some); }
         if self.style_text_attribute(object, property) {
             let raw=self.doc.attr(node,property).unwrap_or("");
@@ -1043,7 +1046,6 @@ impl Bridge<'_> {
         }
         if self.dom_script(node) {
             if let Some(name) = script_attribute(property) {
-                if name == "charset" { return self.resource_charset_get(node).map(Some); }
                 return Ok(Some(if boolean_script_attribute(name) {
                     Value::Bool(
                         self.doc.attr(node, name).is_some()
@@ -1695,6 +1697,10 @@ impl Bridge<'_> {
             return Ok(false);
         }
         let node = self.dom_node(object)?;
+        if property=="charset" && self.resource_charset_element(node) {
+            self.resource_charset_set(node,value)?;
+            return Ok(true);
+        }
         if property != "origin" && self.anchor_url_property(node, property) {
             self.anchor_url_set(node, property, value)?;
             return Ok(true);
@@ -1750,10 +1756,6 @@ impl Bridge<'_> {
                 return Ok(true);
             }
             if let Some(name) = script_attribute(property) {
-                if name == "charset" {
-                    self.resource_charset_set(node, value)?;
-                    return Ok(true);
-                }
                 let text = if boolean_script_attribute(name) {
                     value.truthy().then(String::new)
                 } else {
