@@ -7113,7 +7113,9 @@ if(image.src!==''||image.alt!==''||image.width!==0||image.height!==0||link.href!
             &[r#"
 var symbol=Symbol('timer token'), p=document.getElementById('p'), field=document.getElementById('field');
 var area=document.getElementById('area'), check=document.getElementById('check'), choice=document.getElementById('choice');
-p.hidden=symbol; field.disabled=symbol; check.checked=symbol;
+var rejected=false;try{p.hidden=symbol;}catch(error){rejected=error instanceof TypeError;}
+if(!rejected||p.hidden||p.hasAttribute('hidden'))throw Error('hidden union Symbol refusal');
+p.hidden=true; field.disabled=symbol; check.checked=symbol;
 if(!p.hidden||!field.disabled||!check.checked)throw Error('boolean Symbol');
 document.title=null; p.title=null; p.textContent=null; field.value=null; area.value=null;
 if(document.title!=='null'||p.title!=='null'||p.textContent!==''||field.value!==''||area.value!=='')throw Error('null conversion');
@@ -7121,7 +7123,8 @@ p.textContent=undefined; field.value=undefined; choice.selectedIndex=null;
 var text=document.createTextNode('old'); text.nodeValue=null;
 if(text.data!==''||p.textContent!==''||field.value!=='undefined'||choice.value!=='a')throw Error('existing defaults');
 text.data=null; if(text.data!=='null')throw Error('data null');
-text.textContent=undefined; if(text.data!=='undefined')throw Error('text undefined');
+text.textContent=undefined; if(text.data!=='')throw Error('nullable textContent');
+text.data=undefined; if(text.data!=='undefined')throw Error('non-nullable CharacterData');
 p.addEventListener('click',function(){},symbol);
 setTimeout(function(value){if(value!==symbol||typeof value!=='symbol')throw Error('argument identity');document.title=value.description;},0,symbol);
 "#],

@@ -427,14 +427,18 @@ for(var receiver of [document,document.createTextNode('x'),native,Object.create(
         assert_eq!(setup.errors, 0, "{}", page.report());
         for refused in [
             "p.style='background-image:url(a),url(b)';",
-            "Object.defineProperty(p,'ownerDocument',{get:function(){return null;}});",
             "Object.defineProperty(p,'onclick',{value:17});",
         ] {
             let outcome = page.console_eval(&mut doc, &mut forms, refused);
             assert_eq!(outcome.errors, 1, "{refused}: {}", page.report());
         }
-        let outcome = page.console_eval(&mut doc, &mut forms,
-            "if(p.ownerDocument!==document||p.style!==native||Object.hasOwn(p,'style')||p.getAttribute('style')!==keep)throw 'protected native state';");
+        let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var owner=Object.getOwnPropertyDescriptor(Node.prototype,'ownerDocument').get;
+Object.defineProperty(p,'ownerDocument',{configurable:true,get:function(){return null;}});
+if(p.ownerDocument!==null||owner.call(p)!==document||p.style!==native)throw 'author property versus native owner';
+delete p.ownerDocument;
+if(p.ownerDocument!==document||p.style!==native||Object.hasOwn(p,'style')||p.getAttribute('style')!==keep)throw 'protected native state';
+"#);
         assert_eq!(outcome.errors, 0, "{}", page.report());
     }
 

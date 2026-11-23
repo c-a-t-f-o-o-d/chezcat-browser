@@ -1785,9 +1785,15 @@ document.title='animation-absence-ok';
     for operation in ["d.animate=function(){return 17;};","Object.defineProperty(d,'animate',{value:function(){return 17;}});","d.getAnimations;","video.animate=function(){return 17;};","Object.defineProperty(video,'animate',{value:function(){return 17;}});","video.getAnimations;"] {
         let outcome=page.console_eval(&mut doc,&mut forms,operation);assert_eq!(outcome.errors,1,"{operation}: {}",page.report());assert_eq!(page.state.dom_commits,commits);assert_eq!(doc.nodes.len(),nodes);assert!(!page.has_host_tasks());
     }
-    let mut bridge=Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    let foreign=bridge.doc.nodes.iter().enumerate().find_map(|(n,_)|(bridge.doc.attr(n,"id")==Some("foreign")).then_some(n)).unwrap();
-    assert!(bridge.get(node_handle(foreign),"animate").is_err(),"foreign animation capability remains unavailable");
+    let outcome = page.console_eval(&mut doc, &mut forms, r#"
+var svg=document.getElementById('foreign');
+if(svg.namespaceURI!=='http://www.w3.org/2000/svg'||svg.animate!==undefined||'animate' in svg)throw 'SVG animation exposure';
+var denied=false;try{svg.animate([]);}catch(error){denied=error instanceof TypeError;}if(!denied)throw 'SVG animation call';
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    assert_eq!(page.state.dom_commits, commits);
+    assert_eq!(doc.nodes.len(), nodes);
+    assert!(!page.has_host_tasks());
 }
 
 #[test]
@@ -3624,8 +3630,9 @@ if(document.f.q!==document.getElementById('query')||document.f.query!==document.
 // Selectors now use the canonical Element prototype; this genuine named field overrides it.
 var selectorField=document.getElementById('selector-shadow');
 if(document.f.querySelector!==selectorField||selectorField.form!==document.f||Element.prototype.querySelector.call(document.f,'#query')!==document.f.q)throw 'named selector versus canonical borrowed operation';
-// Keep the native-priority witness on the untouched per-instance tag-name method.
-if(document.body.tagName!=='BODY'||typeof document.getElementById!=='function'||typeof document.f.getElementsByTagName!=='function'||typeof document.f.textContent!=='string')throw 'native priority';
+var controls=Element.prototype.getElementsByTagName.call(document.f,'input');
+if(controls.length!==4||document.f.getElementsByTagName!==controls[3]||controls[3].form!==document.f)throw 'named control and borrowed tag-name operation';
+if(document.body.tagName!=='BODY'||typeof document.getElementById!=='function'||typeof document.f.textContent!=='string')throw 'native priority';
 if(document.missing!==undefined||document.inert!==undefined||document.f.missing!==undefined||'missing' in document.f)throw 'missing or inert name';
 document.f&&document.f.q.focus();document.title='named focus passed';
 "#],
