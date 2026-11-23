@@ -627,6 +627,11 @@ impl Runtime {
                     self.define_host_attribute(prototype, window, property, get, Some(set))?;
                 }
             }
+            for &(interface, get, set) in html_reflection_interface::CHARSET {
+                if name == interface {
+                    self.define_host_attribute(prototype, window, "charset", get, Some(set))?;
+                }
+            }
             if name == "HTMLSlotElement" {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }

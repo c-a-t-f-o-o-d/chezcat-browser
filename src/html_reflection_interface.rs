@@ -51,3 +51,14 @@ pub(crate) fn meta_operation(method: &str) -> Option<(&'static str, &'static str
         (method == get || method == set).then_some((property, attr, method == set))
     })
 }
+
+pub(crate) const CHARSET: &[(&str, &str, &str)] = &[
+    ("HTMLScriptElement", "\0HTMLScriptElement.get.charset", "\0HTMLScriptElement.set.charset"),
+    ("HTMLLinkElement", "\0HTMLLinkElement.get.charset", "\0HTMLLinkElement.set.charset"),
+];
+
+pub(crate) fn charset_operation(method: &str) -> Option<(&'static str, bool)> {
+    CHARSET.iter().find_map(|&(interface, get, set)| {
+        (method == get || method == set).then_some((interface, method == set))
+    })
+}
