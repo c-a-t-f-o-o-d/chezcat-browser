@@ -13,6 +13,25 @@ fn evict_scratch(page:&mut Page) {
     page.state.retained-=old.capacity()*size_of::<tree_order::Visit>();drop(old);
     page.state.dirty=true;page.state.copy_work=page.state.limits.copy_bytes;page.state.host_work=page.state.limits.host_work;
 }
+
+#[test]
+fn anonymous_leaf_appends_preserve_current_order_id_ordinals_and_sibling_slots() {
+    let (mut doc, mut forms, mut page) = page(11, true);
+    let result = page.console_eval(&mut doc, &mut forms,
+        "var early=document.getElementById('key00000'),later=document.getElementById('key00001');var added=document.createElement('span');early.appendChild(added);");
+    assert_eq!(result.errors, 0, "{}", page.report());
+    assert!(!page.state.dirty);
+    for &(node, ordinal) in &page.state.tree.ids {
+        assert_eq!(page.state.tree.order[ordinal], node);
+    }
+    let result = page.console_eval(&mut doc, &mut forms, r#"
+if(early.firstChild!==added||added.parentNode!==early||added.nextSibling!==null||!added.isConnected)throw 'appended topology';
+if(added.compareDocumentPosition(later)!==4||document.getElementById('key00001')!==later)throw 'live order';
+added.id='key00001';if(document.getElementById('key00001')!==added)throw 'duplicate order after ID mutation';
+early.removeChild(added);if(document.getElementById('key00001')!==later||added.isConnected)throw 'removal rebuild';
+"#);
+    assert_eq!(result.errors, 0, "{}", page.report());
+}
 #[test]
 fn tree_order_storage_six_thousand_real_nodes_pay_actual_order_and_reusable_stack_capacity() {
     let(doc,_,mut page)=page(6000,false);

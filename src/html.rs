@@ -182,7 +182,7 @@ impl AttributeName {
     }
     pub(crate) fn matches_dom(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:&str)->bool{self.matches_names(namespace,crate::dom_string::DomStringRef::Scalar(local))}
     pub(crate) fn matches_names(&self,namespace:Option<crate::dom_string::DomStringRef<'_>>,local:crate::dom_string::DomStringRef<'_>)->bool{
-        let equal=match(self.namespace_uri(),namespace){(None,None)=>true,(Some(a),Some(b))=>a.code_units().eq(b.code_units()),_=>false};equal&&self.local().code_units().eq(local.code_units())
+        let equal=match(self.namespace_uri(),namespace){(None,None)=>true,(Some(a),Some(b))=>a.view().same_units(b),_=>false};equal&&self.local().view().same_units(local)
     }
     pub fn same_expanded_name(&self, other: &Self) -> bool { self.matches_names(other.namespace_uri().map(DomString::view), other.local().view()) }
     pub fn bytes(&self) -> usize {

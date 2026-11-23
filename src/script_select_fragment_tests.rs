@@ -1,5 +1,23 @@
 //! Original Page-level fragment/control ownership regressions; no libraries.
 use super::*;
+
+#[test]
+fn leaf_form_plan_skips_unrelated_controls_and_keeps_real_owner_changes() {
+    let (mut doc, mut forms, mut page, outcome) = run("");
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    let find = |name| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(name)).unwrap();
+    let (leaf, control, form) = (find("events"), find("keep"), find("b"));
+    let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    let allowance = bridge.state.host_work;
+    bridge.state.host_work = 1;
+    let noop = bridge.prepare_select_form_change(None, &[(leaf, Some(form))]).unwrap();
+    assert!(noop.additions.is_empty() && noop.metadata.is_empty() && noop.radio_checked.is_empty());
+    assert_eq!(noop.retained_bytes, 0);
+    bridge.state.host_work = allowance;
+    let moving = bridge.prepare_select_form_change(None, &[(control, Some(form))]).unwrap();
+    assert!(moving.metadata.iter().any(|&(node, owner, _, _)| node == control && owner == Some(form)));
+    assert_eq!(bridge.forms.controls[&control].owner, None);
+}
 fn run(source: &str) -> (Document, Forms, Page, Outcome) {
     let mut doc = crate::html::parse("<html><body><input id=keep value=original><form id=a action='/result'><div id=host></div><input name=after value=tail></form><form id=b><div id=other></div></form><fieldset disabled><div id=blocked></div><legend><div id=allowed></div></legend></fieldset><p id=events></p></body></html>");
     doc.scripting_enabled = true;

@@ -19,7 +19,14 @@ pub(crate) enum DomStringRef<'a>{Scalar(&'a str),Raw(&'a [u16])}
 impl<'a> DomStringRef<'a>{
     pub(crate) fn split_colon(self)->(Option<Self>,Self){match self{Self::Scalar(s)=>s.split_once(':').map_or((None,self),|(p,l)|(Some(Self::Scalar(p)),Self::Scalar(l))),Self::Raw(u)=>u.iter().position(|&n|n==0x3a).map_or((None,self),|at|(Some(Self::Raw(&u[..at])),Self::Raw(&u[at+1..])))}}
     pub(crate) fn is_empty(self)->bool{match self{Self::Scalar(s)=>s.is_empty(),Self::Raw(u)=>u.is_empty()}}
-    pub(crate) fn equals(self,text:&str)->bool{self.code_units().eq(text.encode_utf16())}
+    pub(crate) fn same_units(self, other: DomStringRef<'_>) -> bool {
+        match (self, other) {
+            (Self::Scalar(a), DomStringRef::Scalar(b)) => a == b,
+            (Self::Raw(a), DomStringRef::Raw(b)) => a == b,
+            _ => self.code_units().eq(other.code_units()),
+        }
+    }
+    pub(crate) fn equals(self,text:&str)->bool{self.same_units(DomStringRef::Scalar(text))}
     pub(crate) fn code_units(self)->Units<'a>{match self{Self::Scalar(s)=>Units::Scalar(s.encode_utf16()),Self::Raw(u)=>Units::Raw(u.iter().copied())}}
     pub(crate) fn logical_bytes(self)->usize{match self{Self::Scalar(s)=>s.len(),Self::Raw(u)=>u.len()*2}}
     pub(crate) fn copy_bytes(self)->Result<usize,String>{match self{Self::Scalar(s)=>Ok(s.len()),Self::Raw(u)=>{let(p,raw)=DomString::projected_size(u)?;p.checked_add(if raw{u.len().checked_mul(2).ok_or("DOMString view copy overflow.")?}else{0}).ok_or("DOMString view copy overflow.".into())}}}
@@ -131,17 +138,27 @@ impl From<String> for DomString {fn from(projection:String)->Self{Self {projecti
 impl From<&str> for DomString {fn from(text:&str)->Self{Self::from(text.to_owned())}}
 impl Deref for DomString {type Target=str;fn deref(&self)->&str{self.render_projection()}}
 impl fmt::Display for DomString {fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{self.render_projection().fmt(f)}}
-impl PartialEq for DomString {fn eq(&self,other:&Self)->bool{self.code_units().eq(other.code_units())}}
+impl PartialEq for DomString {fn eq(&self,other:&Self)->bool{self.view().same_units(other.view())}}
 impl Eq for DomString {}
 impl Ord for DomString{fn cmp(&self,other:&Self)->std::cmp::Ordering{self.code_units().cmp(other.code_units())}}
 impl PartialOrd for DomString{fn partial_cmp(&self,other:&Self)->Option<std::cmp::Ordering>{Some(self.cmp(other))}}
-impl PartialEq<str> for DomString {fn eq(&self,other:&str)->bool{self.code_units().eq(other.encode_utf16())}}
+impl PartialEq<str> for DomString {fn eq(&self,other:&str)->bool{self.view().equals(other)}}
 impl PartialEq<&str> for DomString {fn eq(&self,other:&&str)->bool{self==*other}}
 impl PartialEq<String> for DomString {fn eq(&self,other:&String)->bool{self==other.as_str()}}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_dom_string_shared_equality_checks_exact_scalar_and_raw_units() {
+        let text = DomStringRef::Scalar("a😀");
+        let same = DomStringRef::Raw(&[0x61, 0xd83d, 0xde00]);
+        assert!(text.same_units(same) && same.same_units(text));
+        assert!(same.same_units(DomStringRef::Raw(&[0x61, 0xd83d, 0xde00])));
+        assert!(!DomStringRef::Raw(&[0xd800]).equals("\u{fffd}"));
+        assert!(!DomStringRef::Scalar("é").equals("e\u{301}"));
+        assert!(!DomStringRef::Scalar("A").equals("a"));
+    }
     #[test]
     fn native_dom_string_preserves_isolates_and_refuses_scalar_projection_as_data(){
         let text=DomString::from_units(&[0xd800,0x41,0xdfff],32).unwrap();
