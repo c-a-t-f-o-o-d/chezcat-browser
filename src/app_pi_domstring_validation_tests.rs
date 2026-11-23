@@ -11,6 +11,10 @@ var root=document.getElementById('bound'),xml=null,owner=null,source=null,copied
 </script><div id=table-owner><table>BeforeRow<tr><?Row-Marker ready?><td>InsideCell</table></div><script>
 var host=document.getElementById('table-owner'),table=host.lastChild,row=table.firstChild.firstChild;
 if(host.firstChild.nodeType!==3||host.firstChild.data!=='BeforeRow'||table.localName!=='table'||table.firstChild.localName!=='tbody'||row.localName!=='tr'||row.parentNode!==table.firstChild||row.firstChild.target!=='Row-Marker'||row.firstChild.data!=='ready'||row.lastChild.localName!=='td'||row.lastChild.textContent!=='InsideCell')throw 'native table placement';
+</script><section id=format-owner><p><a href=#end data-marker=one>First</p>Second</a></section><script>
+var formatOwner=document.getElementById('format-owner'),firstLink=formatOwner.firstChild.firstChild,secondLink=formatOwner.lastChild;
+if(firstLink===secondLink||secondLink.localName!=='a'||firstLink.textContent!=='First'||secondLink.textContent!=='Second'||secondLink.parentNode!==formatOwner||secondLink.getAttribute('href')!=='#end'||secondLink.getAttribute('data-marker')!=='one')throw 'native reconstructed anchor';
+secondLink.setAttribute('data-marker','two');if(firstLink.getAttribute('data-marker')!=='one')throw 'aliased formatting attribute';
 </script></body></html>"#).unwrap();
     let mut app=App::new();app.resize(480,320);app.set_javascript_enabled(true);app.open(&file.0);
     assert!(!app.failed&&!app.is_loading(),"{}",app.status);

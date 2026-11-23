@@ -53,6 +53,9 @@ fn space(b: u8) -> bool {
 fn table_parent(s: &str) -> bool {
     section(s) || matches!(s, "table" | "tr")
 }
+pub(super) fn foster_target(doc: &Document, node: usize) -> bool {
+    table_parent(name(doc, node))
+}
 fn limit_error(n: usize) -> String {
     format!("HTML document node limit reached ({n} nodes).")
 }
@@ -174,6 +177,7 @@ impl Tables {
         stack: &mut Vec<usize>,
         tag: &Tag,
         limit: usize,
+        formatting: &mut active_formatting::Formatting,
     ) -> Result<Action, String> {
         let n = tag.name.as_str();
         let end = tag.closing;
@@ -199,6 +203,7 @@ impl Tables {
                 Mode::Cell => {
                     if end && matches!(n, "td" | "th") {
                         if n == current {
+                            formatting.clear_to_marker();
                             stack.truncate(depth);
                         }
                         return Ok(Action::Consumed);
@@ -208,6 +213,7 @@ impl Tables {
                             && matches!(n, "table" | "tr" | "tbody" | "tfoot" | "thead")
                             && stack[table.depth..depth].iter().any(|&i| name(doc, i) == n);
                     if close {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         continue;
                     }
@@ -219,10 +225,12 @@ impl Tables {
                 }
                 Mode::Caption => {
                     if end && n == "caption" {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         return Ok(Action::Consumed);
                     }
                     if !end && part(n) || end && n == "table" {
+                        formatting.clear_to_marker();
                         stack.truncate(depth);
                         continue;
                     }
@@ -416,7 +424,13 @@ impl Tables {
         self.open.last_mut().unwrap().slot += 1;
         Ok(())
     }
-    pub(super) fn flush(&mut self, doc: &mut Document, limit: usize) -> Result<(), String> {
+    pub(super) fn flush(
+        &mut self,
+        doc: &mut Document,
+        stack: &mut Vec<usize>,
+        formatting: &mut active_formatting::Formatting,
+        limit: usize,
+    ) -> Result<(), String> {
         let Some(parent) = self.pending_parent.take() else {
             return Ok(());
         };
@@ -424,6 +438,12 @@ impl Tables {
         let foster = std::mem::take(&mut self.nonspace);
         if !foster {
             if !append_text_value(doc, parent, text, limit)? {
+                return Err(limit_error(limit));
+            }
+            return Ok(());
+        }
+        if formatting.reconstruct(doc, stack, limit, Some(self))? {
+            if !append_text_value(doc, *stack.last().unwrap(), text, limit)? {
                 return Err(limit_error(limit));
             }
             return Ok(());
