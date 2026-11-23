@@ -28,7 +28,13 @@ fn checkbox_pixels(app:&App,left:i32,checked:bool)->Vec<u32> {
     let node=id(app,"check");let controls:Vec<_>=app.page.controls.iter().filter(|rect|rect.node==node).collect();assert_eq!(controls.len(),1);
     let rect=controls[0];assert_eq!((rect.x,rect.y,rect.width,rect.height),(left,80,24,24));
     let border=app.page.border_rects[node].unwrap();assert_eq!((border.x,border.y,border.width,border.height),(left,80,24,24));
-    for(dx,dy)in[(0,0),(12,12),(23,23)] {assert_eq!(app.page.control_at(left+dx,80+dy),Some(node));}
+    for (dx, dy) in [(0, 0), (12, 12), (23, 23)] {
+        let (x, y) = (left + dx, 80 + dy);
+        let top = app.page.element_node_at(x, y);
+        assert_eq!(app.page.control_at(x, y), Some(node),
+            "checkbox checked={checked} at ({x},{y}), topmost node {top:?}, id {:?}",
+            top.and_then(|item| app.document.attr(item, "id")));
+    }
     assert_eq!(app.page.control_at(left-1,92),None);assert_eq!(app.page.control_at(left+24,92),None);
     let control=&app.forms.controls[&node];assert_eq!(control.kind,Kind::Checkbox);assert_eq!(control.checked,checked);assert_eq!(control.value.text(),"yes");assert_eq!(app.document.attr(node,"checked"),Some(""));assert_eq!(app.document.attr(node,"value"),Some("yes"));
     let canvas=app.draw();

@@ -471,15 +471,25 @@ fn real_tree_pointer_hits_select_the_node_and_fold_only_the_requested_branch() {
         .join("\n")
         .contains("data-note = original attribute"));
 
+    // The doctype is a real leaf preceding the root element. Hit the branch
+    // itself and keep the sibling row visible while the branch is collapsed.
+    let html = app.document.nodes[0].children.iter().copied().find(|&node|
+        matches!(&app.document.nodes[node].kind, crate::html::NodeKind::Element { tag, .. } if tag == "html")).unwrap();
+    let doctype = app.document.nodes[0].children.iter().copied().find(|&node|
+        matches!(&app.document.nodes[node].kind, crate::html::NodeKind::DocumentType(_))).unwrap();
+    let rows_before: Vec<_> = app.inspector_snapshot().rows.iter().map(|row| row.node).collect();
+    let branch_row = rows_before.iter().position(|&node| node == Some(html)).unwrap();
+    assert!(rows_before.iter().position(|&node| node == Some(doctype)).unwrap() < branch_row);
     app.inspector.scroll = 0;
-    let count = app.inspector_snapshot().rows.len();
     let x = body.x + 10;
-    let y = body.y + 7;
+    let y = body.y + branch_row as i32 * app.inspector.line_height() + 7;
     app.pointer_down(x, y, false);
     app.pointer_up(x, y);
-    assert_eq!(app.inspector_snapshot().rows.len(), 1);
+    assert_eq!(app.inspector.selected, Some(html));
+    assert_eq!(app.inspector_snapshot().rows.iter().map(|row| row.node).collect::<Vec<_>>(),
+               [Some(doctype), Some(html)]);
     app.pointer_down(x, y, false);
     app.pointer_up(x, y);
-    assert_eq!(app.inspector_snapshot().rows.len(), count);
+    assert_eq!(app.inspector_snapshot().rows.iter().map(|row| row.node).collect::<Vec<_>>(), rows_before);
     assert!(!report(&app).contains("JavaScript error"));
 }

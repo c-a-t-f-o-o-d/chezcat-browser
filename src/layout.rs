@@ -1082,7 +1082,9 @@ fn build_viewport_with_fonts_inner(
         .saturating_add(16)
         .clamp(16, MAX_HEIGHT);
     engine.finish_decorations();
-    if !engine.order_explicit_stacking(budget.as_deref_mut())?{engine.order_positioned_paint();}
+    if !engine.order_explicit_stacking(budget.as_deref_mut())? {
+        engine.order_positioned_paint(budget.as_deref_mut())?;
+    }
     engine.filter_visibility_paint(budget.as_deref_mut())?;
     engine.finish_opacity();
     engine.build_hits();
@@ -1743,14 +1745,15 @@ impl Engine<'_> {
         }
     }
 
-    fn order_positioned_paint(&mut self) {
+    fn order_positioned_paint(&mut self, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
         if self.pending.is_empty() && self.relatives.is_empty() && self.translated_ranks.is_empty() {
-            return;
+            return Ok(());
         }
-        // Supported positioned boxes use the default auto/zero layer. Normal
-        // flow paints first, then positioned groups in DOM order; child groups
-        // keep their own later position. Explicit z-index/stacking contexts
-        // remain outside this subset.
+        // Opacity/transform contexts already supply scene ranks. The ordinary
+        // positioned path also needs the current tree order after a DOM move.
+        if self.translated_ranks.is_empty() {
+            self.rank_auto_positioned_items(budget)?;
+        }
         let items = std::mem::take(&mut self.layout.items);
         let fixed = std::mem::take(&mut self.layout.fixed_items);
         let layers = std::mem::take(&mut self.layout.positioned_items);
@@ -1765,7 +1768,7 @@ impl Engine<'_> {
                 self.layout.positioned_items.push(layer);
                 self.layout.item_clips.push(clip);
             }
-            return;
+            return Ok(());
         }
         let mut ordered: Vec<_> = items
             .into_iter()
@@ -1783,6 +1786,7 @@ impl Engine<'_> {
             self.layout.item_clips.push(clip);
             self.opacity_items.push(opacity);
         }
+        Ok(())
     }
 
     fn build_hits(&mut self) {
@@ -5945,6 +5949,30 @@ mod tests {
         page.set_scroll(500);
         assert_eq!(page.viewport_link_regions(400, 500, 200), 2);
         assert_eq!(page.viewport_link_regions(0, 500, 200), 0);
+    }
+
+    #[test]
+    fn positioned_sibling_paint_and_link_hits_follow_live_order_with_stable_node_ids() {
+        let mut doc = parse("<!doctype html><style>body{margin:0}a{display:block;position:absolute;left:0;top:0;width:80px;height:30px}#a{background:red}#b{background:blue}</style><body><a id=a href=first>A</a><a id=b href=second>B</a></body>");
+        let find = |id| (0..doc.nodes.len()).find(|&n| doc.attr(n, "id") == Some(id)).unwrap();
+        let (a, b) = (find("a"), find("b"));
+        let parent = doc.nodes.iter().position(|node| node.children.contains(&a) && node.children.contains(&b)).unwrap();
+        let verify = |doc: &Document, front, url, color| {
+            let scene = layout(doc, 240);
+            assert_eq!(scene.element_node_at(20, 15), Some(front));
+            assert_eq!(scene.link_at(20, 15), Some(url));
+            let last = scene.items.iter().rev().find_map(|item| match item {
+                PaintItem::Rect {node, color, ..} if *node == a || *node == b => Some((*node, *color)),
+                _ => None,
+            });
+            assert_eq!(last, Some((front, color)));
+        };
+        verify(&doc, b, "second", 0x0000ff);
+        let siblings = &mut doc.nodes[parent].children;
+        let first = siblings.iter().position(|&n| n == a).unwrap();
+        let second = siblings.iter().position(|&n| n == b).unwrap();
+        siblings.swap(first, second);
+        verify(&doc, a, "first", 0xff0000);
     }
 
     #[test]
