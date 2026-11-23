@@ -45,6 +45,10 @@ pub(super) const ENTRY_END: u32 = 0x8700_0000; // AbortController owns the next 
 const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 
 #[cfg(test)]
+#[path = "script_inert_charset_tests.rs"]
+mod charset_tests;
+
+#[cfg(test)]
 #[path = "script_inert_attributes_tests.rs"]
 mod attribute_tests;
 

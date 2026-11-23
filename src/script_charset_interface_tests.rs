@@ -68,7 +68,7 @@ var value={toString:function(){calls++;return '\ud800';}};putScript(s,value);put
 
 
 #[test]
-fn charset_interface_genuine_inert_owner_and_foreign_brand_refusals_precede_conversion() {
+fn charset_interface_genuine_inert_owner_and_foreign_brand_contracts() {
     let (mut doc,mut forms,mut page)=fixture();
     run(&mut doc,&mut forms,&mut page,r#"
 var xml=document.implementation.createDocument(null,'Root'),calls=0,value={toString:function(){calls++;return 'changed';}};
@@ -76,9 +76,8 @@ for(var entry of [['script',HTMLScriptElement],['link',HTMLLinkElement]]){
 var C=entry[1],saved=Object.getOwnPropertyDescriptor(C.prototype,'charset'),inert=xml.createElementNS('http://www.w3.org/1999/xhtml',entry[0]),foreign=xml.createElementNS('urn:outside',entry[0]);
 if(!(inert instanceof C)||foreign instanceof C||Object.getPrototypeOf(C.prototype)!==HTMLElement.prototype)throw 'real namespace interface';
 var bad=false;try{new C();}catch(e){bad=e instanceof TypeError;}if(!bad)throw 'illegal interface constructor';
-bad=false;try{saved.set.call(inert,value);}catch(e){bad=e.name==='NotSupportedError';}if(!bad||calls||inert.getAttribute('charset')!==null)throw 'inert owner refusal before conversion';
-bad=false;try{saved.get.call(inert);}catch(e){bad=e.name==='NotSupportedError';}if(!bad)throw 'inert getter refusal';
-bad=false;try{saved.set.call(foreign,value);}catch(e){bad=e instanceof TypeError;}if(!bad||calls)throw 'foreign brand before conversion';
+var before=calls;saved.set.call(inert,value);if(calls!==before+1||inert.getAttribute('charset')!=='changed'||saved.get.call(inert)!=='changed')throw 'genuine inert owner storage';
+bad=false;try{saved.set.call(foreign,value);}catch(e){bad=e instanceof TypeError;}if(!bad||calls!==before+1)throw 'foreign brand before conversion';
 }
 "#);
 }
