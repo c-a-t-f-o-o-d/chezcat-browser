@@ -18,6 +18,8 @@ pub struct ScriptRequest {
     pub nonce: Option<String>,
     pub policy: Arc<crate::csp::PolicySet>,
     pub same_origin_only: bool,
+    /// Charset captured when the element is prepared; later mutations do not alter this request.
+    pub(crate) fallback_encoding: crate::text_codec::Encoding,
     /// Maximum source the document can admit when the request is prepared.
     /// Completion rechecks the remaining allowance after other scripts run.
     pub source_limit: usize,
@@ -213,6 +215,7 @@ impl Bridge<'_> {
             .unwrap_or_else(crate::navigation::Location::home);
         let nonce = crate::csp::nonce(self.doc, node).map(str::to_owned);
         let same_origin_only = self.doc.attr(node, "crossorigin").is_some();
+        let fallback_encoding = crate::loader::script_fallback(self.doc, node);
         let prepare = (|| {
             if kind == "module" {
                 return Err("JavaScript modules are not implemented.".to_owned());
@@ -280,7 +283,7 @@ impl Bridge<'_> {
         let source_limit=if self.state.limits.test_entry_arenas{self.state.limits.capacity.source_bytes.min(self.state.limits.capacity.retained_source.saturating_sub(self.state.dynamic.source_bytes))}else{self.state.limits.capacity.source_bytes};
         #[cfg(not(test))]
         let source_limit=self.state.limits.capacity.source_bytes;
-        let request=Arc::new(ScriptRequest{node,target,origin,nonce,policy:policy.clone(),same_origin_only,source_limit,error,
+        let request=Arc::new(ScriptRequest{node,target,origin,nonce,policy:policy.clone(),same_origin_only,fallback_encoding,source_limit,error,
             storage_limit:self.state.limits.capacity.script_storage_bytes,_storage:storage,_policy_storage:policy_storage.clone()});
         if let Some(mut next)=bitmap{next.append(&mut self.state.dynamic.started);self.state.dynamic.started=next;}
         if required>self.state.dynamic.started.len(){self.state.dynamic.started.resize(required,0);}
