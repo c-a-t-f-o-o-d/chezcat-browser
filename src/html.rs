@@ -574,7 +574,7 @@ fn parse_internal(
 
         if tag.closing {
             let parent=*stack.last().unwrap();
-            if structure.is_some() && document.nodes[parent].namespace==Namespace::Html && fragment_formatting(&tag.name) && formatting.end(&document,&mut stack,&tag.name) {continue;}
+            if structure.is_some() && document.nodes[parent].namespace==Namespace::Html && fragment_formatting(&tag.name) && formatting.end(&mut document,&mut stack,&tag.name,&mut tables,loaded.unwrap())? {continue;}
             if let Some(root) = svg.root {
                 let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
                     matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
@@ -609,10 +609,10 @@ fn parse_internal(
             return Err("HTML fragment implied-close formatting reconstruction is not implemented.".into());
         }
         if structure.is_some() && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
-            if tag.name=="a"{formatting.end(&document,&mut stack,&tag.name);}
+            if tag.name=="a"{formatting.end(&mut document,&mut stack,&tag.name,&mut tables,loaded.unwrap())?;}
             let table_foster=foster;
             if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
-            if tag.name=="nobr" && formatting.close_nested_nobr(&document,&mut stack) {
+            if tag.name=="nobr" && formatting.close_nested_nobr(&mut document,&mut stack,&mut tables,loaded.unwrap())? {
                 foster=table_foster && table_construction::foster_target(&document,*stack.last().unwrap());
                 if formatting.reconstruct(&mut document,&mut stack,node_limit,foster.then_some(&mut tables))? {foster=false;}
             }
@@ -671,6 +671,7 @@ fn parse_internal(
             children: Vec::new(),
         });
 
+        formatting.topology.linked(node,parent)?;
         if raw {
             let check = loaded.map(|tree| tree.check_cancel);
             let (content_end, after_end_tag) = raw_text_end_mode(input, position, &tag.name, checked, check)?;
@@ -729,7 +730,7 @@ fn parse_internal(
         }
     }
 
-    if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
+    if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;formatting.topology.verify(&document,loaded.unwrap().check_cancel)?;}
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }

@@ -1,5 +1,90 @@
 use super::*;
 
+#[test]
+fn formatting_adoption_inner_loop_retains_original_chain_and_moves_three_replacements() {
+    let doc = parse_loaded_document("<div><a><b><u><i><code><div></a>", &|| Ok(())).unwrap();
+    let outer = first(&doc, "div");
+    assert_eq!(kids(&doc, outer), ["a", "u"]);
+    let mut old = doc.nodes[outer].children[0];
+    for tag in ["b", "u", "i", "code"] {
+        assert_eq!(kids(&doc, old), [tag]);
+        old = doc.nodes[old].children[0];
+    }
+    assert!(doc.nodes[old].children.is_empty());
+    let mut new = doc.nodes[outer].children[1];
+    for tag in ["i", "code", "div", "a"] {
+        assert_eq!(kids(&doc, new), [tag]);
+        new = doc.nodes[new].children[0];
+    }
+    assert!(doc.nodes[new].children.is_empty());
+    let mut parents = vec![0; doc.nodes.len()];
+    for n in &doc.nodes {
+        for &i in &n.children {
+            parents[i] += 1;
+        }
+    }
+    assert_eq!(parents[0], 0);
+    assert!(parents[1..].iter().all(|&n| n == 1));
+}
+
+#[test]
+fn formatting_adoption_reparents_blocks_and_preserves_original_native_anchor_attributes() {
+    let source = "<a href=#end data-label=old>1<p>2</a>3</p>";
+    for doc in [
+        parse_loaded_document(source, &|| Ok(())).unwrap(),
+        parse_inert_html(source, 10, &|| Ok(())).unwrap().0,
+    ] {
+        let body = first(&doc, "body");
+        assert_eq!(kids(&doc, body), ["a", "p"]);
+        let original = doc.nodes[body].children[0];
+        let p = doc.nodes[body].children[1];
+        let replacement = doc.nodes[p].children[0];
+        assert_ne!(original, replacement);
+        assert_eq!(kids(&doc, original), ["#1"]);
+        assert_eq!(kids(&doc, p), ["a", "#3"]);
+        assert_eq!(kids(&doc, replacement), ["#2"]);
+        assert_eq!(doc.attr(replacement, "href"), Some("#end"));
+        assert_eq!(doc.attr(replacement, "data-label"), Some("old"));
+    }
+    assert!(
+        parse_inert_html(source, 8, &|| Ok(()))
+            .unwrap_err()
+            .contains("node limit")
+    );
+    let calls = std::cell::Cell::new(0);
+    let check = || {
+        calls.set(calls.get() + 1);
+        if calls.get() == 4 {
+            Err("cancel adoption".into())
+        } else {
+            Ok(())
+        }
+    };
+    assert!(
+        parse_loaded_document(source, &check)
+            .unwrap_err()
+            .contains("cancel adoption")
+    );
+}
+
+#[test]
+fn formatting_adoption_nested_outer_loops_and_fostered_table_edges_are_in_dom_order() {
+    let doc = parse_loaded_document("<a>1<div>2<div>3</a>4</div>5</div>", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["a", "div"]);
+    let outer = first(&doc, "div");
+    assert_eq!(kids(&doc, outer), ["a", "div", "#5"]);
+    let inner = doc.nodes[outer].children[1];
+    assert_eq!(kids(&doc, inner), ["a", "#4"]);
+    assert_eq!(kids(&doc, doc.nodes[outer].children[0]), ["#2"]);
+    assert_eq!(kids(&doc, doc.nodes[inner].children[0]), ["#3"]);
+    let doc = parse_loaded_document("<table><a>1<p>2</a>3</p></table>", &|| Ok(())).unwrap();
+    let body = first(&doc, "body");
+    assert_eq!(kids(&doc, body), ["a", "p", "table"]);
+    assert_eq!(kids(&doc, first(&doc, "p")), ["a", "#3"]);
+    assert!(doc.nodes[first(&doc, "table")].children.is_empty());
+}
+
 fn kids(doc: &Document, parent: usize) -> Vec<String> {
     doc.nodes[parent]
         .children
