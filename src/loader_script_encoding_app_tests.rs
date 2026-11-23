@@ -83,3 +83,40 @@ a.href='#done';document.getElementById('probe').textContent='native integrated';
     assert_eq!(app.document.title,"native integrated","{}",app.activity_report());
     assert_painted_document(&app,"native integrated");exercise_editor_and_link(&mut app);
 }
+
+#[test]
+fn script_charset_domstring_app_exact_metadata_identity_and_conversion_observation() {
+    let source=document("","waiting",false)+r#"<script>
+var s=document.createElement('script');s.charset='Shift_JIS';var attr=s.getAttributeNode('charset');
+var observer=new MutationObserver(function(){});observer.observe(s,{attributes:true,attributeOldValue:true,attributeFilter:['charset']});
+var calls=0;s.charset={toString:function(){calls++;s.setAttribute('charset','during');return 'x\ud800';}};
+var records=observer.takeRecords();
+if(calls!==1||s.charset!=='x\ud800'||attr.value!==s.charset||s.getAttribute('charset')!==s.charset||records.length!==2||records[0].oldValue!=='Shift_JIS'||records[1].oldValue!=='during')throw 'exact script charset conversion';
+attr.value='\udfff';records=observer.takeRecords();if(s.charset!=='\udfff'||records.length!==1||records[0].oldValue!=='x\ud800')throw 'attached script Attr';
+var replacement=document.createAttribute('charset');replacement.value='\ud800\ufffd';s.setAttributeNode(replacement);records=observer.takeRecords();
+if(s.charset!=='\ud800\ufffd'||replacement.ownerElement!==s||attr.ownerElement!==null||records.length!==1||records[0].oldValue!=='\udfff')throw 'script charset Attr transfer';
+s.removeAttribute('charset');records=observer.takeRecords();if(s.charset!==''||replacement.ownerElement!==null||records.length!==1||records[0].oldValue!=='\ud800\ufffd')throw 'raw charset removal';
+document.getElementById('probe').textContent='Exact script metadata';document.title='Exact script metadata';
+</script>"#;
+    let site=Site::new(vec![Response{path:"/page",content_type:"text/html;charset=utf-8",headers:"",body:source.into_bytes()}]);
+    let mut app=open(&site,"/page");assert_eq!(app.document.title,"Exact script metadata","{}",app.activity_report());
+    assert_painted_document(&app,"Exact script metadata");exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page"]);
+}
+
+#[test]
+fn script_charset_domstring_app_unknown_raw_label_and_captured_fallback() {
+    for (header,before,after,expected) in [
+        ("text/html;charset=Shift_JIS",r"Shift_JIS\ud800","windows-1252","あ"),
+        ("text/html;charset=windows-1252","Shift_JIS",r"Shift_JIS\ud800","あ"),
+        ("text/html;charset=windows-1252",r"Shift_JIS\ud800","Shift_JIS","‚\u{a0}"),
+    ] {
+        let prepare=format!("<script>var s=document.createElement('script');s.charset='{before}';s.src='/source';document.body.appendChild(s);s.charset='{after}';</script>");
+        let source=document("","waiting",false)+&prepare;
+        let site=Site::new(vec![
+            Response{path:"/page",content_type:header,headers:"",body:source.into_bytes()},
+            Response{path:"/source",content_type:"text/javascript",headers:"",body:script_bytes(&[0x82,0xa0])},
+        ]);
+        let mut app=open(&site,"/page");assert_eq!(app.document.title,expected,"{}",app.activity_report());
+        assert_painted_document(&app,expected);exercise_editor_and_link(&mut app);assert_eq!(site.requests(),["/page","/source"]);
+    }
+}

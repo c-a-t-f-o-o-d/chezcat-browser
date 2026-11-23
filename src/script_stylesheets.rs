@@ -300,10 +300,6 @@ impl Page {
 }
 
 impl Bridge<'_> {
-    pub(super) fn stylesheet_charset_attribute(&self, node: usize, name: &crate::html::AttributeName) -> bool {
-        self.dom_stylesheet(node) && name.html_is("charset")
-    }
-
     // https://html.spec.whatwg.org/multipage/semantics.html#update-a-style-block
     // The node stays real on CSP/MIME refusal. Source-limit failures precede
     // mutation and never publish a partial sheet or displace a preceding one.
@@ -362,12 +358,7 @@ impl Bridge<'_> {
             return Ok(None);
         };
         if attribute == "charset" {
-            let NodeKind::Element {attrs,..} = &self.doc.nodes[node].kind else {unreachable!()};
-            self.state.work(attrs.len())?;
-            return match self.doc.dom_attr(node, attribute) {
-                Some(value) => Self::dom_string_value(self.state, value).map(Some),
-                None => self.string("").map(Some),
-            };
+            return self.resource_charset_get(node).map(Some);
         }
         if attribute == "disabled" {
             return Ok(Some(Value::Bool(self.doc.attr(node, attribute).is_some())));
@@ -399,10 +390,7 @@ impl Bridge<'_> {
             return Ok(false);
         };
         if attribute == "charset" {
-            let value = self.dom_text(value)?;
-            self.state.copies(attribute.len())?;
-            let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text(attribute)?);
-            self.public_dom_attribute(node, name, Some(value), script_attr::InputPreparation::Pending)?;
+            self.resource_charset_set(node, value)?;
             return Ok(true);
         }
         let value = if attribute == "disabled" {

@@ -6,7 +6,7 @@ use crate::text_codec::{self, Encoding};
 mod mime;
 
 pub(crate) fn script_fallback(doc: &crate::html::Document, node: usize) -> Encoding {
-    doc.attr(node, "charset").and_then(Encoding::label).unwrap_or(doc.encoding)
+    doc.dom_attr(node, "charset").and_then(|value| value.scalar().ok()).and_then(Encoding::label).unwrap_or(doc.encoding)
 }
 
 pub(crate) fn decode_script(

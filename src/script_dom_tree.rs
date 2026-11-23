@@ -1043,6 +1043,7 @@ impl Bridge<'_> {
         }
         if self.dom_script(node) {
             if let Some(name) = script_attribute(property) {
+                if name == "charset" { return self.resource_charset_get(node).map(Some); }
                 return Ok(Some(if boolean_script_attribute(name) {
                     Value::Bool(
                         self.doc.attr(node, name).is_some()
@@ -1749,6 +1750,10 @@ impl Bridge<'_> {
                 return Ok(true);
             }
             if let Some(name) = script_attribute(property) {
+                if name == "charset" {
+                    self.resource_charset_set(node, value)?;
+                    return Ok(true);
+                }
                 let text = if boolean_script_attribute(name) {
                     value.truthy().then(String::new)
                 } else {
