@@ -25,6 +25,9 @@ including the integrated feature changes through `1de1f24` and release preparati
 The [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
 failed at the normal Windows test stage; packaging/publication were not reached
 and no alpha.2 release assets exist. Alpha.1 remains the verified download.
+The `0.82.0-alpha.3` source prepares the accepted F00 requirements, input and
+parser-baseline milestone. F01, F02 and F04 retain open integration and
+conformance requirements. Tagged delivery and download verification are pending.
 The matrix describes implemented source slices; earlier measurements keep their
 recorded revisions and do not become alpha.2 runtime results. See the
 [change summary](../CHANGELOG.md) and [release procedure](RELEASING.md).
