@@ -74,6 +74,7 @@ impl Runtime {
     ) -> Result<bool, Fault> {
         let owner = match key {
             PropertyKey::String(name) => self.property_dispatch_owner(object, name)?,
+            PropertyKey::StringUnits(name) => self.units_dispatch_owner(object, name)?,
             PropertyKey::Symbol(symbol) => self.symbol_dispatch_owner(object, *symbol)?,
         };
         let Some(owner) = owner else { return Ok(false) };

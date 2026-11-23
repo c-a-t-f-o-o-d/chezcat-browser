@@ -1,11 +1,12 @@
 //! Original bounded JSON support. Parsing and serialization use explicit frame
 //! stacks and the enclosing Runtime's object, retained-value and work budgets.
 //! Callback walks retain source snapshots and real holders without recursive
-//! native traversal. Lone UTF-16 surrogates remain an explicit limitation.
+//! native traversal. Serialization escapes unpaired UTF-16 code units exactly;
+//! parsing lone surrogates and raw-unit indentation remain explicit limitations.
 
 use super::{
     number_text, property_index, strict_equal, Fault, Host, Ordinary, PropertyKey, Reference,
-    Runtime, Value,
+    Runtime, StringKey, Value,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
@@ -59,9 +60,9 @@ fn reserve_json_frames<T>(
     Ok(())
 }
 
-fn key_storage(keys: &Vec<String>) -> usize {
-    keys.iter().fold(keys.capacity() * size_of::<String>(), |bytes, key| {
-        bytes.saturating_add(key.capacity())
+fn key_storage(keys: &Vec<StringKey>) -> usize {
+    keys.iter().fold(keys.capacity() * size_of::<StringKey>(), |bytes, key| {
+        bytes.saturating_add(key.capacity_bytes())
     })
 }
 
@@ -380,7 +381,7 @@ impl Reader<'_> {
 
 enum Entries {
     Array { next: usize, length: usize },
-    Object(std::vec::IntoIter<String>),
+    Object(std::vec::IntoIter<StringKey>),
     Listed { next: usize },
 }
 
@@ -400,7 +401,7 @@ struct Writer {
 
 struct ReviveFrame {
     holder: Value,
-    key: String,
+    key: StringKey,
     value: Value,
     context: usize,
     entries: Option<Entries>,
@@ -500,7 +501,7 @@ impl Runtime {
         self.store_property(holder, "".into(), root, Some((true, true, true)))?;
         let first = self.json_revive_frame(
             Value::Object(holder),
-            String::new(),
+            StringKey::Scalar(String::new()),
             snapshots.get(&(usize::MAX, String::new())),
             &source,
             host,
@@ -512,7 +513,7 @@ impl Runtime {
             let frame = frames.last_mut().unwrap();
             let key = match frame.entries.as_mut() {
                 Some(Entries::Array { next, length }) if *next < *length => {
-                    let key = next.to_string();
+                    let key = StringKey::Scalar(next.to_string());
                     *next += 1;
                     Some(key)
                 }
@@ -523,8 +524,11 @@ impl Runtime {
                 let holder = frame.value.clone();
                 let id = self.ordinary_id(self.ordinary_required(&holder)?)?;
                 let snapshot = if frame.snapshot_matches {
-                    self.work(key.len())?;
-                    snapshots.get(&(id, key.clone()))
+                    self.work(key.byte_len())?;
+                    // Reader snapshots currently contain scalar keys only.
+                    // A callback can introduce raw keys into a later holder,
+                    // but those keys have no source-token context.
+                    key.as_scalar().and_then(|name| snapshots.get(&(id, name.to_owned())))
                 } else {
                     None
                 };
@@ -533,7 +537,7 @@ impl Runtime {
                 continue;
             }
             let frame = frames.pop().unwrap();
-            let key_value = Value::String(frame.key.clone());
+            let key_value = frame.key.clone().into_value();
             let result = self.call_value(
                 callback.clone(),
                 &[key_value, frame.value, Value::Object(frame.context)],
@@ -567,13 +571,13 @@ impl Runtime {
     fn json_revive_frame(
         &mut self,
         holder: Value,
-        key: String,
+        key: StringKey,
         snapshot: Option<&ParseSnapshot>,
         source: &str,
         host: &mut dyn Host,
     ) -> Result<ReviveFrame, Fault> {
-        self.work(key.len())?;
-        let value = self.read_reference(&Reference::Property(holder.clone(), key.clone()), host)?;
+        self.work(key.byte_len())?;
+        let value = self.read_reference(&key.clone().into_property_key().reference(holder.clone()), host)?;
         if matches!(value, Value::Host(_)) {
             return Err(Fault::new(
                 "JSON reviver traversal of native host objects is not implemented.",
@@ -593,7 +597,7 @@ impl Runtime {
                 Some((true, true, true)),
             )?;
         }
-        let mut scratch_bytes = key.capacity().saturating_add(value.bytes());
+        let mut scratch_bytes = key.capacity_bytes().saturating_add(value.bytes());
         let entries = if let Some(object) = Ordinary::from_value(&value) {
             let id = self.ordinary_id(object)?;
             Some(if let Some(length) = self.object(id)?.length {
@@ -620,14 +624,14 @@ impl Runtime {
     fn json_revive_property(
         &mut self,
         holder: &Value,
-        key: String,
+        key: StringKey,
         value: Value,
         host: &mut dyn Host,
     ) -> Result<(), Fault> {
         if matches!(value, Value::Undefined) {
             let previous = self.strict;
             self.strict = false;
-            let result = self.delete_reference(Reference::Property(holder.clone(), key), host);
+            let result = self.delete_reference(key.into_property_key().reference(holder.clone()), host);
             self.strict = previous;
             return result.map(|_| ());
         }
@@ -635,33 +639,52 @@ impl Runtime {
         // InternalizeJSONProperty ignores a false definition result. Check
         // descriptor rejection before the throwing general-purpose helper;
         // abrupt typed-value conversions must still propagate unchanged.
-        if let Some(index) = self.typed_numeric_key(id, &key)? {
-            if !self.typed_index_valid(id, index) {
-                return Ok(());
+        match &key {
+            StringKey::Scalar(name) => {
+                if let Some(index) = self.typed_numeric_key(id, name)? {
+                    if !self.typed_index_valid(id, index) {
+                        return Ok(());
+                    }
+                } else {
+                    if self.objects[id]
+                        .properties
+                        .get(name)
+                        .is_some_and(|property| !property.configurable)
+                        || !self.objects[id].properties.contains_key(name) && !self.objects[id].extensible
+                    {
+                        return Ok(());
+                    }
+                    if let Some(length) = self.objects[id].length {
+                        if name == "length"
+                            || property_index(name).is_some_and(|index| index >= length)
+                                && !self.objects[id].length_writable
+                        {
+                            return Ok(());
+                        }
+                    }
+                }
             }
-        } else {
-            if self.objects[id]
-                .properties
-                .get(&key)
-                .is_some_and(|property| !property.configurable)
-                || !self.objects[id].properties.contains_key(&key) && !self.objects[id].extensible
-            {
-                return Ok(());
-            }
-            if let Some(length) = self.objects[id].length {
-                if key == "length"
-                    || property_index(&key).is_some_and(|index| index >= length)
-                        && !self.objects[id].length_writable
+            StringKey::Units(units) => {
+                let previous = self.objects[id].properties.get_units(units);
+                if previous.is_some_and(|property| !property.configurable)
+                    || previous.is_none() && !self.objects[id].extensible
                 {
                     return Ok(());
                 }
             }
         }
-        self.create_data_property(holder, PropertyKey::String(key), value, host)
+        self.create_data_property(holder, key.into_property_key(), value, host)
     }
 
     fn json_quote(&mut self, output: &mut String, text: &str) -> Result<(), Fault> {
         self.json_quote_chars(output, text.chars().map(Ok))
+    }
+
+    fn json_quote_key(&mut self, output: &mut String, key: &StringKey) -> Result<(), Fault> {
+        match key {
+            StringKey::Scalar(name) => self.json_quote(output, name),
+            StringKey::Units(units) => self.json_quote_chars(output, char::decode_utf16(units.iter().copied())),
+        }
     }
 
     fn json_quote_chars(&mut self, output: &mut String, chars: impl Iterator<Item=Result<char, std::char::DecodeUtf16Error>>) -> Result<(), Fault> {
@@ -776,13 +799,13 @@ impl Runtime {
     fn json_property_value(
         &mut self,
         holder: &Value,
-        key: &str,
+        key: &StringKey,
         replacer: Option<&Value>,
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
-        self.work(key.len())?;
+        self.work(key.byte_len())?;
         let mut value =
-            self.read_reference(&Reference::Property(holder.clone(), key.into()), host)?;
+            self.read_reference(&key.clone().into_property_key().reference(holder.clone()), host)?;
         if matches!(value, Value::Host(_)) {
             return Err(Fault::new(
                 "JSON serialization of host objects is not implemented.",
@@ -792,13 +815,13 @@ impl Runtime {
             let hook =
                 self.read_reference(&Reference::Property(value.clone(), "toJSON".into()), host)?;
             if matches!(hook, Value::Function(_)) {
-                value = self.call_value(hook, &[Value::String(key.into())], value, host)?;
+                value = self.call_value(hook, &[key.clone().into_value()], value, host)?;
             }
         }
         if let Some(replacer) = replacer {
             value = self.call_value(
                 replacer.clone(),
-                &[Value::String(key.into()), value],
+                &[key.clone().into_value(), value],
                 holder.clone(),
                 host,
             )?;
@@ -823,7 +846,7 @@ impl Runtime {
         &mut self,
         value: Option<&Value>,
         host: &mut dyn Host,
-    ) -> Result<Option<Vec<String>>, Fault> {
+    ) -> Result<Option<Vec<StringKey>>, Fault> {
         let Some(Value::Object(id)) = value else {
             return Ok(None);
         };
@@ -836,10 +859,8 @@ impl Runtime {
         for index in 0..length {
             self.step()?;
             let value = self.get_property_with_host(*id, &index.to_string(), host)?;
-            let key = match value {
-                Value::String(text) => Some(text),
-                Value::StringUnits(_) => return Err(Fault::new("JSON property keys containing unpaired UTF-16 surrogates are not implemented.")),
-                Value::Number(number) => Some(number_text(number)),
+            let primitive = match value {
+                value @ (Value::String(_) | Value::StringUnits(_) | Value::Number(_)) => Some(value),
                 value
                     if matches!(
                         self.wrapped_data(&value),
@@ -849,19 +870,33 @@ impl Runtime {
                         )
                     ) =>
                 {
-                    Some(self.primitive_with_hint(value, true, host)?.script_text()?)
+                    Some(self.primitive_with_hint(value, true, host)?)
                 }
                 _ => None,
             };
-            if let Some(key) = key {
-                self.property_name(&key)?;
-                self.work(key.len())?;
+            if let Some(primitive) = primitive {
+                let key = match primitive {
+                    // Native values may use units even when they are entirely
+                    // well formed. Share ordinary-key normalization before
+                    // both duplicate detection and property-name admission.
+                    Value::StringUnits(units) => match self.canonical_units_key(units)? {
+                        PropertyKey::String(name) => StringKey::Scalar(name),
+                        PropertyKey::StringUnits(units) => StringKey::Units(units),
+                        PropertyKey::Symbol(_) => unreachable!(),
+                    },
+                    value => {
+                        let name = if let Value::String(name) = value { name } else { value.script_text()? };
+                        self.property_name(&name)?;
+                        StringKey::Scalar(name)
+                    }
+                };
+                self.work(key.byte_len())?;
                 if !seen.contains(&key) {
                     if keys.len() == self.limits.heap.object_properties {
                         return Err(Fault::new(format!("JSON property list limit reached ({}).", self.limits.heap.object_properties)));
                     }
-                    let added = key.len() * 2
-                        + 2 * std::mem::size_of::<String>()
+                    let added = key.capacity_bytes().saturating_mul(2)
+                        + 2 * std::mem::size_of::<StringKey>()
                         + 3 * std::mem::size_of::<usize>();
                     self.charge_json_scratch(added, "property list snapshot")?;
                     self.work(added)?;
@@ -947,7 +982,7 @@ impl Runtime {
         let holder = self.new_object(None)?;
         let value = self.copy_value(value)?;
         self.store_property(holder, "".into(), value, Some((true, true, true)))?;
-        let value = self.json_property_value(&Value::Object(holder), "", replacer, host)?;
+        let value = self.json_property_value(&Value::Object(holder), &StringKey::Scalar(String::new()), replacer, host)?;
         if matches!(
             value,
             Value::Undefined | Value::Function(_) | Value::Symbol(_)
@@ -965,7 +1000,7 @@ impl Runtime {
                     if *next == *length {
                         None
                     } else {
-                        let key = next.to_string();
+                        let key = StringKey::Scalar(next.to_string());
                         *next += 1;
                         Some(key)
                     }
@@ -974,7 +1009,7 @@ impl Runtime {
                 Entries::Listed { next } => {
                     let keys = property_list.as_ref().unwrap();
                     if let Some(key) = keys.get(*next) {
-                        self.work(key.len())?;
+                        self.work(key.byte_len())?;
                         *next += 1;
                         Some(key.clone())
                     } else {
@@ -1000,7 +1035,7 @@ impl Runtime {
                 frame.wrote = true;
                 self.json_indent(output, &gap, writer.frames.len() + 1)?;
                 if !array {
-                    self.json_quote(output, &key)?;
+                    self.json_quote_key(output, &key)?;
                     self.append_string(output, if gap.is_empty() { ":" } else { ": " })?;
                 }
                 writer.frames.push(frame);
@@ -1146,6 +1181,118 @@ if(JSON.stringify([1,2],['1'])!=='[1,2]')throw 'array list ignored';
 'ok';
 "#,
         );
+    }
+
+    #[test]
+    fn stringify_raw_utf16_keys_escape_exact_units_and_keep_mixed_creation_order() {
+        callback_succeeds(r#"
+var high='\ud800',low='\udfff',object={},symbol=Symbol('hidden');
+object.z=1;
+object[high]=2;
+object['2']=3;
+object['\ufffd']=4;
+object[low]=5;
+object['x\ud800\udc00\udfff']=6;
+object['\\ud800']=7;
+object[symbol]=object;
+Object.defineProperty(object,'hidden\ud800',{value:8});
+if(JSON.stringify(object)!=='{"2":3,"z":1,"\\ud800":2,"�":4,"\\udfff":5,"x𐀀\\udfff":6,"\\\\ud800":7}')
+    throw 'raw keys or mixed order';
+delete object[high];object[high]=9;
+if(JSON.stringify(object)!=='{"2":3,"z":1,"�":4,"\\udfff":5,"x𐀀\\udfff":6,"\\\\ud800":7,"\\ud800":9}')
+    throw 'raw reinsertion order';
+var controls={};controls['\0\ud800']='\udfff';
+if(JSON.stringify(controls)!=='{"\\u0000\\ud800":"\\udfff"}')throw 'raw control key and value';
+'ok';
+"#);
+    }
+
+    #[test]
+    fn stringify_raw_utf16_callbacks_and_property_lists_preserve_keys_and_live_reads() {
+        callback_succeeds(r#"
+var high='\ud800',low='\udfff',root={},trace=[];
+var leaf={toJSON:function(key){if(this!==leaf||key!==high)throw 'raw toJSON key';trace.push('json');return 11;}};
+root[high]=leaf;
+Object.defineProperty(root,low,{enumerable:true,get:function(){trace.push('get');delete root.later;root.added=31;return 17;}});
+root.later=19;
+root['\ufffd']=23;
+var output=JSON.stringify(root,function(key,value){
+    if(key===''){trace.push('root');return value;}
+    if(this!==root)throw 'raw replacer holder';
+    trace.push(key);
+    if(key===high&&value!==11)throw 'toJSON before raw replacer';
+    return value;
+});
+if(output!=='{"\\ud800":11,"\\udfff":17,"�":23}'||trace.length!==7||
+    trace[0]!=='root'||trace[1]!=='json'||trace[2]!==high||trace[3]!=='get'||
+    trace[4]!==low||trace[5]!=='later'||trace[6]!=='\ufffd')throw 'raw callback order';
+var parent={};parent[low]=37;
+var listed=Object.create(parent);Object.defineProperty(listed,high,{value:41});listed['\ufffd']=43;
+var boxed=Object('key'),calls=0;
+boxed.toString=function(){calls++;return high;};
+if(JSON.stringify(listed,[low,boxed,high,'\ufffd',low,Symbol('ignored')])!=='{"\\udfff":37,"\\ud800":41,"�":43}'||calls!==1)
+    throw 'raw property-list order or duplicate identity';
+'ok';
+"#);
+    }
+
+    #[test]
+    fn stringify_property_lists_canonicalize_native_scalar_units_and_boxed_conversion_results() {
+        let mut runtime = Runtime::for_test();
+        runtime.define_global("nativeName", Value::StringUnits(vec![0x61])).unwrap();
+        runtime.define_global("nativePair", Value::StringUnits(vec![0xd800, 0xdc00])).unwrap();
+        let value = runtime.execute(r#"
+var assigned={};assigned[nativeName]=7;
+if(JSON.stringify(assigned,[nativeName])!=='{"a":7}')throw 'native scalar name';
+var source={},trace='';
+Object.defineProperty(source,'a',{get:function(){trace+='a';return 1;}});
+Object.defineProperty(source,'\ud800\udc00',{get:function(){trace+='p';return 2;}});
+var stringBox=Object('unused'),numberBox=Object(3);
+stringBox.toString=function(){trace+='s';return nativeName;};
+numberBox[Symbol.toPrimitive]=function(hint){if(hint!=='string')throw 'hint';trace+='n';return nativePair;};
+var output=JSON.stringify(source,[nativeName,'a',stringBox,nativePair,'\ud800\udc00',numberBox,nativeName]);
+if(output!=='{"a":1,"𐀀":2}'||trace!=='snap')throw 'canonical list identity or conversion order';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(value.to_text(), "ok");
+    }
+
+    #[test]
+    fn stringify_native_scalar_unit_property_lists_share_the_scalar_name_byte_limit() {
+        let mut runtime = Runtime::for_test();
+        let capacity = runtime.limits.capacity.property_bytes;
+        runtime.define_global("nativeBoundary", Value::StringUnits(vec![0x61; capacity])).unwrap();
+        runtime.define_global("nativeOverflow", Value::StringUnits(vec![0x61; capacity + 1])).unwrap();
+        let value = runtime.execute(
+            "var boundary={};boundary[nativeBoundary]=7;JSON.stringify(boundary,[nativeBoundary]);",
+            &mut NoHost,
+        ).unwrap();
+        assert_eq!(value.to_text(), format!("{{\"{}\":7}}", "a".repeat(capacity)));
+        runtime.begin_job();
+        let error = runtime.execute("JSON.stringify({},[nativeOverflow]);", &mut NoHost).unwrap_err();
+        assert!(error.contains("Property-name limit"), "{error}");
+    }
+
+    #[test]
+    fn json_reviver_raw_utf16_keys_added_to_later_holders_have_exact_callbacks_without_source() {
+        callback_succeeds(r#"
+var high='\ud800',low='\udfff',removed='remove\ud800',visited=[];
+var value=JSON.parse('{"first":1,"later":{}}',function(key,value,context){
+    if(key==='first'){this.later[high]=2;this.later[low]=3;this.later[removed]=4;}
+    if(key===high||key===low||key===removed){
+        visited.push(key);
+        if(Object.hasOwn(context,'source')||this[key]!==value)throw 'raw reviver context or holder';
+        if(key===high)return 9;
+        if(key===low){Object.defineProperty(this,key,{value:7,configurable:false});return 11;}
+        return undefined;
+    }
+    return value;
+});
+if(visited.length!==3||visited[0]!==high||visited[1]!==low||visited[2]!==removed||
+    value.later[high]!==9||value.later[low]!==7||removed in value.later)throw 'raw reviver definitions';
+if(JSON.stringify(value)!=='{"first":1,"later":{"\\ud800":9,"\\udfff":7}}')throw 'raw revived output';
+'ok';
+"#);
     }
 
     #[test]

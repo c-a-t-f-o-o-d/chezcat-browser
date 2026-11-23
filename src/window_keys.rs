@@ -1,6 +1,6 @@
 //! Active Window key snapshots use the actual realm's bindings/property store.
 //! Other Window operations retain their existing foreign-context restrictions.
-use super::{property_index, Fault, Host, Ordinary, Runtime, WorkKind};
+use super::{Fault, Host, Ordinary, Runtime, StringKey, WorkKind};
 use std::collections::BTreeSet;
 
 impl Runtime {
@@ -58,7 +58,7 @@ impl Runtime {
         }
     }
 
-    pub(super) fn window_keys(&mut self, inherited: bool, enumerable_only: bool, host: &mut dyn Host) -> Result<Vec<String>, Fault> {
+    pub(super) fn window_keys(&mut self, inherited: bool, enumerable_only: bool, host: &mut dyn Host) -> Result<Vec<StringKey>, Fault> {
         let (handle, properties) = self.browser_global.expect("active Window");
         let native = host.window_properties(handle).map_err(Fault::new)?;
         // Deferred families are real nonenumerable own globals. Materialize
@@ -67,25 +67,27 @@ impl Runtime {
         let environment = self.environment(self.global_environment);
         let raw_count = environment.bindings.len().checked_add(self.objects[properties].properties.len())
             .and_then(|n| n.checked_add(native.len())).ok_or_else(|| Fault::new("Window key accounting overflow."))?;
-        let bytes = environment.bindings.keys().chain(self.objects[properties].properties.keys())
+        let bytes = environment.bindings.keys()
             .fold(0usize, |total, name| total.saturating_add(name.len()))
+            .saturating_add(self.objects[properties].properties.keys()
+                .fold(0usize, |total, name| total.saturating_add(name.byte_len())))
             .saturating_add(native.iter().map(|(name, _)| name.len()).sum::<usize>());
         self.work_as(bytes.saturating_mul(2), WorkKind::PropertyEnumeration)?;
         for _ in 0..raw_count { self.step()?; }
-        let mut entries = Vec::new();
+        let mut entries: Vec<(StringKey, (usize, usize), bool)> = Vec::new();
         entries.try_reserve(raw_count).map_err(|_| Fault::new("Unable to allocate Window key snapshot."))?;
         for (order, &(name, enumerable)) in native.iter().enumerate() {
-            entries.push((name.to_owned(), (0, order), enumerable));
+            entries.push((name.into(), (0, order), enumerable));
         }
         for (name, binding) in &self.environment(self.global_environment).bindings {
             if self.global_binding(name) {
-                entries.push((name.clone(), (1, binding.order), self.global_attributes.get(name).is_none_or(|attributes| attributes.0)));
+                entries.push((name.clone().into(), (1, binding.order), self.global_attributes.get(name).is_none_or(|attributes| attributes.0)));
             }
         }
         for (name, property) in &self.objects[properties].properties {
-            entries.push((name.clone(), (1, property.order), property.enumerable));
+            entries.push((name.to_owned(), (1, property.order), property.enumerable));
         }
-        entries.sort_by(|left, right| match (property_index(&left.0), property_index(&right.0)) {
+        entries.sort_by(|left, right| match (left.0.index(), right.0.index()) {
             (Some(left), Some(right)) => left.cmp(&right),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,

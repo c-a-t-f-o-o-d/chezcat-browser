@@ -51,7 +51,7 @@ impl Runtime {
         handle: u32,
         enumerable_only: bool,
         host: &mut dyn Host,
-    ) -> Result<Vec<String>, Fault> {
+    ) -> Result<Vec<StringKey>, Fault> {
         self.validate_native_access(handle, host)?;
         let caller = self
             .native_access_caller
@@ -71,7 +71,7 @@ impl Runtime {
         self.work(keys.len().saturating_add("location".len()))?;
         let at = keys
             .iter()
-            .take_while(|k| property_index(k).is_some())
+            .take_while(|k| k.index().is_some())
             .count();
         keys.try_reserve(1)
             .map_err(|_| Fault::new("Cannot reserve Document location key."))?;

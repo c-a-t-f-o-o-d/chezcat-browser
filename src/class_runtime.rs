@@ -110,7 +110,9 @@ impl Runtime {
                 self.object_assigned_closures.insert(method_id);
                 match &key {
                     PropertyKey::String(name) => self.class_function_name(method_id, name, member.kind)?,
-                    PropertyKey::Symbol(_) => self.literal_function_name(method_id, &key, member.kind)?,
+                    PropertyKey::StringUnits(_) | PropertyKey::Symbol(_) => {
+                        self.literal_function_name(method_id, &key, member.kind)?;
+                    }
                 }
                 let owner = if member.is_static { properties } else { prototype };
                 if let Function::Script { home_object, .. } = &mut self.functions[method_id] {
@@ -167,5 +169,55 @@ impl Runtime {
         Ok(self.objects[properties].properties.get("name").is_some_and(|descriptor| {
             descriptor.accessor.is_some() || matches!(descriptor.value, StoredValue::Value(Value::Function(_)))
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self, _: u32, _: &str) -> Result<Value, String> {
+            panic!("Class keys must not read a native object")
+        }
+        fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> {
+            panic!("Class keys must not write a native object")
+        }
+        fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> {
+            panic!("Class keys must not call a native object")
+        }
+    }
+
+    #[test]
+    fn class_raw_utf16_member_keys_names_and_descriptors_preserve_units() {
+        let mut runtime = Runtime::for_test();
+        let result = runtime.execute(r#"
+var raw='\ud800',access='access\udfff',staticKey='static\ud800';
+class Example {
+    [raw](){return this.value;}
+    get [access](){return this.value+1;}
+    set [access](value){this.value=value;}
+    '\udfff'(){return 7;}
+    static [staticKey](){return 11;}
+}
+var instance=new Example();instance.value=3;
+if(instance[raw]()!==3||instance['\udfff']()!==7||Example[staticKey]()!==11||
+    instance[raw].name!==raw||instance['\udfff'].name!=='\udfff'||Example[staticKey].name!==staticKey)
+    throw 'class raw method identity';
+instance[access]=13;
+if(instance[access]!==14||Object.hasOwn(instance,access))throw 'class raw accessor receiver';
+var descriptor=Object.getOwnPropertyDescriptor(Example.prototype,access);
+if(descriptor.enumerable||!descriptor.configurable||descriptor.get.name!=='get '+access||
+    descriptor.set.name!=='set '+access)throw 'class raw accessor descriptor';
+descriptor=Object.getOwnPropertyDescriptor(Example.prototype,raw);
+if(descriptor.enumerable||!descriptor.writable||!descriptor.configurable||Object.hasOwn(Example.prototype,'\ufffd'))
+    throw 'class raw method descriptor';
+var inferred={[raw]:class {}};
+if(inferred[raw].name!==raw)throw 'inferred raw class name';
+'ok';
+"#, &mut NoHost).unwrap();
+        assert_eq!(result.to_text(), "ok");
+        assert!(runtime.transient_registration_is_empty());
     }
 }

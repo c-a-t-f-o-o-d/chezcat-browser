@@ -151,7 +151,8 @@ mod tests {
         let mut runtime = Runtime::for_capacity_test();
         let before = runtime.functions.len();
         let pending: Vec<_> = runtime.objects.iter().enumerate().flat_map(|(owner, object)| {
-            object.properties.iter().filter_map(move |(name, property)| matches!(property.value, StoredValue::DeferredNative(_)).then(|| (owner, name.clone())))
+            object.properties.iter().filter_map(move |(name, property)| matches!(property.value, StoredValue::DeferredNative(_))
+                .then(|| (owner, name.as_scalar().expect("native method names are scalar").to_owned())))
         }).collect();
         let mut identities = Vec::new();
         for (owner, name) in &pending {

@@ -3,6 +3,10 @@
 use super::*;
 
 #[cfg(test)]
+#[path = "property_key_retention_tests.rs"]
+mod property_key_retention_tests;
+
+#[cfg(test)]
 #[path = "function_array_tests.rs"]
 mod array_seed_tests;
 
@@ -37,7 +41,7 @@ impl Edge {
     pub(super) fn reference(reference: &Reference, add: &mut impl FnMut(Edge)) {
         match reference {
             Reference::Binding(id, _) => add(Self::Environment(*id)),
-            Reference::Property(receiver, _) | Reference::SymbolProperty(receiver, _) => Self::value(receiver, add),
+            Reference::Property(receiver, _) | Reference::UnitsProperty(receiver, _) | Reference::SymbolProperty(receiver, _) => Self::value(receiver, add),
             Reference::ComputedProperty(receiver, key) => { Self::value(receiver, add); Self::value(key, add); }
             Reference::SuperProperty { base, receiver, .. } => {
                 if let Some(base) = base { Self::value(&base.value(), add); }
@@ -309,7 +313,7 @@ impl Runtime {
     }
 
     pub(super) fn direct_object_closure_assignment(&self, program: &Rc<Program>, right: ExprId, reference: &Reference, value: &Value) -> Option<usize> {
-        if !matches!(reference, Reference::Property(Value::Object(_), _) | Reference::SymbolProperty(Value::Object(_), _)
+        if !matches!(reference, Reference::Property(Value::Object(_), _) | Reference::UnitsProperty(Value::Object(_), _) | Reference::SymbolProperty(Value::Object(_), _)
             | Reference::ComputedProperty(Value::Object(_), _)) { return None; }
         let ExprKind::Function(template) = &program.exprs[right].kind else { return None; };
         let Value::Function(id) = value else { return None; };

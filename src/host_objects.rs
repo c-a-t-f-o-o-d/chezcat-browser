@@ -1,7 +1,7 @@
 //! Bounded ordinary expandos on explicitly selected native objects and live
 //! named-property reflection. Host handles never acquire arbitrary capability.
 
-use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, Value, collections,
+use super::{Accessors, Builtin, Fault, Function, Host, Ordinary, Runtime, StringKey, Value, collections,
     ELEMENT_INNER_HTML_GET, ELEMENT_INNER_HTML_SET, ELEMENT_STYLE_GET, ELEMENT_STYLE_SET, SVG_STYLE_GET,SVG_STYLE_SET,
     CREATE_CDATA_SECTION, CREATE_PROCESSING_INSTRUCTION, DOCUMENT_ACTIVE_ELEMENT_GET, DOCUMENT_CURRENT_SCRIPT_GET, DOCUMENT_IMPORT_NODE, DOCUMENT_ADOPT_NODE,
     NODE_MUTATION_METHODS, NODE_TEXT_CONTENT_GET, NODE_TEXT_CONTENT_SET, NODE_TRAVERSAL_GETTERS, PARENT_NODE_GETTERS,
@@ -1043,7 +1043,7 @@ impl Runtime {
                 let unpublished = self.objects.pop().unwrap();
                 self.properties -= unpublished.properties.len();
                 for (key, property) in unpublished.properties {
-                    self.value_bytes -= key.len() + property.value.bytes();
+                    self.value_bytes -= key.byte_len() + property.value.bytes();
                 }
             }
             return Err(error);
@@ -1411,7 +1411,7 @@ impl Runtime {
         handle: u32,
         inherited: bool,
         host: &mut dyn Host,
-    ) -> Result<Vec<String>, Fault> {
+    ) -> Result<Vec<StringKey>, Fault> {
         self.reject_foreign_window(&Value::Host(handle), host)?;
         if self.is_browser_global(handle) { return self.window_keys(inherited, true, host); }
         if !inherited && host.document_location_owner(handle).is_some() {return self.document_own_string_keys(handle,true,host);}
@@ -1432,7 +1432,8 @@ impl Runtime {
                 self.enumerable_keys(id)?
             }
         } else {
-            if inherited {host.inherited_keys(handle)} else {host.own_keys(handle)}.map_err(Fault::new)?
+            if inherited {host.inherited_keys(handle)} else {host.own_keys(handle)}
+                .map_err(Fault::new)?.into_iter().map(StringKey::from).collect()
         };
         if keys.len() > self.limits.heap.object_properties {
             return Err(Fault::new(
@@ -1440,7 +1441,10 @@ impl Runtime {
             ));
         }
         for key in &keys {
-            self.property_name(key)?;
+            match key {
+                StringKey::Scalar(name) => self.property_name(name)?,
+                StringKey::Units(units) => self.property_name_units(units)?,
+            }
         }
         Ok(keys)
     }
@@ -1449,7 +1453,7 @@ impl Runtime {
     /// ordinary backing. Other Host key/inspection policies remain guarded.
     #[inline(never)]
     pub(super) fn indexed_host_keys(&mut self,handle:u32,inherited:bool,enumerable_only:bool,host:&mut dyn Host)
-        ->Result<Vec<String>,Fault>
+        ->Result<Vec<StringKey>,Fault>
     {
         self.validate_indexed_host_iteration(handle,None,host)?;
         let native=host.own_keys(handle).map_err(Fault::new)?;
@@ -1459,9 +1463,12 @@ impl Runtime {
         } else {Vec::new()};
         let mut seen=std::collections::BTreeSet::new();
         let mut keys=Vec::new();
-        for key in native.into_iter().chain(ordinary) {
-            self.property_name(&key)?;
-            self.work_as(key.len().saturating_mul(2).saturating_add(std::mem::size_of::<String>()*2),super::WorkKind::PropertyEnumeration)?;
+        for key in native.into_iter().map(StringKey::from).chain(ordinary) {
+            match &key {
+                StringKey::Scalar(name) => self.property_name(name)?,
+                StringKey::Units(units) => self.property_name_units(units)?,
+            }
+            self.work_as(key.byte_len().saturating_mul(2).saturating_add(std::mem::size_of::<StringKey>()*2),super::WorkKind::PropertyEnumeration)?;
             if !seen.insert(key.clone()) {continue;}
             if keys.len()==self.limits.heap.object_properties {
                 return Err(Fault::new(format!("Property enumeration limit reached ({} keys).",self.limits.heap.object_properties)));

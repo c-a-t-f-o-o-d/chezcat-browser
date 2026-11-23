@@ -9,7 +9,7 @@
 
 use super::{
     strict_equal, Accessors, Builtin, Fault, Function, Host, Ordinary, PropertyKey, Runtime,
-    Value,
+    StringKey, Value,
 };
 use std::collections::HashSet;
 
@@ -856,7 +856,7 @@ impl Runtime {
         Ok(false)
     }
 
-    pub(super) fn inherited_keys(&mut self, object: Ordinary) -> Result<Vec<String>, Fault> {
+    pub(super) fn inherited_keys(&mut self, object: Ordinary) -> Result<Vec<StringKey>, Fault> {
         let mut current = Some(object);
         let mut seen = HashSet::new();
         let mut keys = Vec::new();
@@ -879,7 +879,7 @@ impl Runtime {
                     .saturating_mul(self.limits.capacity.property_bytes),
                 super::WorkKind::PropertyEnumeration,
             )?;
-            seen.extend(self.objects[id].properties.keys().cloned());
+            seen.extend(self.objects[id].properties.keys().map(|key| key.to_owned()));
             if self.objects[id].length.is_some() {
                 seen.insert("length".into());
             }
@@ -927,6 +927,9 @@ impl Runtime {
                 OwnPropertyQuery::Descriptor => match key {
                     PropertyKey::String(name) => {
                         runtime.own_descriptor(Ordinary::Object(target), name)
+                    }
+                    PropertyKey::StringUnits(units) => {
+                        runtime.own_units_descriptor(Ordinary::Object(target), units)
                     }
                     PropertyKey::Symbol(symbol) => {
                         runtime.own_symbol_descriptor(Ordinary::Object(target), *symbol)
@@ -1025,6 +1028,37 @@ impl Runtime {
         Ok(Value::Object(descriptor))
     }
 
+    pub(super) fn own_units_descriptor(&mut self, object: Ordinary, units: &[u16]) -> Result<Value, Fault> {
+        self.property_name_units(units)?;
+        let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "getOwnPropertyDescriptor")?;
+        let Some(property) = self.objects[id].properties.get_units(units) else {
+            return Ok(Value::Undefined);
+        };
+        if let Some(accessor) = property.accessor {
+            return self.accessor_descriptor(accessor, property.enumerable, property.configurable);
+        }
+        let (enumerable, writable, configurable) =
+            (property.enumerable, property.writable, property.configurable);
+        let value = self.own_units_property(id, units)?;
+        let descriptor = self.new_object(None)?;
+        for (name, value) in [
+            ("value", value),
+            ("writable", Value::Bool(writable)),
+            ("enumerable", Value::Bool(enumerable)),
+            ("configurable", Value::Bool(configurable)),
+        ] {
+            self.set_property(descriptor, name.into(), value)?;
+        }
+        Ok(Value::Object(descriptor))
+    }
+
+    pub(super) fn own_units_enumerable(&mut self, id: usize, units: &[u16]) -> Result<bool, Fault> {
+        self.property_name_units(units)?;
+        self.owns_units_property(id, units)?;
+        Ok(self.objects[id].properties.get_units(units).is_some_and(|property| property.enumerable))
+    }
+
     fn own_symbol_descriptor(&mut self, object: Ordinary, key: usize) -> Result<Value, Fault> {
         let id = self.ordinary_id(object)?;
         self.reject_unsupported_proxy_operation(id, "getOwnPropertyDescriptor")?;
@@ -1094,6 +1128,22 @@ impl Runtime {
         self.define_stored_property(id, PropertyKey::Symbol(key), descriptor)
     }
 
+    fn define_units_data_property(
+        &mut self,
+        target: &Value,
+        units: Vec<u16>,
+        descriptor: PropertyDescriptor,
+        host: &mut dyn Host,
+    ) -> Result<(), Fault> {
+        self.property_name_units(&units)?;
+        let object = self.symbol_backing(target, host)?.ok_or_else(|| {
+            Fault::new("UTF-16 properties of this native object are not implemented.")
+        })?;
+        let id = self.ordinary_id(object)?;
+        self.reject_unsupported_proxy_operation(id, "defineProperty")?;
+        self.define_stored_property(id, PropertyKey::StringUnits(units), descriptor)
+    }
+
     fn property_descriptor(
         &mut self,
         descriptor: Ordinary,
@@ -1157,7 +1207,7 @@ impl Runtime {
 
     pub(super) fn stored_descriptor_property(&self, id: usize, key: &PropertyKey) -> Option<&super::Property> {
         match key {
-            PropertyKey::String(name) => self.objects[id].properties.get(name),
+            PropertyKey::String(_) | PropertyKey::StringUnits(_) => self.objects[id].properties.get_key(key),
             PropertyKey::Symbol(key) => self.objects[id].symbol_properties.get(key),
         }
     }
@@ -1265,6 +1315,9 @@ impl Runtime {
                 PropertyKey::String(name) => {
                     self.store_accessor_property(id, name, accessor, (enumerable, configurable))
                 }
+                PropertyKey::StringUnits(units) => {
+                    self.store_units_accessor_property(id, units, accessor, (enumerable, configurable))
+                }
                 PropertyKey::Symbol(key) => self.store_symbol_accessor_property(
                     id,
                     key,
@@ -1280,7 +1333,7 @@ impl Runtime {
                 && self.stored_descriptor_property(id, &key).is_some_and(|property| matches!(property.value, super::StoredValue::DeferredNative(_))) {
                 self.step()?;
                 let property = match &key {
-                    PropertyKey::String(name) => self.objects[id].properties.get_mut(name).unwrap(),
+                    PropertyKey::String(_) | PropertyKey::StringUnits(_) => self.objects[id].properties.get_key_mut(&key).unwrap(),
                     PropertyKey::Symbol(key) => self.objects[id].symbol_properties.get_mut(key).unwrap(),
                 };
                 property.enumerable = enumerable;
@@ -1295,6 +1348,7 @@ impl Runtime {
                 // user code; a conversion from accessor starts with undefined.
                 match &key {
                     PropertyKey::String(name) => self.own_property(id, name)?,
+                    PropertyKey::StringUnits(units) => self.own_units_property(id, units)?,
                     PropertyKey::Symbol(symbol) => {
                         let bytes = self.objects[id].symbol_properties[symbol].value.bytes();
                         self.work(bytes)?;
@@ -1307,6 +1361,9 @@ impl Runtime {
             match key {
                 PropertyKey::String(name) => {
                     self.store_property(id, name, value, Some((enumerable, writable, configurable)))
+                }
+                PropertyKey::StringUnits(units) => {
+                    self.store_units_property(id, units, value, Some((enumerable, writable, configurable)))
                 }
                 PropertyKey::Symbol(key) => self.store_symbol_property(
                     id,
@@ -1339,6 +1396,10 @@ impl Runtime {
             PropertyKey::String(name) => {
                 let object = self.ordinary_required(target)?;
                 self.define_data_property(object, name, descriptor, host)
+            }
+            PropertyKey::StringUnits(units) => {
+                self.ordinary_required(target)?;
+                self.define_units_data_property(target, units, descriptor, host)
             }
             PropertyKey::Symbol(key) => {
                 self.ordinary_required(target)?;
@@ -1752,6 +1813,26 @@ impl Runtime {
                     }
                 }
                 let key = match key {
+                    PropertyKey::StringUnits(units) => {
+                        let object = self.symbol_backing(first, host)?;
+                        if method == "getOwnPropertyDescriptor" {
+                            return if let Some(object) = object {
+                                self.own_units_descriptor(object, &units)
+                            } else {
+                                Ok(Value::Undefined)
+                            };
+                        }
+                        if object.is_none() {
+                            return Err(Fault::new("UTF-16 properties of this native object are not implemented."));
+                        }
+                        // Validate the native target before author descriptor
+                        // getters, then revalidate its backing at application.
+                        let descriptor =
+                            self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
+                        let descriptor = self.property_descriptor(descriptor, host)?;
+                        self.define_units_data_property(first, units, descriptor, host)?;
+                        return self.copy_value(first);
+                    }
                     PropertyKey::Symbol(key) => {
                         if method == "getOwnPropertyDescriptor" {
                             return if let Some(object) = self.symbol_backing(first, host)? {
@@ -1891,18 +1972,30 @@ impl Runtime {
                         ));
                     }
                     for key in keys {
-                        let enumerable = if let Value::Host(handle) = source {
-                            self.host_owned(*handle, &key, true, host)?
-                        } else {
-                            let object = self.ordinary_required(source)?;
-                            let id = self.ordinary_id(object)?;
-                            self.own_enumerable(id, &key)?
+                        let enumerable = match &key {
+                            StringKey::Scalar(name) => {
+                                if let Value::Host(handle) = source {
+                                    self.host_owned(*handle, name, true, host)?
+                                } else {
+                                    let object = self.ordinary_required(source)?;
+                                    let id = self.ordinary_id(object)?;
+                                    self.own_enumerable(id, name)?
+                                }
+                            }
+                            StringKey::Units(units) => {
+                                if let Some(object) = self.symbol_backing(source, host)? {
+                                    let id = self.ordinary_id(object)?;
+                                    self.own_units_enumerable(id, units)?
+                                } else {
+                                    false
+                                }
+                            }
                         };
                         if !enumerable {
                             continue;
                         }
                         let value = self.read_reference(
-                            &super::Reference::Property(source.clone(), key.clone()),
+                            &key.clone().into_property_key().reference(source.clone()),
                             host,
                         )?;
                         // Object.assign uses Set with Throw=true in every
@@ -1910,7 +2003,7 @@ impl Runtime {
                         let previous_strict = self.strict;
                         self.strict = true;
                         let result = self.write_reference(
-                            super::Reference::Property(first.clone(), key),
+                            key.into_property_key().reference(first.clone()),
                             value,
                             host,
                         );
@@ -1979,7 +2072,7 @@ impl Runtime {
         let mut keys: Vec<_> = self
             .own_string_keys(id, false)?
             .into_iter()
-            .map(PropertyKey::String)
+            .map(StringKey::into_property_key)
             .collect();
         let symbols = self.own_symbol_keys(id, false)?;
         if keys.len().saturating_add(symbols.len()) > self.limits.heap.object_properties {
@@ -1991,6 +2084,7 @@ impl Runtime {
         for key in keys {
             let enumerable = match &key {
                 PropertyKey::String(key) => self.own_enumerable(id, key)?,
+                PropertyKey::StringUnits(units) => self.own_units_enumerable(id, units)?,
                 PropertyKey::Symbol(key) => self.objects[id]
                     .symbol_properties
                     .get(key)
@@ -2002,6 +2096,9 @@ impl Runtime {
             let value = match &key {
                 PropertyKey::String(key) => {
                     self.get_ordinary_property_with_host(descriptors, key, host)?
+                }
+                PropertyKey::StringUnits(units) => {
+                    self.get_units_property_with_receiver(descriptors, units, &descriptors.value(), host)?
                 }
                 PropertyKey::Symbol(key) => {
                     self.get_symbol_property(descriptors.value(), *key, host)?
@@ -2024,6 +2121,9 @@ impl Runtime {
                 PropertyKey::String(key) => {
                     let target = self.descriptor_target(target, &key, host)?;
                     self.define_target_property(target, key, descriptor, host)?;
+                }
+                PropertyKey::StringUnits(units) => {
+                    self.define_units_data_property(target, units, descriptor, host)?;
                 }
                 PropertyKey::Symbol(key) => {
                     self.define_symbol_data_property(target, key, descriptor, host)?;
@@ -2194,6 +2294,19 @@ impl Runtime {
             }
         }
         let key = match key {
+            PropertyKey::StringUnits(units) => {
+                let owned = if let Some(object) = self.symbol_backing(&this, host)? {
+                    let id = self.ordinary_id(object)?;
+                    if method == "propertyIsEnumerable" {
+                        self.own_units_enumerable(id, &units)?
+                    } else {
+                        self.owns_units_property(id, &units)?
+                    }
+                } else {
+                    false
+                };
+                return Ok(Value::Bool(owned));
+            }
             PropertyKey::Symbol(key) => {
                 let owned = if let Some(object) = self.symbol_backing(&this, host)? {
                     let id = self.ordinary_id(object)?;

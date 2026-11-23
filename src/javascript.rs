@@ -12,6 +12,20 @@ use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use work_attribution::Kind as WorkKind;
+#[path = "string_property_map.rs"]
+mod string_property_map;
+use string_property_map::{StringKey, StringProperties};
+#[path = "property_key_utf16.rs"]
+mod property_key_utf16;
+#[cfg(test)]
+#[path = "property_key_utf16_tests.rs"]
+mod property_key_utf16_tests;
+#[cfg(test)]
+#[path = "property_key_proxy_tests.rs"]
+mod property_key_proxy_tests;
+#[cfg(test)]
+#[path = "property_key_native_tests.rs"]
+mod property_key_native_tests;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
 #[path="anchor_url_interface.rs"]
@@ -3343,6 +3357,7 @@ impl Parser {
                     TokenKind::Word(_)
                         | TokenKind::EscapedWord(_)
                         | TokenKind::String(_)
+                        | TokenKind::StringUnits(_)
                         | TokenKind::Number(_)
                         | TokenKind::Punct("[")
                 )
@@ -3371,6 +3386,12 @@ impl Parser {
                 let key = self.assignment_with_in()?;
                 self.need("]")?;
                 (key, None)
+            } else if let TokenKind::StringUnits(units) = self.token().kind.clone() {
+                if units.len().saturating_mul(2) > self.capacity.property_bytes {
+                    return Err(self.unsupported("Property-name limit reached."));
+                }
+                self.current += 1;
+                (self.expr(ExprKind::Literal(Value::StringUnits(units)), position)?, None)
             } else {
                 let (name, shorthand) = match self.token().kind.clone() {
                     TokenKind::Word(name) | TokenKind::EscapedWord(name) => {
@@ -4036,7 +4057,7 @@ struct Object {
     iterator: Option<collections::IteratorData>,
     generator: Option<generator_functions::State>,
     text: Option<text_encoding::Data>,
-    properties: BTreeMap<String, Property>,
+    properties: StringProperties,
     symbol_properties: BTreeMap<usize, Property>,
     /// Arrays retain holes without allocating a Value for each missing index.
     length: Option<usize>,
@@ -4108,6 +4129,7 @@ impl Control {
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum PropertyKey {
     String(String),
+    StringUnits(Vec<u16>),
     Symbol(usize),
 }
 
@@ -4115,6 +4137,7 @@ impl PropertyKey {
     fn reference(self, receiver: Value) -> Reference {
         match self {
             Self::String(name) => Reference::Property(receiver, name),
+            Self::StringUnits(units) => Reference::UnitsProperty(receiver, units),
             Self::Symbol(id) => Reference::SymbolProperty(receiver, id),
         }
     }
@@ -4125,6 +4148,7 @@ enum Reference {
     Missing(String),
     Global(String),
     Property(Value, String),
+    UnitsProperty(Value, Vec<u16>),
     SymbolProperty(Value, usize),
     // Keep the evaluated key value until GetValue/PutValue/Delete. In a plain
     // assignment the RHS runs first; compound operations convert independently
@@ -4144,7 +4168,7 @@ impl Reference {
 }
 
 enum LoopIterator {
-    Keys(Value, std::vec::IntoIter<String>),
+    Keys(Value, std::vec::IntoIter<StringKey>),
     Values(iterator_protocol::Record),
 }
 
@@ -6253,7 +6277,7 @@ impl Runtime {
             iterator: None,
             generator: None,
             text: None,
-            properties: BTreeMap::new(),
+            properties: StringProperties::new(),
             symbol_properties: BTreeMap::new(),
             length,
             length_writable: true,
@@ -6441,10 +6465,10 @@ impl Runtime {
             return Ok(PropertyKey::Symbol(id));
         }
         self.work_as(primitive.bytes(), WorkKind::ConversionOutput)?;
-        let key = if let Value::String(text) = primitive {
-            text
-        } else {
-            primitive.script_text()?
+        let key = match primitive {
+            Value::String(text) => text,
+            Value::StringUnits(units) => return self.canonical_units_key(units),
+            primitive => primitive.script_text()?,
         };
         self.property_name(&key)?;
         Ok(PropertyKey::String(key))
@@ -6706,14 +6730,14 @@ impl Runtime {
         Ok(Value::Object(id))
     }
 
-    fn enumerable_keys(&mut self, id: usize) -> Result<Vec<String>, Fault> {
+    fn enumerable_keys(&mut self, id: usize) -> Result<Vec<StringKey>, Fault> {
         self.own_string_keys(id, true)
     }
 
     // Snapshot stored string keys and integer-indexed entries. Fixed,
     // nonenumerable virtual properties (array length / RegExp metadata) cannot
     // become enumerable and need no slot in assign/defineProperties snapshots.
-    fn own_string_keys(&mut self, id: usize, enumerable_only: bool) -> Result<Vec<String>, Fault> {
+    fn own_string_keys(&mut self, id: usize, enumerable_only: bool) -> Result<Vec<StringKey>, Fault> {
         self.reject_unsupported_proxy_operation(id, "ownKeys")?;
         let object = self.object(id)?;
         let indexed_length = self.typed_view(id).map_or_else(
@@ -6737,15 +6761,15 @@ impl Runtime {
             .properties
             .iter()
             .filter(|(_, property)| !enumerable_only || property.enumerable)
-            .map(|(name, property)| (name.clone(), property.order))
+            .map(|(name, property)| (name.to_owned(), property.order))
             .collect();
         for index in 0..indexed_length {
-            keys.push((index.to_string(), index));
+            keys.push((StringKey::Scalar(index.to_string()), index));
         }
         // Canonical integer indices precede string keys. String keys retain
         // creation order, including after a removed array index is re-added.
         keys.sort_by_cached_key(|(name, order)| {
-            property_index(name).map_or((1, *order), |index| (0, index))
+            name.index().map_or((1, *order), |index| (0, index))
         });
         Ok(keys.into_iter().map(|(name, _)| name).collect())
     }
@@ -6760,12 +6784,12 @@ impl Runtime {
         };
         let result = self.new_object(Some(keys.len()))?;
         for (index, name) in keys.into_iter().enumerate() {
-            self.set_property(result, index.to_string(), Value::String(name))?;
+            self.set_property(result, index.to_string(), name.into_value())?;
         }
         Ok(Value::Object(result))
     }
 
-    fn for_in_keys(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<String>, Fault> {
+    fn for_in_keys(&mut self, value: &Value, host: &mut dyn Host) -> Result<Vec<StringKey>, Fault> {
         match value {
             Value::Object(id) => self.inherited_keys(Ordinary::Object(*id)),
             Value::Function(id) => self.inherited_keys(Ordinary::Function(*id)),
@@ -6776,7 +6800,7 @@ impl Runtime {
                     return Err(Fault::new(format!("for-in enumeration limit reached ({} keys).", self.limits.heap.object_properties)));
                 }
                 self.work(length.saturating_mul(8))?;
-                Ok((0..length).map(|index| index.to_string()).collect())
+                Ok((0..length).map(|index| StringKey::Scalar(index.to_string())).collect())
             }
             Value::Host(handle) => self.host_keys(*handle, true, host),
             Value::Undefined
@@ -6810,6 +6834,11 @@ impl Runtime {
         self.reject_foreign_window(&object, host)?;
         if let Some(ordinary) = Ordinary::from_value(&object) {
             return self.has_ordinary_key(ordinary, &name, host).map(Value::Bool);
+        }
+        if let PropertyKey::StringUnits(_) = &name {
+            let base = self.units_lookup_base(&object, host)?.ok_or_else(||
+                Fault::new("UTF-16 properties of this native object are not implemented."))?;
+            return self.has_ordinary_key(base, &name, host).map(Value::Bool);
         }
         if let (Value::Host(handle), PropertyKey::String(name)) = (&object, &name) {
             if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
@@ -7802,7 +7831,15 @@ impl Runtime {
             LoopIterator::Keys(source, keys) => {
                 for name in keys {
                     self.step()?;
-                    self.work(name.len())?;
+                    self.work(name.byte_len())?;
+                    if let StringKey::Units(units) = &name {
+                        let Some(base) = self.units_lookup_base(source, host)? else { continue; };
+                        let owner = self.units_dispatch_owner(base, units)?;
+                        let Some(owner) = self.ordinary_descriptor_owner(owner)? else { continue; };
+                        if !self.objects[owner].properties.get_units(units).is_some_and(|p| p.enumerable) { continue; }
+                        return Ok(Some(name.into_value()));
+                    }
+                    let StringKey::Scalar(name) = name else { unreachable!() };
                     // Snapshot keys but recheck their current presence. Removed
                     // entries disappear; later additions do not enter for-in.
                     if let Some(object) = Ordinary::from_value(source) {
@@ -8419,6 +8456,7 @@ impl Runtime {
         Self::require_property_receiver(&object)?;
         let property = self.property_key(property, host)?;
         let function = match &property {
+            PropertyKey::StringUnits(units) => Some(self.read_units_property(&object, units, host)?),
             PropertyKey::Symbol(key) => {
                 let receiver = self.copy_value(&object)?;
                 Some(self.get_symbol_property(receiver, *key, host)?)
@@ -8467,10 +8505,10 @@ impl Runtime {
             (PropertyKey::String(property), None) => {
                 self.call_member(object, &property, args, host)
             }
-            (PropertyKey::Symbol(_), Some(function)) => {
+            (PropertyKey::Symbol(_) | PropertyKey::StringUnits(_), Some(function)) => {
                 self.call_value(function, args, object, host)
             }
-            (PropertyKey::Symbol(_), None) => unreachable!(),
+            (PropertyKey::Symbol(_) | PropertyKey::StringUnits(_), None) => unreachable!(),
         }
     }
 
@@ -8768,6 +8806,7 @@ impl Runtime {
                 let key = self.property_key(key, host)?;
                 match key {
                     PropertyKey::String(name) => self.read_property(object, &name, host),
+                    PropertyKey::StringUnits(units) => self.read_units_property(object, &units, host),
                     PropertyKey::Symbol(key) => {
                         let object = self.copy_value(object)?;
                         self.read_reference(&Reference::SymbolProperty(object, key), host)
@@ -8778,6 +8817,7 @@ impl Runtime {
                 self.reject_foreign_window(&object, host)?;
                 self.get_symbol_property(object.clone(), *key, host)
             }
+            Reference::UnitsProperty(object, units) => self.read_units_property(object, units, host),
             Reference::Binding(env, name) => self.read_binding(*env, name, host),
             Reference::Global(name) => self.global_value(name, host),
             Reference::SuperProperty { base, receiver, name } => self.read_super_property(*base, receiver, name, host),
@@ -8902,6 +8942,7 @@ impl Runtime {
                 if self.is_browser_global(object) { return self.set_global(property, value, host); }
                 self.host_write(object, property, value, host)
             }
+            Reference::UnitsProperty(receiver, units) => self.assign_units_property(receiver, units, value, host),
             Reference::Property(Value::Object(object), property) => self.assign_ordinary_property(Ordinary::Object(object), property, value, host),
             Reference::Property(Value::Function(function), property) => self.assign_ordinary_property(Ordinary::Function(function), property, value, host),
             Reference::Property(receiver @ (Value::String(_) | Value::StringUnits(_) | Value::Number(_) | Value::BigInt(_) | Value::Bool(_) | Value::Symbol(_)), property) => self.assign_primitive_property(receiver, property, value, host),
@@ -8925,6 +8966,23 @@ impl Runtime {
         let deleted = match reference {
             Reference::SuperProperty { .. } => return Err(Fault::exception("ReferenceError", "A super property cannot be deleted.")),
             Reference::ComputedProperty(_, _) => unreachable!(),
+            Reference::UnitsProperty(object, units) => {
+                Self::require_property_receiver(&object)?;
+                self.property_name_units(&units)?;
+                if let Some(backing) = self.symbol_backing(&object, host)? {
+                    let id = self.ordinary_id(backing)?;
+                    self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
+                    if self.objects[id].window_named_properties || self.objects[id].properties.get_units(&units)
+                        .is_some_and(|property| !property.configurable) {
+                        false
+                    } else {
+                        self.remove_units_property(id, &units)?;
+                        true
+                    }
+                } else if matches!(object, Value::Host(_)) {
+                    return Err(Fault::new("UTF-16 properties of this native object are not implemented."));
+                } else { true }
+            }
             Reference::SymbolProperty(object, key) => {
                 Self::require_property_receiver(&object)?;
                 if let Some(backing) = self.symbol_backing(&object, host)? {
@@ -10154,6 +10212,7 @@ impl Runtime {
                 let key = self.property_key(key, host)?;
                 return Ok(Value::Bool(match key {
                     PropertyKey::String(name) => self.owns_property(id, &name)?,
+                    PropertyKey::StringUnits(units) => self.owns_units_property(id, &units)?,
                     PropertyKey::Symbol(key) => {
                         self.object(id)?.symbol_properties.contains_key(&key)
                     }
@@ -12221,7 +12280,7 @@ caught;
     }
 
     #[test]
-    fn string_index_exact_surrogate_runs_callbacks_and_utf8_only_key_refusal_cancels_them() {
+    fn string_index_exact_surrogate_keys_preserve_callbacks_and_scalar_only_refusal_cancels_them() {
         let mut runtime = Runtime::for_test();
         let mut host = TestHost::default();
         runtime.begin_job();
@@ -12234,6 +12293,13 @@ caught;
         runtime.begin_job();
         runtime.execute(
             "var caught=0,target={};tail=0;Promise.resolve().then(function(){try{target['😀'[0]]=1;}catch(e){caught++;}finally{caught+=10;}});Promise.resolve().then(function(){tail++;});",
+            &mut host,
+        ).unwrap();
+        assert!(runtime.microtask_checkpoint(&mut host).unwrap().is_empty());
+        assert_eq!(runtime.execute("caught===10&&tail===1&&target['😀'[0]]===1&&target['\\ufffd']===undefined;", &mut host).unwrap().to_text(), "true");
+        runtime.begin_job();
+        runtime.execute(
+            "caught=0;tail=0;Promise.resolve().then(function(){try{encodeURIComponent('😀'[0]);}catch(e){caught++;}finally{caught+=10;}});Promise.resolve().then(function(){tail++;});",
             &mut host,
         ).unwrap();
         let error = runtime.microtask_checkpoint(&mut host).unwrap_err();

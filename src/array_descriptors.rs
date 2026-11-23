@@ -53,7 +53,7 @@ impl Runtime {
             self.work_as(object.properties.len().saturating_mul(self.limits.capacity.property_bytes), super::WorkKind::PropertyEnumeration)?;
             let mut keys = self.objects[id]
                 .properties
-                .iter()
+                .scalar_iter()
                 .filter_map(|(name, property)| {
                     property_index(name)
                         .filter(|index| *index >= length)

@@ -162,7 +162,7 @@ impl Target {
         match self {
             Self::Value { function, .. } | Self::Construct(function) => pending_value_bytes(function),
             Self::Member { receiver, function, key } => {
-                let key = match key { PropertyKey::String(name) => name.capacity(), PropertyKey::Symbol(_) => 0 };
+                let key = match key { PropertyKey::String(name) => name.capacity(), PropertyKey::StringUnits(units) => units.capacity().saturating_mul(2), PropertyKey::Symbol(_) => 0 };
                 pending_value_bytes(receiver)
                     .saturating_add(key)
                     .saturating_add(function.as_ref().map_or(0, pending_value_bytes))
@@ -245,6 +245,7 @@ impl State<'_> {
                 let retained = match reference {
                     Reference::Binding(_, name) | Reference::Missing(name) | Reference::Global(name) => name.capacity(),
                     Reference::Property(receiver, name) => pending_value_bytes(receiver).saturating_add(name.capacity()),
+                    Reference::UnitsProperty(receiver, units) => pending_value_bytes(receiver).saturating_add(units.capacity().saturating_mul(2)),
                     Reference::SymbolProperty(receiver, _) => pending_value_bytes(receiver),
                     Reference::ComputedProperty(receiver, key) => pending_value_bytes(receiver).saturating_add(pending_value_bytes(key)),
                     Reference::SuperProperty { receiver, name, .. } => pending_value_bytes(receiver).saturating_add(name.len()),

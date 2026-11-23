@@ -2,7 +2,7 @@
 //! https://fetch.spec.whatwg.org/#headers-class
 //! No network I/O or script emulation occurs in this value layer.
 use super::function_reachability::Edge;
-use super::{Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, Value};
+use super::{Builtin, Declaration, Fault, Host, Ordinary, Runtime, StringKey, Value};
 pub(super) type Pair = (String, String);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Guard {
@@ -289,15 +289,23 @@ impl Runtime {
         let mut pairs = Vec::new();
         for key in keys {
             self.step()?;
-            if !self.own_enumerable(object, &key)? {
+            let enumerable = match &key {
+                StringKey::Scalar(name) => self.own_enumerable(object, name)?,
+                StringKey::Units(units) => self.own_units_enumerable(object, units)?,
+            };
+            if !enumerable {
                 continue;
             }
             let pair = self.headers_hold(bytes(&pairs)?, |runtime| {
-                let key_value = runtime.headers_copy(&key)?;
+                let key_value = match &key {
+                    StringKey::Scalar(name) => runtime.headers_copy(name)?,
+                    // Every canonical raw key contains a unit above 255.
+                    StringKey::Units(_) => return Err(invalid("Headers ByteString contains a value above255.")),
+                };
                 let name = runtime.headers_byte_string(Value::String(key_value), host)?;
                 let text = runtime.headers_hold(name.capacity(), |runtime| {
                     let receiver = runtime.copy_value(&value)?;
-                    let v = runtime.read_reference(&Reference::Property(receiver, key), host)?;
+                    let v = runtime.read_reference(&key.into_property_key().reference(receiver), host)?;
                     runtime.headers_byte_string(v, host)
                 })?;
                 Ok((name, text))
