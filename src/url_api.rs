@@ -5,7 +5,7 @@
 //! Source: https://url.spec.whatwg.org/#api (algorithms, not engine source).
 
 use super::{
-    Accessors, Builtin, Declaration, Fault, Host, Ordinary, Reference, Runtime, StringKey, Value,
+    Accessors, Builtin, Declaration, Fault, Host, Ordinary, Runtime, StringKey, Value,
 };
 use std::net::Ipv6Addr;
 
@@ -963,9 +963,58 @@ impl Runtime {
     fn url_string(&mut self, value: &Value, host: &mut dyn Host) -> Result<String, Fault> {
         let input = self.copy_value(value)?;
         let primitive = self.primitive_with_hint(input, true, host)?;
-        let text = primitive.script_text()?;
+        let text = match primitive {
+            Value::StringUnits(units) => return self.url_usv_units(&units),
+            Value::String(text) => text,
+            other => other.script_text()?,
+        };
+        self.url_string_size(text.len())?;
         self.work(text.len())?;
         Ok(text)
+    }
+    fn url_string_size(&self, bytes: usize) -> Result<(), Fault> {
+        if bytes > self.limits.capacity.string_bytes {
+            return Err(Fault::new(format!(
+                "String limit reached ({} KiB).",
+                self.limits.capacity.string_bytes / 1024,
+            )));
+        }
+        Ok(())
+    }
+    // URL's IDL strings contain scalar values. Keep replacement at this API
+    // boundary; ordinary property names and DOMString values retain exact units.
+    // https://webidl.spec.whatwg.org/#es-USVString
+    fn url_usv_units(&mut self, units: &[u16]) -> Result<String, Fault> {
+        self.work(units.len().saturating_mul(2))?;
+        let bytes = char::decode_utf16(units.iter().copied()).try_fold(
+            0usize,
+            |bytes, item| {
+                bytes.checked_add(item.unwrap_or(char::REPLACEMENT_CHARACTER).len_utf8())
+                    .ok_or_else(|| Fault::new("URL string byte accounting overflow."))
+            },
+        )?;
+        self.url_string_size(bytes)?;
+        self.work(bytes)?;
+        let mut text = String::new();
+        text.try_reserve_exact(bytes)
+            .map_err(|_| Fault::new("Cannot reserve URL scalar string."))?;
+        text.extend(char::decode_utf16(units.iter().copied())
+            .map(|item| item.unwrap_or(char::REPLACEMENT_CHARACTER)));
+        Ok(text)
+    }
+    fn url_record_name(&mut self, key: &StringKey) -> Result<String, Fault> {
+        match key {
+            StringKey::Units(units) => self.url_usv_units(units),
+            StringKey::Scalar(name) => {
+                self.url_string_size(name.len())?;
+                self.work(name.len())?;
+                let mut text = String::new();
+                text.try_reserve_exact(name.len())
+                    .map_err(|_| Fault::new("Cannot reserve URL record name."))?;
+                text.push_str(name);
+                Ok(text)
+            }
+        }
     }
     fn url_data(&self, id: usize) -> Result<&Data, Fault> {
         self.object(id)?.url.as_ref().ok_or_else(|| {
@@ -1130,7 +1179,7 @@ impl Runtime {
             let object = self.ordinary_id(ordinary)?;
             let keys = self.own_string_keys(object, false)?;
             let symbols = self.own_symbol_keys(object, false)?;
-            let mut pairs = Vec::new();
+            let mut pairs: Vec<Pair> = Vec::new();
             let mut bytes = 0usize;
             for key in keys {
                 self.step()?;
@@ -1141,21 +1190,39 @@ impl Runtime {
                 if !enumerable {
                     continue;
                 }
-                let StringKey::Scalar(key) = key else {
-                    return Err(Fault::new("URLSearchParams record names containing unpaired UTF-16 require the pending USVString conversion."));
-                };
-                if pairs.len() >= MAX_PAIRS {
+                // Web IDL record conversion reads the original property key,
+                // but stores the converted key in an ordered map. Distinct raw
+                // keys can replace the same scalar name without moving it.
+                // https://webidl.spec.whatwg.org/#es-record
+                let name = self.url_record_name(&key)?;
+                let mut existing = None;
+                for (index, (candidate, _)) in pairs.iter().enumerate() {
+                    self.work(name.len().min(candidate.len()).saturating_add(1))?;
+                    if *candidate == name {
+                        existing = Some(index);
+                        break;
+                    }
+                }
+                if existing.is_none() && pairs.len() >= MAX_PAIRS {
                     return Err(Fault::new("URLSearchParams entry limit reached (1024)."));
                 }
                 let receiver = self.copy_value(value)?;
-                let next =
-                    self.read_reference(&Reference::Property(receiver, key.clone()), host)?;
+                let reference = key.into_property_key().reference(receiver);
+                let next = self.read_reference(&reference, host)?;
                 let next = self.url_string(&next, host)?;
-                bytes += key.len() + next.len();
+                bytes = if let Some(index) = existing {
+                    bytes - pairs[index].1.len() + next.len()
+                } else {
+                    bytes + name.len() + next.len()
+                };
                 if bytes > MAX_PARAMS_BYTES {
                     return Err(Fault::new("URLSearchParams byte limit reached (64 KiB)."));
                 }
-                pairs.push((key, next));
+                if let Some(index) = existing {
+                    pairs[index].1 = next;
+                } else {
+                    pairs.push((name, next));
+                }
             }
             for key in symbols {
                 self.step()?;
@@ -1584,6 +1651,14 @@ impl Runtime {
 #[cfg(test)]
 #[path = "url_api_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "url_usv_tests.rs"]
+mod usv_tests;
+
+#[cfg(test)]
+#[path = "url_usv_boundary_tests.rs"]
+mod usv_boundary_tests;
 
 #[cfg(test)]
 mod projection_tests {

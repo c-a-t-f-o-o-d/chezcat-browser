@@ -605,11 +605,12 @@
               "normative_pins": [
                 "html",
                 "dom",
-                "webidl"
+                "webidl",
+                "url"
               ],
               "entry_paths": [
                 "error filename",
-                "URL and typed API conversion"
+                "URL and URLSearchParams arguments, setters and record keys"
               ],
               "status": "partial",
               "source_anchors": [
@@ -617,7 +618,10 @@
                 "src/host_objects.rs",
                 "src/script_inert_documents.rs",
                 "src/script_clone_node.rs",
-                "src/script_template_imports.rs"
+                "src/script_template_imports.rs",
+                "src/url_api.rs",
+                "src/url_usv_tests.rs",
+                "src/url_usv_boundary_tests.rs"
               ],
               "integration_dependencies": [
                 "F03",
@@ -627,7 +631,7 @@
                 "F01-usvstring-replacement-distinct-from-domstring"
               ],
               "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
-              "supplementary_evidence": "Existing source-bound focused/native App results remain regression evidence, not replacement browser WPT. Canonical native compareDocumentPosition now covers actual main/inert/document/fragment/doctype/CharacterData/Attr and immutable child roots, current sibling and attribute-list order, stable reciprocal disconnected masks, detach/adopt/current owners and template dedicated-root separation. Nonnullable Node brands, both operand/captured caller origin/lifetime, iterative paid main/inert paths, child scratch admission, refusal/recovery,350-depth no-slot and original Windows App binding/pixels/editor/link provide supplementary evidence. Complete parser/custom-element/shadow/lifecycle and required unchanged browser WPT remain open; no F01 closure.",
+              "supplementary_evidence": "Development-source URL/URLSearchParams inputs now apply bounded Web IDL scalar replacement after one ordered string-hint primitive conversion. Valid surrogate pairs remain intact. Record construction snapshots exact own keys, checks current enumerability, converts the name before reading through the original key, and retains the first position with the last value when converted names collide. String/sequence inputs continue to preserve duplicate pairs. All 49 focused standalone Linux URL/query tests passed, including 27 new regressions covering constructors/statics/bases/setters, method and record conversion, callback order and reentry, Symbol/iterator failures, input/output work, scalar length, retained/query/URL limits, atomic native-slot refusal/recovery and existing capability boundaries. The current Web IDL record and USVString algorithm anchors supplement the existing pins without claiming a new normative revision. This finite F01 prerequisite is supplementary to F03.03; it is not a full URL corpus assessment. The required ErrorEvent.filename witness, original frozen input files, selections and expected results are unchanged. Full Windows, connected App and required frozen browser qualification were not rerun; F01 and F01.03 remain partial.",
               "closing_evidence": []
             },
             {
@@ -669,7 +673,7 @@
               ],
               "required_original_witness_ids": [],
               "required_browser_selection": "All unchanged assertions in the original 21 locked F01 dom/nodes HTML/XHTML files remain required. Runtime subtest counts follow completed harness reports.",
-              "supplementary_evidence": "All 43 focused standalone Linux runtime tests passed for this finite increment. Exact unpaired units remain distinct from U+FFFD, scalar spellings and Symbols; well-formed pairs retain scalar identity. Ordinary reads/writes, membership/deletion, descriptor/accessor/prototype behavior, ordering, copy operations, supported Reflect/Proxy paths, literal/class names and pattern exclusions preserve keys. Storage, copy-work, strong-edge retention, atomic refusal/recovery and registered native owner/origin/lifetime boundaries have focused evidence. JSON.stringify escapes raw names exactly, retains callback keys and live values, and accepts supported raw replacer-list names; reviver-created raw keys receive no fabricated source context. The current ECMAScript algorithm anchor accompanies the existing HTML/DOM/WebIDL integration pins; no new normative revision is asserted. Scalar-only native consumers, opaque handles, URLSearchParams raw record-name USVString conversion, JSON.parse lone-surrogate strings/keys and raw-unit indentation retain their limitations. The full Windows suite, connected App journeys and required frozen browser conformance were not rerun. Frozen input files, selection, expected results and witness IDs are unchanged. These focused tests are supplementary evidence and do not close F01 or F01.03.",
+              "supplementary_evidence": "All 43 focused standalone Linux runtime tests passed for this finite increment. Exact unpaired units remain distinct from U+FFFD, scalar spellings and Symbols; well-formed pairs retain scalar identity. Ordinary reads/writes, membership/deletion, descriptor/accessor/prototype behavior, ordering, copy operations, supported Reflect/Proxy paths, literal/class names and pattern exclusions preserve keys. Storage, copy-work, strong-edge retention, atomic refusal/recovery and registered native owner/origin/lifetime boundaries have focused evidence. JSON.stringify escapes raw names exactly, retains callback keys and live values, and accepts supported raw replacer-list names; reviver-created raw keys receive no fabricated source context. The current ECMAScript algorithm anchor accompanies the existing HTML/DOM/WebIDL integration pins; no new normative revision is asserted. Scalar-only native consumers, opaque handles, JSON.parse lone-surrogate strings/keys and raw-unit indentation retain their limitations. The full Windows suite, connected App journeys and required frozen browser conformance were not rerun. Frozen input files, selection, expected results and witness IDs are unchanged. These focused tests are supplementary evidence and do not close F01 or F01.03.",
               "closing_evidence": []
             }
           ]
@@ -1025,7 +1029,8 @@
           "requirement": "URLSearchParams, setters and form URL encoding",
           "status": "unassessed",
           "verification": [],
-          "dependency_details": []
+          "dependency_details": [],
+          "supplementary_evidence": "The finite URL/URLSearchParams USVString boundary is implemented and tested under F01.03.usvstring. General URL parser/setter/form-encoding conformance remains unassessed; the required F03 case-level acceptance selection and URL corpus execution are still pending."
         },
         {
           "id": "F03.04",
