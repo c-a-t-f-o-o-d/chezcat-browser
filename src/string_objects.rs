@@ -1,9 +1,9 @@
 //! Bounded original String exotic objects.
 //!
-//! The immutable payload owns one UTF-8 string, charged to retained values.
+//! The immutable payload owns an exact scalar or raw UTF-16 string, charged to retained values.
 //! Indexed own properties are virtual; boxing a long string does not allocate
 //! thousands of property slots. Length and enumeration count UTF-16 code units.
-//! Reading an isolated surrogate retains the existing explicit string boundary.
+//! Indexed values preserve individual code units, including unpaired surrogates.
 //! https://tc39.es/ecma262/#sec-string-exotic-objects
 //! https://tc39.es/ecma262/#sec-string-constructor
 
@@ -29,12 +29,16 @@ impl Runtime {
         if index >= *length {
             return Err(Fault::new("Invalid String object index."));
         }
-        let bytes = value.len();
+        let bytes = value.bytes();
         self.work_as(bytes, WorkKind::CharacterScan)?;
         let Some(Data::String { value, .. }) = self.objects[id].primitive.as_ref() else {
             unreachable!()
         };
-        Ok(value.encode_utf16().nth(index).unwrap())
+        match value {
+            Value::String(text)=>Ok(text.encode_utf16().nth(index).unwrap()),
+            Value::StringUnits(units)=>Ok(units[index]),
+            _=>unreachable!("String slot contains a non-string"),
+        }
     }
 
     pub(super) fn string_object_index_value(
@@ -43,7 +47,7 @@ impl Runtime {
         index: usize,
     ) -> Result<Value, Fault> {
         let unit = self.string_object_unit(id, index)?;
-        self.units_string(&[unit]).map(Value::String)
+        self.string_from_units(&[unit])
     }
 
     pub(super) fn string_object_index_matches(
@@ -52,18 +56,20 @@ impl Runtime {
         index: usize,
         candidate: &Value,
     ) -> Result<bool, Fault> {
-        // Descriptor compatibility does not coerce its value, and does not
-        // need to materialize an unsupported isolated surrogate.
-        let Value::String(candidate) = candidate else {
-            return Ok(false);
+        // Immutable descriptor compatibility compares the exact single unit
+        // without coercion or materializing a temporary indexed value.
+        if !candidate.is_string(){return Ok(false);}
+        self.work(candidate.bytes())?;
+        let unit=match candidate {
+            Value::String(text)=>{
+                let mut units=text.encode_utf16();let first=units.next();
+                if units.next().is_some(){return Ok(false);}first
+            },
+            Value::StringUnits(units) if units.len()==1=>Some(units[0]),
+            _=>None,
         };
-        self.work(candidate.len())?;
-        let mut units = candidate.encode_utf16();
-        let first = units.next();
-        if first.is_none() || units.next().is_some() {
-            return Ok(false);
-        }
-        Ok(first == Some(self.string_object_unit(id, index)?))
+        let Some(unit)=unit else{return Ok(false);};
+        Ok(unit==self.string_object_unit(id,index)?)
     }
 
     pub(super) fn initialize_string_object(
@@ -71,45 +77,56 @@ impl Runtime {
         id: usize,
         value: String,
     ) -> Result<(), Fault> {
-        if value.len() > self.limits.capacity.string_bytes {
+        self.initialize_string_value(id,Value::String(value))
+    }
+
+    fn initialize_string_value(&mut self,id:usize,value:Value)->Result<(),Fault> {
+        if !value.is_string(){return Err(Fault::new("Invalid String object payload."));}
+        if value.bytes() > self.limits.capacity.string_bytes {
             return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if self
             .value_bytes
-            .saturating_add(value.len())
+            .saturating_add(value.bytes())
             .saturating_add("length".len())
             > self.limits.heap.retained_values
         {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
-        self.work_as(value.len(), WorkKind::LengthScan)?;
-        let length = value.encode_utf16().count();
+        self.work_as(value.bytes(), WorkKind::LengthScan)?;
+        let length=value.string_length().expect("validated String payload");
+
         self.store_property(
             id,
             "length".into(),
             Value::Number(length as f64),
             Some((false, false, false)),
         )?;
-        self.value_bytes += value.len();
+        self.value_bytes += value.bytes();
         self.objects[id].primitive = Some(Data::String { value, length });
         Ok(())
     }
 
     pub(super) fn box_string(&mut self, value: String) -> Result<Value, Fault> {
+        self.box_string_value(Value::String(value))
+    }
+
+    pub(super) fn box_string_value(&mut self,value:Value)->Result<Value,Fault> {
+        if !value.is_string(){return Err(Fault::new("Invalid String object payload."));}
         // Validate before allocating an object; no partial object is exposed.
-        if value.len() > self.limits.capacity.string_bytes {
+        if value.bytes() > self.limits.capacity.string_bytes {
             return Err(Fault::new(format!("String limit reached ({} KiB).", self.limits.capacity.string_bytes / 1024)));
         }
         if self
             .value_bytes
-            .saturating_add(value.len())
+            .saturating_add(value.bytes())
             .saturating_add("length".len())
             > self.limits.heap.retained_values
         {
             return Err(Fault::new(format!("Retained value limit reached ({} bytes).", self.limits.heap.retained_values)));
         }
         let id = self.new_object(None)?;
-        self.initialize_string_object(id, value)?;
+        self.initialize_string_value(id, value)?;
         self.objects[id].prototype = self.string_prototype.map(Ordinary::Object);
         Ok(Value::Object(id))
     }
@@ -124,11 +141,11 @@ impl Runtime {
             // Only String() as a function has the Symbol description exception.
             let primitive = self.primitive_with_hint(value, true, host)?;
             self.work_as(primitive.bytes(), WorkKind::ConversionOutput)?;
-            primitive.script_text()?
+            if primitive.is_string(){primitive}else{Value::String(primitive.script_text()?)}
         } else {
-            String::new()
+            Value::String(String::new())
         };
-        self.box_string(value)
+        self.box_string_value(value)
     }
 }
 
@@ -298,16 +315,16 @@ if(log!=='string:3')throw 'primitive inherited setter';
     }
 
     #[test]
-    fn string_object_resource_faults_and_surrogate_faults_remain_fatal() {
+    fn string_object_resource_faults_remain_fatal_and_surrogate_indices_are_exact() {
         for source in [
-            "try{new String('😀')[0];}catch(e){throw 'caught';}finally{throw 'finally';}",
             "let b=new String('x');try{for(var i=0;i<5000;i++)new String('x');}catch(e){throw 'caught';}finally{throw 'finally';}",
         ] {
             let error=Runtime::for_test().execute(source,&mut NoHost).unwrap_err();
             let diagnostic=error.lines().next().unwrap();
             assert!(!diagnostic.contains("caught")&&!diagnostic.contains("finally"), "{error}");
-            assert!(error.contains("lone UTF-16")||error.contains("Object identity limit"), "{error}");
+            assert!(error.contains("Object identity limit"), "{error}");
         }
+        succeeds("if(new String('😀')[0]!=='\\ud83d'||new String('😀')[1]!=='\\ude00')throw 'exact indexed surrogate';'ok';");
         let mut runtime = Runtime::for_test();
         let boxed = runtime.box_string("work".into()).unwrap();
         runtime.copy_bytes = 0;
@@ -352,5 +369,121 @@ if(!Object.is(NaN,NaN)||Object.is(0,-0)||!Object.is(-0,-0)||Object.is({},{}))thr
 'ok';
 "#,
         );
+    }
+}
+
+
+#[cfg(test)]
+mod raw_box_tests {
+    use super::*;
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self,_:u32,_:&str)->Result<Value,String>{Err("No native reads".into())}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{Err("No native writes".into())}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{Err("No native calls".into())}
+    }
+    fn succeeds(source:&str){assert_eq!(Runtime::for_test().execute(source,&mut NoHost).unwrap().to_text(),"ok");}
+
+    #[test]
+    fn string_box_utf16_constructor_object_routes_exact_slot_and_ordered_hooks() {
+        succeeds(r#"
+var raw='A\ud800B\udfff',b=new String(raw),o=Object(raw),n=new Object(raw);
+for(var box of [b,o,n]){if(typeof box!=='object'||!(box instanceof String)||box.valueOf()!==raw||box.toString()!==raw||String(box)!==raw||box.length!==4)throw 'exact slot';}
+if(Object(b)!==b||o===n)throw 'identity';
+var order='',arg={toString:function(){order+='S';return raw;},valueOf:function(){throw 'wrong hint';}};
+if(new String(arg).valueOf()!==raw||order!=='S')throw 'ordered construction';
+var marker={};try{new String({toString:function(){throw marker;}});throw 'missing abrupt';}catch(e){if(e!==marker)throw e;}
+try{new String(Symbol('x'));throw 'accepted symbol';}catch(e){if(!(e instanceof TypeError))throw e;}
+try{String.prototype.valueOf.call(Object.create(String.prototype));throw 'forged slot';}catch(e){if(!(e instanceof TypeError))throw e;}
+var B=String.bind(null,raw);if(new B().valueOf()!==raw)throw 'bound constructor';
+'ok';
+"#);
+    }
+
+    #[test]
+    fn string_box_utf16_virtual_units_and_immutable_descriptor_compatibility() {
+        succeeds(r#"
+for(var b of [new String('😀'),new String('\ud83d\ude00'),new String('\ud800\udfff')]){
+if(b.length!==2||b[0].length!==1||b[1].length!==1||b[0].charCodeAt(0)!==b.charCodeAt(0)||b[1].charCodeAt(0)!==b.charCodeAt(1))throw 'exact virtual units';
+for(var i=0;i<2;i++){var d=Object.getOwnPropertyDescriptor(b,''+i);if(d.value!==b[i]||d.writable||!d.enumerable||d.configurable)throw 'descriptor';Object.defineProperty(b,i,{value:b[i]});}
+try{Object.defineProperty(b,0,{value:'\ufffd'});throw 'accepted replacement';}catch(e){if(!(e instanceof TypeError))throw e;}
+if(Object.getOwnPropertyNames(b).join()!=='0,1,length'||Object.keys(b).join()!=='0,1')throw 'virtual enumeration';
+Object.freeze(b);if(!Object.isFrozen(b))throw 'freeze';
+}
+'ok';
+"#);
+    }
+
+    #[test]
+    fn string_box_utf16_json_keys_sloppy_receiver_and_exact_search_consumers() {
+        succeeds(r#"
+var raw='A\ud800B\udfff',b=new String(raw),o={};o[b]=7;
+if(Object.keys(o)[0]!==raw||o[raw]!==7||JSON.parse(JSON.stringify(o))[raw]!==7)throw 'boxed key';
+if(JSON.parse(JSON.stringify({x:b})).x!==raw||JSON.parse(JSON.stringify(o,[b]))[raw]!==7)throw 'JSON consumers';
+if((function(){return this instanceof String&&this.valueOf()===raw;}).call(raw)!==true)throw 'sloppy boxing';
+if(b.indexOf('\ud800')!==1||b.lastIndexOf('\udfff')!==3||b.slice(1,2)!=='\ud800')throw 'exact methods';
+var gap=new String('\ud800'),formatted=JSON.stringify({x:1},null,gap);if(formatted.charCodeAt(2)!==55296)throw 'exact gap';
+'ok';
+"#);
+    }
+}
+
+#[cfg(test)]
+mod raw_box_boundary_tests {
+    use super::*;
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self,_:u32,_:&str)->Result<Value,String>{Err("No native reads".into())}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{Err("No native writes".into())}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{Err("No native calls".into())}
+    }
+    #[test]
+    fn string_box_utf16_payload_admission_is_exact_before_object_allocation() {
+        let mut runtime=Runtime::for_test();
+        let before=runtime.value_bytes;let objects=runtime.objects.len();let properties=runtime.properties;
+        let cap=runtime.limits.capacity.string_bytes;let limit=runtime.limits.heap.retained_values;
+        runtime.limits.capacity.string_bytes=3;
+        let error=runtime.box_string_value(Value::StringUnits(vec![0xd800,0xdfff])).unwrap_err();
+        assert!(error.exception.is_none()&&error.message.contains("String limit"));
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.properties),(before,objects,properties));
+        runtime.limits.capacity.string_bytes=cap;runtime.limits.heap.retained_values=before+9;
+        let error=runtime.box_string_value(Value::StringUnits(vec![0xd800,0xdfff])).unwrap_err();
+        assert!(error.exception.is_none()&&error.message.contains("Retained value limit"));
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.properties),(before,objects,properties));
+        runtime.limits.heap.retained_values=before+10;runtime.begin_job();
+        let boxed=runtime.box_string_value(Value::StringUnits(vec![0xd800,0xdfff])).unwrap();
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.properties),(before+10,objects+1,properties+1));
+        assert!(matches!(runtime.wrapped_primitive(&boxed).unwrap(),Some(Value::StringUnits(units)) if units==[0xd800,0xdfff]));
+        runtime.limits.heap.retained_values=limit;
+    }
+
+    #[test]
+    fn string_box_utf16_large_payload_uses_virtual_indices_and_no_property_fanout() {
+        let mut runtime=Runtime::for_test();let before=runtime.value_bytes;let properties=runtime.properties;
+        let Value::Object(id)=runtime.box_string_value(Value::StringUnits(vec![0xd800;32768])).unwrap()else{panic!("String object")};
+        assert_eq!(runtime.value_bytes,before+65536+6);assert_eq!(runtime.properties,properties+1);
+        assert_eq!(runtime.objects[id].properties.len(),1);assert_eq!(runtime.string_object_length(id),Some(32768));
+        assert!(matches!(runtime.string_object_index_value(id,32767).unwrap(),Value::StringUnits(units) if units==[0xd800]));
+        let error=runtime.own_string_keys(id,true).unwrap_err();assert!(error.message.contains("enumeration limit"));
+    }
+
+    #[test]
+    fn string_box_utf16_index_output_and_unboxing_work_refuse_then_recover() {
+        let mut runtime=Runtime::for_test();let boxed=runtime.box_string_value(Value::StringUnits(vec![0xd800,65])).unwrap();
+        let Value::Object(id)=boxed else{panic!("String object")};let retained=runtime.value_bytes;
+        let cap=runtime.limits.capacity.string_bytes;runtime.limits.capacity.string_bytes=1;runtime.begin_job();
+        let error=runtime.string_object_index_value(id,0).unwrap_err();assert!(error.exception.is_none()&&error.message.contains("String limit"));
+        assert_eq!(runtime.value_bytes,retained);
+        // Descriptor compatibility compares a unit directly, without output.
+        assert!(runtime.string_object_index_matches(id,0,&Value::StringUnits(vec![0xd800])).unwrap());
+        assert!(!runtime.string_object_index_matches(id,0,&Value::String("\u{fffd}".into())).unwrap());
+        runtime.limits.capacity.string_bytes=cap;runtime.begin_job();runtime.copy_bytes=0;
+        let error=runtime.wrapped_primitive(&Value::Object(id)).unwrap_err();assert!(error.message.contains("work limit"));
+        assert_eq!(runtime.value_bytes,retained);runtime.begin_job();runtime.copy_bytes=0;
+        let error=runtime.string_object_index_value(id,0).unwrap_err();assert!(error.message.contains("work limit"));
+        assert_eq!(runtime.value_bytes,retained);runtime.begin_job();
+        assert!(matches!(runtime.string_object_index_value(id,0).unwrap(),Value::StringUnits(units) if units==[0xd800]));
+        assert!(matches!(runtime.wrapped_primitive(&Value::Object(id)).unwrap(),Some(Value::StringUnits(units)) if units==[0xd800,65]));
+        assert_eq!(runtime.value_bytes,retained);
     }
 }

@@ -14,7 +14,7 @@ pub(super) enum Data {
     BigInt(std::sync::Arc<str>),
     Boolean(bool),
     Symbol(usize),
-    String { value: String, length: usize },
+    String { value: Value, length: usize },
 }
 
 impl Data {
@@ -24,7 +24,7 @@ impl Data {
             Self::BigInt(value) => Value::BigInt(value.clone()),
             Self::Boolean(value) => Value::Bool(*value),
             Self::Symbol(value) => Value::Symbol(*value),
-            Self::String { value, .. } => Value::String(value.clone()),
+            Self::String { value, .. } => value.clone(),
         }
     }
 
@@ -49,7 +49,7 @@ impl Runtime {
 
     pub(super) fn wrapped_primitive(&mut self, value: &Value) -> Result<Option<Value>, Fault> {
         let bytes = match self.wrapped_data(value) {
-            Some(Data::String { value, .. }) => value.len(),
+            Some(Data::String { value, .. }) => value.bytes(),
             Some(Data::BigInt(value)) => value.len(),
             _ => 0,
         };
@@ -67,7 +67,7 @@ impl Runtime {
                 (Data::Symbol(value), self.symbol_prototype)
             }
             Value::String(value) => return self.box_string(value),
-            Value::StringUnits(_) => return Err(Fault::new("Boxing a string containing unpaired UTF-16 surrogates is not implemented.")),
+            value @ Value::StringUnits(_) => return self.box_string_value(value),
             _ => {
                 return Err(Fault::exception(
                     "TypeError",
