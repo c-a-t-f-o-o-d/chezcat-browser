@@ -6,6 +6,12 @@ algorithms remain original Rust/std-only. Upstream corpus bytes stay in an
 explicit external cache and are never downloaded by the runner or shipped in a
 runtime package.
 
+The normal Windows suite exercises the adapter's request decoder, native
+fragment parser, tree serialization and malformed-request response in memory.
+The external corpus runner selects that same test by its exact name and writes
+requests under the chosen verification root. Its selection also supports older
+test executables whose adapter was registered as ignored.
+
 The inputs.json lock records repository revisions, paths, Git blobs, byte lengths
 and SHA-256 digests, including licenses, data format documents and the selected
 F01 browser fixtures' static dependencies. WPT uses its 3-clause BSD license;
