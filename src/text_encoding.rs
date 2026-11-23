@@ -28,6 +28,8 @@ use super::{
 };
 
 use crate::text_codec::{DecodeError, Decoder, Encoding};
+#[path = "text_encoding_xml.rs"]
+mod xml;
 
 #[derive(Debug)]
 struct TextInput {
@@ -514,6 +516,13 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// XML declaration selection borrows admitted request bytes. Charge its
+    /// finite scan independently of the subsequent shared decoder work.
+    pub(crate) fn xml_request_text_encoding(&mut self, bytes: &[u8]) -> Result<Option<&'static str>, String> {
+        self.work(bytes.len()).map_err(Fault::display)?;
+        Ok(xml::determine(bytes))
+    }
+
     /// Resolve Encoding's complete label set for native request algorithms.
     /// Unknown labels remain distinct from the recognized replacement decoder;
     /// the caller, rather than the codec, owns its default-encoding policy.

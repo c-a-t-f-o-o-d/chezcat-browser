@@ -1095,7 +1095,7 @@ impl State {
         self.pending.clear();
     }
 }
-fn response_encoding(record: &Record, response: &crate::http::Response) -> Result<&'static str, String> {
+fn response_encoding(runtime: &mut Runtime, record: &Record, response: &crate::http::Response) -> Result<&'static str, String> {
     let response_mime = mime::parse(response.header("content-type").unwrap_or(""))?;
     let override_mime = mime::parse(&record.mime)?;
     // Charset selection is separate from the final MIME type: an override
@@ -1104,9 +1104,16 @@ fn response_encoding(record: &Record, response: &crate::http::Response) -> Resul
         .as_ref()
         .and_then(|mime| mime.charset())
         .or_else(|| response_mime.as_ref().and_then(|mime| mime.charset()));
-    Ok(label
-        .and_then(Runtime::request_text_encoding_label)
-        .unwrap_or("utf-8"))
+    if let Some(encoding) = label.and_then(Runtime::request_text_encoding_label) {
+        return Ok(encoding);
+    }
+    let final_mime = override_mime.as_ref().or(response_mime.as_ref())
+        .map_or("text/xml", |mime| mime.essence.as_str());
+    let xml = final_mime == "text/xml" || final_mime == "application/xml" || final_mime.ends_with("+xml");
+    if record.response_type.is_empty() && xml {
+        return Ok(runtime.xml_request_text_encoding(&response.body)?.unwrap_or("utf-8"));
+    }
+    Ok("utf-8")
 }
 
 impl Page {
@@ -1210,7 +1217,7 @@ impl Page {
                     response.encoded_body_bytes,
                     response.body.len()
                 ));
-                let label = response_encoding(&self.state.xhr.records[id], &response);
+                let label = response_encoding(&mut self.runtime, &self.state.xhr.records[id], &response);
                 match label
                     .and_then(|label| self.runtime.decode_request_text(&response.body, label))
                 {

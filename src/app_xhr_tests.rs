@@ -460,6 +460,39 @@ r.open('GET',{path:?});r.responseType='text';{override_source}r.send();
 }
 
 #[test]
+fn xhr_xml_default_actual_app_decodes_declaration_and_paints_text() {
+    let site = Site::new();
+    let bytes = b"<?xml version='1.0' encoding='Shift_JIS'?><r>\x82\xa0</r>";
+    site.put("/xml-text", 200, "Content-Type: application/xml\r\n", bytes);
+    let html=r#"<!doctype html><style>html,body{margin:0;background:white}#out{position:absolute;left:20px;top:100px;width:300px;height:40px;margin:0;color:#123456;font-size:24px}#neighbor{position:absolute;left:20px;top:20px;width:200px;height:32px}#stable{position:absolute;left:20px;top:180px;width:100px;height:24px}</style><body><input id=neighbor value=seed><p id=out>waiting</p><a id=stable href=#destination>Go</a><div id=destination></div><script>
+var r=new XMLHttpRequest(),loads=0;
+r.onload=function(e){if(!e.isTrusted||e.loaded!==51||r.responseText!=="<?xml version='1.0' encoding='Shift_JIS'?><r>\u3042</r>"||r.response!==r.responseText||r.status!==200)throw 'XML network response';loads++;document.getElementById('out').textContent='XML '+r.responseText.slice(-5,-4);document.title='XML default decoded';};
+r.open('GET','/xml-text');r.send();
+</script></body>"#;
+    site.put("/xml-home",200,"Content-Type: text/html;charset=utf-8\r\nContent-Security-Policy: connect-src 'self'\r\n",html.as_bytes());
+    assert_eq!(bytes.len(), 51);
+    let mut app=App::new(); app.resize(640,480); app.set_javascript_enabled(true);
+    site.open(&mut app,"/xml-home");
+    let neighbor=node(&app,"neighbor");
+    app.forms.script_set_value(neighbor,"edited neighbor").unwrap();
+    { let editor=&mut app.forms.controls.get_mut(&neighbor).unwrap().value;editor.cursor=5;editor.anchor=2;editor.offset=1; }
+    let before=app.draw().pixels;
+    until(&mut app, |app| app.document.title=="XML default decoded" || app.scripting.as_ref().is_some_and(|page| page.error_count()!=0));
+    clean(&app); assert_eq!(app.document.title,"XML default decoded");
+    let page=app.scripting.as_mut().unwrap();
+    assert_eq!(page.console_eval(&mut app.document,&mut app.forms,"if(document.getElementById('out').textContent!=='XML \\u3042'||loads!==1)throw 'XML painted consumer';").errors,0);
+    assert!(app.page.runs.iter().any(|run|run.text.contains('あ')));
+    let after=app.draw();assert_ne!(before,after.pixels);
+    let top=(app.content_top()+100-app.scroll) as usize;
+    assert!((top..top+40).any(|y|after.pixels[y*after.width+20..y*after.width+320].contains(&0x123456)));
+    let editor=&app.forms.controls[&neighbor].value;
+    assert_eq!((editor.text(),editor.cursor,editor.anchor,editor.offset),("edited neighbor".into(),5,2,1));
+    assert_eq!(app.page.link_node_at(70,192),Some(node(&app,"stable")));
+    assert_eq!(app.page.link_at(70,192),Some("#destination"));
+    assert_eq!(site.count("/xml-text"),1);
+}
+
+#[test]
 fn xhr_actual_app_charset_replacement_response_paints_and_preserves_editor_and_link_targets() {
     let site = Site::new();
     let bytes = b"<script>source must not appear</script>";
