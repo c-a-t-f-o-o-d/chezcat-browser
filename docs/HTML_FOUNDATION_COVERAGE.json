@@ -1068,6 +1068,17 @@
       ],
       "status": "partial",
       "scope": "required",
+      "native_tree_observation": {
+        "baseline_source": "5b4a8b9816583118aefd24074d104f17cc664397",
+        "source_commit": "bc553945049e422cca8b9a1644e7dc52a6b419d1",
+        "frozen_records_verified": 10989,
+        "baseline_matching_tree_outputs": 55,
+        "matching_tree_outputs": 1808,
+        "mismatching_tree_outputs": 1724,
+        "previously_matching_outputs_lost": 0,
+        "newly_passing_originals": ["F05-implicit-document-roots", "F05-head-to-body"],
+        "scope": "These are native tree-output comparisons. Parse-error diagnostics, testcase scripting and browser integrations retain their separate requirements."
+      },
       "current_source_scope": "Loaded and inert full HTML document entry paths now insert native html, head, and body or frameset records from the token stream. Metadata after head, duplicate root/body attributes, comment placement and EOF have original checks. Other insertion-mode branches, table/formatting recovery, scripting-dependent noscript and tokenizer/foreign integrations remain open.",
       "source_anchors": [
         "src/html.rs",

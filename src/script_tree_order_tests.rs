@@ -16,7 +16,8 @@ fn evict_scratch(page:&mut Page) {
 
 #[test]
 fn anonymous_leaf_appends_preserve_current_order_id_ordinals_and_sibling_slots() {
-    let (mut doc, mut forms, mut page) = page(11, true);
+    let (mut doc, mut forms, mut page) = page(12, true);
+    assert!(page.state.tree.order.capacity()>page.state.tree.order.len(),"incremental append requires a paid spare order slot");
     let result = page.console_eval(&mut doc, &mut forms,
         "var early=document.getElementById('key00000'),later=document.getElementById('key00001');var added=document.createElement('span');early.appendChild(added);");
     assert_eq!(result.errors, 0, "{}", page.report());

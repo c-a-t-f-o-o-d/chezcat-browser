@@ -1651,6 +1651,23 @@ set(anchor,value);if(reads!==1||anchor.href!=='https://example.test/ok')throw 's
         assert_eq!(page.console_eval(&mut doc,&mut forms,"md.get.call(cd);").errors,1);
     }
 
+
+    #[test]
+    fn native_child_remove_captured_caller_keeps_origin_and_immutable_child_boundaries() {
+        let source=format!("{CREATE}{}",r#"
+var remove=w.Element.prototype.remove, invoke=w.Function('remove','node','return remove.call(node);');
+var a=document.createElement('i');document.body.appendChild(a);
+invoke(remove,a);if(a.parentNode!==null)throw 'same origin removal';document.body.appendChild(a);
+"#);
+        let(mut doc,mut forms,mut page,result)=start(&source,&crate::csp::PolicySet::default());
+        assert_eq!(result.errors,0,"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"remove.call(w.document.body);").errors,1);
+        page.set_location(&crate::navigation::address("https://other.test/",&crate::navigation::Location::home()).unwrap());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"invoke(remove,a);").errors,1);
+        assert!(page.report().contains("same-origin"),"{}",page.report());
+        assert_eq!(page.console_eval(&mut doc,&mut forms,"if(a.parentNode!==document.body)throw 'denied removal';").errors,0);
+    }
+
     #[test]
     fn frame_collection_and_nodelist_handles_are_disjoint() {
         let source = format!("var tags=document.getElementsByTagName('p'),list=document.querySelectorAll('p');{CREATE}{}", r#"

@@ -9,7 +9,8 @@ fn page(markup:&str)->(Document,Forms,Page) {
 
 #[test]
 fn id_index_storage_exact_record_and_copy_refusal_leave_previous_tree_and_recover() {
-    let(mut doc,mut forms,mut page)=page("<html><body><p></p></body></html>");
+    let(mut doc,mut forms,mut page)=page("<html><head></head><body><p></p><i></i><i></i><i></i></body></html>");
+    assert_eq!(page.state.tree.order.len(),page.state.tree.order.capacity(),"ID admission must not borrow spare order slots");
     let node=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{tag,..}if tag=="p")).unwrap();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
     bridge.set(node_handle(node),"id",Value::String("new".into())).unwrap();
@@ -68,7 +69,8 @@ fn id_index_many_real_owners_use_only_paid_record_capacity_and_borrow_wide_ids()
 
 #[test]
 fn id_index_replacement_credit_obeys_reduced_headroom_and_refunds_dropped_spares() {
-    let(doc,_,mut page)=page("<html><body><p id='kept'></p></body></html>");
+    let(doc,_,mut page)=page("<html><head></head><body><p id='kept'></p><i></i><i></i><i></i></body></html>");
+    assert_eq!(page.state.tree.order.len(),page.state.tree.order.capacity(),"only the ID index can refund spare slots");
     let owner=page.state.document_id(&doc,"kept").unwrap().unwrap();
     let before=page.state.retained;let slot=size_of::<(usize,usize)>();
     let old=page.state.tree.ids.capacity()*slot;assert!(old>slot);

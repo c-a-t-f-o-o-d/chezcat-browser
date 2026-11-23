@@ -40,8 +40,9 @@ fn browser_adopted_storage_append_joint_exact_backing_and_copy_refusal_keep_owne
 
 #[test]
 fn browser_adopted_storage_parked_source_and_owned_record_fit_as_one_bundle() {
-    let (mut doc, mut forms, mut page, templates, _) = page("<html><body><template></template></body></html>");
+    let (mut doc, mut forms, mut page, templates, _) = page("<html><head></head><body><template></template><i></i><i></i><i></i></body></html>");
     let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+    assert_eq!(bridge.doc.nodes.len(),bridge.doc.nodes.capacity(),"bundle admission must pay for the new main node");
     let Value::Host(fragment) = bridge.template_content(templates[0]).unwrap() else { panic!("content") };
     let before = bridge.state.retained;
     let nodes = bridge.doc.nodes.len();

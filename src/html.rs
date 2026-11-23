@@ -1363,11 +1363,15 @@ mod tests {
             let body = format!("<b data-q='x'>é&amp;</b></{tag}more>\r\n\0tail");
             let source = format!("<{tag}>{body}</{} ><p>after</p>", tag.to_ascii_uppercase());
             let doc = parse_loaded_document(&source, &|| Ok(())).unwrap();
-            let root = doc.nodes[0].children[0];
+            let html=doc.nodes[0].children[0];
+            let head=doc.nodes[html].children[0];let body_node=doc.nodes[html].children[1];
+            let parent=if tag=="noframes" {head}else{body_node};
+            let root=doc.nodes[parent].children[0];
+            assert!(matches!(&doc.nodes[root].kind,NodeKind::Element{tag:name,..} if name==tag));
             let [child] = doc.nodes[root].children.as_slice() else { panic!("expected one {tag} text child") };
             let expected = body.replace("\r\n", "\n").replace('\0', "\u{fffd}");
             assert!(matches!(&doc.nodes[*child].kind, NodeKind::Text(data) if data == &expected));
-            let tail = doc.nodes[0].children[1];
+            let tail = *doc.nodes[body_node].children.last().unwrap();
             assert!(matches!(&doc.nodes[tail].kind, NodeKind::Element { tag, .. } if tag == "p"));
             assert!(parse(&format!("<{tag}></{tag}>")).nodes[1].children.is_empty());
             let unfinished = parse(&format!("<{tag}>literal <i> and &amp;"));
@@ -1391,7 +1395,8 @@ mod tests {
         let limit = LoadedTree { nodes: 2, check_cancel: &|| Ok(()) };
         assert!(parse_internal("<iframe>x</iframe>", None, false, Some(limit), None).is_err());
         let fresh = parse_loaded_document("<iframe>x</iframe>", &|| Ok(())).unwrap();
-        assert_eq!(fresh.nodes.len(), 3);
+        assert_eq!(fresh.nodes.len(), 6);
+        assert_eq!(parse_internal("<iframe>x</iframe>",None,false,Some(LoadedTree{nodes:5,check_cancel:&||Ok(())}),None).unwrap_err(),"HTML document node limit reached (5 nodes).");
     }
 
     #[test]
