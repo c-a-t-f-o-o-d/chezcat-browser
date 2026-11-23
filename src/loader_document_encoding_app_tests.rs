@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[path = "loader_script_encoding_app_tests.rs"]
+mod script_encoding_tests;
+
 struct Response {
     path: &'static str,
     content_type: &'static str,

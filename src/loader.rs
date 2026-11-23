@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 
 #[path = "document_encoding.rs"]
 mod document_encoding;
+#[path = "script_encoding.rs"]
+mod script_encoding;
+pub(crate) use script_encoding::{decode_script, script_fallback};
 #[cfg(test)]
 #[path = "loader_document_encoding_app_tests.rs"]
 mod document_encoding_app_tests;
@@ -1488,7 +1491,7 @@ fn load_critical_resources(
                 };
                 let response = if kind == "SCRIPT" {
                     let wire_limit = limit.min(remaining);
-                    pool.fetch_classic_script(url, wire_limit, script_input_limit(script_limit, wire_limit),
+                    pool.fetch_classic_script(url, wire_limit, wire_limit,
                         origin, mode, same_origin_only, &guard)?
                 } else {
                     let fetched = match pool.fetch_stylesheet(url, limit.min(remaining), origin, mode, same_origin_only, &guard) {
@@ -1556,11 +1559,11 @@ fn load_critical_resources(
                 let limit = if kind == "CSS" {
                     stylesheet_limits.sheet_bytes
                 } else {
-                    script_input_limit(script_limit, capacity.source_bytes)
+                    capacity.source_bytes
                 };
                 (
                     navigation::read_limited(path, limit)?,
-                    "charset=utf-8".to_owned(),
+                    if kind == "CSS" { "charset=utf-8".to_owned() } else { String::new() },
                     resolved.clone(),
                 )
             };
@@ -1573,7 +1576,7 @@ fn load_critical_resources(
                 style_bases.insert(node, resolved_location);
                 Ok(format!("loaded {resolved_name}"))
             } else {
-                let source = decode_script(bytes, &encoding, script_limit)?;
+                let source = decode_script(&bytes, &encoding, script_fallback(&loaded.document, node), script_limit, &|| check_cancel(cancel))?;
                 let bytes=source.len();
                 retain_script(&mut loaded.scripts,&mut script_payload,Script{node,source,label:resolved_name.clone()},capacity.script_storage_bytes)?;
                 script_bytes+=bytes;
@@ -2636,47 +2639,6 @@ fn check_decoded_length(length: usize, limit: usize) -> Result<(), String> {
     Ok(())
 }
 
-// The UTF-8 BOM is discarded during text decoding. Every other supported
-// conversion needs at least one UTF-8 byte per input byte.
-pub(crate) fn script_input_limit(source_limit: usize, resource_limit: usize) -> usize {
-    source_limit.saturating_add(3).min(resource_limit)
-}
-
-/// Transfer a UTF-8 response directly into the VM's source string. For other
-/// encodings, size the UTF-8 output before allocating it against the allowance.
-pub(crate) fn decode_script(mut bytes: Vec<u8>, content_type: &str, limit: usize) -> Result<String, String> {
-    let encoding = if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
-        bytes.drain(..3);
-        TextEncoding::Utf8
-    } else {
-        text_encoding(&bytes, content_type, false)?
-    };
-    if matches!(encoding, TextEncoding::Windows1252) && !bytes.is_ascii() {
-        return windows_1252(&bytes, limit);
-    }
-    match String::from_utf8(bytes) {
-        Ok(source) => {
-            check_decoded_length(source.len(), limit)?;
-            Ok(source)
-        }
-        Err(error) => {
-            let bytes = error.as_bytes();
-            let length = bytes.utf8_chunks().map(|chunk| {
-                chunk.valid().len() + if chunk.invalid().is_empty() { 0 } else { char::REPLACEMENT_CHARACTER.len_utf8() }
-            }).sum();
-            check_decoded_length(length, limit)?;
-            let mut source = String::with_capacity(length);
-            for chunk in bytes.utf8_chunks() {
-                source.push_str(chunk.valid());
-                if !chunk.invalid().is_empty() {
-                    source.push(char::REPLACEMENT_CHARACTER);
-                }
-            }
-            Ok(source)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -3145,12 +3107,12 @@ mod tests {
             (&b"a\xe2\x82b\xff"[..], "text/javascript;charset=utf8", "a�b�"),
             (&b"a\xe9"[..], "text/javascript;charset=latin1", "aé"),
         ] {
-            let decoded = decode_script(bytes.to_vec(), content_type, expected.len()).unwrap();
+            let decoded = decode_script(bytes, content_type, crate::text_codec::Encoding::WINDOWS1252, expected.len(), &|| Ok(())).unwrap();
             assert_eq!(decoded, expected);
             assert_eq!(decoded, decode_text(bytes, content_type, false).unwrap());
-            assert!(decode_script(bytes.to_vec(), content_type, expected.len() - 1).is_err());
+            assert!(decode_script(bytes, content_type, crate::text_codec::Encoding::WINDOWS1252, expected.len() - 1, &|| Ok(())).is_err());
         }
-        assert!(decode_script(b"plain".to_vec(), "charset=unsupported", 10).is_err());
+        assert_eq!(decode_script(b"plain", "charset=unsupported", crate::text_codec::Encoding::UTF8, 10, &|| Ok(())).unwrap(), "plain");
     }
 
     #[test]

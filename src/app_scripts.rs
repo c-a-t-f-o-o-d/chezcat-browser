@@ -202,7 +202,7 @@ mod completion_tests {
     use super::*;
     fn request()->DynamicScript {
         Arc::new(crate::scripting::ScriptRequest{node:1,target:Location::home(),origin:Location::home(),nonce:None,
-            policy:Arc::new(crate::csp::PolicySet::default()),same_origin_only:false,
+            policy:Arc::new(crate::csp::PolicySet::default()),same_origin_only:false,fallback_encoding:crate::text_codec::Encoding::UTF8,
             source_limit:crate::javascript::limits::BROWSER_CAPACITIES.source_bytes,error:None,
             storage_limit:crate::javascript::limits::BROWSER_CAPACITIES.script_storage_bytes,
             _storage:Lease::default(),_policy_storage:Arc::new(Lease::default())})
@@ -230,6 +230,33 @@ mod completion_tests {
     }
     fn job(request:DynamicScript,epoch:u64)->Job {
         Job{epoch,request,blocking:Arc::new(crate::blocking::Policy::default()),network:crate::network_trace::Trace::default(),cancel:Arc::new(AtomicBool::new(false)),_storage:None}
+    }
+    #[test]
+    fn dynamic_script_encoded_input_can_exceed_decoded_allowance_and_refusal_recovers() {
+        use std::io::{Read,Write};
+        use std::net::TcpListener;
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+        let url=crate::url::parse(&format!("http://{}/source.js",listener.local_addr().unwrap())).unwrap().0;
+        let server=std::thread::spawn(move||{
+            for _ in 0..3 {
+                let (mut stream,_)=listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut head=Vec::new();let mut byte=[0];
+                while !head.ends_with(b"\r\n\r\n"){assert_eq!(stream.read(&mut byte).unwrap(),1);head.push(byte[0]);assert!(head.len()<16384);}
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\nContent-Length: 6\r\nConnection: close\r\n\r\n\xff\xfe1\0;\0").unwrap();
+            }
+        });
+        let mut request=request();
+        let location=Location{url:Some(url),path:None,root:None,fragment:String::new()};
+        {let request=Arc::get_mut(&mut request).unwrap();request.target=location.clone();request.origin=location.clone();}
+        let job=job(request,1);let trust=crate::trust::Store::unconfigured();
+        let cookies=Arc::new(crate::cookies::Session::default());
+        for limit in [2,1,2] {
+            let result=fetch(&job,limit,&trust,cookies.clone(),&mut Vec::new());
+            if limit==1 { assert!(result.err().unwrap().contains("Decoded text exceeds")); }
+            else {let script=result.unwrap();assert_eq!(script.source,"1;");assert_eq!(script.label,location.display());}
+        }
+        server.join().unwrap();
     }
     #[test]
     fn dynamic_script_worker_exceeds_old_queue_count_and_preserves_fifo_with_actual_owned_storage() {
@@ -302,7 +329,7 @@ fn fetch(
     let response = pool.fetch_classic_script(
         url,
         wire_limit,
-        loader::script_input_limit(source_limit, wire_limit),
+        wire_limit,
         origin,
         crate::http::FetchMode::Normal,
         job.request.same_origin_only,
@@ -319,7 +346,9 @@ fn fetch(
     if !loader::javascript_mime(&loader::media_type(&content_type)) {
         return Err("Dynamic external scripts require a JavaScript Content-Type.".into());
     }
-    let source = loader::decode_script(response.body, &content_type, source_limit)?;
+    let source = loader::decode_script(&response.body, &content_type, job.request.fallback_encoding, source_limit, &|| {
+        if job.cancel.load(Ordering::Relaxed) { Err("Script loading canceled.".into()) } else { Ok(()) }
+    })?;
     events.push(format!(
         "DYNAMIC SCRIPT node {}: loaded {} bytes from {}",
         job.request.node,
