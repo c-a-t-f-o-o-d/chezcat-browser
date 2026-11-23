@@ -194,6 +194,12 @@ mod media_interface;
 mod runtime_diagnostics;
 #[path = "string_substr.rs"]
 mod string_substr;
+#[cfg(test)]
+#[path = "string_slicing_utf16_tests.rs"]
+mod string_slicing_utf16_tests;
+#[cfg(test)]
+#[path = "string_slicing_utf16_boundary_tests.rs"]
+mod string_slicing_utf16_boundary_tests;
 #[path = "string_concat.rs"]
 mod string_concat;
 #[path = "window_relationships.rs"]
@@ -10249,6 +10255,9 @@ impl Runtime {
         if matches!(method,"replace"|"replaceAll") && object.is_string() {
             return self.string_replace_value(object,args,method=="replaceAll",host);
         }
+        if matches!(method, "slice" | "substring" | "substr") && object.is_string() {
+            return self.string_slice_value(&object, method, args, host);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
                 "charCodeAt" | "codePointAt" | "charAt" => self.raw_string_character(units, method, args),
@@ -10260,7 +10269,6 @@ impl Runtime {
         }
         if let Value::String(text) = object {
             if method == "concat" { return self.string_concat(&text,args,host); }
-            if method == "substr" { return self.string_substr(&text,args,host); }
             if method == "lastIndexOf" { return self.string_last_index_of(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
@@ -10271,38 +10279,6 @@ impl Runtime {
             self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
             return match method {
                 "split" => self.split_string(&text, args),
-                "slice" | "substring" => {
-                    let input: Vec<_> = text.encode_utf16().collect();
-                    let length = input.len();
-                    let start = args.first().unwrap_or(&Value::Undefined);
-                    start.primitive()?;
-                    self.work(start.bytes().saturating_mul(2))?;
-                    let start = start.script_number()?;
-                    let end = args.get(1).unwrap_or(&Value::Undefined);
-                    end.primitive()?;
-                    self.work(end.bytes().saturating_mul(2))?;
-                    let end = if matches!(end, Value::Undefined) {
-                        length as f64
-                    } else {
-                        end.script_number()?
-                    };
-                    let index = |value: f64| {
-                        if method == "slice" && value < 0.0 {
-                            (length as f64 + value.trunc()).max(0.0) as usize
-                        } else {
-                            bounded_index(value, length)
-                        }
-                    };
-                    let mut start = index(start);
-                    let mut end = index(end);
-                    if method == "substring" && start > end {
-                        std::mem::swap(&mut start, &mut end);
-                    }
-                    if start > end {
-                        end = start;
-                    }
-                    self.units_string(&input[start..end]).map(Value::String)
-                }
                 "toString" | "valueOf" => self.checked_value(Value::String(text)),
                 "trim" => self.checked_value(Value::String(text.trim_matches(js_space).into())),
                 "toLowerCase" => self.checked_value(Value::String(text.to_lowercase())),
