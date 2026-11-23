@@ -10,6 +10,7 @@ pub(super) enum NodeList {
     // A live SameObject list over this real node's immediate children.
     Children(usize),
     InertChildren(u32),
+    FrameChildren(u32),
 }
 
 pub(super) fn node_list_index(handle: u32) -> Option<usize> {
@@ -100,12 +101,25 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
+    pub(super) fn node_list_owner(&self, handle: u32) -> Option<u32> {
+        match self.state.node_lists.get(node_list_index(handle)?)? {
+            NodeList::FrameChildren(root) => self.frame_contains_node(*root).map(|(owner, _)| owner),
+            _ => Some(WINDOW),
+        }
+    }
+
+    pub(super) fn create_frame_child_list(&mut self, root: u32) -> Result<Value, String> {
+        let (owner, _) = self.frame_contains_node(root).ok_or("Invalid child document node.")?;
+        self.contains_child_document(owner)?;
+        self.create_logical_child_list(root, NodeList::FrameChildren(root))
+    }
+
     pub(super) fn create_inert_child_list(&mut self, object: u32) -> Result<Value, String> {
         if self.inert_children(object).is_none() { return Err("Invalid inert childNodes owner.".into()); }
-        self.create_logical_child_list(object,false)
+        self.create_logical_child_list(object, NodeList::InertChildren(object))
     }
-    pub(super) fn create_attribute_child_list(&mut self,object:u32)->Result<Value,String>{if !self.attr_receiver(object){return Err("Invalid Attr childNodes owner.".into());}self.create_logical_child_list(object,true)}
-    fn create_logical_child_list(&mut self,object:u32,attribute:bool)->Result<Value,String>{
+    pub(super) fn create_attribute_child_list(&mut self,object:u32)->Result<Value,String>{if !self.attr_receiver(object){return Err("Invalid Attr childNodes owner.".into());}self.create_logical_child_list(object, NodeList::HandleSnapshot(Vec::new()))}
+    fn create_logical_child_list(&mut self,object:u32,list:NodeList)->Result<Value,String>{
         if let Some(index)=node_index(object){self.state.work(self.state.dom.child_lists.lookup_work())?;if let Some(&saved)=self.state.dom.child_lists.get(&index){return Ok(Value::Host(saved));}}
         self.state.work(1)?;
         self.state.work(self.state.dom.inert_child_lists.lookup_work())?;
@@ -120,7 +134,7 @@ impl Bridge<'_> {
         let copied=work.saturating_add(if map.is_some(){self.state.dom.inert_child_lists.len()}else{0});
         self.state.copies(self.state.dom.inert_child_lists.movement_bytes(copied))?;
         let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
-        self.commit_node_list(if attribute{NodeList::HandleSnapshot(Vec::new())}else{NodeList::InertChildren(object)},replacement,added,payload);
+        self.commit_node_list(list,replacement,added,payload);
         self.state.dom.inert_child_lists.commit(map);
         self.state.dom.inert_child_lists.insert(object, handle);
         Ok(Value::Host(handle))
@@ -158,6 +172,16 @@ impl Bridge<'_> {
             .node_lists
             .get(index)
             .ok_or("Invalid NodeList handle.")?;
+        if let NodeList::FrameChildren(handle) = list {
+            let (owner, root) = self.frame_contains_node(*handle).ok_or("Unknown child NodeList root.")?;
+            self.state.work(1)?;
+            let children = &self.contains_child_document(owner)?.nodes[root].children;
+            if property == "length" { return Ok(Value::Number(children.len() as f64)); }
+            return match collection_index(property).and_then(|index| children.get(index)).copied() {
+                Some(node) => self.frame_child_node_handle(owner, node).map(Value::Host),
+                None => Ok(Value::Undefined),
+            };
+        }
         if let NodeList::Children(root) = list {
             let root = *root;
             if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }

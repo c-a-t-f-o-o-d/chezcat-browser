@@ -345,6 +345,7 @@ impl Runtime {
                             self.store_property(object,key.into(),Value::Number(f64::from(value)),Some((true,false,false)))?;
                         }
                     }
+                    self.define_host_attribute(prototype, window, "nodeValue", super::NODE_VALUE_GET, Some(super::NODE_VALUE_SET))?;
                     for (property, operation) in NODE_TRAVERSAL_GETTERS {
                         self.define_readonly_node_getter(prototype, window, property, operation)?;
                     }

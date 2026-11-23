@@ -9,6 +9,33 @@ fn fixture()->(Document,Forms,Page){
 fn run(doc:&mut Document,forms:&mut Forms,page:&mut Page,source:&str){
     assert_eq!(page.console_eval(doc,forms,source).errors,0,"{source}\n{}",page.report());
 }
+
+#[test]
+fn native_node_value_descriptor_reads_current_owners_and_preserves_nondata_children() {
+    let (mut doc, mut forms, mut page) = fixture();
+    run(&mut doc, &mut forms, &mut page, r#"
+var desc=Object.getOwnPropertyDescriptor(Node.prototype,'nodeValue'),reads=0;
+if(!desc.enumerable||!desc.configurable||desc.get.length||desc.set.length!==1||!('nodeValue' in document))throw 'native Node descriptor';
+var el=document.createElement('div'),child=document.createTextNode('child'),frag=document.createDocumentFragment();
+el.appendChild(child);frag.appendChild(el);
+var xml=document.implementation.createDocument(null,'Root'), dt=document.implementation.createDocumentType('example','','');
+for(var n of [document,xml,xml.documentElement,dt,el,frag]){
+ if(n.nodeValue!==null||desc.get.call(n)!==null||Object.hasOwn(n,'nodeValue'))throw 'null native value';
+ desc.set.call(n,{toString:function(){reads++;return 'unused';}});
+}
+if(reads!==6||el.firstChild!==child||child.data!=='child'||frag.firstChild!==el)throw 'Web IDL conversion before no-op';
+var wrong=false;try{desc.set.call({}, {toString:function(){reads++;return 'bad';}});}catch(e){wrong=e instanceof TypeError;}
+if(!wrong||reads!==6)throw 'wrong brand conversion';
+var attr=el.ownerDocument.createAttribute('data-node'),text=xml.createTextNode('s'),cdata=xml.createCDATASection('c'),comment=document.createComment('c'),pi=xml.createProcessingInstruction('p','d');
+el.setAttributeNode(attr);
+for(var v of [attr,child,text,cdata,comment,pi]){desc.set.call(v,'\ud800x');if(desc.get.call(v)!=='\ud800x'||v.nodeValue!=='\ud800x')throw 'raw native data';v.nodeValue=null;if(desc.get.call(v)!=='')throw 'nullable data';}
+if(el.getAttribute('data-node')!==''||attr.ownerElement!==el)throw 'native attached Attr';
+Object.defineProperty(Node.prototype,'nodeValue',{value:42,configurable:true});
+if(document.nodeValue!==42||desc.get.call(document)!==null||desc.get.call(child)!=='')throw 'overridden descriptor';
+Object.defineProperty(Node.prototype,'nodeValue',desc);
+"#);
+}
+
 #[test]
 fn native_dom_string_character_factories_aliases_observer_old_values_and_range_are_exact(){
     let (mut doc,mut forms,mut page)=fixture();

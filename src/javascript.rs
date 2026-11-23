@@ -547,6 +547,8 @@ pub(crate) const PARENT_NODE_GETTERS: [(&str, &str); 4] = [
     ("lastElementChild", "\0ParentNode.get.lastElementChild"),
     ("childElementCount", "\0ParentNode.get.childElementCount"),
 ];
+pub(crate) const NODE_VALUE_GET: &str = "\0Node.get.nodeValue";
+pub(crate) const NODE_VALUE_SET: &str = "\0Node.set.nodeValue";
 pub(crate) const NODE_TEXT_CONTENT_GET: &str = "\0Node.get.textContent";
 pub(crate) const NODE_TEXT_CONTENT_SET: &str = "\0Node.set.textContent";
 pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
@@ -9179,6 +9181,15 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if method == NODE_VALUE_SET {
+            // A retained child may have been detached since this accessor was
+            // saved. Resolve its current native owner before invoking toString.
+            host.native_operation_caller(self.native_access_caller
+                .unwrap_or_else(|| self.browser_global.map(|(window, _)| window)));
+            if let Err((kind, message)) = host.validate_call(object, method, &[]) {
+                return Err(Fault::exception(kind, message));
+            }
+        }
         // Canonical attribute getters ignore arguments; setters use one value.
         let attribute_setter=html_reflection_interface::operation(method).map(|(_,setter)|setter)
             .or_else(||aria_reflection_interface::operation(method).map(|(_,_,setter)|setter));
@@ -9186,8 +9197,8 @@ impl Runtime {
             if setter { &args[..args.len().min(1)] } else { &[][..] }
         } else {
             match method {
-                ELEMENT_STYLE_GET|SVG_STYLE_GET => &[][..],
-                ELEMENT_STYLE_SET|SVG_STYLE_SET => &args[..args.len().min(1)],
+                ELEMENT_STYLE_GET | SVG_STYLE_GET | NODE_VALUE_GET => &[][..],
+                ELEMENT_STYLE_SET | SVG_STYLE_SET | NODE_VALUE_SET => &args[..args.len().min(1)],
                 _ => args,
             }
         };
