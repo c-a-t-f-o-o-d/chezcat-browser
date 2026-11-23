@@ -14,6 +14,7 @@ from collections import Counter
 import hashlib
 import importlib.util
 import json
+import runpy
 import os
 from pathlib import Path
 import re
@@ -465,7 +466,7 @@ def main(argv=None):
     review_file = source_root / "tools/compatibility_cases.json"
     browser_inventory = [] if selected_only else json.loads(review_file.read_text(encoding="utf-8"))["browser_inventory"]
     before = source_manifest(source_root)
-    input_paths = [Path(__file__), helper_file]
+    input_paths = [Path(__file__), helper_file, Path(__file__).with_name("javascript_probe_source.py")]
     if not selected_only:
         input_paths.extend([CASE_FILE, COHORT_FILE, review_file])
     if promise_helper:
@@ -484,8 +485,9 @@ def main(argv=None):
             directory = Path(directory)
             source = directory / "probe.rs"
             probe = directory / ("probe.exe" if os.name == "nt" else "probe")
-            source.write_text(helper.PROBE.replace("JAVASCRIPT_SOURCE", json.dumps(str(source_root / "src/javascript.rs"))), encoding="utf-8")
-            subprocess.run([options.rustc, "--edition=2021", "-O", str(source), "-o", str(probe)],
+            write_probe = runpy.run_path(str(Path(__file__).with_name("javascript_probe_source.py")))["write_probe"]
+            flags = write_probe(helper.PROBE, source_root, source)
+            subprocess.run([options.rustc, "--edition=2021", "-O", *flags, str(source), "-o", str(probe)],
                            capture_output=True, text=True, timeout=120, check=True)
             promise_probe, checkpoint_available = (promise_helper.compile_probe(source_root, directory, options.rustc)
                                                    if promise_helper else (None, False))

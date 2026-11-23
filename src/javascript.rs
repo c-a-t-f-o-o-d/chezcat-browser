@@ -505,7 +505,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
 /// Exact ordinary interfaces for supported HTML nodes, including elements
 /// whose immediate interface is HTMLElement itself.
 pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
-    if tag == "main" || crate::html::valid_custom_element_name(tag) {
+    if tag == "main" || crate::custom_element_name::valid(tag) {
         return Some("HTMLElement");
     }
     ORDINARY_HTML_SUBCLASSES.iter().find(|(local, _)| *local == tag).map(|&(_, name)| name)

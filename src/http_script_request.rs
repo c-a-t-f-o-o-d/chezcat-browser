@@ -179,12 +179,8 @@ fn copy_text(text: &str) -> Result<String, String> {
     value.push_str(text);
     Ok(value)
 }
-pub(crate) fn token(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
-}
+pub(crate) use crate::http_token::valid as token;
+
 pub(crate) fn forbidden_header(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name.starts_with("proxy-")

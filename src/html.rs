@@ -298,16 +298,8 @@ pub(crate) fn svg_dom_name(name:&str)->bool{svg_namespace::dom_name(name)}
 pub(crate) fn svg_dom_attribute(tag:&str,name:&AttributeName,value:&str)->bool{svg_namespace::dom_attribute(tag,name,value)}
 pub(crate) fn svg_dom_transfer(node:&Node)->bool{node.namespace==Namespace::Svg&&match &node.kind{NodeKind::Element{tag,attrs,..}=>svg_dom_name(tag)&&attrs.iter().all(|attr|svg_dom_attribute(tag,&attr.name,&attr.value)),_=>false}}
 
-/// HTML's autonomous custom-element names start with an ASCII lowercase
-/// letter and use the DOM local-name grammar.
-/// https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name
-pub(crate) fn valid_custom_element_name(name: &str) -> bool {
-    name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-        && name.contains('-')
-        && !name.bytes().any(|b| matches!(b, b'A'..=b'Z' | 0 | b'\t' | b'\n' | 0x0c | b'\r' | b' ' | b'/' | b'>'))
-        && !matches!(name, "annotation-xml" | "color-profile" | "font-face" | "font-face-src"
-            | "font-face-uri" | "font-face-format" | "font-face-name" | "missing-glyph")
-}
+pub(crate) use crate::custom_element_name::valid as valid_custom_element_name;
+
 
 fn parse_internal(
     input: &str,

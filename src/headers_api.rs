@@ -318,7 +318,7 @@ impl Runtime {
     }
     fn headers_normalize(&mut self, mut name: String, value: String) -> Result<Pair, Fault> {
         self.work(name.len().saturating_add(value.len()))?;
-        if !crate::http::script_request::token(&name) {
+        if !crate::http_token::valid(&name) {
             return Err(invalid("Invalid HTTP header name."));
         }
         let value = value.trim_matches(['\t', ' ', '\r', '\n']);

@@ -58,6 +58,8 @@ fn representation(value: &Value) -> String {
         Value::String(value) => format!("string:{}", value.as_bytes().iter().map(|b| format!("{b:02x}")).collect::<String>()),
         #[cfg(chezcat_string_units)]
         Value::StringUnits(units) => format!("string-units:{}", units.iter().map(|unit| format!("{unit:04x}")).collect::<String>()),
+        #[cfg(chezcat_bigint)]
+        Value::BigInt(value) => format!("bigint:{value}"),
         Value::Symbol(_) => "symbol".into(),
         Value::Function(_) => "function".into(),
         Value::Object(_) => "object".into(),
@@ -183,6 +185,7 @@ function repr(value) {
         if (utf8.toString('utf8') === value) return 'string:' + utf8.toString('hex');
         return 'string-units:' + Buffer.from(value, 'utf16le').swap16().toString('hex');
     }
+    if (typeof value === 'bigint') return 'bigint:' + String(value);
     if (typeof value === 'symbol') return 'symbol';
     if (typeof value === 'function') return 'function';
     if (value === test) return 'host:1';

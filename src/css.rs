@@ -85,11 +85,7 @@ const MAX_GROUPED_BOX_BYTES: usize = 2048;
 const MAX_SELECTOR_BYTES: usize = 512;
 const MAX_SELECTOR_NESTING: usize = 8;
 const MAX_MATCH_STEPS: usize = 128_000_000;
-const STYLESHEET_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
-const SOURCE_WORK_CHUNK: usize = 64;
-const SOURCE_WORK_PER_CHUNK: usize = 512;
-pub(crate) const FULL_STYLESHEET_SOURCE_WORK: usize =
-    STYLESHEET_DOCUMENT_BYTES / SOURCE_WORK_CHUNK * SOURCE_WORK_PER_CHUNK;
+use crate::stylesheet_source_budget::{STYLESHEET_DOCUMENT_BYTES,SOURCE_WORK_CHUNK,SOURCE_WORK_PER_CHUNK};
 
 /// Host policy, shared by resource decoding, retention and the complete parser.
 /// These are allowances, never sizes used for maximum-sized preallocation.
