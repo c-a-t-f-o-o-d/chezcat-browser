@@ -2003,3 +2003,6 @@ pub(super) mod identifier_lookup;
 
 #[path="script_inert_contains.rs"]
 mod inert_contains;
+
+#[path="script_owned_name_traversal.rs"]
+mod owned_name_traversal;

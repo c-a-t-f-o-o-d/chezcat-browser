@@ -1779,3 +1779,7 @@ document.title='deferred-ok';
         assert!(page.report().contains("browsing-context teardown is not implemented"));
     }
 }
+
+#[cfg(test)]
+#[path="script_owned_name_frame_tests.rs"]
+mod owned_name_frame_tests;

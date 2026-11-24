@@ -6448,7 +6448,7 @@ impl Host for Bridge<'_> {
                 Value::Null
             });
         }
-        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{self.validate_name_list(object).map_err(|(_,e)|e)?;return self.create_name_list(args.first().ok_or("getElementsByName requires one argument.")?);}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{self.validate_name_list(object).map_err(|(_,e)|e)?;return self.create_document_name_list(object,args.first().ok_or("getElementsByName requires one argument.")?);}
         if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.native_identifier_lookup(object,args,document);}
         if method==script_position::METHOD{return self.compare_document_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.node_equality(object,args,method==script_inert_documents::node_equality::SAME);}
@@ -9159,3 +9159,7 @@ mod form_id_guards;
 #[cfg(test)]
 #[path="script_document_name_method_tests.rs"]
 mod document_name_method_tests;
+
+#[cfg(test)]
+#[path="script_owned_name_list_tests.rs"]
+mod owned_name_list_tests;

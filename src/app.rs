@@ -6521,3 +6521,7 @@ mod live_name_domstring_tests;
 #[cfg(test)]
 #[path="app_document_name_method_tests.rs"]
 mod document_name_method_tests;
+
+#[cfg(test)]
+#[path="app_owned_name_list_tests.rs"]
+mod owned_name_list_tests;
