@@ -10269,9 +10269,11 @@ impl Runtime {
         if method == "indexOf" && object.is_string() {
             return self.string_index_value(&object, args, false, host);
         }
+        if matches!(method, "charAt" | "charCodeAt" | "codePointAt") && object.is_string() {
+            return self.string_character_value(&object,method,args,host);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
-                "charCodeAt" | "codePointAt" | "charAt" => self.raw_string_character(units, method, args),
                 "toString" | "valueOf" => Ok(object),
                 "concat" => self.string_primitive_concat(object, args, host),
                 "search" | "match" => self.regexp_string_method_units(units, method, args, host),
@@ -10282,9 +10284,6 @@ impl Runtime {
             if method == "concat" { return self.string_concat(&text,args,host); }
             if matches!(method, "search" | "match" | "replace") {
                 return self.regexp_string_method(&text, method, args, host);
-            }
-            if matches!(method, "charAt" | "charCodeAt" | "codePointAt") {
-                return self.string_character(&text, method, args);
             }
             self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
             return match method {
@@ -14335,3 +14334,10 @@ mod string_from_char_code_utf16_tests;
 
 #[path = "string_from_char_code.rs"]
 mod string_from_char_code;
+
+#[cfg(test)]
+#[path = "character_position_tests.rs"]
+mod character_position_tests;
+
+#[path = "character_position.rs"]
+mod character_position;

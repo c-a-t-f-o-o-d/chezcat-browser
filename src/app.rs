@@ -6421,3 +6421,7 @@ mod reflect_own_keys_tests;
 #[cfg(test)]
 #[path = "app_from_char_code_utf16_tests.rs"]
 mod from_char_code_utf16_tests;
+
+#[cfg(test)]
+#[path = "app_character_position_tests.rs"]
+mod character_position_tests;

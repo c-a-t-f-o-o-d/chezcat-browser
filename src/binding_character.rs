@@ -80,7 +80,10 @@ impl Runtime {
             self.call_depth += 1;
             let result = (|| {
                 self.step()?; // call_member
-                let Value::Number(position) = index else { unreachable!() };
+                self.step()?; // string_character_value
+                // Eligibility proved a Number, so the shared numeric route
+                // stays callback-free while preserving its exact accounting.
+                let position = self.binary_number(&index, host)?;
                 self.work_as(0, WorkKind::ConversionOutput)?;
                 let position = if position.is_nan() { 0.0 } else { position.trunc() };
                 if position < 0.0 || position >= bytes as f64 { return Ok(Value::Number(f64::NAN)); }
