@@ -26,8 +26,8 @@ impl Bridge<'_> {
         self.forms.controls.iter().any(|(&node, control)| {
             control.owner == Some(form)
                 && control.kind != Kind::Image
-                && (self.doc.attr(node, "id") == Some(name)
-                    || self.doc.attr(node, "name") == Some(name))
+                && (self.doc.dom_attr(node,"id").is_some_and(|value|value==name)
+                    || self.doc.dom_attr(node,"name").is_some_and(|value|value==name))
         })
     }
 

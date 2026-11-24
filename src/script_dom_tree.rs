@@ -1863,9 +1863,9 @@ impl Bridge<'_> {
             if tag(self.doc, node) != "form" {
                 continue;
             }
-            let candidate = self.doc.attr(node, "name");
-            self.state.copies(candidate.map_or(0, str::len))?;
-            if candidate == Some(name) {
+            let bytes=self.doc.dom_attr(node,"name").map_or(0,DomString::logical_bytes);
+            self.state.work(bytes.saturating_add(name.len()))?;
+            if self.doc.dom_attr(node,"name").is_some_and(|value|value==name) {
                 if found.is_some() {
                     return Err("Multiple named forms require a live HTMLCollection, which is not implemented.".into());
                 }
@@ -1890,13 +1890,7 @@ impl Bridge<'_> {
             if control.owner != Some(form) || control.kind == Kind::Image {
                 continue;
             }
-            let id = self.doc.attr(node, "id");
-            let candidate = self.doc.attr(node, "name");
-            self.state.copies(
-                id.map_or(0, str::len)
-                    .saturating_add(candidate.map_or(0, str::len)),
-            )?;
-            if id == Some(name) || candidate == Some(name) {
+            if self.collection_element_named_match(node_handle(node),crate::dom_string::DomStringRef::Scalar(name))? {
                 if found.is_some() {
                     return Err(
                         "Multiple named controls require RadioNodeList, which is not implemented."

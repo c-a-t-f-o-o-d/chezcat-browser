@@ -9131,3 +9131,7 @@ mod css_id_exact_tests;
 #[cfg(test)]
 #[path="script_collection_named_exact_tests.rs"]
 mod collection_named_exact_tests;
+
+#[cfg(test)]
+#[path="script_form_named_exact_tests.rs"]
+mod form_named_exact_tests;
