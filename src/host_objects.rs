@@ -927,8 +927,8 @@ impl Runtime {
     }
 
     fn define_node_list_iteration_interface(&mut self,window:u32)->Result<(),Fault> {
-        // Indexed iteration and callback traversal share the owner Array
-        // intrinsics. item retains its existing guarded native route.
+        // Indexed iteration and callbacks share owner Array intrinsics;
+        // item is a branded owner operation over the same native node records.
         let allocation=self.allocate_host_function_with_length(window,"NodeList",0).map_err(Fault::new)?;
         if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
         let constructor=Value::Function(allocation.id);
@@ -944,6 +944,10 @@ impl Runtime {
         self.store_property(prototype,"forEach".into(),self.array_for_each_intrinsic(),Some((true,true,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
         self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
+        let item=self.allocate_host_function_with_length(window,"\0NodeList.item",1).map_err(Fault::new)?;
+        if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(item.id){*receiver_required=true;}
+        self.store_property(self.function_properties[item.id],"name".into(),Value::String("item".into()),Some((false,false,true)))?;
+        self.store_property(prototype,"item".into(),Value::Function(item.id),Some((true,true,true)))?;
         self.define_host_attribute(prototype, window, "length", "\0NodeList.get.length", None)?;
         self.put_binding(self.global_environment,"NodeList".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("NodeList".into(),(false,true,true));

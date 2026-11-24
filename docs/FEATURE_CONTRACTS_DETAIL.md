@@ -226,7 +226,10 @@ initialization or visible improvement; connected follow-up behavior is in CP2.
 Use the genuine retained main Document and supported main Node objects. Each
 childNodes getter returns one stable, live NodeList identity for that root. Reads
 observe the actual immediate Element/Text children in tree order, including Text;
-native indexed slots and the guarded item operation remain. NodeList.forEach
+native indexed slots remain protected. The canonical owner NodeList.prototype.item
+operation supports ordinary overrides/deletion, checks its native receiver and
+origin before once-only unsigned-long index conversion, and reads current nodes.
+Saved methods remain branded after deletion. NodeList.forEach
 uses the owner Array intrinsic: it captures and converts effective length before
 callback validation, then performs live HasProperty/Get with actual Node values.
 The native length getter is read-only; ordinary own properties can shadow its

@@ -3426,10 +3426,9 @@ impl Host for Bridge<'_> {
         if self.named_map_receiver(object){return !script_named_map::prototype_member(property);}
         if self.collection_receiver(object){return !self.collection_prototype_member(property);}
         if self.node_list_receiver(object) {
-            // Genuine main NodeLists retain protected native indexed slots and
-            // existing item calls. Other properties use their ordinary
-            // backing/prototype, including author callback/length changes.
-            return collection_index(property).is_some() || property=="item";
+            // Only native indices are protected. Methods and length use the
+            // ordinary backing/prototype, including author overrides.
+            return collection_index(property).is_some();
         }
         if self.element_selector_member(object,property) {return false;}
         if self.inherited_node_property(object,property) {return false;}
@@ -3811,7 +3810,7 @@ impl Host for Bridge<'_> {
         {
             return &[(0, true)];
         }
-        if node_list_index(object).is_some() && method == "item" {
+        if self.node_list_receiver(object) && method == "\0NodeList.item" {
             return &[(0, false)];
         }
         if object == DOCUMENT && method == "getElementById"
@@ -3942,7 +3941,7 @@ impl Host for Bridge<'_> {
         if object==WINDOW && method=="getComputedStyle" {return Some(WINDOW);}
         if self.computed_style_receiver(object) {return self.computed_style_owner(object);}
         if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return Some(object);}
-        if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return Some(object);}
+        if self.event_target_interface(object)&&matches!(method,"\0NodeList.get.length"|"\0NodeList.item") {return Some(object);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
@@ -3956,7 +3955,6 @@ impl Host for Bridge<'_> {
         {
             return Some(object);
         }
-        if method=="item" { if let Some(window) = self.node_list_owner(object) { return Some(window); } }
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return Some(object);}
@@ -4133,7 +4131,7 @@ impl Host for Bridge<'_> {
                         | "appendChild"
                         | "removeChild"
                 )
-            || node_list_index(object).is_some() && method=="item"
+            || self.node_list_receiver(object) && method=="\0NodeList.item"
             || object == NAVIGATOR && method == "sendBeacon"
         {
             1
@@ -4265,7 +4263,8 @@ impl Host for Bridge<'_> {
         if matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&!self.collection_receiver(object){return Err(("TypeError","HTMLCollection operation requires a genuine native collection.".into()));}
         if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
         if script_named_map::operation(method).is_some()&&!self.named_map_receiver(object){return Err(("TypeError","NamedNodeMap operation requires a genuine map.".into()));}
-        if method=="\0NodeList.get.length"&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList length getter requires a genuine accessible NodeList.".into()));}
+        if matches!(method,"\0NodeList.get.length"|"\0NodeList.item")&&!self.node_list_receiver(object) {return Err(("TypeError","NodeList operation requires a genuine accessible NodeList.".into()));}
+        if method=="\0NodeList.item"&&args.is_empty(){return Err(("TypeError","NodeList item requires one argument.".into()));}
         if method=="setAttribute"&&self.inert_node_type(object)==Some(1){if let Some(name)=args.first(){if !script_attribute_names::valid_attribute_name_dom(script_attribute_names::converted_name(name)?){return Err(("InvalidCharacterError","Invalid attribute local name.".into()));}}}
         if parent_children::operation(method).is_some() && !self.parent_node_receiver(object) {
             return Err(("TypeError","ParentNode getter requires a genuine accessible parent node.".into()));
@@ -4419,8 +4418,7 @@ impl Host for Bridge<'_> {
                 ));
             }
         }
-        if (node_list_index(object).is_some() && method == "item"
-            || object == DOCUMENT && method == "getElementById"
+        if (object == DOCUMENT && method == "getElementById"
             || node_index(object).is_some()
                 && matches!(method, "getAttribute" | "hasAttribute" | "removeAttribute"))
             && args.is_empty()
@@ -4593,7 +4591,7 @@ impl Host for Bridge<'_> {
         if let Some(method) = self.dom_method(object, property) {
             return Some(method);
         }
-        if node_list_index(object).is_some() {return (property=="item").then_some("item");}
+        if node_list_index(object).is_some() {return None;}
         if node_index(object).is_some_and(|node| {
             self.doc
                 .nodes
@@ -4718,7 +4716,7 @@ impl Host for Bridge<'_> {
         if self.computed_style_receiver(object) {return self.computed_style_receiver(receiver);}
         if self.event_target_interface(object)&&matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem"){return self.collection_receiver(receiver);}
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return self.named_map_receiver(receiver);}
-        if self.event_target_interface(object)&&method=="\0NodeList.get.length" {return self.node_list_receiver(receiver);}
+        if self.event_target_interface(object)&&matches!(method,"\0NodeList.get.length"|"\0NodeList.item") {return self.node_list_receiver(receiver);}
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return self.selector_operation_receiver(receiver,method);}
         if self.event_target_interface(object) {
             if let Some(interface) = Slottable::getter(method) {return self.slottable(receiver) == Some(interface);}
@@ -5279,7 +5277,7 @@ impl Host for Bridge<'_> {
                 || !matches!(self.tag_collection_get(object, property)?, Value::Undefined));
         }
         if node_list_index(object).is_some() {
-            return Ok(matches!(property, "length" | "item")
+            return Ok(property=="length"
                 || !matches!(self.node_list_get(object, property)?, Value::Undefined));
         }
         if self.ui_receiver(object) && matches!(property,"view"|"detail") {return Ok(true);}
@@ -6399,6 +6397,11 @@ impl Host for Bridge<'_> {
         if method=="\0HTMLCollection.item"{return self.tag_collection_call(object,"item",args);}
         if method=="\0HTMLCollection.namedItem"{return self.tag_collection_call(object,"namedItem",args);}
         if method=="\0NodeList.get.length" {self.state.work(1)?;return self.node_list_get(object,"length");}
+        if method=="\0NodeList.item" {
+            let index=timer_integer(args.first().ok_or("NodeList item requires an index.")?)? as u32;
+            let value=self.node_list_get(object,&index.to_string())?;
+            return Ok(if matches!(value,Value::Undefined){Value::Null}else{value});
+        }
         let method=if let Some(operation)=script_element_selectors::operation(method) {
             self.validate_selector_operation_receiver(object,method).map_err(|(_,message)|message)?;
             operation
@@ -6537,18 +6540,7 @@ impl Host for Bridge<'_> {
         if let Some(value) = self.dom_call(object, method, args)? {
             return Ok(value);
         }
-        if node_list_index(object).is_some() {
-            if method == "item" {
-                let index = timer_integer(args.first().ok_or("item requires an index.")?)? as u32;
-                let value = self.node_list_get(object, &index.to_string())?;
-                return Ok(if matches!(value, Value::Undefined) {
-                    Value::Null
-                } else {
-                    value
-                });
-            }
-            return Err("This NodeList method is not implemented.".into());
-        }
+
         if object == IMAGE_FACTORY && method == "Image" {
             return self.create_image(args);
         }
@@ -9120,3 +9112,7 @@ mod token_list_for_each_tests;
 #[cfg(test)]
 #[path="script_node_list_for_each_tests.rs"]
 mod node_list_for_each_tests;
+
+#[cfg(test)]
+#[path="script_node_list_item_tests.rs"]
+mod node_list_item_tests;
