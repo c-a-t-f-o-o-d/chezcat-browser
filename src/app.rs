@@ -6633,3 +6633,7 @@ mod output_value_default_tests;
 #[cfg(test)]
 #[path="app_output_reset_tests.rs"]
 mod output_reset_tests;
+
+#[cfg(test)]
+#[path="app_output_form_attribute_tests.rs"]
+mod output_form_attribute_tests;
