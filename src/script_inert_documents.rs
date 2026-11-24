@@ -2,6 +2,8 @@
 //! https://dom.spec.whatwg.org/#dom-domimplementation-createhtmldocument
 use super::*;
 use std::rc::Rc;
+#[path="script_inert_class_list.rs"]
+mod class_list;
 
 #[path="script_element_names.rs"]
 pub(super) mod element_names;

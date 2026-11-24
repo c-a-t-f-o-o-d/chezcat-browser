@@ -3681,7 +3681,7 @@ impl Host for Bridge<'_> {
         if matches!(property,"id"|"className")&&self.canonical_selector_receiver(object){return true;}
         if matches!(property,"title"|"lang"|"dir")&&self.html_reflection_receiver(object){return true;}
         if matches!(property,"className"|"classList")&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
-        if property=="value"&&self.class_list_receiver(object)&&script_class_list::attribute(object)==Some("class")&&script_class_list::element(object).and_then(node_index).is_some_and(|node|self.html_class_element(node)){return true;}
+        if property=="value"&&self.exact_class_token_receiver(object){return true;}
         if property=="charset" && node_index(object).is_some_and(|node|self.resource_charset_element(node)) {return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
@@ -9208,3 +9208,6 @@ mod script_element_class_list;
 #[cfg(test)]
 #[path="script_element_class_list_accessor_tests.rs"]
 mod element_class_list_accessor_tests;
+#[cfg(test)]
+#[path="script_inert_html_class_list_tests.rs"]
+mod inert_html_class_list_tests;

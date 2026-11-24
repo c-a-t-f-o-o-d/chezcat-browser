@@ -8,18 +8,21 @@ pub(super) const BASE: u32 = 0x8000_0000;
 const END: u32 = BASE + NODE_HANDLES;
 const SANDBOX_BASE:u32=0x8100_0000;
 const SANDBOX_END:u32=SANDBOX_BASE+NODE_HANDLES;
+const INERT_BASE:u32=0xc200_0000;
+const INERT_END:u32=INERT_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION);
 pub(super) fn attribute(handle:u32)->Option<&'static str> {
-    if (BASE..END).contains(&handle){Some("class")}
+    if (BASE..END).contains(&handle)||(INERT_BASE+1..INERT_END).contains(&handle){Some("class")}
     else if (SANDBOX_BASE..SANDBOX_END).contains(&handle){Some("sandbox")}
     else {None}
 }
 pub(super) fn element(handle:u32)->Option<u32> {
+    if (INERT_BASE+1..INERT_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_BASE));}
     let base=match attribute(handle)? {"class"=>BASE,_=>SANDBOX_BASE};
     let element=node_handle((handle-base)as usize);node_index(element).map(|_|element)
 }
 pub(super) fn sandbox_handle(element:u32)->u32 {SANDBOX_BASE+(element-NODE_BASE)}
 pub(super) fn handle(element: u32) -> u32 {
-    BASE + (element - NODE_BASE)
+    if node_index(element).is_some(){BASE+(element-NODE_BASE)}else{INERT_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
 }
 fn whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}')
@@ -76,10 +79,10 @@ impl Bridge<'_> {
                 .is_some_and(|node| matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg))
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|element| self.class_list_element_receiver(element) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
+        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_html_class_element_receiver(element)) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
     }
     pub(super) fn exact_class_token_receiver(&self,object:u32)->bool {
-        self.class_list_receiver(object)&&attribute(object)==Some("class")&&element(object).and_then(node_index).is_some_and(|node|self.html_class_element(node))
+        self.class_list_receiver(object)&&attribute(object)==Some("class")&&element(object).is_some_and(|owner|self.inert_html_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
     }
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
@@ -166,6 +169,7 @@ impl Bridge<'_> {
         Ok(())
     }
     pub(super) fn class_list_get(&mut self, object: u32, property: &str) -> Result<Value, String> {
+        if element(object).is_some_and(|owner|self.inert_html_class_element_receiver(owner)){return self.inert_html_class_list_get(object,property);}
         let node = self.class_list_node(object)?;
         let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         if property == "value" {
@@ -188,6 +192,11 @@ impl Bridge<'_> {
         property: &str,
         value: Value,
     ) -> Result<(), String> {
+        if let Some(owner)=element(object).filter(|&owner|self.inert_html_class_element_receiver(owner)){
+            if attribute(object)!=Some("class"){return Err("Inert HTML token attribute is unavailable.".into());}
+            if property!="value"{return Err("DOMTokenList property write is not implemented.".into());}
+            return self.element_class_name_set(owner,&value);
+        }
         let node = self.class_list_node(object)?;
         let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         if property != "value" {
@@ -203,6 +212,7 @@ impl Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<Value, String> {
+        if element(object).is_some_and(|owner|self.inert_html_class_element_receiver(owner)){return self.inert_html_class_list_call(object,method,args);}
         let node = self.class_list_node(object)?;
         let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         self.class_list_validate(object, method, args)
@@ -311,9 +321,7 @@ impl Bridge<'_> {
         self.attribute(node, attribute, Some(tokens.join(" ")))
     }
     pub(super) fn class_list_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
-        let node = self.class_list_node(object)?;
-        let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
-        let Value::Number(count)=self.read_class_tokens(node,attribute,token_list_reads::Read::Length)? else{unreachable!()};
+        let Value::Number(count)=self.class_list_get(object,"length")? else{unreachable!()};
         let count=count as usize;
         self.state.work(count)?;
         self.state.copies(
