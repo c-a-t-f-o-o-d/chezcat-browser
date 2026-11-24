@@ -3640,6 +3640,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0&&object==DOCUMENT&&method=="getElementsByName"{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if index==0 && self.class_list_receiver(object) && matches!(method,"contains"|"supports"){return true;}
@@ -9152,6 +9153,9 @@ mod html_id_domstring_tests;
 #[cfg(test)]
 #[path="script_html_id_materialization_tests.rs"]
 mod html_id_materialization_tests;
+#[cfg(test)]
+#[path="script_live_name_domstring_tests.rs"]
+mod live_name_domstring_tests;
 
 #[path="script_form_id_guards.rs"]
 mod form_id_guards;

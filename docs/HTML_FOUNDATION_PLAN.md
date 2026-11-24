@@ -363,6 +363,17 @@ refuse atomically. Original component and App fixtures qualify native records.
 Raw form producers and foreign raw-ID imports, general dynamic owner resetting, parser form-owner
 magic and frozen qualification remain separate. F01 stays partial.
 
+Exact live-name filter increment: displayed-document getElementsByName retains
+converted UTF-16 filters in admitted native NodeList storage. Live reads compare
+authoritative HTML name attributes rather than scalar projections and preserve
+real tree order through moves and scalar name changes. Conversion occurs once;
+brand/Symbol/abrupt behavior and native copy/string/storage/read-work refusal
+retain recovery. Main raw-name records are component fixtures; App pointer-driven
+native queries retain paint/editor/link/page identity, and production controls
+cover scalar names and unmatched raw queries. Main raw-name producers,
+canonical/inert/child Document expansion and frozen qualification remain separate.
+F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**
