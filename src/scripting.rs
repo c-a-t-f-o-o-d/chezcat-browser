@@ -9623,3 +9623,7 @@ mod meter_numeric_tests;
 
 #[path="script_meter_numeric.rs"]
 mod script_meter_numeric;
+
+#[cfg(test)]
+#[path="script_gauge_lifecycle_tests.rs"]
+mod gauge_lifecycle_tests;
