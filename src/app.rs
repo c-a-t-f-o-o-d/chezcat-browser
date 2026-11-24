@@ -6561,3 +6561,7 @@ mod inert_foreign_class_list_tests;
 #[cfg(test)]
 #[path="app_inert_reflection_namespace_tests.rs"]
 mod inert_reflection_namespace_tests;
+
+#[cfg(test)]
+#[path="app_aria_domstring_reflection_tests.rs"]
+mod aria_domstring_reflection_tests;

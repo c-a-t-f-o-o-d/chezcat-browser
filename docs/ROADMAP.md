@@ -85,6 +85,8 @@ Inert foreign Element token lists now share exact native attributes, namespace
 separation, clone/adoption identity and resource/origin refusal recovery;
 Inert id and common HTML native reflection writes now preserve same-spelling
 namespaced attributes with exact native lookup, identity and refusal/recovery;
+Nullable ARIA getters and inert setters now retain exact native DOMString
+values, null/empty separation, namespaces and original refusal/origin behavior;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
