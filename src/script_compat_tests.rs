@@ -736,13 +736,14 @@ fn html_label_native_members_stay_reserved() {
         &["var label = document.getElementById('lbl');"],
     );
     assert_eq!(initial.errors, 0, "{}", scripts.report());
-    for member in ["control", "form", "htmlFor"] {
+    // htmlFor is a canonical accessor; inert retains the unsupported native reservation.
+    for member in ["control", "form", "inert"] {
         let source = format!("Object.defineProperty(label, '{member}', {{value: 1}});");
         let result = scripts.console_eval(&mut doc, &mut forms, &source);
         assert_eq!(result.errors, 1, "{member}: {}", scripts.report());
     }
     let retained = scripts.console_eval(&mut doc, &mut forms, r#"
-        if (Object.hasOwn(label,'control') || Object.hasOwn(label,'form') || Object.hasOwn(label,'htmlFor') ||
+        if (Object.hasOwn(label,'control') || Object.hasOwn(label,'form') || Object.hasOwn(label,'htmlFor') || Object.hasOwn(label,'inert') || label.htmlFor !== 'field' ||
             label.getAttribute('for') !== 'field') throw 'label association changed';
     "#);
     assert_eq!(retained.errors, 0, "{}", scripts.report());

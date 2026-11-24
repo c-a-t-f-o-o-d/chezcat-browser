@@ -513,6 +513,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("iframe", "HTMLIFrameElement"),
     ("img", "HTMLImageElement"),
     ("input", "HTMLInputElement"),
+    ("label", "HTMLLabelElement"),
     ("meta", "HTMLMetaElement"),
     ("script", "HTMLScriptElement"),
     ("link", "HTMLLinkElement"),
