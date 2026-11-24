@@ -579,7 +579,10 @@ impl Runtime {
         let tag_key = self.symbol_to_string_tag
             .ok_or_else(|| Fault::new("Missing interface class-tag symbol."))?;
 
-        for &(_, name) in super::ORDINARY_HTML_SUBCLASSES {
+        for (at,&(_, name)) in super::ORDINARY_HTML_SUBCLASSES.iter().enumerate() {
+            // Several local names can share one canonical interface identity.
+            self.work(at)?;
+            if super::ORDINARY_HTML_SUBCLASSES[..at].iter().any(|&(_,prior)|prior==name){continue;}
             let allocation = self.allocate_host_function_with_length(window, name, 0)
                 .map_err(Fault::new)?;
             if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
@@ -1636,6 +1639,12 @@ impl Runtime {
 #[cfg(test)]
 mod expando_tests {
     use super::*;
+    #[test]
+    fn quote_interface_aliases_allocate_one_constructor_callable_per_owner(){
+        for owner in [77,88]{let mut runtime=Runtime::for_test();runtime.bind_browser_global(owner).unwrap();runtime.define_event_target_interface(owner).unwrap();runtime.define_node_interfaces(owner,&[],None).unwrap();
+            for class in ["HTMLQuoteElement","HTMLImageElement"]{assert_eq!(runtime.functions.iter().filter(|f|matches!(f,Function::Host{object,method,..}if *object==owner&&*method==class)).count(),1,"{class}/{owner}");}
+        }
+    }
     struct Native { enabled:bool, reads:usize }
     impl Host for Native {
         fn expando_owner(&self,object:u32)->Option<u32> {(self.enabled&&object==42).then_some(77)}
