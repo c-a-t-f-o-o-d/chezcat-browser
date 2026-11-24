@@ -6,8 +6,11 @@ use super::*;
 #[derive(Clone, Copy)]
 enum State { Pending, Ready(usize), Failed }
 
+#[derive(Clone, Copy)]
+enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize } }
+
 pub(super) struct NativeMethod {
-    builtin: Builtin,
+    definition: Definition,
     name: String,
     realm: Option<usize>,
     state: State,
@@ -15,6 +18,14 @@ pub(super) struct NativeMethod {
 
 impl Runtime {
     pub(super) fn deferred_native_method(&mut self, owner: usize, name: &str, builtin: Builtin) -> Result<(), Fault> {
+        self.defer_method(owner,name,Definition::Native(builtin),false)
+    }
+
+    pub(super) fn deferred_host_method(&mut self, owner:usize, window:u32, name:&'static str, operation:&'static str, length:usize)->Result<(),Fault>{
+        self.defer_method(owner,name,Definition::Host{window,operation,length},true)
+    }
+
+    fn defer_method(&mut self, owner:usize, name:&str, definition:Definition, enumerable:bool)->Result<(),Fault>{
         #[cfg(test)]
         if self.limits.test_entry_arenas && self.deferred_native_methods.len() >= self.limits.capacity.functions {
             return Err(Fault::new("Deferred native method metadata limit reached (1024)."));
@@ -27,11 +38,11 @@ impl Runtime {
         self.work(bytes.saturating_add(if growth.added != 0 { self.deferred_native_methods.len() } else { 0 }))?;
         growth.commit(&mut self.deferred_native_methods);
         let index = self.deferred_native_methods.len();
-        self.deferred_native_methods.push(NativeMethod { builtin, name: name.into(), realm: self.active_realm, state: State::Pending });
+        self.deferred_native_methods.push(NativeMethod { definition, name: name.into(), realm: self.active_realm, state: State::Pending });
         self.value_bytes += bytes;
         // There are no callbacks between registration and replacing the private
         // slot. Failed registrations retain only bounded, charged metadata.
-        self.store_property(owner, name.into(), Value::Undefined, Some((false, true, true)))?;
+        self.store_property(owner, name.into(), Value::Undefined, Some((enumerable, true, true)))?;
         self.objects[owner].properties.get_mut(name).unwrap().value = StoredValue::DeferredNative(index);
         Ok(())
     }
@@ -44,10 +55,18 @@ impl Runtime {
             State::Failed => return Err(Fault::new("Native method initialization is unavailable after an earlier bounded failure.")),
             State::Pending => {
                 let method = &self.deferred_native_methods[index];
-                let (builtin, realm, bytes) = (method.builtin, method.realm, method.name.len());
+                let (definition, realm, bytes) = (method.definition, method.realm, method.name.len());
                 self.work(bytes)?;
                 let name = self.deferred_native_methods[index].name.clone();
-                let result = self.with_intrinsic_realm(realm, |runtime| runtime.native_function(builtin, &name));
+                let result = self.with_intrinsic_realm(realm, |runtime| match definition {
+                    Definition::Native(builtin)=>runtime.native_function(builtin,&name),
+                    Definition::Host{window,operation,length}=>{
+                        let method=runtime.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
+                        if let Some(Function::Host{receiver_required,..})=runtime.functions.get_mut(method.id){*receiver_required=true;}
+                        runtime.store_property(runtime.function_properties[method.id],"name".into(),Value::String(name.clone()),Some((false,false,true)))?;
+                        Ok(Value::Function(method.id))
+                    }
+                });
                 match result {
                     Ok(Value::Function(function)) => {
                         self.deferred_native_methods[index].state = State::Ready(function);
@@ -74,6 +93,39 @@ mod tests {
         fn get(&mut self, _: u32, _: &str) -> Result<Value, String> { Err("unexpected native get".into()) }
         fn set(&mut self, _: u32, _: &str, _: Value) -> Result<(), String> { Err("unexpected native set".into()) }
         fn call(&mut self, _: u32, _: &str, _: &[Value]) -> Result<Value, String> { Err("unexpected native call".into()) }
+    }
+
+
+    #[test]
+    fn host_data_method_preserves_flags_identity_and_no_eager_callable() {
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.execute("var freeze=Object.freeze,inspect=Object.getOwnPropertyDescriptor;",&mut NoHost).unwrap();
+        let owner=runtime.new_object(None).unwrap();
+        runtime.put_binding(runtime.global_environment,"pendingHost".into(),Some(Value::Object(owner)),Declaration::Var,false).unwrap();
+        let count=runtime.functions.len();
+        runtime.deferred_host_method(owner,77,"check","\0test.check",0).unwrap();
+        runtime.execute("if(!('check' in pendingHost))throw 'presence';freeze(pendingHost);",&mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(),count);
+        runtime.execute("var a=pendingHost.check,b=inspect(pendingHost,'check');if(a!==pendingHost.check||a!==b.value||b.get!==undefined||!b.enumerable||b.writable||b.configurable||a.name!=='check'||a.length!==0)throw 'host data descriptor';var caught=false;try{new a();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'method constructor';",&mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(),count+1);
+    }
+
+    #[test]
+    fn host_data_method_failure_is_bounded_and_never_retries_or_resurrects() {
+        let mut runtime=Runtime::for_capacity_test();
+        let owner=runtime.new_object(None).unwrap();
+        runtime.deferred_host_method(owner,77,"check","\0test.check",0).unwrap();
+        while runtime.functions.len()<MAX_FUNCTIONS{runtime.native_function(Builtin::IsNaN,"fixture").unwrap();}
+        let before=(runtime.functions.len(),runtime.objects.len());
+        assert!(runtime.materialize_native_property(owner,"check").unwrap_err().display().contains("Function limit reached"));
+        runtime.begin_job();
+        assert!(runtime.materialize_native_property(owner,"check").unwrap_err().display().contains("earlier bounded failure"));
+        assert_eq!((runtime.functions.len(),runtime.objects.len()),before);
+        runtime.set_property(owner,"check".into(),Value::Number(17.0)).unwrap();
+        assert_eq!(runtime.own_property(owner,"check").unwrap().to_number(),17.0);
+        runtime.remove_property(owner,"check").unwrap();
+        assert!(matches!(runtime.own_property(owner,"check").unwrap(),Value::Undefined));
+        assert_eq!((runtime.functions.len(),runtime.objects.len()),before);
     }
 
     #[test]

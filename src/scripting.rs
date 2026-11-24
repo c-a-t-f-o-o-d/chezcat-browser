@@ -3118,6 +3118,7 @@ impl Bridge<'_> {
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
+        if self.output_validation_member(object,property){return true;}
         if self.output_value_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.html_label_for_member(object,property){return true;}
@@ -3432,6 +3433,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return false;}
         if self.output_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
+        if self.output_validation_member(object,property){return false;}
         if self.output_value_member(object,property){return false;}
         if self.html_label_control_member(object,property){return false;}
         if self.html_label_for_member(object,property){return false;}
@@ -3556,6 +3558,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
+        if self.output_validation_readonly(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -3973,6 +3976,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_output_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_value::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_label_control::GET&&self.event_target_interface(object){return Some(object);}
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4288,6 +4292,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.validate_html_label_form(object);}
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
+        if script_output_validation::operation(method){return self.validate_output_metadata(object);}
         if script_output_value::operation(method).is_some(){return self.validate_output_value(object);}
         if method==script_label_control::GET{return self.validate_html_label_control(object);}
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
@@ -4749,6 +4754,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_value::operation(method).is_some(){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
@@ -5627,6 +5633,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
+        if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
         if self.output_value_member(object,property){return self.output_value_get(object,property);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
@@ -6466,6 +6473,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.output_form_get(object);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
+        if script_output_validation::operation(method){return self.output_validation(object,method);}
         if method==script_output_metadata::TYPE_GET{return self.output_metadata_get(object,"type");}
         if method==script_output_metadata::NAME_SET{return Err("OUTPUT name setter requires the native conversion transaction.".into());}
         if method==script_label_control::GET{return self.html_label_control_get(object);}
@@ -9421,3 +9429,10 @@ mod output_reset_tests;
 #[cfg(test)]
 #[path="script_output_form_attribute_tests.rs"]
 mod output_form_attribute_tests;
+
+#[cfg(test)]
+#[path="script_output_validation_tests.rs"]
+mod output_validation_tests;
+
+#[path="script_output_validation.rs"]
+mod script_output_validation;
