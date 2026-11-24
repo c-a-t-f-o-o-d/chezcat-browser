@@ -6433,3 +6433,7 @@ mod trim_utf16_tests;
 #[cfg(test)]
 #[path = "app_token_list_exact_reads_tests.rs"]
 mod token_list_exact_reads_tests;
+
+#[cfg(test)]
+#[path = "app_token_list_interface_tests.rs"]
+mod token_list_interface_tests;

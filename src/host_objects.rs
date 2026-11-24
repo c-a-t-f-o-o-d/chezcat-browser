@@ -518,6 +518,7 @@ impl Runtime {
             }
             self.define_node_list_iteration_interface(window)?;
             self.define_html_collection_interface(window)?;
+            self.define_token_list_interface(window)?;
             self.define_named_node_map_interface(window)?;
             self.define_window_interface(window)?;
             Ok(())
@@ -874,6 +875,31 @@ impl Runtime {
         }
         self.put_binding(self.global_environment,"NamedNodeMap".into(),Some(constructor),super::Declaration::Var,false)?;self.global_attributes.insert("NamedNodeMap".into(),(false,true,true));
         self.native_constructor_prototypes.insert((window,"NamedNodeMap"),prototype);Ok(())
+    }
+
+    fn define_token_list_interface(&mut self,window:u32)->Result<(),Fault> {
+        let allocation=self.allocate_host_function_with_length(window,"DOMTokenList",0).map_err(Fault::new)?;
+        if let Some(Function::Host{constructible,..})=self.functions.get_mut(allocation.id){*constructible=true;}
+        let constructor=Value::Function(allocation.id);let prototype=self.new_object(None)?;
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("DOMTokenList".into()),Some((false,false,true)))?;
+        self.define_host_attribute(prototype,window,"length","\0DOMTokenList.get.length",None)?;
+        self.define_host_attribute(prototype,window,"value","\0DOMTokenList.get.value",Some("\0DOMTokenList.set.value"))?;
+        for (name,operation,length) in [("item","\0DOMTokenList.item",1),("contains","\0DOMTokenList.contains",1),("add","\0DOMTokenList.add",0),("remove","\0DOMTokenList.remove",0),("supports","\0DOMTokenList.supports",1),("toString","\0DOMTokenList.toString",0)] {
+            let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
+            if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
+            self.store_property(self.function_properties[method.id],"name".into(),Value::String(name.into()),Some((false,false,true)))?;
+            self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;
+        }
+        for (name,mode) in [("keys",super::collections::Mode::Keys),("values",super::collections::Mode::Values),("entries",super::collections::Mode::Entries)] {
+            let method=self.array_iterator_intrinsic(mode);self.store_property(prototype,name.into(),method,Some((true,true,true)))?;
+        }
+        let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
+        self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
+        self.put_binding(self.global_environment,"DOMTokenList".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("DOMTokenList".into(),(false,true,true));
+        self.native_constructor_prototypes.insert((window,"DOMTokenList"),prototype);Ok(())
     }
 
     fn define_html_collection_interface(&mut self,window:u32)->Result<(),Fault> {
