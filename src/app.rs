@@ -6669,3 +6669,7 @@ mod fieldset_name_tests;
 #[cfg(test)]
 #[path="app_fieldset_disabled_tests.rs"]
 mod fieldset_disabled_tests;
+
+#[cfg(test)]
+#[path="app_fieldset_validation_tests.rs"]
+mod fieldset_validation_tests;
