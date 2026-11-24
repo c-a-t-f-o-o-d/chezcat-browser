@@ -9563,3 +9563,7 @@ mod script_fieldset_validation;
 #[cfg(test)]
 #[path="script_fieldset_validity_tests.rs"]
 mod fieldset_validity_tests;
+
+#[cfg(test)]
+#[path="script_fieldset_form_attribute_tests.rs"]
+mod fieldset_form_attribute_tests;

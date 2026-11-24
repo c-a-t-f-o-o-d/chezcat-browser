@@ -52,7 +52,7 @@ pub(super) fn html_label_or_output_for_attribute(namespace:crate::html::Namespac
     namespace==crate::html::Namespace::Html && matches!(tag,"label"|"output") && name.html_is("for")
 }
 pub(super) fn html_output_form_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
-    namespace==crate::html::Namespace::Html && tag=="output" && name.html_is("form")
+    namespace==crate::html::Namespace::Html && matches!(tag,"output"|"fieldset") && name.html_is("form")
 }
 pub(super) fn html_aria_attribute(namespace:crate::html::Namespace,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html
