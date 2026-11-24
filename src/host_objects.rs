@@ -331,7 +331,7 @@ impl Runtime {
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
                     ) {
-                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"|"isEqualNode"|"compareDocumentPosition"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"|"isEqualNode"|"compareDocumentPosition"|"isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;
@@ -629,6 +629,7 @@ impl Runtime {
             if name == "HTMLPreElement" {self.define_host_attribute(prototype,window,"width","\0HTMLPreElement.get.width",Some("\0HTMLPreElement.set.width"))?;}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"start","\0HTMLOListElement.get.start",Some("\0HTMLOListElement.set.start"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLUListElement.get.compact",Some("\0HTMLUListElement.set.compact"))?;}
+            if name == "HTMLDirectoryElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDirectoryElement.get.compact",Some("\0HTMLDirectoryElement.set.compact"))?;}
             if name == "HTMLMenuElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLMenuElement.get.compact",Some("\0HTMLMenuElement.set.compact"))?;}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLOListElement.get.compact",Some("\0HTMLOListElement.set.compact"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"noShade","\0HTMLHRElement.get.noShade",Some("\0HTMLHRElement.set.noShade"))?;}

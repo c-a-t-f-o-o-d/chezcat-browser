@@ -6809,3 +6809,7 @@ mod br_clear_tests;
 #[cfg(test)]
 #[path="app_menu_compact_tests.rs"]
 mod menu_compact_tests;
+
+#[cfg(test)]
+#[path="app_dir_compact_tests.rs"]
+mod dir_compact_tests;
