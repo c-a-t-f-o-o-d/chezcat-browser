@@ -21,6 +21,7 @@ mod crypto_x25519;
 mod csp;
 mod css;
 mod diagnostics;
+mod decimal_number;
 mod downloads;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod editor;

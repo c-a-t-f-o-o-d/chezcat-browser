@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3121,6 +3121,7 @@ impl Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
         if self.form_length_member(object,property){return true;}
+        if self.progress_numeric_member(object,property){return true;}
         if self.legend_form_member(object,property){return true;}
         if self.fieldset_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
@@ -3252,6 +3253,7 @@ impl Host for Bridge<'_> {
         if property=="className"&&self.canonical_selector_receiver(target){return Some("class");}
         if self.html_label_for_member(target,property){return Some("for");}
         if self.fieldset_disabled_member(target,property){return Some("disabled");}
+        if let Some(name)=self.progress_numeric_attribute(target,property){return Some(name);}
         if self.fieldset_name_member(target,property){return Some("name");}
         if self.output_name_member(target,property){return Some("name");}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(target) {return Some("href");}
@@ -3452,6 +3454,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return false;}
         if self.control_type_member(object,property){return false;}
         if self.form_length_member(object,property){return false;}
+        if self.progress_numeric_member(object,property){return false;}
         if self.legend_form_member(object,property){return false;}
         if self.fieldset_member(object,property){return false;}
         if self.control_form_member(object,property){return false;}
@@ -3586,6 +3589,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
         if self.form_length_member(object,property){return true;}
+        if self.progress_numeric_member(object,property){return property=="position";}
         if self.legend_form_member(object,property){return true;}
         if self.fieldset_member(object,property){return matches!(property,"form"|"type");}
         if self.control_form_member(object,property){return true;}
@@ -3681,6 +3685,7 @@ impl Host for Bridge<'_> {
         if method==script_element_id::SET&&self.canonical_selector_receiver(object){return Some("id");}
         if method==script_element_class_name::SET&&self.canonical_selector_receiver(object){return Some("className");}
         if method==script_label_html_for::SET&&self.html_label_receiver(object){return Some("htmlFor");}
+        if self.progress_numeric_receiver(object){match method{script_progress_numeric::VALUE_SET=>return Some("value"),script_progress_numeric::MAX_SET=>return Some("max"),_=>{}}}
         if method==script_fieldset::DISABLED_SET&&self.fieldset_receiver(object){return Some("disabled");}
         if method==script_fieldset::NAME_SET&&self.fieldset_receiver(object){return Some("name");}
         if method==script_output_metadata::NAME_SET&&self.html_output_receiver(object){return Some("name");}
@@ -3721,6 +3726,7 @@ impl Host for Bridge<'_> {
     fn run_native_microtask(&mut self,ticket:u64)->Result<(),String>{self.run_media_microtask(ticket)}
 
     fn number_setter(&self, object: u32, property: &str) -> bool {
+        if self.progress_numeric_attribute(object,property).is_some(){return true;}
         if property=="tabIndex"&&self.html_reflection_receiver(object){return true;}
         if self.xhr_index(object).is_some(){return property=="timeout";}
 
@@ -4017,6 +4023,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_control_type::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_form_length::GET&&self.event_target_interface(object){return Some(object);}
+        if script_progress_numeric::operation(method)&&self.event_target_interface(object){return Some(object);}
         if method==script_legend_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_fieldset::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_control_form::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4341,6 +4348,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_control_type::interface(method).is_some(){return self.validate_control_type(object,method);}
         if method==script_form_length::GET{return self.validate_form_length(object);}
+        if script_progress_numeric::operation(method){return self.validate_progress_numeric(object);}
         if method==script_legend_form::GET{return self.validate_legend_form(object);}
         if script_fieldset::operation(method){return self.validate_fieldset(object);}
         if script_control_form::interface(method).is_some(){return self.validate_control_form(object,method);}
@@ -4588,6 +4596,7 @@ impl Host for Bridge<'_> {
         if self.canvas_context_receiver(object) && script_canvas_context::unsupported_state(property) {
             return Err(("NotSupportedError", format!("Canvas 2D drawing state {property:?} is not implemented.")));
         }
+        if self.progress_numeric_attribute(object,property).is_some(){self.validate_progress_numeric(object)?;if !matches!(value,Value::Number(n)if n.is_finite()){return Err(("TypeError","Progress numeric metadata requires finite doubles.".into()));}return Ok(());}
         if property=="currentTime" && self.media_interface_receiver(object) {
             if !self.state.enabled || !self.doc.scripting_enabled {
                 return Err(("InvalidStateError","Scripting is disabled.".into()));
@@ -4812,6 +4821,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_control_type::interface(method).is_some(){return self.event_target_interface(object)&&self.control_type_matches(receiver,method);}
         if method==script_form_length::GET{return self.event_target_interface(object)&&self.form_length_receiver(receiver);}
+        if script_progress_numeric::operation(method){return self.event_target_interface(object)&&self.progress_numeric_receiver(receiver);}
         if method==script_legend_form::GET{return self.event_target_interface(object)&&self.legend_receiver(receiver);}
         if script_fieldset::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_control_form::interface(method).is_some(){return self.event_target_interface(object)&&self.control_form_matches(receiver,method);}
@@ -5698,6 +5708,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.control_type_member(object,property){return self.control_type_get(object,self.control_type_method(object).unwrap());}
         if self.form_length_member(object,property){return self.form_length_get(object);}
+        if self.progress_numeric_member(object,property){return self.progress_numeric_get(object,match property{"value"=>script_progress_numeric::VALUE_GET,"max"=>script_progress_numeric::MAX_GET,_=>script_progress_numeric::POSITION_GET});}
         if self.legend_form_member(object,property){return self.legend_form_get(object);}
         if self.fieldset_member(object,property){return self.fieldset_get(object,match property{"form"=>script_fieldset::FORM,"name"=>script_fieldset::NAME_GET,"disabled"=>script_fieldset::DISABLED_GET,_=>script_fieldset::TYPE});}
         if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
@@ -6132,6 +6143,7 @@ impl Host for Bridge<'_> {
         if property=="id"&&self.canonical_selector_receiver(object){return self.element_id_set(object,&value);}
         if property=="className"&&self.canonical_selector_receiver(object){return self.element_class_name_set(object,&value);}
         if self.html_label_for_member(object,property){return self.html_label_for_set(object,&value);}
+        if self.progress_numeric_attribute(object,property).is_some(){return self.progress_numeric_set(object,property,&value);}
         if self.fieldset_disabled_member(object,property){return self.fieldset_disabled_set(object,&value);}
         if self.fieldset_name_member(object,property){return self.fieldset_name_set(object,&value);}
         if self.output_name_member(object,property){return self.output_name_set(object,&value);}
@@ -6548,6 +6560,8 @@ impl Host for Bridge<'_> {
         if script_control_type::interface(method).is_some(){return self.control_type_get(object,method);}
         if method==script_form_length::GET{return self.form_length_get(object);}
         if matches!(method,script_fieldset::NAME_SET|script_fieldset::DISABLED_SET){return Err("Fieldset setters require the native conversion transaction.".into());}
+        if matches!(method,script_progress_numeric::VALUE_SET|script_progress_numeric::MAX_SET){return Err("Progress setters require the native conversion transaction.".into());}
+        if script_progress_numeric::operation(method){return self.progress_numeric_get(object,method);}
         if method==script_legend_form::GET{return self.legend_form_get(object);}
         if script_fieldset::operation(method){return self.fieldset_get(object,method);}
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
@@ -9582,3 +9596,10 @@ mod legend_form_tests;
 
 #[path="script_legend_form.rs"]
 mod script_legend_form;
+
+#[cfg(test)]
+#[path="script_progress_numeric_tests.rs"]
+mod progress_numeric_tests;
+
+#[path="script_progress_numeric.rs"]
+mod script_progress_numeric;
