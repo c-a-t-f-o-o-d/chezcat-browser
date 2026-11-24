@@ -75,7 +75,9 @@ promotion with real token/reflection/CSS consumers and resource refusal/recovery
 Canonical Element.className now uses inherited native accessors over exact
 attributes, including inert property writes, observation and materialization;
 Canonical Element.classList now uses inherited accessors and ordinary PutForwards
-ordering over existing main HTML/SVG token lists; inert token-list owners remain open;
+ordering over existing main HTML/SVG token lists;
+Inert HTML token lists now share exact native reads and mutations, independent
+cloning/import, stable template promotion and admitted scratch/refusal recovery;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

@@ -6545,3 +6545,7 @@ mod element_class_name_accessor_tests;
 #[cfg(test)]
 #[path="app_element_class_list_accessor_tests.rs"]
 mod element_class_list_accessor_tests;
+
+#[cfg(test)]
+#[path="app_inert_html_class_list_tests.rs"]
+mod inert_html_class_list_tests;
