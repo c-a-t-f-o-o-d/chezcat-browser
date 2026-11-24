@@ -652,8 +652,10 @@ impl Runtime {
             if name == "HTMLTextAreaElement" {
                 self.define_host_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
             }
+            for (interface,get) in [("HTMLInputElement","\0HTMLInputElement.get.labels"),("HTMLButtonElement","\0HTMLButtonElement.get.labels"),("HTMLTextAreaElement","\0HTMLTextAreaElement.get.labels")]{
+                if name==interface{self.define_host_attribute(prototype,window,"labels",get,None)?;}
+            }
             if name == "HTMLInputElement" {
-                self.define_host_attribute(prototype,window,"labels","\0HTMLInputElement.get.labels",None)?;
                 for (key, getter, setter) in [
                     ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),
                     ("checked", "\0HTMLInputElement.get.checked", "\0HTMLInputElement.set.checked"),

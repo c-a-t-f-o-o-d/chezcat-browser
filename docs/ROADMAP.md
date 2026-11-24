@@ -99,7 +99,7 @@ Canonical label form reads now preserve native stored owners and bounded
 inert connected/detached association with descriptor and App evidence;
 Input labels now use a stable live NodeList with exact native association,
 hidden-state identity recovery and admitted nested traversal scratch;
-frozen browser qualification stays separate.
+button and textarea labels now share bounded live NodeLists with distinct native getter brands; remaining built-in label interfaces and lifecycle dependencies stay required; frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and

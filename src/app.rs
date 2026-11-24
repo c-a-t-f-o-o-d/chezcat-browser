@@ -6589,3 +6589,7 @@ mod html_label_form_tests;
 #[cfg(test)]
 #[path="app_html_input_labels_tests.rs"]
 mod html_input_labels_tests;
+
+#[cfg(test)]
+#[path="app_button_textarea_labels_tests.rs"]
+mod button_textarea_labels_tests;
