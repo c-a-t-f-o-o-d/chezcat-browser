@@ -2367,11 +2367,15 @@ impl App {
                     if self.script_event(owner, "reset", true) {
                         return;
                     }
-                    if let Err(error)=self.forms.reset_in_document(&self.document,owner) {self.error(error);return;}
+                    let outcome=match crate::scripting::reset_form(&mut self.document,&mut self.forms,self.scripting.as_mut(),owner){Ok(outcome)=>outcome,Err(error)=>{self.error(error);return;}};
+                    self.apply_history_replacement();
+                    self.apply_script_scroll();
+                    self.apply_script_focus();
+                    self.validate_control_focus();
                     self.invalidate_script_geometry();
                     self.reflow();
                     self.sync_editors();
-                    self.status = "Form reset.".into();
+                    self.status = if outcome.errors>0{format!("JavaScript subset: {} error(s). Ctrl+I shows details.",outcome.errors)}else{"Form reset.".into()};
                     self.failed = false;
                 }
             }
@@ -6625,3 +6629,7 @@ mod descendant_text_tests;
 #[cfg(test)]
 #[path="app_output_value_default_tests.rs"]
 mod output_value_default_tests;
+
+#[cfg(test)]
+#[path="app_output_reset_tests.rs"]
+mod output_reset_tests;
