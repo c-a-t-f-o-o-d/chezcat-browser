@@ -74,6 +74,9 @@ impl Bridge<'_> {
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
         element(object).is_some_and(|element| self.class_list_element_receiver(element) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
     }
+    pub(super) fn exact_class_token_receiver(&self,object:u32)->bool {
+        self.class_list_receiver(object)&&attribute(object)==Some("class")&&element(object).and_then(node_index).is_some_and(|node|self.html_class_element(node))
+    }
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
         let node = self.node(element)?;
@@ -123,6 +126,12 @@ impl Bridge<'_> {
         if method=="supports" && supported_tokens(object).is_none(){return Err(("TypeError","This token attribute does not define supported tokens.".into()));}
         if matches!(method, "add" | "remove") {
             for value in args {
+                if self.exact_class_token_receiver(object) {
+                    let token=token_list_reads::argument(value).map_err(|message|("TypeError",message))?;
+                    if token.is_empty(){return Err(("SyntaxError","Class token must not be empty.".into()));}
+                    if token.code_units().any(|unit|matches!(unit,0x09|0x0a|0x0c|0x0d|0x20)){return Err(("InvalidCharacterError","Class token contains ASCII whitespace.".into()));}
+                    continue;
+                }
                 let Value::String(token) = value else {
                     return Err((
                         "TypeError",
@@ -202,6 +211,16 @@ impl Bridge<'_> {
             let value=args.first().ok_or("item requires an index.")?.to_number();
             let index=if value.is_finite(){value.trunc().rem_euclid(4_294_967_296.0)as usize}else{0};
             return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,false));
+        }
+        if matches!(method,"add"|"remove")&&self.exact_class_token_receiver(object)
+            &&(self.doc.dom_attr(node,"class").is_some_and(|value|value.raw_units().is_some())||args.iter().any(|value|matches!(value,Value::StringUnits(_)))) {
+            let source=self.doc.dom_attr(node,"class").map(DomString::view).unwrap_or(crate::dom_string::DomStringRef::Scalar(""));
+            let value=token_list_mutation::serialize(self.state,source,args,method=="add")?;
+            if value.is_empty()&&self.doc.dom_attr(node,"class").is_none(){return Ok(Value::Undefined);}
+            self.state.copies("class".len())?;
+            let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("class")?);
+            self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)?;
+            return Ok(Value::Undefined);
         }
         let mut tokens = self.class_tokens(node,attribute)?;
         match method {

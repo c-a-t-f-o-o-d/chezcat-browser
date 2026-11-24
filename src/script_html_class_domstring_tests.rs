@@ -35,10 +35,11 @@ var clone=p.cloneNode(true);if(clone.className!==raw||clone.getAttributeNode('cl
 p.className='A�z';rows=observer.takeRecords();if(rows.length!==1||rows[0].oldValue!==raw||!p.matches('.A�z')||clone.className!==raw||a.value!=='A�z')throw 'live scalar replacement';
 "#);}
 #[test]
-fn html_class_domstring_raw_token_mutation_and_unapproved_attributes_refuse_without_commit(){
+fn html_class_domstring_raw_token_mutation_and_unapproved_attributes_preserve_exact_record(){
     let(mut doc,mut forms,mut page)=fixture();run(&mut doc,&mut forms,&mut page,r#"var p=document.getElementById('target'),frame=document.getElementById('frame');p.className='A\ud800z plain';"#);
+    run(&mut doc,&mut forms,&mut page,"p.classList.add('next');if(p.className!=='A\\ud800z plain next')throw 'exact supported token mutation';");
     let before=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;
-    for source in ["p.classList.add('next')","frame.setAttribute('sandbox','allow-scripts\\ud800')","p.setAttribute('style','color:red\\ud800')"] {
+    for source in ["frame.setAttribute('sandbox','allow-scripts\\ud800')","p.setAttribute('style','color:red\\ud800')"] {
         page.begin_job();let error=page.runtime.execute(source,&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap_err();
         assert!(error.contains("UTF-16")||error.contains("Unpaired"),"{error}");assert_eq!(format!("{:?}",doc.nodes),before);assert_eq!(page.state.dom_commits,commits);
     }

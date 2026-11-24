@@ -6449,3 +6449,7 @@ mod selector_ident_start_tests;
 #[cfg(test)]
 #[path="app_html_class_domstring_tests.rs"]
 mod html_class_domstring_tests;
+
+#[cfg(test)]
+#[path="app_token_list_exact_mutation_tests.rs"]
+mod token_list_exact_mutation_tests;

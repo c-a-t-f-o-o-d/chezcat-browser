@@ -40,12 +40,13 @@ target.setAttribute('class','changed changed Other');if(list.length!==2||list[0]
 }
 
 #[test]
-fn token_list_exact_reads_do_not_scalarize_native_raw_records_during_unsupported_mutation() {
-    let(mut doc,mut forms,mut page)=fixture();let node=raw_record(&mut doc,&mut page);let before=doc.dom_attr(node,"class").unwrap().try_clone().unwrap();
+fn token_list_exact_reads_preserve_native_raw_records_during_supported_scalar_token_mutation() {
+    let(mut doc,mut forms,mut page)=fixture();let node=raw_record(&mut doc,&mut page);let old=doc.dom_attr(node,"class").unwrap().capacity();
     let retained=page.state.retained;let commits=page.state.dom_commits;
-    let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.class_list_call(script_class_list::handle(node_handle(node)),"add",&[Value::String("other".into())]).unwrap_err();
-    assert!(error.contains("raw")||error.contains("UTF-16"),"{error}");
-    assert_eq!(doc.dom_attr(node,"class").unwrap(),&before);assert_eq!(page.state.retained,retained);assert_eq!(page.state.dom_commits,commits);
+    Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.class_list_call(script_class_list::handle(node_handle(node)),"add",&[Value::String("other".into())]).unwrap();
+    let value=doc.dom_attr(node,"class").unwrap();
+    assert_eq!(value.code_units().collect::<Vec<_>>(),"one A".encode_utf16().chain([0xd800]).chain("z \u{a0}\u{b} other".encode_utf16()).collect::<Vec<_>>());
+    assert_eq!(page.state.retained,retained-old+value.capacity());assert_eq!(page.state.dom_commits,Some(commits.unwrap()+1));
 }
 
 #[test]
