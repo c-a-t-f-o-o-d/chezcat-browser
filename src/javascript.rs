@@ -526,6 +526,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("slot", "HTMLSlotElement"),
     ("template", "HTMLTemplateElement"),
     ("textarea", "HTMLTextAreaElement"),
+    ("time", "HTMLTimeElement"),
     ("title", "HTMLTitleElement"),
     ("ul", "HTMLUListElement"),
 ];
