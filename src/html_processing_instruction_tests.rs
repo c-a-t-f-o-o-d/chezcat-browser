@@ -25,7 +25,7 @@ fn html_processing_instruction_modes_literal_data_targets_question_end_and_bogus
     ] {
         let (token,consumed)=read(input,None).unwrap();
         assert_eq!(consumed,input.find('>').map_or(input.len(),|i|i+1));
-        let actual=token.into_kind().unwrap().map(|kind|shape(&Node{kind,namespace:Namespace::None,children:Vec::new()}));
+        let actual=token.into_kind(None).unwrap().map(|kind|shape(&Node{kind,namespace:Namespace::None,children:Vec::new()}));
         assert_eq!(actual.as_deref(),expected,"{input:?}");
     }
 }

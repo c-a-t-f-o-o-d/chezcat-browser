@@ -2,21 +2,70 @@
 //! https://html.spec.whatwg.org/multipage/parsing.html#comment-start-state
 // Data is literal (not an entity/reference context). The pending delimiter
 // characters at EOF are not part of the emitted token, just as at a close.
-pub(super) fn token(source:&str)->(&str,usize){
-    if source.starts_with('>'){return ("",1);}
-    if source.starts_with("->"){return ("",2);}
-    let normal=source.find("-->").map(|end|(end,3));
-    let bang=source.find("--!>").map(|end|(end,4));
-    let closed=match(normal,bang){(Some(a),Some(b))=>Some(if a.0<b.0{a}else{b}),(a,None)|(None,a)=>a};
-    if let Some((end,delimiter))=closed{return (&source[..end],end+delimiter);}
-    let pending=if source.ends_with("--!"){3}else if source.ends_with("--"){2}else if source.ends_with('-'){1}else{0};
-    (&source[..source.len()-pending],source.len())
+pub(super) fn token<'a>(
+    source: &'a str,
+    check: Option<&dyn Fn() -> Result<(), String>>,
+) -> Result<(&'a str, usize), String> {
+    let bytes = source.as_bytes();
+    for (block, chunk) in bytes.chunks(super::RAW_TEXT_CHECK_BYTES).enumerate() {
+        if let Some(check) = check { check()?; }
+        for (offset, &byte) in chunk.iter().enumerate() {
+            if byte != b'>' { continue; }
+            let at = block * super::RAW_TEXT_CHECK_BYTES + offset;
+            if at == 0 || at == 1 && bytes[0] == b'-' {
+                return Ok(("", at + 1));
+            }
+            if at >= 2 && &bytes[at - 2..at] == b"--" {
+                return Ok((&source[..at - 2], at + 1));
+            }
+            if at >= 3 && &bytes[at - 3..at] == b"--!" {
+                return Ok((&source[..at - 3], at + 1));
+            }
+        }
+    }
+    let pending = if source.ends_with("--!") { 3 }
+        else if source.ends_with("--") { 2 }
+        else if source.ends_with('-') { 1 } else { 0 };
+    Ok((&source[..source.len() - pending], source.len()))
 }
 
-pub(super) fn copy_data(source:&str)->Result<String,String>{
-    let nulls=source.bytes().filter(|&byte|byte==0).count();
-    let length=nulls.checked_mul(2).and_then(|bytes|bytes.checked_add(source.len())).ok_or("HTML comment data length overflow.")?;
-    let mut text=String::new();text.try_reserve_exact(length).map_err(|_|"Could not reserve HTML comment data.")?;
-    if nulls==0{text.push_str(source);}else{for character in source.chars(){text.push(if character=='\0'{'\u{fffd}'}else{character});}}
+pub(super) fn bogus<'a>(
+    source: &'a str,
+    check: Option<&dyn Fn() -> Result<(), String>>,
+) -> Result<(&'a str, usize), String> {
+    for (block, chunk) in source.as_bytes().chunks(super::RAW_TEXT_CHECK_BYTES).enumerate() {
+        if let Some(check) = check { check()?; }
+        if let Some(offset) = chunk.iter().position(|&byte| byte == b'>') {
+            let end = block * super::RAW_TEXT_CHECK_BYTES + offset;
+            return Ok((&source[..end], end + 1));
+        }
+    }
+    Ok((source, source.len()))
+}
+
+pub(super) fn copy_data(
+    source: &str,
+    check: Option<&dyn Fn() -> Result<(), String>>,
+) -> Result<String, String> {
+    let mut length = source.len();
+    for chunk in source.as_bytes().chunks(super::RAW_TEXT_CHECK_BYTES) {
+        if let Some(check) = check { check()?; }
+        let nulls = chunk.iter().filter(|&&byte| byte == 0).count();
+        length = nulls.checked_mul(2).and_then(|bytes| length.checked_add(bytes))
+            .ok_or("HTML comment data length overflow.")?;
+    }
+    let mut text = String::new();
+    text.try_reserve_exact(length).map_err(|_| "Could not reserve HTML comment data.")?;
+    let mut remaining = source;
+    while !remaining.is_empty() {
+        if let Some(check) = check { check()?; }
+        let end = remaining.floor_char_boundary(remaining.len().min(super::RAW_TEXT_CHECK_BYTES));
+        let (chunk, rest) = remaining.split_at(end);
+        for (index, part) in chunk.split('\0').enumerate() {
+            if index != 0 { text.push('\u{fffd}'); }
+            text.push_str(part);
+        }
+        remaining = rest;
+    }
     Ok(text)
 }

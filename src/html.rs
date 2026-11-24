@@ -453,23 +453,47 @@ fn parse_internal(
             position = end;
             continue;
         }
+        if rest.starts_with("</>") { position += 3; continue; }
         ignore_fragment_lf = None;
 
-        if let Some(comment) = rest.strip_prefix("<!--") {
+        let comment = rest.strip_prefix("<!--");
+        let doctype_open = rest.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("<!doctype"));
+        let bogus_end = rest.starts_with("</")
+            && rest.as_bytes().get(2).is_some_and(|byte| !byte.is_ascii_alphabetic());
+        if comment.is_some() || rest.starts_with("<!") && !doctype_open || bogus_end {
+            let check = loaded.map(|tree| tree.check_cancel);
+            let foreign_cdata = rest.starts_with("<![CDATA[")
+                && (uncertain_foreign_recovery || svg.root.is_some()
+                    || parent != 0 && document.nodes[parent].namespace != Namespace::Html);
             tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
+            if foreign_cdata {
+                svg.root = None;
+                if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
+                if inert_doctype.is_some() { return Err("HTML foreign CDATA recovery is outside the inert parser subset.".into()); }
+                let (_, consumed) = comments::bogus(&rest[2..], check)?;
+                position += 2 + consumed;
+                continue;
+            }
             let parent=*stack.last().unwrap();
             let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
             // A comment neither leaves the current tree context nor terminates
             // a checked SVG island. Its data never reenters markup scanning.
-            let (data,consumed)=comments::token(comment);
+            let (data, consumed) = if let Some(comment) = comment {
+                let (data, consumed) = comments::token(comment, check)?;
+                (data, 4 + consumed)
+            } else {
+                let (data, consumed) = comments::bogus(&rest[2..], check)?;
+                (data, 2 + consumed)
+            };
             if document.nodes.len()>=node_limit {
                 if fail_on_capacity{return Err(node_limit_error());}break;
             }
-            let data=comments::copy_data(data)?;
+            let data=comments::copy_data(data, check)?;
             append_markup_leaf(&mut document,parent,NodeKind::Comment(data.into()))?;
-            position+=4+consumed;continue;
+            position+=consumed;continue;
         }
-        if !checked&&rest.get(..9).is_some_and(|prefix|prefix.eq_ignore_ascii_case("<!doctype")) {
+        if doctype_open {
+            if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
             tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             let token=doctype::read(&rest[9..],loaded.map(|loaded|loaded.check_cancel))?;
             if initial {
@@ -493,18 +517,10 @@ fn parse_internal(
                 }
                 let parent=*stack.last().unwrap();
             let parent=structure.as_ref().map_or(parent,|s|s.comment_parent(parent));
-                if let Some(kind)=token.into_kind()? {append_markup_leaf(&mut document,parent,kind)?;}
+                if let Some(kind)=token.into_kind(loaded.map(|tree| tree.check_cancel))? {append_markup_leaf(&mut document,parent,kind)?;}
             }
             position+=consumed;continue;
         }
-        if rest.starts_with("<!") {
-            tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
-            svg.root=None;
-            if checked{return Err("HTML fragment declaration/comment tokens are not implemented.".into());}
-            if inert_doctype.is_some(){return Err("HTML bogus-comment recovery is outside the inert parser subset.".into());}
-            position+=rest.find('>').map_or(rest.len(),|end|end+1);continue;
-        }
-
         let mut tag = match read_tag_mode(input, position, checked, loaded.map(|tree| tree.check_cancel))? {
             TagToken::Complete(tag) => tag,
             TagToken::Incomplete => break,
@@ -514,7 +530,6 @@ fn parse_internal(
                     return Err("Template SVG contains a malformed tag.".into());
                 }
                 svg.root = None;
-                if checked && rest.starts_with("</") { return Err("HTML fragment bogus end-tag/comment recovery is not implemented.".into()); }
                 if let Some(start)=&mut structure{
                     initial=false;
                     if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit)? {
@@ -1539,3 +1554,11 @@ mod comments;
 #[cfg(test)]
 #[path = "html_comment_tests.rs"]
 mod comment_tests;
+
+#[cfg(test)]
+#[path = "html_bogus_comment_tests.rs"]
+mod bogus_comment_tests;
+
+#[cfg(test)]
+#[path = "html_comment_scan_tests.rs"]
+mod comment_scan_tests;
