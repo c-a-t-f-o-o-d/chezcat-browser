@@ -6705,3 +6705,7 @@ mod time_datetime_tests;
 #[cfg(test)]
 #[path="app_data_value_tests.rs"]
 mod data_value_tests;
+
+#[cfg(test)]
+#[path="app_quote_interface_tests.rs"]
+mod quote_interface_tests;
