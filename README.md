@@ -61,10 +61,7 @@ These are **implemented slices, not complete standards support**. The
 
 | You want… | Start here | What you are getting |
 | :--- | :--- | :--- |
-| **A fixed downloadable snapshot** | [📦 0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) | The verified published prerelease, with runtime/source ZIPs, notices, checksums, and its own source identity. |
-| **F00 foundation baseline** | [Release notes](CHANGELOG.md#0820-alpha4) and [checksums](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS) | Verified Windows runtime and matching source archive from `122d0b7`. |
-| **The tagged alpha.3 attempt** | [F00 baseline notes](CHANGELOG.md#0820-alpha3) and [Windows qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) | The normal suite failed. Publication was skipped. |
-| **The tagged alpha.2 attempt** | [🔬 Validation record](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) | Exact source `14134ab`; the normal Windows test stage failed. No alpha.2 release assets were published. |
+| **The latest published prerelease** | [📦 0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) | Verified Windows x64 runtime and matching source ZIPs, with notices, checksums, and build identity. |
 | **Newer integrated development** | Public `main` + [build instructions](#build) | Source changes that may not exist in the published executable. Check the current CI result. |
 | **Work under review** | [🔎 Open pull requests](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pulls) | Feature-branch work with its own results and remaining checks; not necessarily in `main`. |
 
@@ -73,16 +70,13 @@ These are **implemented slices, not complete standards support**. The
 > exact-source delivery checks and public download verification. The table above
 > distinguishes the verified download from subsequent development on main.
 
-**`0.82.0-alpha.4` is the verified download.** All four public assets matched the recorded hashes. The extracted Windows runtime passed startup and the original App/input journey for tagged source `122d0b7de5988493481dc4bed168d01969eef488`. [Download and runtime checks](docs/RELEASING.md#published-baseline)
-
-**Tagged candidate `0.82.0-alpha.2`** identifies source
-`14134aba8ac2ab001c8ec13db77f68fa220b1400`, including the integrated changes through
-PR #430 and release preparation in PR #431. Its
-[source notes](CHANGELOG.md#0820-alpha2) describe the scope. The
-[Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-stopped at the normal test stage; packaging and publication were not reached.
-**Alpha.2 is not a published download.** Its failed tag remains fixed. See the [release record](docs/RELEASING.md#current-release-candidate)
-for the unresolved failure and recovery rules.
+**Current release: [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).**
+The Windows build and release checks passed for tagged source `122d0b7`.
+The release includes the Windows x64 runtime, matching source archive,
+publication manifest, and [checksums](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS).
+Download verification and the extracted runtime's startup and input checks passed.
+See the [release notes](CHANGELOG.md#0820-alpha4) and
+[release record](docs/RELEASING.md#current-verified-release) for details.
 
 Commit-identified development downloads and a possible `dev` channel remain
 roadmap items, not advertised delivery options. The CI badge reports source
@@ -90,15 +84,18 @@ privacy and configuration checks on the latest trusted push to main.
 
 ## Development highlights
 
-**Current foundation source.** F00 has a verified requirement register, pinned
-inputs and executable native baseline. Integrated work now includes document
-encoding metadata, exact UTF-16 live class collections, current-tree paint and
-hit order, and literal HTML iframe fallback Text. The adapter and capacity
-repairs pass the local normal suite at `7e0d347`. The [capability matrix](docs/CAPABILITIES.md)
-records open XML, MIME, tokenizer, DOM and browser-harness requirements.
+**Current development on `main`.** The HTML/XHTML document foundation is the
+active focus. Integrated work includes native document and node records, shared
+text decoding for documents, scripts and stylesheets, expanded exact UTF-16
+handling in DOM APIs and class lists, and HTML parser and fragment improvements.
+The [foundation plan](docs/HTML_FOUNDATION_PLAN.md) tracks the work ahead; the
+[capability matrix](docs/CAPABILITIES.md) and [coverage register](docs/HTML_FOUNDATION_COVERAGE.json)
+record supported behavior, remaining requirements, and verification evidence.
 
-*Snapshot: November 21, 2026 · tagged source `14134ab`; release candidate
-`0.82.0-alpha.2`.*
+*Published baseline: `0.82.0-alpha.4` · tagged source `122d0b7`.
+The highlights below describe integrated capabilities; source builds from `main`
+can include newer changes than the published release. See the [changelog](CHANGELOG.md)
+for individual updates.*
 
 | State | Improvement | Evidence and boundary |
 | :--- | :--- | :--- |
@@ -110,21 +107,6 @@ records open XML, MIME, tokenizer, DOM and browser-harness requirements.
 | ✅ **Merged** | **Shared CSS and SVG presentation** | Sizing math, viewport units, inline-flex, focus/hover, visibility/stacking and supported SVG CSS geometry/cascade/paint use shared layout and input paths. |
 | ✅ **Merged** | **Capacity and storage corrections** | Iterative flattening and checked compiler/runtime/DOM/resource storage remove selected independent count ceilings. Image, font, HTTP and media paths retain real format/output/work guards. |
 | ✅ **Merged** | **Faster development builds and test pages** | `build_dev.cmd` reuses incremental development artifacts; the home page adds test websites and original scenarios. Normal release optimization is preserved. |
-
-**After the alpha.2 tag:** [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433),
-integrated at `ce464a4`, adds passive HTML/custom-host `textContent` replacement
-with real mutation records, saved identities and native-control boundaries.
-[PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434), integrated at
-`117bbb5`, preserves newly created inert Text identities through direct promotion
-when native backing is available. [PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435)
-at `ad58c9a` extends reservation to supported inert HTML/custom/style and SVG
-constructors. [PR #437](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/437)
-and [PR #438](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/438) subsequently
-reserve inert subtree-clone and main-template import identities.
-[PR #439](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/439) permits genuine
-Event author chains while preserving native trust and brands. These increments
-require a newer development build; they do not update the alpha.2 candidate or
-establish a usable website.
 
 Earlier recorded **jQuery 4.0.0** app checks pass startup, trusted input and a timer update.
 Separate **Vue 2.7.16** and **Vue 3.5.45** apps pass mount, input and asynchronous
