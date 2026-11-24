@@ -17,6 +17,9 @@ pub(super) fn ordinary_clone_element(name:&str)->bool{
         ||["q","data","progress","meter","nav","main","section","article","aside","header","footer","address","figure","figcaption","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
 }
 
+// LEGEND copies have no private control payload; connection keeps its separate guards.
+fn cloneable_html_element(name:&str)->bool{name=="legend"||ordinary_clone_element(name)}
+
 pub(super) fn copy_text(text:&str)->Result<String,String>{
     let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Cannot reserve copied DOM text.")?;
     copied.push_str(text);Ok(copied)
@@ -122,7 +125,7 @@ impl Bridge<'_> {
                         if attrs.iter().any(|attr|!script_attr::materializable_value(attr,node.namespace,tag)){return Err("Native import of unpaired attribute values requires its DOMString consumer integration.".into());}
                         let svg=node.namespace==crate::html::Namespace::Svg;
                         if svg{if !crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}for attr in attrs{if attr.name.html_is("style"){validate_style(&attr.value,self.state.limits.host.string_bytes)?;}}}
-                        if !svg&&(node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
+                        if !svg&&(node.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
@@ -136,7 +139,7 @@ impl Bridge<'_> {
                     copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
-                    if !(ordinary_clone_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
+                    if !(cloneable_html_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
                         return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                     }
                     tag.len()
@@ -244,7 +247,7 @@ impl Bridge<'_> {
                 let textarea = tag == "textarea" && self.owned_native_textarea(source);
                 let radio = tag == "input" && self.owned_native_radio(source);
                 let svg=item.namespace==crate::html::Namespace::Svg;
-                if !svg&&(item.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag) || tag == "meta" || textarea || radio || image || style)
+                if !svg&&(item.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag) || tag == "meta" || textarea || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_empty()
                         && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
