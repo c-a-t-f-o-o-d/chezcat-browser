@@ -331,7 +331,7 @@ impl Runtime {
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
                     ) {
-                        if name=="contains"{self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;
@@ -624,6 +624,7 @@ impl Runtime {
             if name == "HTMLHeadingElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHeadingElement.get.align",Some("\0HTMLHeadingElement.set.align"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"type","\0HTMLUListElement.get.type",Some("\0HTMLUListElement.set.type"))?;}
             if name == "HTMLLIElement" {self.define_host_attribute(prototype,window,"type","\0HTMLLIElement.get.type",Some("\0HTMLLIElement.set.type"))?;}
+            if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"type","\0HTMLOListElement.get.type",Some("\0HTMLOListElement.set.type"))?;}
             if name == "HTMLLIElement" {self.define_host_attribute(prototype,window,"value","\0HTMLLIElement.get.value",Some("\0HTMLLIElement.set.value"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLUListElement.get.compact",Some("\0HTMLUListElement.set.compact"))?;}
             if name == "HTMLDListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDListElement.get.compact",Some("\0HTMLDListElement.set.compact"))?;}

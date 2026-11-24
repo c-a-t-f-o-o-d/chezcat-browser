@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3129,6 +3129,7 @@ impl Bridge<'_> {
         if self.heading_align_member(object,property){return true;}
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
+        if self.ol_type_member(object,property){return true;}
         if self.li_value_member(object,property){return true;}
         if self.ul_compact_member(object,property){return true;}
         if self.dl_compact_member(object,property){return true;}
@@ -3272,6 +3273,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(target,property){return Some("align");}
         if self.ul_type_member(target,property){return Some("type");}
         if self.li_type_member(target,property){return Some("type");}
+        if self.ol_type_member(target,property){return Some("type");}
         if self.li_value_member(target,property){return Some("value");}
         if self.ul_compact_member(target,property){return Some("compact");}
         if self.dl_compact_member(target,property){return Some("compact");}
@@ -3486,6 +3488,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return false;}
         if self.ul_type_member(object,property){return false;}
         if self.li_type_member(object,property){return false;}
+        if self.ol_type_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.ul_compact_member(object,property){return false;}
         if self.dl_compact_member(object,property){return false;}
@@ -3632,6 +3635,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return false;}
         if self.ul_type_member(object,property){return false;}
         if self.li_type_member(object,property){return false;}
+        if self.ol_type_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.ul_compact_member(object,property){return false;}
         if self.dl_compact_member(object,property){return false;}
@@ -3684,6 +3688,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return true;}
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
+        if self.ol_type_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.ul_compact_member(object,property){return false;}
         if self.dl_compact_member(object,property){return false;}
@@ -3751,6 +3756,7 @@ impl Host for Bridge<'_> {
         if method==script_heading_align::SET&&self.heading_align_receiver(object){return Some("align");}
         if method==script_ul_type::SET&&self.ul_type_receiver(object){return Some("type");}
         if method==script_li_type::SET&&self.li_type_receiver(object){return Some("type");}
+        if method==script_ol_type::SET&&self.ol_type_receiver(object){return Some("type");}
         if method==script_li_value::SET&&self.li_value_receiver(object){return Some("value");}
         if method==script_ul_compact::SET&&self.ul_compact_receiver(object){return Some("compact");}
         if method==script_dl_compact::SET&&self.dl_compact_receiver(object){return Some("compact");}
@@ -3849,6 +3855,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return true;}
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
+        if self.ol_type_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.ul_compact_member(object,property){return false;}
         if self.dl_compact_member(object,property){return false;}
@@ -4114,6 +4121,7 @@ impl Host for Bridge<'_> {
         if script_heading_align::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_ul_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_li_type::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_ol_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_li_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_ul_compact::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_dl_compact::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4451,6 +4459,7 @@ impl Host for Bridge<'_> {
         if script_heading_align::operation(method){return self.validate_heading_align(object);}
         if script_ul_type::operation(method){return self.validate_ul_type(object);}
         if script_li_type::operation(method){return self.validate_li_type(object);}
+        if script_ol_type::operation(method){return self.validate_ol_type(object);}
         if script_li_value::operation(method){return self.validate_li_value(object);}
         if script_ul_compact::operation(method){return self.validate_ul_compact(object);}
         if script_dl_compact::operation(method){return self.validate_dl_compact(object);}
@@ -4694,6 +4703,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return self.validate_heading_align(object);}
         if self.ul_type_member(object,property){return self.validate_ul_type(object);}
         if self.li_type_member(object,property){return self.validate_li_type(object);}
+        if self.ol_type_member(object,property){return self.validate_ol_type(object);}
         if self.li_value_member(object,property){return self.validate_li_value(object);}
         if self.ul_compact_member(object,property){return self.validate_ul_compact(object);}
         if self.dl_compact_member(object,property){return self.validate_dl_compact(object);}
@@ -4948,6 +4958,7 @@ impl Host for Bridge<'_> {
         if script_heading_align::operation(method){return self.event_target_interface(object)&&self.heading_align_receiver(receiver);}
         if script_ul_type::operation(method){return self.event_target_interface(object)&&self.ul_type_receiver(receiver);}
         if script_li_type::operation(method){return self.event_target_interface(object)&&self.li_type_receiver(receiver);}
+        if script_ol_type::operation(method){return self.event_target_interface(object)&&self.ol_type_receiver(receiver);}
         if script_li_value::operation(method){return self.event_target_interface(object)&&self.li_value_receiver(receiver);}
         if script_ul_compact::operation(method){return self.event_target_interface(object)&&self.ul_compact_receiver(receiver);}
         if script_dl_compact::operation(method){return self.event_target_interface(object)&&self.dl_compact_receiver(receiver);}
@@ -5847,6 +5858,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return self.heading_align_get(object);}
         if self.ul_type_member(object,property){return self.ul_type_get(object);}
         if self.li_type_member(object,property){return self.li_type_get(object);}
+        if self.ol_type_member(object,property){return self.ol_type_get(object);}
         if self.li_value_member(object,property){return self.li_value_get(object);}
         if self.ul_compact_member(object,property){return self.ul_compact_get(object);}
         if self.dl_compact_member(object,property){return self.dl_compact_get(object);}
@@ -6294,6 +6306,7 @@ impl Host for Bridge<'_> {
         if self.heading_align_member(object,property){return self.heading_align_set(object,&value);}
         if self.ul_type_member(object,property){return self.ul_type_set(object,&value);}
         if self.li_type_member(object,property){return self.li_type_set(object,&value);}
+        if self.ol_type_member(object,property){return self.ol_type_set(object,&value);}
         if self.li_value_member(object,property){return self.li_value_set(object,&value);}
         if self.ul_compact_member(object,property){return self.ul_compact_set(object,&value);}
         if self.dl_compact_member(object,property){return self.dl_compact_set(object,&value);}
@@ -6720,6 +6733,7 @@ impl Host for Bridge<'_> {
         if method==script_heading_align::SET{return Err("Heading align setters require the native conversion transaction.".into());}
         if method==script_ul_type::SET{return Err("UL type setters require the native conversion transaction.".into());}
         if method==script_li_type::SET{return Err("LI type setters require the native conversion transaction.".into());}
+        if method==script_ol_type::SET{return Err("OL type setters require the native conversion transaction.".into());}
         if method==script_li_value::SET{return Err("LI value setters require the native conversion transaction.".into());}
         if method==script_ul_compact::SET{return Err("UL compact setters require the native conversion transaction.".into());}
         if method==script_dl_compact::SET{return Err("DL compact setters require the native conversion transaction.".into());}
@@ -6730,6 +6744,7 @@ impl Host for Bridge<'_> {
         if method==script_heading_align::GET{return self.heading_align_get(object);}
         if method==script_ul_type::GET{return self.ul_type_get(object);}
         if method==script_li_type::GET{return self.li_type_get(object);}
+        if method==script_ol_type::GET{return self.ol_type_get(object);}
         if method==script_li_value::GET{return self.li_value_get(object);}
         if method==script_ul_compact::GET{return self.ul_compact_get(object);}
         if method==script_dl_compact::GET{return self.dl_compact_get(object);}
@@ -9890,3 +9905,10 @@ mod li_value_tests;
 
 #[path="script_li_value.rs"]
 mod script_li_value;
+
+#[cfg(test)]
+#[path="script_ol_type_tests.rs"]
+mod ol_type_tests;
+
+#[path="script_ol_type.rs"]
+mod script_ol_type;
