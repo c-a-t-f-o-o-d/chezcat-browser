@@ -331,7 +331,7 @@ impl Runtime {
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
                     ) {
-                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"|"isEqualNode"|"compareDocumentPosition"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;
@@ -636,6 +636,7 @@ impl Runtime {
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHRElement.get.align",Some("\0HTMLHRElement.set.align"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"color","\0HTMLHRElement.get.color",Some("\0HTMLHRElement.set.color"))?;}
+            if name == "HTMLBRElement" {self.define_host_attribute(prototype,window,"clear","\0HTMLBRElement.get.clear",Some("\0HTMLBRElement.set.clear"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"size","\0HTMLHRElement.get.size",Some("\0HTMLHRElement.set.size"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"width","\0HTMLHRElement.get.width",Some("\0HTMLHRElement.set.width"))?;}
             if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"align","\0HTMLLegendElement.get.align",Some("\0HTMLLegendElement.set.align"))?;}

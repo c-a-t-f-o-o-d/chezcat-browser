@@ -6801,3 +6801,7 @@ mod hr_size_tests;
 #[cfg(test)]
 #[path="app_hr_width_tests.rs"]
 mod hr_width_tests;
+
+#[cfg(test)]
+#[path="app_br_clear_tests.rs"]
+mod br_clear_tests;
