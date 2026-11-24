@@ -308,6 +308,14 @@ Native work/copy refusal, conversion ordering, origin recovery and App interacti
 have original checks. Raw named-property keys, full named descriptors, main raw-ID
 producers and frozen qualification remain separate; F01 stays partial.
 
+Exact visual-ID consumer increment: native anchors read authoritative scalar IDs,
+omitting raw IDs rather than publishing replacement-character aliases. Table
+anchor spans and fixed state follow actual admission. Label association compares
+borrowed exact native ID/for records while preserving first tree-order matches.
+Component and App pointer/navigation fixtures qualify raw records; production
+probes cover scalar controls. Main raw-ID/for producers, complete fragment/label
+behavior and frozen qualification remain separate; F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**
