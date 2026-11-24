@@ -6649,3 +6649,7 @@ mod output_validity_state_tests;
 #[cfg(test)]
 #[path="app_control_form_accessor_tests.rs"]
 mod control_form_accessor_tests;
+
+#[cfg(test)]
+#[path="app_control_type_tests.rs"]
+mod control_type_tests;

@@ -671,6 +671,7 @@ impl Runtime {
  ("HTMLButtonElement","\0HTMLButtonElement.get.form"),
  ("HTMLSelectElement","\0HTMLSelectElement.get.form"),
  ("HTMLTextAreaElement","\0HTMLTextAreaElement.get.form")]{if name==interface{self.define_host_attribute(prototype,window,"form",get,None)?;}}
+            for (interface,get) in [("HTMLSelectElement","\0HTMLSelectElement.get.type"),("HTMLTextAreaElement","\0HTMLTextAreaElement.get.type")]{if name==interface{self.define_host_attribute(prototype,window,"type",get,None)?;}}
             for &(interface,get) in super::CONTROL_LABEL_GETTERS{
                 if name==interface{self.define_host_attribute(prototype,window,"labels",get,None)?;}
             }
