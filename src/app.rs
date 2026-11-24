@@ -6525,3 +6525,7 @@ mod document_name_method_tests;
 #[cfg(test)]
 #[path="app_owned_name_list_tests.rs"]
 mod owned_name_list_tests;
+
+#[cfg(test)]
+#[path="app_passive_name_domstring_tests.rs"]
+mod passive_name_domstring_tests;

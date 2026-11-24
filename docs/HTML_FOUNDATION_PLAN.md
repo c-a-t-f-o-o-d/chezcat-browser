@@ -383,7 +383,18 @@ root. Child lists use their real owner realm and preserve origin checks on saved
 reads and iteration. Traversal has paid native lookups, bounded iterative order,
 fallible combined scratch admission including replacement peaks, and refusal/recovery.
 Original native/App checks and production probes qualify this scoped integration;
-raw main-name producers, child writes and frozen browser qualification remain open.
+control/slot/frame/resource raw-name producers, raw-name imports, child writes
+and frozen browser qualification remain open.
+F01 stays partial.
+
+Ordinary HTML name producer increment: supported ordinary containers now retain
+raw UTF-16 null-namespace name values through setAttribute/NS, attached Attr
+value/nodeValue/textContent and setAttributeNode/NS. The existing admitted native
+attribute transaction serves exact live-name and named-collection consumers,
+clone/move/removal and actual observation old values. Retained backing and
+work/copy/string/storage refusal preserve recovery. Original native/App and
+production checks qualify this scope; native controls, slots, frames, resources,
+foreign/namespace-qualified raw names and inert raw-name imports stay guarded.
 F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing
