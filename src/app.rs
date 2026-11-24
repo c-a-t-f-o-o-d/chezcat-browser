@@ -6713,3 +6713,7 @@ mod quote_interface_tests;
 #[cfg(test)]
 #[path="app_heading_interface_tests.rs"]
 mod heading_interface_tests;
+
+#[cfg(test)]
+#[path="app_heading_align_tests.rs"]
+mod heading_align_tests;
