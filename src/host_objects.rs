@@ -621,6 +621,7 @@ impl Runtime {
             }
             if name == "HTMLLabelElement" {
                 self.define_host_attribute(prototype,window,"htmlFor","\0HTMLLabelElement.get.htmlFor",Some("\0HTMLLabelElement.set.htmlFor"))?;
+                self.define_host_attribute(prototype,window,"control","\0HTMLLabelElement.get.control",None)?;
             }
             if name == "HTMLTitleElement" {
                 self.define_host_attribute(prototype,window,"text",super::TITLE_TEXT_GET,Some(super::TITLE_TEXT_SET))?;
