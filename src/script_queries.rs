@@ -8,6 +8,7 @@ pub(super) enum NodeList {
     HandleSnapshot(Vec<u32>),
     Name(DomString),
     RootedName { root:u32, name:DomString },
+    InputLabels(u32),
     // A live SameObject list over this real node's immediate children.
     Children(usize),
     InertChildren(u32),
@@ -150,6 +151,14 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
 
+    pub(super) fn create_input_labels_list(&mut self,control:u32)->Result<Value,String>{
+        self.state.work(self.state.node_lists.len().checked_add(1).ok_or("Input labels identity lookup work overflow.")?)?;
+        if let Some(index)=self.state.node_lists.iter().position(|list|matches!(list,NodeList::InputLabels(owner) if *owner==control)){return Ok(Value::Host(NODE_LIST_BASE+index as u32));}
+        self.state.copies(size_of::<NodeList>())?;
+        let(handle,replacement,added)=self.prepare_node_list("input labels",0)?;
+        self.commit_node_list(NodeList::InputLabels(control),replacement,added,0);Ok(Value::Host(handle))
+    }
+
     pub(super) fn create_document_name_list(&mut self,root:u32,value:&Value)->Result<Value,String>{
         self.validate_name_list(root).map_err(|(_,e)|e)?;
         if root==DOCUMENT{return self.create_name_list(value);}
@@ -226,6 +235,12 @@ impl Bridge<'_> {
             return if property == "length" { Ok(Value::Number(children.len() as f64)) }
                 else { Ok(collection_index(property).and_then(|index| children.get(index)).copied()
                     .map_or(Value::Undefined, Value::Host)) };
+        }
+        if let NodeList::InputLabels(control)=list{
+            let control=*control;
+            if property!="length"&&collection_index(property).is_none(){return Ok(Value::Undefined);}
+            let nodes=self.input_labels_list_nodes(control)?;
+            return Ok(if property=="length"{Value::Number(nodes.len() as f64)}else{collection_index(property).and_then(|at|nodes.get(at)).copied().map_or(Value::Undefined,Value::Host)});
         }
         if matches!(list,NodeList::RootedName{..}) {
             if property!="length"&&collection_index(property).is_none(){return Ok(Value::Undefined);}

@@ -653,6 +653,7 @@ impl Runtime {
                 self.define_host_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
             }
             if name == "HTMLInputElement" {
+                self.define_host_attribute(prototype,window,"labels","\0HTMLInputElement.get.labels",None)?;
                 for (key, getter, setter) in [
                     ("value", "\0HTMLInputElement.get.value", "\0HTMLInputElement.set.value"),
                     ("checked", "\0HTMLInputElement.get.checked", "\0HTMLInputElement.set.checked"),
