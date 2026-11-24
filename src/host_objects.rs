@@ -109,6 +109,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,length) in [("addEventListener",2),("removeEventListener",2),("dispatchEvent",1)] {
+                if name=="removeEventListener"{self.deferred_host_method(prototype,window,name,name,length)?;continue;}
                 let method=self.allocate_host_function_with_length(window,name,length).map_err(Fault::new)?;
                 if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                 self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;
@@ -620,6 +621,7 @@ impl Runtime {
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
             if name == "HTMLDataElement" {self.define_host_attribute(prototype,window,"value","\0HTMLDataElement.get.value",Some("\0HTMLDataElement.set.value"))?;}
             if name == "HTMLHeadingElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHeadingElement.get.align",Some("\0HTMLHeadingElement.set.align"))?;}
+            if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"align","\0HTMLLegendElement.get.align",Some("\0HTMLLegendElement.set.align"))?;}
             if name == "HTMLDivElement" {self.define_host_attribute(prototype,window,"align","\0HTMLDivElement.get.align",Some("\0HTMLDivElement.set.align"))?;}
             if name == "HTMLMeterElement" {self.define_host_attribute(prototype,window,"value","\0HTMLMeterElement.get.value",Some("\0HTMLMeterElement.set.value"))?;self.define_host_attribute(prototype,window,"min","\0HTMLMeterElement.get.min",Some("\0HTMLMeterElement.set.min"))?;self.define_host_attribute(prototype,window,"max","\0HTMLMeterElement.get.max",Some("\0HTMLMeterElement.set.max"))?;self.define_host_attribute(prototype,window,"low","\0HTMLMeterElement.get.low",Some("\0HTMLMeterElement.set.low"))?;self.define_host_attribute(prototype,window,"high","\0HTMLMeterElement.get.high",Some("\0HTMLMeterElement.set.high"))?;self.define_host_attribute(prototype,window,"optimum","\0HTMLMeterElement.get.optimum",Some("\0HTMLMeterElement.set.optimum"))?;}
