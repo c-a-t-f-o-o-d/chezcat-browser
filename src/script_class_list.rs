@@ -27,6 +27,20 @@ fn whitespace(c: char) -> bool {
 pub(super) fn supported_tokens(object:u32)->Option<&'static [&'static str]>{
     (attribute(object)==Some("sandbox")).then_some(script_iframe_sandbox::SUPPORTED_TOKENS)
 }
+pub(super) fn operation(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "\0DOMTokenList.get.length"=>"get length",
+        "\0DOMTokenList.get.value"=>"get value",
+        "\0DOMTokenList.set.value"=>"set value",
+        "\0DOMTokenList.item"=>"item",
+        "\0DOMTokenList.contains"=>"contains",
+        "\0DOMTokenList.add"=>"add",
+        "\0DOMTokenList.remove"=>"remove",
+        "\0DOMTokenList.supports"=>"supports",
+        "\0DOMTokenList.toString"=>"toString",
+        _=>return None,
+    })
+}
 pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
         "add" => Some("add"),
