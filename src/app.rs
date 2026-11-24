@@ -6753,3 +6753,7 @@ mod span_interface_tests;
 #[cfg(test)]
 #[path="app_dl_compact_tests.rs"]
 mod dl_compact_tests;
+
+#[cfg(test)]
+#[path="app_li_type_tests.rs"]
+mod li_type_tests;
