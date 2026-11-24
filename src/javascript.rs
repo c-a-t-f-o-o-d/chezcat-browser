@@ -1120,41 +1120,7 @@ fn radix_number(text: &str, radix: u32) -> Option<f64> {
 
 /// Longest syntactically complete decimal prefix; an incomplete exponent is
 /// left out, as parseFloat requires. Full-number callers also compare lengths.
-fn decimal_end(bytes: &[u8], signed: bool) -> Option<usize> {
-    let mut at = usize::from(signed && matches!(bytes.first(), Some(b'+' | b'-')));
-    let begin = at;
-    while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-        at += 1;
-    }
-    let integer_digits = at - begin;
-    let mut fraction_digits = 0;
-    if bytes.get(at) == Some(&b'.') {
-        at += 1;
-        let start = at;
-        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-            at += 1;
-        }
-        fraction_digits = at - start;
-    }
-    if integer_digits + fraction_digits == 0 {
-        return None;
-    }
-    let end = at;
-    if matches!(bytes.get(at), Some(b'e' | b'E')) {
-        at += 1;
-        if matches!(bytes.get(at), Some(b'+' | b'-')) {
-            at += 1;
-        }
-        let digits = at;
-        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
-            at += 1;
-        }
-        if at == digits {
-            return Some(end);
-        }
-    }
-    Some(at)
-}
+fn decimal_end(bytes:&[u8],signed:bool)->Option<usize>{crate::decimal_number::prefix_end(bytes,signed)}
 
 #[derive(Debug)]
 enum Exception {

@@ -6685,3 +6685,7 @@ mod fieldset_form_attribute_tests;
 #[cfg(test)]
 #[path="app_legend_form_tests.rs"]
 mod legend_form_tests;
+
+#[cfg(test)]
+#[path="app_progress_numeric_tests.rs"]
+mod progress_numeric_tests;
