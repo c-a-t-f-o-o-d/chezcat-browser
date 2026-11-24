@@ -73,6 +73,6 @@ fn rgba_border_direct_color_inherit_and_side_inherit_carry_computed_rgb_and_alph
     let b=at(&doc,&styles,"b");assert_eq!(b.border_color,[None,None,None,Some(0x010203)]);assert_eq!(b.border_alpha,[255,255,255,102]);
     let c=at(&doc,&styles,"c");assert_eq!(c.border_color,[None,Some(0x010203),None,None]);assert_eq!(c.border_alpha,[255,102,255,255]);
     let(doc,styles)=self::styles("#parent{color:#123456;border-color:currentColor}#a{color:blue;border-color:inherit}#b{border-color:transparent;border-color:unset}");
-    assert_eq!(at(&doc,&styles,"a").border_color,[Some(0x123456);4]);assert_eq!(at(&doc,&styles,"a").border_alpha,[255;4]);
+    assert_eq!(at(&doc,&styles,"a").border_color,[None;4]);assert_eq!(at(&doc,&styles,"a").border_color.map(|rgb|rgb.unwrap_or(at(&doc,&styles,"a").color)),[0x0000ff;4]);assert_eq!(at(&doc,&styles,"a").border_alpha,[255;4]);
     assert_eq!(at(&doc,&styles,"b").border_color,[None;4]);assert_eq!(at(&doc,&styles,"b").border_alpha,[255;4]);
 }
