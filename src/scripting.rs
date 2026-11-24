@@ -2502,7 +2502,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.resource_charset_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3563,6 +3563,7 @@ impl Host for Bridge<'_> {
     fn nullable_scalar_setter(&self,object:u32,property:&str)->bool{property=="hidden"&&self.html_reflection_receiver(object)}
     fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property=="className"&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
         if self.aria_reflection_attribute(object,property){return true;}
@@ -3682,6 +3683,8 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if matches!(property,"className"|"classList")&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
+        if property=="value"&&self.class_list_receiver(object)&&script_class_list::attribute(object)==Some("class")&&script_class_list::element(object).and_then(node_index).is_some_and(|node|self.html_class_element(node)){return true;}
         if property=="charset" && node_index(object).is_some_and(|node|self.resource_charset_element(node)) {return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
@@ -5821,6 +5824,7 @@ impl Host for Bridge<'_> {
             "style" => Ok(Value::Host(STYLE_BASE + node as u32)),
             "dataset" => Ok(Value::Host(DATASET_BASE + node as u32)),
             "id" | "className" | "title" => {
+                if property=="className"&&self.html_class_element(node){return self.class_value(node,"class");}
                 let name = if property == "className" {
                     "class"
                 } else {
@@ -6114,6 +6118,7 @@ impl Host for Bridge<'_> {
         if self.iframe_sandbox_member(object,property){return self.iframe_sandbox_set(object,value);}
         if property == "classList" {
             if !matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) { return Err("Class token list requires known namespace provenance.".into()); }
+            if self.html_class_element(node){return self.html_class_set(node,&value);}
             let value = self.text(&value)?;
             return self.attribute(node,"class",Some(value));
         }
@@ -6148,6 +6153,7 @@ impl Host for Bridge<'_> {
                 self.set_text_content(node, text)
             }
             "id" | "className" | "title" => {
+                if property=="className"&&self.html_class_element(node){return self.html_class_set(node,&value);}
                 let value = self.text(&value)?;
                 self.attribute(
                     node,
@@ -9093,3 +9099,7 @@ mod token_list_reads;
 #[cfg(test)]
 #[path = "script_token_list_interface_tests.rs"]
 mod token_list_interface_tests;
+
+#[cfg(test)]
+#[path="script_html_class_domstring_tests.rs"]
+mod html_class_domstring_tests;

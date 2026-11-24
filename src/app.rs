@@ -6445,3 +6445,7 @@ mod css_class_exact_tests;
 #[cfg(test)]
 #[path="app_selector_ident_start_tests.rs"]
 mod selector_ident_start_tests;
+
+#[cfg(test)]
+#[path="app_html_class_domstring_tests.rs"]
+mod html_class_domstring_tests;

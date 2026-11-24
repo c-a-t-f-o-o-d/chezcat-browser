@@ -54,6 +54,18 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn html_class_element(&self,node:usize)->bool {
+        self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html&&matches!(entry.kind,NodeKind::Element{..}))
+    }
+    pub(super) fn html_class_attribute(&self,node:usize,name:&crate::html::AttributeName)->bool {
+        self.html_class_element(node)&&name.html_is("class")
+    }
+    pub(super) fn html_class_set(&mut self,node:usize,value:&Value)->Result<(),String> {
+        let value=self.dom_text(value)?;
+        self.state.copies("class".len())?;
+        let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("class")?);
+        self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)
+    }
     pub(super) fn class_list_element_receiver(&self, object: u32) -> bool {
         self.attr_element_receiver(object)
             && node_index(object)
@@ -71,7 +83,7 @@ impl Bridge<'_> {
         if !self.class_list_receiver(object){return Err("Invalid attribute token list receiver.".into());}
         Ok(node)
     }
-    fn class_value(&mut self, node: usize, attribute:&str) -> Result<Value, String> {
+    pub(super) fn class_value(&mut self, node: usize, attribute:&str) -> Result<Value, String> {
         let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind else {
             unreachable!()
         };
@@ -158,6 +170,7 @@ impl Bridge<'_> {
         if property != "value" {
             return Err("DOMTokenList property write is not implemented.".into());
         }
+        if attribute=="class"&&self.html_class_element(node){return self.html_class_set(node,&value);}
         let value = self.text(&value)?;
         self.attribute(node, attribute, Some(value))
     }
