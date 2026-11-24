@@ -435,7 +435,7 @@ impl Bridge<'_> {
         candidates.truncate(kept);Ok(candidates)
     }
 
-    fn tag_collection_named(&mut self, handle: u32, name: &str) -> Result<Value, String> {
+    fn tag_collection_named(&mut self, handle: u32, name: DomStringRef<'_>) -> Result<Value, String> {
         if let Some(owner)=self.children_collection_owner(handle){
             if name.is_empty(){return Ok(Value::Undefined);}
             for node in self.parent_element_nodes(owner)? {
@@ -462,7 +462,7 @@ impl Bridge<'_> {
         if let Some(owner)=self.children_collection_owner(handle){
             if property=="length"{return self.parent_node_get(owner,"childElementCount");}
             if let Some(index)=collection_index(property){return Ok(self.parent_element_nodes(owner)?.get(index).copied().map_or(Value::Undefined,Value::Host));}
-            return self.tag_collection_named(handle,property);
+            return self.tag_collection_named(handle,DomStringRef::Scalar(property));
         }
         if property == "length" {
             return Ok(Value::Number(
@@ -475,7 +475,7 @@ impl Bridge<'_> {
                 .get(index)
                 .map_or(Value::Undefined, |&node| Value::Host(node)));
         }
-        self.tag_collection_named(handle, property)
+        self.tag_collection_named(handle, DomStringRef::Scalar(property))
     }
 
     pub(super) fn tag_collection_call(
@@ -495,8 +495,12 @@ impl Bridge<'_> {
                 else {self.tag_collection_handles(handle)?.get(index).map_or(Value::Undefined, |&node| Value::Host(node))}
             }
             "namedItem" => {
-                let name = self.text(argument)?;
-                self.tag_collection_named(handle, &name)?
+                let name = match argument {
+                    Value::String(s)=>DomStringRef::Scalar(s),Value::StringUnits(u)=>DomStringRef::Raw(u),
+                    _=>return Err("HTMLCollection namedItem requires its converted DOMString key.".into()),
+                };
+                if name.logical_bytes()>self.state.limits.host.string_bytes{return Err("HTMLCollection key exceeds the host string allowance.".into());}
+                self.tag_collection_named(handle, name)?
             }
             _ => return Err("HTMLCollection method is not implemented.".into()),
         };
@@ -528,7 +532,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         if !matches!(
-            self.tag_collection_named(handle, property)?,
+            self.tag_collection_named(handle, DomStringRef::Scalar(property))?,
             Value::Undefined
         ) {
             // Named properties are nonenumerable in HTMLCollection. The host
@@ -568,16 +572,28 @@ impl State {
 mod storage_tests;
 
 impl Bridge<'_> {
-    fn collection_element_named_match(&mut self,object:u32,name:&str)->Result<bool,String>{
+    fn collection_named_attributes(&self,object:u32)->Result<Option<(&[crate::html::Attribute],bool)>,String>{
         let node=if let Some((owner,node))=self.frame_contains_node(object){self.contains_child_document(owner)?.nodes.get(node)}
             else if self.inert_node_type(object).is_some(){self.inert_collection_element_source(object)}
             else {node_index(object).and_then(|index|self.doc.nodes.get(index))};
-        let (work,found)=if let Some(Node{namespace,kind:NodeKind::Element{attrs,..},..})=node {
-            let html=*namespace==crate::html::Namespace::Html;
-            let work=attrs.iter().fold(attrs.len(),|sum,attr|sum.saturating_add(attr.name.qualified.len()).saturating_add(attr.value.len()));
-            (work,attrs.iter().any(|attr|(attr.name.html_is("id")||html&&attr.name.html_is("name"))&&attr.value==name))
-        }else{(1,false)};
-        self.state.work(work)?;Ok(found)
+        Ok(match node {Some(Node{namespace,kind:NodeKind::Element{attrs,..},..})=>Some((attrs,*namespace==crate::html::Namespace::Html)),_=>None})
+    }
+    pub(super) fn collection_element_named_match(&mut self,object:u32,name:DomStringRef<'_>)->Result<bool,String>{
+        self.native_node_access(object).map_err(|(_,error)|error)?;
+        let count=self.collection_named_attributes(object)?.map_or(0,|(attrs,_)|attrs.len());
+        self.state.work(count.saturating_add(1))?;
+        for at in 0..count {
+            let (attrs,html)=self.collection_named_attributes(object)?.unwrap();
+            let name_work=attrs[at].name.bytes().saturating_add(1);self.state.work(name_work)?;
+            let (attrs,_)=self.collection_named_attributes(object)?.unwrap();
+            if !(attrs[at].name.html_is("id")||html&&attrs[at].name.html_is("name")){continue;}
+            let work=attrs[at].value.logical_bytes().min(name.logical_bytes()).saturating_add(1);
+            self.state.work(work)?;
+            // Native code units and a borrowed converted key share one prepaid
+            // comparison. No replacement projection or temporary string copy.
+            if self.collection_named_attributes(object)?.unwrap().0[at].value.view().same_units(name){return Ok(true);}
+        }
+        Ok(false)
     }
     pub(super) fn collection_receiver(&self,handle:u32)->bool {handle==DOCUMENT_IMAGES||collection_handle_index(handle).is_some_and(|index|index<self.state.dom.collections.len())}
     pub(super) fn collection_prototype_member(&self,property:&str)->bool {matches!(property,"constructor"|"length"|"item"|"namedItem")}

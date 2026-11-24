@@ -301,6 +301,13 @@ producers and App pointer-driven paint retain actual node/editor/link/page ident
 Main-document raw ID producers, quirks-mode folding, XML ID typing and frozen
 qualification remain separate. F01 stays partial.
 
+Exact collection named-lookup increment: HTMLCollection.namedItem retains converted
+UTF-16 keys across current native children/tag/image views. Prepaid native ID/name
+comparisons preserve actual node identity and skip scalar projection aliases.
+Native work/copy refusal, conversion ordering, origin recovery and App interaction
+have original checks. Raw named-property keys, full named descriptors, main raw-ID
+producers and frozen qualification remain separate; F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**
