@@ -120,3 +120,6 @@ pub(in crate::scripting) mod label_form;
 
 #[path="script_input_labels.rs"]
 pub(in crate::scripting) mod input_labels;
+
+#[path="script_form_length.rs"]
+pub(in crate::scripting) mod form_length;

@@ -615,6 +615,7 @@ impl Runtime {
                 Some((false, false, true)),
             )?;
             if name == "HTMLFormElement" {
+                self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
                 self.define_canvas_operation(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;
             }
             if name == "HTMLTemplateElement" {

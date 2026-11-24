@@ -6653,3 +6653,7 @@ mod control_form_accessor_tests;
 #[cfg(test)]
 #[path="app_control_type_tests.rs"]
 mod control_type_tests;
+
+#[cfg(test)]
+#[path="app_form_length_tests.rs"]
+mod form_length_tests;
