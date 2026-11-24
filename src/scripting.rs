@@ -546,6 +546,7 @@ struct State {
     native_methods: Vec<(u32, &'static str, Value)>,
     detached_images: node_sets::NodeSet,
     detached_nodes: node_sets::NodeSet,
+    output_defaults: identity_map::IdentityMap<u32,DomString>,
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
     canvas_contexts: script_canvas_context::Contexts,
@@ -639,6 +640,7 @@ impl State {
             native_methods: Vec::new(),
             detached_images: node_sets::NodeSet::default(),
             detached_nodes: node_sets::NodeSet::default(),
+            output_defaults: identity_map::IdentityMap::default(),
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
             canvas_contexts: script_canvas_context::Contexts::default(),
@@ -3116,6 +3118,7 @@ impl Bridge<'_> {
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
+        if self.output_value_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.html_label_for_member(object,property){return true;}
         if self.element_class_list_member(object,property){return true;}
@@ -3429,6 +3432,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return false;}
         if self.output_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
+        if self.output_value_member(object,property){return false;}
         if self.html_label_control_member(object,property){return false;}
         if self.html_label_for_member(object,property){return false;}
         if self.element_class_list_member(object,property){return false;}
@@ -3588,6 +3592,7 @@ impl Host for Bridge<'_> {
     fn string_setter(&self, object: u32, property: &str) -> bool {
         if self.html_label_for_member(object,property){return true;}
         if self.output_name_member(object,property){return true;}
+        if self.output_value_member(object,property){return true;}
         if matches!(property,"id"|"className")&&self.canonical_selector_receiver(object){return true;}
         if property=="className"&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
@@ -3639,6 +3644,7 @@ impl Host for Bridge<'_> {
         if method==script_element_class_name::SET&&self.canonical_selector_receiver(object){return Some("className");}
         if method==script_label_html_for::SET&&self.html_label_receiver(object){return Some("htmlFor");}
         if method==script_output_metadata::NAME_SET&&self.html_output_receiver(object){return Some("name");}
+        if let Some((property,true))=script_output_value::operation(method){return self.html_output_receiver(object).then_some(property);}
         if script_class_list::operation(method)==Some("set value"){return self.class_list_receiver(object).then_some("value");}
         if let Some((interface,true)) = charset_operation(method) { return (self.charset_interface(object)==Some(interface) && self.charset_member(object,"charset")).then_some("charset"); }
         if let Some((property, _, true)) = meta_operation(method) { return self.meta_receiver(object).then_some(property); }
@@ -3720,6 +3726,7 @@ impl Host for Bridge<'_> {
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
         if self.html_label_for_member(object,property){return true;}
         if self.output_name_member(object,property){return true;}
+        if self.output_value_member(object,property){return true;}
         if self.aria_reflection_attribute(object,property){return true;}
         if matches!(property,"id"|"className")&&self.canonical_selector_receiver(object){return true;}
         if matches!(property,"title"|"lang"|"dir")&&self.html_reflection_receiver(object){return true;}
@@ -3966,6 +3973,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_output_value::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_label_control::GET&&self.event_target_interface(object){return Some(object);}
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_list::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4280,6 +4288,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.validate_html_label_form(object);}
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
+        if script_output_value::operation(method).is_some(){return self.validate_output_value(object);}
         if method==script_label_control::GET{return self.validate_html_label_control(object);}
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
         if script_element_class_list::operation(method){return self.validate_element_class_list(object);}
@@ -4740,6 +4749,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if script_output_value::operation(method).is_some(){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_element_class_list::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
@@ -5617,6 +5627,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
+        if self.output_value_member(object,property){return self.output_value_get(object,property);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
         if self.element_class_list_member(object,property){return self.element_class_list_get(object);}
@@ -6042,6 +6053,7 @@ impl Host for Bridge<'_> {
         if property=="className"&&self.canonical_selector_receiver(object){return self.element_class_name_set(object,&value);}
         if self.html_label_for_member(object,property){return self.html_label_for_set(object,&value);}
         if self.output_name_member(object,property){return self.output_name_set(object,&value);}
+        if self.output_value_member(object,property){return self.output_value_set(object,property,&value);}
         if self.aria_reflection_attribute(object,property){return self.aria_reflection_set(object,property,&value);}
         if crate::javascript::html_reflection_interface::property(property).is_some()&&self.html_reflection_receiver(object){return self.html_reflection_set(object,property,&value);}
         if property=="style"&&self.html_element_receiver(object){let node=self.node(object)?;let source=self.text(&value)?;return self.set_css_text(node,&source);}
@@ -6451,6 +6463,7 @@ impl Host for Bridge<'_> {
         if script_input_labels::interface(method).is_some(){return self.html_control_labels_get(object,method);}
         if method==script_label_form::GET{return self.html_label_form_get(object);}
         if method==script_output_form::GET{return self.output_form_get(object);}
+        if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
         if method==script_output_metadata::TYPE_GET{return self.output_metadata_get(object,"type");}
         if method==script_output_metadata::NAME_SET{return Err("OUTPUT name setter requires the native conversion transaction.".into());}
@@ -9388,3 +9401,10 @@ mod descendant_text_tests;
 
 #[path="script_text_content.rs"]
 mod script_text_content;
+
+#[cfg(test)]
+#[path="script_output_value_default_tests.rs"]
+mod output_value_default_tests;
+
+#[path="script_output_value.rs"]
+mod script_output_value;

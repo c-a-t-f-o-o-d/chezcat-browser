@@ -6621,3 +6621,7 @@ mod output_text_replacement_tests;
 #[cfg(test)]
 #[path="app_descendant_text_tests.rs"]
 mod descendant_text_tests;
+
+#[cfg(test)]
+#[path="app_output_value_default_tests.rs"]
+mod output_value_default_tests;

@@ -1754,6 +1754,9 @@ impl Bridge<'_> {
         Ok(parts)
     }
     fn inert_text_content(&mut self, object: u32) -> Result<Value, String> {
+        self.inert_text_content_string(object).map(Self::dom_string_owned)
+    }
+    pub(super) fn inert_text_content_string(&mut self, object: u32) -> Result<DomString, String> {
         script_text_content::deadline(self.state)?;
         let mut pending = Vec::new();
         let mut handles = Vec::new();
@@ -1794,7 +1797,7 @@ impl Bridge<'_> {
         let (_,budget,raw)=script_text_content::plan(&parts,self.state.limits.host.string_bytes,available)?;
         let text=DomString::concat_with_scratch(&parts,budget,raw)?;
         script_text_content::deadline(self.state)?;
-        Ok(Self::dom_string_owned(text))
+        Ok(text)
     }
 
     pub(super) fn inert_get(&mut self, object: u32, property: &str) -> Result<Value, String> {

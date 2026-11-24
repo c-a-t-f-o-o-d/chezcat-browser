@@ -646,6 +646,8 @@ impl Runtime {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLOutputElement" {
+                self.define_host_attribute(prototype,window,"value","\0HTMLOutputElement.get.value",Some("\0HTMLOutputElement.set.value"))?;
+                self.define_host_attribute(prototype,window,"defaultValue","\0HTMLOutputElement.get.defaultValue",Some("\0HTMLOutputElement.set.defaultValue"))?;
                 self.define_host_attribute(prototype,window,"name","\0HTMLOutputElement.get.name",Some("\0HTMLOutputElement.set.name"))?;
                 self.define_host_attribute(prototype,window,"type","\0HTMLOutputElement.get.type",None)?;
                 self.define_host_attribute(prototype,window,"form","\0HTMLOutputElement.get.form",None)?;
