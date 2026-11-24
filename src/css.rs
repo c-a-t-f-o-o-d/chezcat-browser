@@ -1096,6 +1096,12 @@ fn compute_cascade(
             .and_then(|parent| computed.get(parent))
             .cloned()
             .unwrap_or_default();
+        let has_element_parent = parents[index].is_some_and(|parent| {
+            let node = &doc.nodes[parent];
+            matches!(&node.kind, NodeKind::Element { tag, .. }
+                if !(node.namespace == crate::html::Namespace::None
+                    && (parent == 0 || matches!(tag.as_str(), "#document" | "#fragment"))))
+        });
         let inherited_variables = parents[index].and_then(|parent|variables.get(parent)).cloned().unwrap_or_default();
         let parent_overflow_known = parents[index].map_or([true; 2], |parent| overflow_known[parent]);
         let parent_position_known = parents[index].map_or(true, |parent| position_known[parent]);
@@ -1405,12 +1411,12 @@ fn compute_cascade(
                 } else if custom_properties::apply_overflow(&mut style,&parent,declaration,&variables[index],budget,&mut overflow_known[index],parent_overflow_known) {
                     true
                 } else {
-                    custom_properties::apply_box(&mut style,&parent,declaration,&variables[index],budget)
+                    custom_properties::apply_box_with_parent(&mut style,&parent,declaration,&variables[index],budget,has_element_parent)
                 }
             };
             let applied = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, apply_box)? } else { apply_box(&mut variable_budget) };
             if !applied {
-                apply(&mut style, &parent, declaration);
+                apply(&mut style, &parent, declaration, has_element_parent);
             }
             if !priority.1 && declaration.name == "background"
                 && (applied || background_clip::resets_background(&declaration.value.trim().to_ascii_lowercase())) {
@@ -3632,7 +3638,7 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
         apply(style,parent,&Declaration {
             name: "font-size".into(), value: size, important: false,
             stylesheet: declaration.stylesheet,
-        });
+        },true);
         if let Some(line) = line {
             if let Some(value) = line_height::literal(&line,parent.line_height) {
                 style.line_height = value;
@@ -3642,11 +3648,12 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
     true
 }
 
-fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
+fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_element_parent: bool) {
     let value = declaration.value.trim().to_ascii_lowercase();
-    if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name))
+    let border = custom_properties::border_property(&declaration.name);
+    if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name) || border)
         && matches!(value.as_str(), "inherit" | "initial" | "unset") {
-        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit");
+        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit" && (!border || has_element_parent));
         return;
     }
     match declaration.name.as_str() {
@@ -4003,17 +4010,10 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
             }
         }
         "border-color" => {
-            if value=="inherit" {
-                style.border_color=parent.border_color.map(|rgb|Some(rgb.unwrap_or(parent.color)));
-                style.border_alpha=parent.border_alpha;
-            } else if matches!(value.as_str(),"initial"|"unset") {
-                style.border_color=[None;4];style.border_alpha=[255;4];
-            } else {
-                let values=border_parts(&value).and_then(|parts|parts.into_iter().map(border_color_value).collect::<Option<Vec<_>>>());
-                if let Some(values) = values.and_then(|values| four(&values)) {
-                    style.border_color = values.map(|(rgb,_)|rgb);
-                    style.border_alpha = values.map(|(_,alpha)|alpha);
-                }
+            let values=border_parts(&value).and_then(|parts|parts.into_iter().map(border_color_value).collect::<Option<Vec<_>>>());
+            if let Some(values) = values.and_then(|values| four(&values)) {
+                style.border_color = values.map(|(rgb,_)|rgb);
+                style.border_alpha = values.map(|(_,alpha)|alpha);
             }
         }
         "border-style" => {
@@ -4047,9 +4047,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
                         style.border_width[index] = value;
                     }
                 } else if name == format!("border-{side}-color") {
-                    let inherited=if value=="inherit" {Some((Some(parent.border_color[index].unwrap_or(parent.color)),parent.border_alpha[index]))}
-                        else if matches!(value.as_str(),"initial"|"unset") {Some((None,255))} else {border_color_value(&value)};
-                    if let Some((rgb,alpha)) = inherited {
+                    if let Some((rgb,alpha)) = border_color_value(&value) {
                         style.border_color[index] = rgb;
                         style.border_alpha[index] = alpha;
                     }
@@ -5526,3 +5524,7 @@ mod selector_ident_start_tests;
 #[cfg(test)]
 #[path="css_id_exact_tests.rs"]
 mod css_id_exact_tests;
+
+#[cfg(test)]
+#[path = "css_border_default_tests.rs"]
+mod border_default_tests;

@@ -211,11 +211,51 @@ inheritance, shorthand/longhand priority, invalid declarations, changed external
 sources and parent styles, and work/copy refusal with recovery. These results
 use the real native CSS/HTML components on Linux x86_64 with Rust 1.99.1.
 
-Complete property metadata/defaulting, border and logical-property semantics,
+Complete property metadata/defaulting, remaining border grammar and logical-property semantics,
 `revert`/`revert-layer`, full origins/layers and broader CSSOM consistency remain
 open. Windows frontend, HTTP loading, XHTML presentation and unchanged browser
 WPT acceptance were not executed for this increment. No complete C04/C05
 requirement group or package is closed by these native results.
+
+## Preparatory implementation: physical border defaulting
+
+**C04-S02 is a partial property/defaulting increment for C04 and C05.** The
+twenty physical border properties now share literal and substituted `inherit`,
+`initial` and `unset` behavior. Whole-border, side and component shorthands reset
+their own components together; longhands affect only the named side/component.
+
+Inherited `em` and `rem` widths use the parent's final font metrics, and a real
+parent's `none` or `hidden` side supplies zero inherited width even when a child
+selects `solid`. Roots and synthetic fragment containers have no element parent
+and inherit initial values. Genuine null-namespace element parents still supply
+their computed border values. Inherited `currentcolor` remains a keyword, so its
+used color follows each descendant's own foreground; explicit RGB/alpha remain
+unchanged.
+
+This finite contract follows [CSS Cascade 5, 13 January 2022, sections 3, 4.4
+and 7.2–7.3.3](https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/),
+[CSS Backgrounds and Borders 3, 11 March 2024, sections 3.1–3.4](https://www.w3.org/TR/2024/CRD-css-backgrounds-3-20240311/)
+and [CSS Color 4, 23 November 2026, section 15.5](https://www.w3.org/TR/2026/CRD-css-color-4-20261123/).
+
+| Native component evidence | Result |
+| --- | --- |
+| Original border/defaulting regressions | 26 pass |
+| Existing related CSS tests | 49 pass |
+| Production defaulting/cascade/cache/refusal probes | 8 pass |
+
+The selection covers all twenty property names, side/component isolation,
+parent/root distinctions, font and style ordering, multigeneration inheritance,
+currentcolor and alpha, importance and inline priority, invalid declarations and
+substitution, changed external/parent styles, and work/copy refusal with recovery.
+One earlier test's currentcolor expectation was corrected to the normative keyword
+inheritance rule before freezing this selection; its explicit RGBA checks remain.
+
+These are original native CSS/HTML component results on Linux x86_64 with Rust
+1.99.1. The existing `none`/`hidden`/`solid` representation and used-value width
+rounding remain finite: additional styles, collapsed-table distinctions, border
+images, logical borders, device-pixel snapping and general CSSOM stay open.
+Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT
+were not executed. No complete C00/C04/C05 requirement or package is closed.
 
 ## Architecture and invariants
 
