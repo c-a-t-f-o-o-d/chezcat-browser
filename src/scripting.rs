@@ -3234,9 +3234,7 @@ impl Host for Bridge<'_> {
         if self.attr_receiver(object){return Some(WINDOW);}
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
         if self.inert_node_type(object)==Some(11) {return Some(WINDOW);}
-        if self.inert_node_type(object)==Some(1)
-            && (self.html_reflection_receiver(object) || self.inert_interface(object)==Some("SVGElement"))
-        {return Some(WINDOW);}
+        if self.inert_node_type(object)==Some(1){return Some(WINDOW);}
         if self.named_map_receiver(object){return Some(WINDOW);}
         if let Some(window)=self.collection_owner_window(object){return Some(window);}
         if self.inert_adopted_node(object) && self.inert_interface(object)
@@ -9211,3 +9209,6 @@ mod element_class_list_accessor_tests;
 #[cfg(test)]
 #[path="script_inert_html_class_list_tests.rs"]
 mod inert_html_class_list_tests;
+#[cfg(test)]
+#[path="script_inert_element_properties_tests.rs"]
+mod inert_element_properties_tests;
