@@ -13,6 +13,7 @@ impl Runtime {
         let object = self.new_object(None)?;
         self.prototype_method(object, "get", Builtin::ReflectGet)?;
         self.prototype_method(object, "set", Builtin::ReflectSet)?;
+        self.prototype_method(object, "ownKeys", Builtin::ReflectOwnKeys)?;
         let tag = self
             .symbol_to_string_tag
             .expect("initialized well-known symbols");
@@ -30,6 +31,29 @@ impl Runtime {
             false,
         )?;
         Ok(())
+    }
+
+    /// Original bounded own-key reflection; native targets keep the same
+    /// owner/origin/lifetime gates as Object name and symbol inspection.
+    pub(super) fn reflect_own_keys(&mut self,args:&[Value],host:&mut dyn Host)->Result<Value,Fault> {
+        self.step()?;
+        let target=args.first().unwrap_or(&Value::Undefined);
+        if !matches!(target,Value::Object(_)|Value::Function(_)|Value::Host(_)) {
+            return Err(Fault::exception("TypeError","Reflect.ownKeys requires an object target."));
+        }
+        let names=self.inspection_own_string_keys(target,host)?;
+        let symbols=if let Some(object)=self.symbol_backing(target,host)? {
+            let id=self.ordinary_id(object)?;self.own_symbol_keys(id,false)?
+        } else {Vec::new()};
+        let count=names.len().checked_add(symbols.len()).filter(|count|*count<=self.limits.heap.object_properties)
+            .ok_or_else(||Fault::new("Own-key reflection exceeds the property enumeration allowance."))?;
+        let result=self.new_object(Some(count))?;
+        // Snapshot names and Symbols before result construction. Create own
+        // data properties directly so prototype setters cannot intercept them.
+        for (index,key) in names.into_iter().map(StringKey::into_value).chain(symbols.into_iter().map(Value::Symbol)).enumerate() {
+            self.step()?;self.set_property(result,index.to_string(),key)?;
+        }
+        Ok(Value::Object(result))
     }
 
     #[inline(never)]
@@ -259,3 +283,7 @@ impl Runtime {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "reflect_own_keys_tests.rs"]
+mod own_keys_tests;

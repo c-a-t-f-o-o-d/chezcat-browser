@@ -197,6 +197,7 @@ fn raw_key_proxy_preserves_unsupported_operations_and_cleans_up_after_refusal() 
     for (source, operation) in [
         ("Object.keys(proxy)", "ownKeys"),
         ("Object.getOwnPropertyNames(proxy)", "ownKeys"),
+        ("Reflect.ownKeys(proxy)", "ownKeys"),
         ("Object.hasOwn(proxy,raw)", "getOwnPropertyDescriptor"),
         ("Object.defineProperty(proxy,raw,{value:99})", "defineProperty"),
         ("delete proxy[raw]", "deleteProperty"),
@@ -209,7 +210,8 @@ fn raw_key_proxy_preserves_unsupported_operations_and_cleans_up_after_refusal() 
     runtime.begin_job();
     execute(&mut runtime, r#"
         if(calls!==0||target[raw]!==7||Object.getOwnPropertyNames(target).length!==1||
-           Reflect.ownKeys!==undefined)throw 'unsupported path changed state or surface';
+           typeof Reflect.ownKeys!=='function'||Reflect.ownKeys(target)[0]!==raw)
+            throw 'unsupported path changed state or surface';
         delete handler.getOwnPropertyDescriptor;
         if(!Object.hasOwn(proxy,raw)||Object.getOwnPropertyDescriptor(proxy,raw).value!==7)
             throw 'supported descriptor fallback';
