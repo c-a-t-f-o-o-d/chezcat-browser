@@ -360,7 +360,7 @@ explicit misses. ID writes and tree moves share prepaid borrowed comparisons for
 the existing explicit-association refusal. Raw projection aliases can change or
 move without touching a literal owner; projection-equal identity changes still
 refuse atomically. Original component and App fixtures qualify native records.
-Raw main-ID/form producers, general dynamic owner resetting, parser form-owner
+Raw form producers and foreign raw-ID imports, general dynamic owner resetting, parser form-owner
 magic and frozen qualification remain separate. F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing
