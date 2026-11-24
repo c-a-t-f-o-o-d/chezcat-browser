@@ -4,10 +4,10 @@ fn id(doc:&Document,name:&str)->usize {(0..doc.nodes.len()).find(|&node|doc.attr
 
 #[test]
 fn selector_negation_strict_lists_depth_and_atomic_unsupported_members() {
-    for selector in [":not(.missing,:hover)",":not(:not(.missing,:hover))","input:not(:checked)","button:not(.x,#absent)","button:not(div > .x,span + button)","button:not(:not(.selected))",":not(*)",":not([data-key='x,y)'])",":NoT(.selected)"] {
+    for selector in [":not(.missing,:hover)",":not(:not(.missing,:hover))","input:not(:checked)","button:not(.x,#absent)","button:not(div > .x,span + button)","button:not(:not(.selected))",":not(*)",":not([data-key='x,y)'])",":NoT(.selected)",":not(:is(.x))"] {
         assert!(valid_query_selector(selector),"{selector}");
     }
-    for selector in [":not",":not()",":not( )",":not(,a)",":not(a,)",":not(a,,b)",":not(>a)",":not(a >)",":not(::before)",":not(a::after)",":not(.missing,:active)",":not(:not(.missing,:active))",":not(:is(.x))",":not(.x))",":not(.x",":disabled()",":disabled(yes)"] {
+    for selector in [":not",":not()",":not( )",":not(,a)",":not(a,)",":not(a,,b)",":not(>a)",":not(a >)",":not(::before)",":not(a::after)",":not(.missing,:active)",":not(:not(.missing,:active))",":not(.x))",":not(.x",":disabled()",":disabled(yes)"] {
         assert!(!valid_query_selector(selector),"{selector}");
         let list=format!(".safe,{selector}");
         let mut rules=Vec::new();parse_sheet(&format!("{list}{{color:red}}"),&mut rules);

@@ -10,24 +10,27 @@ struct Integer {
     digits: Vec<u8>,
 }
 impl Integer {
-    fn magnitude(source: &str, negative: bool) -> Option<Self> {
+    fn magnitude(source: &str, negative: bool, refused: &mut bool) -> Option<Self> {
         if source.is_empty() || !source.bytes().all(|b| b.is_ascii_digit()) {
             return None;
         }
         let source = source.trim_start_matches('0');
         let mut digits = Vec::new();
-        digits.try_reserve_exact(source.len()).ok()?;
+        if digits.try_reserve_exact(source.len()).is_err() {
+            *refused = true;
+            return None;
+        }
         digits.extend(source.bytes().rev().map(|b| b - b'0'));
         Some(Self {
             negative: negative && !digits.is_empty(),
             digits,
         })
     }
-    fn parse(source: &str) -> Option<Self> {
+    fn parse(source: &str, refused: &mut bool) -> Option<Self> {
         if let Some(s) = source.strip_prefix('-') {
-            Self::magnitude(s, true)
+            Self::magnitude(s, true, refused)
         } else {
-            Self::magnitude(source.strip_prefix('+').unwrap_or(source), false)
+            Self::magnitude(source.strip_prefix('+').unwrap_or(source), false, refused)
         }
     }
 }
@@ -112,17 +115,27 @@ fn subtract(a: &mut Vec<u8>, b: &[u8], budget: &mut usize) -> Option<()> {
     Some(())
 }
 impl Nth {
-    fn new(a: Integer, b: Integer, reverse: bool, typed: bool) -> Option<Self> {
-        let length = a
+    fn new(a: Integer, b: Integer, reverse: bool, typed: bool, refused: &mut bool) -> Option<Self> {
+        let Some(length) = a
             .digits
             .len()
             .max(b.digits.len())
             .max(INDEX_DIGITS)
-            .checked_add(1)?;
+            .checked_add(1)
+        else {
+            *refused = true;
+            return None;
+        };
         let mut delta = Vec::new();
         let mut remainder = Vec::new();
-        delta.try_reserve_exact(length).ok()?;
-        remainder.try_reserve_exact(length).ok()?;
+        if delta.try_reserve_exact(length).is_err() {
+            *refused = true;
+            return None;
+        }
+        if remainder.try_reserve_exact(length).is_err() {
+            *refused = true;
+            return None;
+        }
         Some(Self {
             a,
             b,
@@ -230,7 +243,7 @@ pub(super) fn name(name: &str) -> bool {
     .iter()
     .any(|n| name.eq_ignore_ascii_case(n))
 }
-pub(super) fn parse(name: &str, source: &str, position: &mut usize) -> Option<Predicate> {
+pub(super) fn parse(name: &str, source: &str, position: &mut usize, refused: &mut bool) -> Option<Predicate> {
     let name = name.to_ascii_lowercase();
     let typed = name.ends_with("of-type");
     let reverse = name.contains("last");
@@ -276,34 +289,34 @@ pub(super) fn parse(name: &str, source: &str, position: &mut usize) -> Option<Pr
         };
         let body = normalized.trim_ascii();
         if body.eq_ignore_ascii_case("odd") {
-            (Integer::parse("2")?, Integer::parse("1")?)
+            (Integer::parse("2", refused)?, Integer::parse("1", refused)?)
         } else if body.eq_ignore_ascii_case("even") {
-            (Integer::parse("2")?, Integer::parse("0")?)
+            (Integer::parse("2", refused)?, Integer::parse("0", refused)?)
         } else if let Some(n) = body.bytes().position(|b| matches!(b, b'n' | b'N')) {
             let prefix = &body[..n];
             let a = Integer::parse(match prefix {
                 "" | "+" => "1",
                 "-" => "-1",
                 _ => prefix,
-            })?;
+            }, refused)?;
             let suffix = body[n + 1..].trim_ascii();
             let b = if suffix.is_empty() {
-                Integer::parse("0")?
+                Integer::parse("0", refused)?
             } else {
                 let sign = *suffix.as_bytes().first()?;
                 if !matches!(sign, b'+' | b'-') {
                     return None;
                 }
-                Integer::magnitude(suffix[1..].trim_ascii_start(), sign == b'-')?
+                Integer::magnitude(suffix[1..].trim_ascii_start(), sign == b'-', refused)?
             };
             (a, b)
         } else {
-            (Integer::parse("0")?, Integer::parse(body)?)
+            (Integer::parse("0", refused)?, Integer::parse(body, refused)?)
         }
     } else {
-        (Integer::parse("0")?, Integer::parse("1")?)
+        (Integer::parse("0", refused)?, Integer::parse("1", refused)?)
     };
-    Some(Predicate::Nth(Nth::new(a, b, reverse, typed)?))
+    Some(Predicate::Nth(Nth::new(a, b, reverse, typed, refused)?))
 }
 impl Predicate {
     pub(super) fn matches(

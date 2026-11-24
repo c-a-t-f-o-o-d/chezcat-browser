@@ -151,6 +151,7 @@ pub(super) fn prepare(
             &mut rules,
             environment,
             doc.stylesheet_limits.rules,
+            meter.as_deref_mut(),
             transform_meter.as_deref_mut(),
             deadline,
         ) {
