@@ -47,6 +47,18 @@ impl Iterator for Units<'_> {
     fn size_hint(&self)->(usize,Option<usize>){match self {Self::Scalar(i)=>i.size_hint(),Self::Raw(i)=>i.size_hint()}}
 }
 impl DomString {
+    /// Normalize CRLF and CR in place, preserving exact unpaired UTF-16 units.
+    pub(crate) fn normalize_newlines(&mut self){
+        fn compact<T:Copy+PartialEq+From<u8>>(values:&mut Vec<T>){
+            let(mut write,mut cr)=(0,false);
+            for read in 0..values.len(){let unit=values[read];if cr&&unit==T::from(10){cr=false;continue;}cr=unit==T::from(13);values[write]=if cr{T::from(10)}else{unit};write+=1;}
+            values.truncate(write);
+        }
+        let mut bytes=std::mem::take(&mut self.projection).into_bytes();compact(&mut bytes);
+        self.projection=String::from_utf8(bytes).expect("ASCII newline normalization preserves UTF-8");
+        if let Some(units)=self.units.as_mut(){compact(units);}
+    }
+
     pub(crate) fn view(&self)->DomStringRef<'_>{match self.raw_units(){Some(u)=>DomStringRef::Raw(u),None=>DomStringRef::Scalar(&self.projection)}}
     pub(crate) fn new()->Self{Self::default()}
     pub(crate) fn make_ascii_lowercase(&mut self){self.projection.make_ascii_lowercase();if let Some(units)=&mut self.units{for unit in units{if (0x41..=0x5a).contains(unit){*unit+=0x20;}}}}
@@ -196,4 +208,10 @@ mod tests {
         let mut scalar=String::with_capacity(64);scalar.push('x');
         let scalar=DomString::from(scalar);assert_eq!(scalar.capacity(),64);assert_eq!(scalar.try_clone().unwrap().capacity(),1);
     }
+    #[test]
+    fn newline_normalization_preserves_raw_units_and_owned_capacity(){
+        let units=[0xd800,13,10,13,13,10,0,0xdfff,10];let mut text=DomString::from_units(&units,100).unwrap();let capacity=text.capacity();text.normalize_newlines();assert_eq!(text.raw_units().unwrap(),&[0xd800,10,10,10,0,0xdfff,10]);assert_eq!(text.as_str(),"\u{fffd}\n\n\n\0\u{fffd}\n");assert_eq!(text.capacity(),capacity);text.normalize_newlines();assert_eq!(text.capacity(),capacity);
+        let mut scalar=DomString::from("a\r\nb\rc\n\r\r\n\0\u{1f431}".to_string());let capacity=scalar.capacity();scalar.normalize_newlines();assert_eq!(scalar.as_str(),"a\nb\nc\n\n\n\0\u{1f431}");assert!(scalar.raw_units().is_none());assert_eq!(scalar.capacity(),capacity);
+    }
+
 }

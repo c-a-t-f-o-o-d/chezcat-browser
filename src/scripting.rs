@@ -547,6 +547,7 @@ struct State {
     detached_images: node_sets::NodeSet,
     detached_nodes: node_sets::NodeSet,
     output_defaults: identity_map::IdentityMap<u32,DomString>,
+    output_custom_errors: identity_map::IdentityMap<u32,DomString>,
     node_lists: Vec<queries::NodeList>,
     computed_styles: Vec<script_computed_style::Declaration>,
     canvas_contexts: script_canvas_context::Contexts,
@@ -641,6 +642,7 @@ impl State {
             detached_images: node_sets::NodeSet::default(),
             detached_nodes: node_sets::NodeSet::default(),
             output_defaults: identity_map::IdentityMap::default(),
+            output_custom_errors: identity_map::IdentityMap::default(),
             node_lists: Vec::new(),
             computed_styles: Vec::new(),
             canvas_contexts: script_canvas_context::Contexts::default(),
@@ -3119,6 +3121,7 @@ impl Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
         if self.output_validation_member(object,property){return true;}
+        if self.output_validity_member(object,property)||self.validity_member(object,property){return true;}
         if self.output_value_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.html_label_for_member(object,property){return true;}
@@ -3260,6 +3263,7 @@ impl Host for Bridge<'_> {
         self.state.error("MutationObserver callback", message);
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
+        if self.validity_receiver(object){return Some(WINDOW);}
         if self.class_list_receiver(object){return Some(WINDOW);}
         if self.attr_receiver(object){return Some(WINDOW);}
         if self.character_data_author_receiver(object) {return Some(WINDOW);}
@@ -3284,6 +3288,7 @@ impl Host for Bridge<'_> {
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
+        if self.validity_receiver(object){return true;}
         self.attr_receiver(object) || self.range_owner(object).is_some() || self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
             || self.abort_instance(object).is_some() || self.message_instance(object).is_some()
@@ -3312,6 +3317,7 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if self.validity_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"ValidityState"))});}
         if self.class_list_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"DOMTokenList"))});}
         if self.attr_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"Attr"))});}
         if let Some((window,interface))=self.xhr_interface(object){return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,interface))});}
@@ -3411,6 +3417,7 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
+        if self.validity_receiver(object){return true;}
         if self.form_receiver(object) && self.class_list_element_receiver(object) {return true;}
         self.range_owner(object).is_some() || object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
             || self.abort_instance(object).is_some()
@@ -3434,6 +3441,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
         if self.output_validation_member(object,property){return false;}
+        if self.output_validity_member(object,property)||self.validity_receiver(object){return false;}
         if self.output_value_member(object,property){return false;}
         if self.html_label_control_member(object,property){return false;}
         if self.html_label_for_member(object,property){return false;}
@@ -3486,6 +3494,7 @@ impl Host for Bridge<'_> {
             || self.text_or_comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
+        if self.validity_receiver(object){return true;}
         if self.class_list_receiver(object){return true;}
         if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
         else if self.canvas_context_receiver(object) { !script_canvas_context::unsupported_state(property) }
@@ -3501,6 +3510,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if self.validity_receiver(object){return Some(WINDOW);}
         if self.class_list_receiver(object){return Some(WINDOW);}
         if self.inert_interface(object).is_some() { return Some(WINDOW); }
         if self.message_instance(object).is_some() { return Some(WINDOW); }
@@ -3559,6 +3569,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
+        if property=="validity"&&self.html_output_receiver(object)||self.validity_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -3696,6 +3707,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0&&method==script_output_validity_state::SET{return true;}
         if index==0&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
@@ -3747,6 +3759,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==script_output_validity_state::SET{return &[(0,true)];}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
@@ -3977,6 +3990,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_output_validity_state::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_value::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_label_control::GET&&self.event_target_interface(object){return Some(object);}
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4097,6 +4111,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==script_output_validity_state::SET{return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
@@ -4293,6 +4308,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
         if script_output_validation::operation(method){return self.validate_output_metadata(object);}
+        if script_output_validity_state::operation(method){return self.validate_output_validity(object,method);}
         if script_output_value::operation(method).is_some(){return self.validate_output_value(object);}
         if method==script_label_control::GET{return self.validate_html_label_control(object);}
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
@@ -4329,7 +4345,7 @@ impl Host for Bridge<'_> {
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if matches!(method,"NodeList"|"HTMLCollection"|"NamedNodeMap"|"DOMTokenList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"ValidityState"|"NodeList"|"HTMLCollection"|"NamedNodeMap"|"DOMTokenList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&!self.collection_receiver(object){return Err(("TypeError","HTMLCollection operation requires a genuine native collection.".into()));}
         if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
         if script_named_map::operation(method).is_some()&&!self.named_map_receiver(object){return Err(("TypeError","NamedNodeMap operation requires a genuine map.".into()));}
@@ -4606,6 +4622,7 @@ impl Host for Bridge<'_> {
     }
 
     fn promise_resolution_receiver(&self, object: u32) -> bool {
+        if self.validity_receiver(object){return true;}
         // Promise resolution performs only the normal `then` property lookup.
         // Authorize this protocol explicitly for this realm's Window, Document
         // and real DOM nodes; other native capabilities keep the default deny.
@@ -4755,6 +4772,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else{self.html_output_receiver(receiver)};}
         if script_output_value::operation(method).is_some(){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
@@ -5634,6 +5652,8 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
+        if property=="validity"&&self.html_output_receiver(object){return self.output_validity_call(object,script_output_validity_state::GET,&[]);}
+        if self.validity_member(object,property){let method=script_output_validity_state::FLAGS.iter().find(|&&(key,_)|key==property).unwrap().1;return self.output_validity_call(object,method,&[]);}
         if self.output_value_member(object,property){return self.output_value_get(object,property);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
@@ -6474,6 +6494,7 @@ impl Host for Bridge<'_> {
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
         if script_output_validation::operation(method){return self.output_validation(object,method);}
+        if script_output_validity_state::operation(method){return self.output_validity_call(object,method,args);}
         if method==script_output_metadata::TYPE_GET{return self.output_metadata_get(object,"type");}
         if method==script_output_metadata::NAME_SET{return Err("OUTPUT name setter requires the native conversion transaction.".into());}
         if method==script_label_control::GET{return self.html_label_control_get(object);}
@@ -9436,3 +9457,10 @@ mod output_validation_tests;
 
 #[path="script_output_validation.rs"]
 mod script_output_validation;
+
+#[cfg(test)]
+#[path="script_output_validity_state_tests.rs"]
+mod output_validity_state_tests;
+
+#[path="script_output_validity_state.rs"]
+mod script_output_validity_state;
