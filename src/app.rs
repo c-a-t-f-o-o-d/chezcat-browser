@@ -6425,3 +6425,7 @@ mod from_char_code_utf16_tests;
 #[cfg(test)]
 #[path = "app_character_position_tests.rs"]
 mod character_position_tests;
+
+#[cfg(test)]
+#[path = "app_trim_utf16_tests.rs"]
+mod trim_utf16_tests;
