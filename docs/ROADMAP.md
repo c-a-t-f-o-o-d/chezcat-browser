@@ -61,7 +61,9 @@ Isolation and GPU work keep their separate readiness gates.
 Current foundation increment: live getElementsByName filters retain exact UTF-16
 and match authoritative native HTML names. Focused checks cover conversion,
 liveness, admitted storage and refusal/recovery, with native App interaction.
-Raw main-name producers and canonical/inert/child Document expansion remain open;
+Canonical Document.prototype.getElementsByName supports ordinary prototype changes,
+saved functions and receiver/origin preflight for the displayed backend.
+Raw main-name producers and inert/child Document live traversal remain open;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

@@ -596,6 +596,7 @@ pub(crate) const DOCUMENT_IMPORT_NODE: &str = "\0Document.importNode";
 pub(crate) const DOCUMENT_ADOPT_NODE:&str="\0Document.adoptNode";
 pub(crate) const DOCUMENT_CREATE_ATTRIBUTE:&str="\0Document.createAttribute";
 pub(crate) const DOCUMENT_CREATE_ATTRIBUTE_NS:&str="\0Document.createAttributeNS";
+pub(crate) const DOCUMENT_GET_ELEMENTS_NAME:&str="\0Document.getElementsByName";
 pub(crate) const DOCUMENT_GET_ELEMENTS_TAG:&str="\0Document.getElementsByTagName";
 pub(crate) const DOCUMENT_GET_ELEMENTS_TAG_NS: &str = "\0Document.getElementsByTagNameNS";
 pub(crate) const DOCUMENT_GET_ELEMENTS_CLASS:&str="\0Document.getElementsByClassName";

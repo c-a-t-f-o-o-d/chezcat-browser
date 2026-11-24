@@ -3088,7 +3088,7 @@ impl Bridge<'_> {
         if property=="remove" && (self.collection_interface_receiver(object)==Some(false)||self.character_data_receiver(object)||self.doctype_receiver(object)) {
             return !self.form_named_control(object,property);
         }
-        if self.canonical_collection_member(object, property) { return true; }
+        if self.canonical_collection_member(object, property)||self.canonical_name_list_member(object,property) { return true; }
         if self.node_metadata_property(object,property) {return true;}
         if self.charset_member(object, property) { return true; }
         if self.meta_member(object, property) { return true; }
@@ -3247,7 +3247,7 @@ impl Host for Bridge<'_> {
         if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
         if self.canonical_attribute_factory_member(object,property){return false;}
-        if self.canonical_collection_member(object,property){return false;}
+        if self.canonical_collection_member(object,property)||self.canonical_name_list_member(object,property){return false;}
         self.inert_adopted_node(object) && self.inert_owns_property(object, property)
             || matches!(self.inert_node_type(object),Some(1|9))&&matches!(property,"getElementsByTagName"|"getElementsByTagNameNS"|"getElementsByClassName")
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
@@ -3390,7 +3390,7 @@ impl Host for Bridge<'_> {
         if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
         if self.canonical_attribute_factory_member(object,property){return false;}
-        if self.canonical_collection_member(object,property){return false;}
+        if self.canonical_collection_member(object,property)||self.canonical_name_list_member(object,property){return false;}
         if property=="baseURI" && self.form_named_control(object,property) {return true;}
         if self.node_metadata_property(object,property) {return false;}
         if self.charset_member(object, property) { return false; }
@@ -3640,7 +3640,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        if index==0&&object==DOCUMENT&&method=="getElementsByName"{return true;}
+        if index==0&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if index==0 && self.class_list_receiver(object) && matches!(method,"contains"|"supports"){return true;}
@@ -3689,7 +3689,7 @@ impl Host for Bridge<'_> {
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
-        if script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
         if method==text_split_interface::METHOD{return &[(0,false)];}
         if let Some(edit)=character_data_interface::operation(method){return edit.conversions();}
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
@@ -3783,7 +3783,6 @@ impl Host for Bridge<'_> {
         }
         if (object == DOCUMENT || node_index(object).is_some() || matches!(self.inert_node_type(object),Some(1|9))) && method=="getElementsByTagName"
             || (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) && method=="getElementsByClassName"
-            || object == DOCUMENT && method == "getElementsByName"
         {
             return &[(0, true)];
         }
@@ -3824,7 +3823,7 @@ impl Host for Bridge<'_> {
     }
 
     fn method_length(&self, object:u32, method:&str) -> Option<usize> {
-        if script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(1);}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(1);}
         if script_attr::node_method(method){return Some(if method=="getAttributeNodeNS"{2}else{1});}
         if let Some(ns)=script_attr::factory_operation(method){return Some(if ns{2}else{1});}
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return Some(2);}
@@ -3860,7 +3859,6 @@ impl Host for Bridge<'_> {
             || self.custom_receiver(object) && method=="initCustomEvent"
             || self.ui_receiver(object) && method=="initUIEvent"
             || self.mouse_receiver(object) && method=="initMouseEvent" {return Some(1);}
-        if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) { return Some(1); }
         if self.class_list_receiver(object) {
             return match method {"contains"|"item"|"toggle"=>Some(1),"replace"=>Some(2),"add"|"remove"|"toString"=>Some(0),_=>None};
@@ -3870,7 +3868,7 @@ impl Host for Bridge<'_> {
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
         if script_class_list::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
-        if self.event_target_interface(object)&&script_inert_documents::identifier_lookup::operation(method).is_some(){return Some(object);}
+        if self.event_target_interface(object)&&(method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some()){return Some(object);}
         if self.event_target_interface(object)&&method==script_position::METHOD{return Some(object);}
         if self.event_target_interface(object)&&script_inert_documents::node_equality::operation(method){return Some(object);}
         if script_attr::node_method(method)&&self.event_target_interface(object){return Some(object);}
@@ -3986,6 +3984,7 @@ impl Host for Bridge<'_> {
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
         -> Result<(), (&'static str, String)> {
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return self.validate_name_list(object);}
         if object==WINDOW && method=="cancelAnimationFrame" && (!self.state.enabled || !self.doc.scripting_enabled) {return Err(("SecurityError","Animation capability is unavailable while scripting is disabled.".into()));}
         if object==WINDOW && method=="getComputedStyle" && next_index==1 {self.validate_computed_target(args.first())?;}
         if crate::javascript::range_interface::node_argument(method) && next_index==1 {
@@ -4029,7 +4028,7 @@ impl Host for Bridge<'_> {
     fn required_arguments(&self, object: u32, method: &str) -> usize {
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
-        if script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
         if method==script_position::METHOD{return 1;}
         if script_inert_documents::node_equality::operation(method){return 1;}
         if script_attr::node_method(method){return if method=="getAttributeNodeNS"{2}else{1};}
@@ -4081,7 +4080,6 @@ impl Host for Bridge<'_> {
         if self.class_list_receiver(object)&&method=="replace"{return 2;}
         if self.class_list_receiver(object) && matches!(method,"item"|"contains"|"supports"|"toggle") { return 1; }
         if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
-        if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.custom_receiver(object) && method == "initCustomEvent"
@@ -4285,6 +4283,7 @@ impl Host for Bridge<'_> {
         if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
         if method==node_normalize_interface::METHOD{return if self.normalize_receiver(object){Ok(())}else{Err(("TypeError","normalize requires a genuine supported Node.".into()))};}
         if character_data_interface::operation(method).is_some(){return self.validate_character_edit(object,method,args);}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return self.validate_name_list(object);}
         if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.validate_identifier_lookup(object,document);}
         if method==script_position::METHOD{return self.validate_node_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.validate_node_equality(object,args);}
@@ -4544,7 +4543,7 @@ impl Host for Bridge<'_> {
         if self.canonical_attribute_node_member(object,property)||script_attr::node_method(property)&&self.form_named_control(object,property){return None;}
         if self.canonical_attribute_factory_member(object,property){return None;}
         if matches!(property,"getElementsByTagName"|"getElementsByTagNameNS"|"getElementsByClassName")&&self.form_named_control(object,property){return None;}
-        if self.canonical_collection_member(object,property){return None;}
+        if self.canonical_collection_member(object,property)||self.canonical_name_list_member(object,property){return None;}
         if object==CONSOLE {return match property {"log"=>Some("log"),"info"=>Some("info"),"warn"=>Some("warn"),"error"=>Some("error"),_=>None};}
         if self.xhr_index(object).is_some(){return None;}
 
@@ -4568,7 +4567,6 @@ impl Host for Bridge<'_> {
         if property=="dispatchEvent"&&self.dispatch_receiver(object)&&!self.form_named_control(object,property){return Some("dispatchEvent");}
         if self.named_map_receiver(object){return None;}
         if property=="getElementsByTagName"&&matches!(self.inert_node_type(object),Some(1|9)){return Some("getElementsByTagName");}
-        if object == DOCUMENT && property == "getElementsByName" { return Some("getElementsByName"); }
         if property=="normalize" && !self.is_frame_handle(object) && self.namespace_receiver(object) {return Some("normalize");}
         if property=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9)))
             && !self.form_named_control(object,property) { return Some("getElementsByClassName"); }
@@ -4612,6 +4610,7 @@ impl Host for Bridge<'_> {
         if script_attr::node_method(method){return self.event_target_interface(object)&&(self.attr_element_receiver(receiver)||self.inert_node_type(receiver)==Some(1));}
         if script_attr::member_operation(method).is_some(){return self.event_target_interface(object)&&self.attr_receiver(receiver);}
         if script_attr::factory_operation(method).is_some(){return self.event_target_interface(object)&&(receiver==DOCUMENT||self.inert_document(receiver));}
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return self.event_target_interface(object)&&self.identifier_lookup_receiver(receiver,Some(true));}
         if let Some((_,document))=dom_collections::operation(method){return self.event_target_interface(object)&&self.collection_interface_receiver(receiver)==Some(document);}
         if element_names::namespace_method(method){return self.event_target_interface(object)&&self.namespace_receiver(receiver);}
         if method==character_substring::METHOD{return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
@@ -4725,6 +4724,7 @@ impl Host for Bridge<'_> {
                 && matches!(self.doc.nodes[node].kind,NodeKind::Element {..}|NodeKind::DocumentFragment));
             if parent(object) {return parent(receiver);}
         }
+        if self.event_target_interface(object)&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return self.identifier_lookup_receiver(receiver,Some(true));}
         if self.event_target_interface(object){if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.identifier_lookup_receiver(receiver,Some(document));}}
         if self.event_target_interface(object)&&(script_inert_documents::node_equality::operation(method)||method==script_position::METHOD){return self.namespace_receiver(receiver);}
         if self.event_target_interface(object) && method==script_node_root::ROOT_METHOD {return self.get_root_receiver(receiver);}
@@ -4777,7 +4777,6 @@ impl Host for Bridge<'_> {
         if object == HISTORY { return receiver == HISTORY && matches!(method,"replaceState"|"pushState"); }
         if method == "getBoundingClientRect" { return self.class_list_element_receiver(object) && self.class_list_element_receiver(receiver); }
         if script_named_map::element(object).is_some() { return self.named_map_receiver(object) && self.named_map_receiver(receiver); }
-        if method == "getElementsByName" { return object == DOCUMENT && receiver == DOCUMENT; }
         if method=="normalize" {return !self.is_frame_handle(object) && !self.is_frame_handle(receiver)
             && self.namespace_receiver(object) && self.namespace_receiver(receiver);}
         if method=="getElementsByClassName" {
@@ -5226,7 +5225,7 @@ impl Host for Bridge<'_> {
         if self.canonical_attribute_node_member(object,property){return Ok(false);}
         if self.canonical_attr_member(object,property){return Ok(false);}
         if self.canonical_attribute_factory_member(object,property){return Ok(false);}
-        if self.canonical_collection_member(object,property){return Ok(false);}
+        if self.canonical_collection_member(object,property)||self.canonical_name_list_member(object,property){return Ok(false);}
         if self.xhr_index(object).is_some(){return Ok(self.xhr_member(object,property));}
 
         if self.range_owner(object).is_some() {self.state.work(1)?;return Ok(false);}
@@ -5428,7 +5427,6 @@ impl Host for Bridge<'_> {
                     | "doctype"
                     | "prerendering"
                     | "getElementById"
-                    | "getElementsByName"
                     | "getElementsByTagName"
                     | "querySelector"
                     | "querySelectorAll"
@@ -6450,6 +6448,7 @@ impl Host for Bridge<'_> {
                 Value::Null
             });
         }
+        if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{self.validate_name_list(object).map_err(|(_,e)|e)?;return self.create_name_list(args.first().ok_or("getElementsByName requires one argument.")?);}
         if let Some(document)=script_inert_documents::identifier_lookup::operation(method){return self.native_identifier_lookup(object,args,document);}
         if method==script_position::METHOD{return self.compare_document_position(object,args);}
         if script_inert_documents::node_equality::operation(method){return self.node_equality(object,args,method==script_inert_documents::node_equality::SAME);}
@@ -6505,9 +6504,6 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "createEvent" {
             return if self.event_factory_enabled() { self.create_event(args) }
                 else { Err(unsupported_event_interface(args.first())) };
-        }
-        if object == DOCUMENT && method == "getElementsByName" {
-            return self.create_name_list(args.first().ok_or("getElementsByName requires one argument.")?);
         }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) {
             return self.create_class_collection(object,args.first().ok_or("getElementsByClassName requires one argument.")?);
@@ -9159,3 +9155,7 @@ mod live_name_domstring_tests;
 
 #[path="script_form_id_guards.rs"]
 mod form_id_guards;
+
+#[cfg(test)]
+#[path="script_document_name_method_tests.rs"]
+mod document_name_method_tests;
