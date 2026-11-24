@@ -231,6 +231,7 @@ pub(super) struct Roots {
     array_keys: Option<usize>,
     array_values: Option<usize>,
     array_entries: Option<usize>,
+    array_for_each: Option<usize>,
 }
 
 impl Roots {
@@ -246,7 +247,7 @@ impl Roots {
     pub(super) fn reachability_edges(&self, add: &mut impl FnMut(super::function_reachability::Edge)) {
         use super::function_reachability::Edge;
         for id in [self.map, self.set, self.weak_map, self.weak_set, self.iterator_prototype, self.array_iterator, self.map_iterator, self.set_iterator, self.string_iterator].into_iter().flatten() { add(Edge::Object(id)); }
-        for id in [self.array_keys,self.array_values,self.array_entries].into_iter().flatten() { add(Edge::Function(id)); }
+        for id in [self.array_keys,self.array_values,self.array_entries,self.array_for_each].into_iter().flatten() { add(Edge::Function(id)); }
     }
 }
 #[derive(Clone, Copy)]
@@ -345,6 +346,8 @@ impl Runtime {
             self.prototype_method(prototype, "next", Builtin::Collection(Op::Next(family)))?;
         }
         let array = self.array_prototype.unwrap();
+        let Value::Function(each)=self.get_property(array,"forEach")? else{unreachable!()};
+        self.collection_roots.array_for_each=Some(each);
         for (name, mode) in [
             ("keys", Mode::Keys),
             ("values", Mode::Values),
@@ -601,6 +604,8 @@ impl Runtime {
     pub(super) fn arguments_iterator_method(&self) -> Value {
         Value::Function(self.collection_roots.array_values.unwrap())
     }
+    pub(super) fn array_for_each_intrinsic(&self)->Value{Value::Function(self.collection_roots.array_for_each.unwrap())}
+
     pub(super) fn array_iterator_intrinsic(&self,mode:Mode)->Value {
         Value::Function(match mode {
             Mode::Keys=>self.collection_roots.array_keys,

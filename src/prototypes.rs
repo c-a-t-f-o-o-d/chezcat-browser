@@ -2398,6 +2398,12 @@ impl Runtime {
                 }
             }
             Builtin::ArrayMethod(method) => {
+                if method=="forEach" {
+                    if matches!(this,Value::Null|Value::Undefined){return Err(Fault::exception("TypeError","Array.prototype.forEach requires a non-null receiver."));}
+                    if let Value::Host(handle)=&this {
+                        if host.indexed_iteration_owner(*handle).is_some(){return self.array_for_each_host(*handle,args,host);}
+                    }
+                }
                 if method=="slice" {
                     if matches!(this, Value::Null | Value::Undefined) {
                         return Err(Fault::exception("TypeError", "Array.prototype.slice requires a non-null receiver."));

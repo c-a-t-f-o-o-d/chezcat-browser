@@ -189,7 +189,7 @@ f.sandbox=null;if(list.value!=='null')throw 'PutForwards DOMString null';
         );
     }
     #[test]
-    fn iframe_sandbox_saved_child_getters_toggle_and_unsupported_list_methods_keep_guards() {
+    fn iframe_sandbox_saved_child_getters_and_token_callbacks_keep_guards() {
         let (mut doc, mut forms, mut page) = fixture();
         run(
             &mut doc,
@@ -203,11 +203,8 @@ if(f.sandbox.replace('allow-scripts','allow-forms')!==true||f.sandbox.value!=='a
 "#,
         );
         let before = page.state.dom_commits;
-        for source in ["f.sandbox.forEach(function(){});"] {
-            let out = page.console_eval(&mut doc, &mut forms, source);
-            assert_eq!(out.errors, 1, "{}", page.report());
-            assert_eq!(page.state.dom_commits, before);
-        }
+        run(&mut doc,&mut forms,&mut page,"var seen=[];f.sandbox.forEach(function(value,index,source){if(index!==0||source!==f.sandbox)throw 'actual callback source';seen.push(value);});if(seen.length!==1||seen[0]!=='allow-forms'||f.sandbox.supports('allow-forms')||f.contentWindow!==null)throw 'actual callback metadata';");
+        assert_eq!(page.state.dom_commits,before);
         page.set_location(
             &crate::navigation::address(
                 "https://foreign-owned.test/source",
