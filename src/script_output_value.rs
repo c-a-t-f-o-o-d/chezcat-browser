@@ -95,4 +95,27 @@ impl Bridge<'_>{
   self.state.retained-=peak;
   Ok(())
  }
+
+ pub(super) fn reset_output_value(&mut self,object:u32,value:Value)->Result<(),String>{
+  self.validate_output_value(object).map_err(|(_,message)|message)?;
+  let lookup=self.state.output_defaults.lookup_work();
+  self.state.work(lookup.checked_mul(2).and_then(|work|work.checked_add(1)).ok_or("OUTPUT reset lookup overflow.")?)?;
+  let old=self.state.output_defaults.get(&object).map(DomString::capacity);
+  if old.is_some(){
+   self.state.work(self.state.output_defaults.len())?;
+   let shifted=self.state.output_defaults.retention_movement(|key|*key!=object);
+   self.state.copies(shifted.checked_mul(size_of::<(u32,DomString)>()).ok_or("OUTPUT reset index movement overflow.")?)?;
+  }
+  script_text_content::deadline(self.state)?;
+  // The native getter result coexists with its DOMString conversion and the
+  // unpublished replacement. Admit that source backing throughout the write.
+  let source=retained_storage::value_bytes(&value);
+  self.state.replace_storage(0,source,0)?;
+  let result=(||{let text=self.dom_text(&value)?;self.output_replace_text(object,text)})();
+  self.state.retained-=source;
+  result?;
+  if let Some(bytes)=old{self.state.output_defaults.remove(&object);self.state.retained-=bytes;}
+  Ok(())
+ }
+
 }

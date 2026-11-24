@@ -6005,6 +6005,7 @@ impl Host for Bridge<'_> {
         self.state.navigation_incumbent = window;
     }
 
+    fn reset_output_text(&mut self,target:u32,value:Value)->Result<(),String>{self.reset_output_value(target,value)}
     fn prepare_node_normalize(&mut self,target:u32)->Result<crate::javascript::NativeNormalizeInfo,String>{self.prepare_shared_normalize(target)}
     fn commit_node_normalize(&mut self,target:u32)->Result<(),String>{self.commit_shared_normalize(target)}
     fn abort_node_normalize(&mut self,target:u32){self.abort_shared_normalize(target);}
@@ -9408,3 +9409,11 @@ mod output_value_default_tests;
 
 #[path="script_output_value.rs"]
 mod script_output_value;
+
+#[path="script_output_reset.rs"]
+mod script_output_reset;
+pub(crate) use script_output_reset::reset_form;
+
+#[cfg(test)]
+#[path="script_output_reset_tests.rs"]
+mod output_reset_tests;

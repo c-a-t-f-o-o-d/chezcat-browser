@@ -997,6 +997,7 @@ pub trait Host {
     fn get_with_caller(&mut self, _caller: Option<u32>, object: u32, property: &str) -> Result<Value, String> {
         self.get(object, property)
     }
+    fn reset_output_text(&mut self,_target:u32,_value:Value)->Result<(),String>{Err("Native OUTPUT reset is unavailable.".into())}
     fn prepare_node_normalize(&mut self,_target:u32)->Result<NativeNormalizeInfo,String>{Err("Native normalization preparation is unavailable.".into())}
     fn commit_node_normalize(&mut self,_target:u32)->Result<(),String>{Err("Native normalization publication is unavailable.".into())}
     fn abort_node_normalize(&mut self,_target:u32){}
@@ -14396,3 +14397,6 @@ mod string_trim_utf16_tests;
 
 #[path = "string_trim.rs"]
 mod string_trim;
+
+#[path="output_reset_interface.rs"]
+mod output_reset_interface;
