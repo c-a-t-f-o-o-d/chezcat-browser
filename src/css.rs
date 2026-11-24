@@ -9,6 +9,8 @@ pub(crate) use stylesheet_cache::StylesheetCache;
 
 #[path="css_media.rs"]
 mod media;
+#[path="css_selector_comments.rs"]
+mod selector_comments;
 pub use media::{Hover, MediaEnvironment};
 
 pub(crate) fn serialize_media_query_list(source: &str) -> String {
@@ -62,6 +64,12 @@ mod height_variable_tests;
 #[cfg(test)]
 #[path="css_root_selector_tests.rs"]
 mod root_selector_tests;
+#[cfg(test)]
+#[path="css_selector_comment_tests.rs"]
+mod selector_comment_tests;
+#[cfg(test)]
+#[path="css_selector_comment_boundary_tests.rs"]
+mod selector_comment_boundary_tests;
 #[path="css_translate.rs"]
 mod translate;
 #[path="css_easing.rs"]
@@ -2380,13 +2388,16 @@ fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selecto
 }
 
 fn parse_selector_list_at_depth(source:&str,pseudo_targets:bool,depth:usize)->Option<Vec<Selector>> {
-    if depth>MAX_SELECTOR_NESTING || source.len()>MAX_SELECTOR_BYTES*16 {return None;}
+    if depth>MAX_SELECTOR_NESTING || !selector_comments::within_limit(source,MAX_SELECTOR_BYTES*16,false) {return None;}
     let mut selectors = Vec::new();
     let mut start = 0;
     let mut bracket = false;
     let mut quote = None;
     let mut parentheses=0usize;
-    for (position, byte) in source.bytes().enumerate() {
+    let bytes = source.as_bytes();
+    let mut position = 0;
+    while position < bytes.len() {
+        let byte = bytes[position];
         if let Some(expected) = quote {
             if byte == b'\\' {
                 return None; // Escaped selector strings are outside this subset.
@@ -2394,8 +2405,10 @@ fn parse_selector_list_at_depth(source:&str,pseudo_targets:bool,depth:usize)->Op
             if byte == expected {
                 quote = None;
             }
+            position += 1;
             continue;
         }
+        if selector_comments::skip(bytes, &mut position) { continue; }
         match byte {
             b'[' if !bracket => bracket = true,
             b']' if bracket => bracket = false,
@@ -2417,6 +2430,7 @@ fn parse_selector_list_at_depth(source:&str,pseudo_targets:bool,depth:usize)->Op
             }
             _ => {}
         }
+        position += 1;
     }
     if bracket || quote.is_some() || parentheses!=0 {
         return None;
@@ -2434,11 +2448,13 @@ fn parse_selector(source: &str) -> Option<Selector> {
 fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
     if depth>MAX_SELECTOR_NESTING {return None;}
     let source = source.trim_matches(|character: char| character.is_ascii_whitespace());
-    if source.is_empty() || source.len() > MAX_SELECTOR_BYTES {
+    if source.is_empty() || !selector_comments::within_limit(source,MAX_SELECTOR_BYTES,true) {
         return None;
     }
     let bytes = source.as_bytes();
     let mut position = 0;
+    skip_selector_space(bytes, &mut position);
+    if position == bytes.len() { return None; }
     let mut parts = Vec::new();
     let mut relations = Vec::new();
     let mut specificity = (0u16, 0u16, 0u16);
@@ -2470,10 +2486,12 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             specificity.2 += 1;
         }
         loop {
+            selector_comments::skip(bytes, &mut position);
             match bytes.get(position) {
                 Some(b'.' | b'#') => {
                     let id = bytes[position] == b'#';
                     position += 1;
+                    if !id { selector_comments::skip(bytes, &mut position); }
                     if !starts_selector_ident(bytes, position) {
                         return None;
                     }
@@ -2499,8 +2517,10 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                 }
                 Some(b':') => {
                     position += 1;
+                    selector_comments::skip(bytes, &mut position);
                     if bytes.get(position)==Some(&b':') {
                         position+=1;
+                        selector_comments::skip(bytes, &mut position);
                         let start=position;
                         while bytes.get(position).is_some_and(|b|ident(*b)) {position+=1;}
                         target=if source[start..position].eq_ignore_ascii_case("before") {SelectorTarget::Before}
@@ -2508,7 +2528,8 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                             else {return None;};
                         // This finite slice admits only a terminal pseudo-element.
                         // It never repairs a malformed suffix or later combinator.
-                        if bytes[position..].iter().any(|b|!b.is_ascii_whitespace()) {return None;}
+                        skip_selector_space(bytes, &mut position);
+                        if position != bytes.len() {return None;}
                         specificity.2+=1;
                         break;
                     }
@@ -2549,10 +2570,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             return None;
         }
         parts.push(part);
-        let before_space = position;
-        while bytes.get(position).is_some_and(u8::is_ascii_whitespace) {
-            position += 1;
-        }
+        let separated = skip_selector_space(bytes, &mut position);
         if position == bytes.len() {
             break;
         }
@@ -2563,14 +2581,12 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                 _ => Relation::GeneralSibling,
             };
             position += 1;
-            while bytes.get(position).is_some_and(u8::is_ascii_whitespace) {
-                position += 1;
-            }
+            skip_selector_space(bytes, &mut position);
             if position == bytes.len() {
                 return None;
             }
             relations.push(relation);
-        } else if position > before_space {
+        } else if separated {
             relations.push(Relation::Descendant);
         } else {
             return None;
@@ -2611,6 +2627,7 @@ fn parse_negation_arguments(
                 quote = None;
             }
         } else {
+            if selector_comments::skip(source.as_bytes(), position) { continue; }
             match byte {
                 b'[' if !bracket => bracket = true,
                 b']' if bracket => bracket = false,
@@ -2666,8 +2683,8 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
             substring_prefix: Vec::new(),
         });
     }
-    // An operator is contiguous. Namespace syntax and malformed operators must
-    // still reject the entire selector, rather than broaden an attribute test.
+    // Matcher delimiters can have comments between them, but no whitespace.
+    // Namespace syntax and malformed operators still reject the whole selector.
     let operator = match bytes.get(*position) {
         Some(b'~') => AttributeOperator::Token,
         Some(b'|') => AttributeOperator::Dash,
@@ -2676,7 +2693,10 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
         Some(b'*') => AttributeOperator::Substring,
         _ => AttributeOperator::Exact,
     };
-    if !matches!(operator, AttributeOperator::Exact) { *position += 1; }
+    if !matches!(operator, AttributeOperator::Exact) {
+        *position += 1;
+        selector_comments::skip(bytes, position);
+    }
     if bytes.get(*position) != Some(&b'=') {
         return None;
     }
@@ -2739,9 +2759,14 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
     })
 }
 
-fn skip_selector_space(bytes: &[u8], position: &mut usize) {
-    while bytes.get(*position).is_some_and(u8::is_ascii_whitespace) {
-        *position += 1;
+fn skip_selector_space(bytes: &[u8], position: &mut usize) -> bool {
+    let mut whitespace = false;
+    loop {
+        while bytes.get(*position).is_some_and(u8::is_ascii_whitespace) {
+            *position += 1;
+            whitespace = true;
+        }
+        if !selector_comments::skip(bytes, position) { return whitespace; }
     }
 }
 

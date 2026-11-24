@@ -8,7 +8,8 @@
     "after": "HTML_FOUNDATION_COVERAGE.json#F14",
     "state": "planned",
     "foundation_rule": "Required CSS/default-presentation dependencies of F09–F13 remain HTML foundation blockers; the later broad CSS program does not defer them.",
-    "product_rule": "A product milestone requires its explicit dependency closure and actual journey evidence. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for YouTube. A whole-CSS claim is not permitted while required applicable coverage remains open."
+    "product_rule": "A product milestone requires its explicit dependency closure and actual journey evidence. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for YouTube. A whole-CSS claim is not permitted while required applicable coverage remains open.",
+    "preparatory_work": "Independent syntax/selector corrections may land before F14 when they require no unfinished HTML/XHTML contract and preserve its implementation order. Each records its own baseline, dated clauses, original cases and finite evidence; full program and package acceptance remain gated."
   },
   "source_baseline": {
     "revision": "6d1212e18acb37028bbba63290eddc323ecd5a23",
@@ -28,7 +29,7 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 0
+    "fresh_runtime_passes": 243
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -39,7 +40,7 @@
     "qualified": "Reserved for complete applicable locked contract evidence; not assigned by this planning change."
   },
   "package_dependency_policy": {
-    "status": "planned_after_HTML_F14 is the package state; source_assessment and requirement acceptance use the separate status_policy vocabulary.",
+    "status": "planned_after_HTML_F14 is the package state; source_assessment and requirement acceptance use the separate status_policy vocabulary. Separately recorded preparatory_slices may implement finite contracts earlier without closing the package or changing its complete acceptance prerequisites.",
     "ownership": "Family packages and package family_ids are reciprocal coverage/integration ownership; module primary family does not exclude cross-family requirements.",
     "core_prerequisites": "Acyclic order for reusable producer work; a core checkpoint permits dependent implementation but does not close all integration contracts.",
     "integration_requires": "Interface-level obligations may point to later packages. Required consumers remain blocked until their applicable interfaces work; do not demand whole-package closure recursively.",
@@ -567,6 +568,98 @@
     },
     "qualification": "Inventories enumerate finite actual dispatch/API routes, not property-level or specification conformance."
   },
+  "implementation_slices": [
+    {
+      "id": "C01-S01",
+      "name": "Selector comment boundaries",
+      "status": "partial",
+      "packages": [
+        "C01",
+        "C03"
+      ],
+      "requirement_families": [
+        "CSS-F02",
+        "CSS-F03"
+      ],
+      "baseline_revision": "74d1a9fdb90dd007edf539edbef3b552f03d2971",
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/",
+          "sections": [
+            "4.3.1",
+            "4.3.2",
+            "6.2"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/WD-selectors-4-20260122/",
+          "sections": [
+            "16"
+          ]
+        }
+      ],
+      "implemented": [
+        "Stylesheet and native query selectors consume comments between tokens without introducing descendant whitespace or joining identifier/hash/function spellings.",
+        "Selector lists, strict negation, attribute matchers and nth formulas ignore comment payload punctuation; quoted attribute data remains literal.",
+        "The stylesheet walk retains raw selector boundaries and skips comment payload during structural scanning. Declaration/value and finite media-condition normalization retain their existing behavior.",
+        "Raw query/stylesheet admission remains in force. Existing selector spelling allowances count one virtual comment separator and preserve outer trimming; large payloads do not create a smaller effective selector limit.",
+        "Commented structural pseudo-class introductions prepay raw-source work/storage. Ordinary class/ID/attribute selectors retain their existing accounting."
+      ],
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "7a54c2da42ab1d299634db0e2052928ad822606d",
+          "sha256": "bf9a6791dceb7fbfa2f9b821ce56ba8c2c3d201b0c94a49a687e70962dd0e443"
+        },
+        "src/css_media.rs": {
+          "git_blob": "b967885ab1ce3cf56d399d916260c741dca59d2b",
+          "sha256": "137c9ca3ae10ffbe166329331c24ad3ba88feed564d1f85c8b76dafedddf77ed"
+        },
+        "src/css_structural.rs": {
+          "git_blob": "d36f78291526e16304dd509a0688f199e0398929",
+          "sha256": "183ff9364bef307baf984ded58a7ed5fb6bb930cf7ae563e9e94258ab35d1ca0"
+        },
+        "src/css_selector_comments.rs": {
+          "git_blob": "e8c254a12b2f4bebe5baff370340f12f717090c4",
+          "sha256": "ff4de1f68e72594dc7fcf1fe13c7969c74b0fe0052af8df209acaff0f7ff2c58"
+        },
+        "src/css_selector_comment_tests.rs": {
+          "git_blob": "7a4990a9fef37fce0ad4d2b2e6400d12e0a40fb0",
+          "sha256": "222296de2268c2c8a5ea499502e1b1bc04bd95082ca85ecda199f5e4b5bd1bb3"
+        },
+        "src/css_selector_comment_boundary_tests.rs": {
+          "git_blob": "8a2e39610bd26a713b20c3bbaf0479c10973d4e7",
+          "sha256": "8d598a676a359242c0095f6aa76ea416c38bc0f4d49ac69d3e76750c0c5690fa"
+        }
+      },
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "original_selector_regressions": 28,
+        "review_boundary_regressions": 4,
+        "existing_css_tests": 211,
+        "native_tests_total": 243,
+        "production_probe_count": 8,
+        "production_probe_cases": [
+          "compound",
+          "query-tokens",
+          "attribute-payload",
+          "nested-structure",
+          "media-walk",
+          "cache-change",
+          "query-topology-budget",
+          "large-comment-admission"
+        ],
+        "scope": "Native CSS parser/selector/cascade components through real CSS, HTML and forms implementations. Compile-only HTTP metadata and an unavailable Page adapter provide no HTTP or frontend evidence."
+      },
+      "remaining": [
+        "Complete CSS Syntax token/component-value representation, escapes, string/URL recovery, exact whitespace and declaration/value token semantics remain open.",
+        "Full Selectors coverage, namespace/escape handling, forgiving/relative selector families and remaining capacity work remain open.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 inputs and complete C01/C03 requirement selections remain unqualified; no complete requirement group or package is closed by this increment."
+      ]
+    }
+  ],
   "source_observations": [
     {
       "id": "P-SYN-01",
@@ -646,7 +739,10 @@
         "Add original regression cases for comment-separated selectors, escaped property names, malformed trailing blocks and error recovery without unintended rule broadening.",
         "Separate normative invalidity from unsupported behavior and resource refusal; preserve complete input and report resource rejection without applying a prefix."
       ],
-      "fresh_runtime_result": null
+      "fresh_runtime_result": null,
+      "subsequent_implementation_slices": [
+        "C01-S01"
+      ]
     },
     {
       "id": "P-SEL-01",
@@ -747,7 +843,10 @@
         "Validate live mutation, sibling/reparenting, focus/hover/form state and relational selector invalidation with positive, negative and budget exhaustion controls.",
         "Replace semantic depth cutoffs with explicitly budgeted traversal or documented whole-operation refusal; never invert exhaustion through not()."
       ],
-      "fresh_runtime_result": null
+      "fresh_runtime_result": null,
+      "subsequent_implementation_slices": [
+        "C01-S01"
+      ]
     },
     {
       "id": "P-SEL-02",
@@ -5828,7 +5927,10 @@
         "P-LOAD-02"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C01-S01"
+      ]
     },
     {
       "id": "C02",
@@ -5914,7 +6016,10 @@
         "P-INV-01"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C01-S01"
+      ]
     },
     {
       "id": "C04",
@@ -7380,5 +7485,6 @@
     "No fresh Windows, App, WPT, benchmark, accessibility-tree or print execution occurred for the CSS plan.",
     "Full SVG/MathML, Unicode data/font formats, codec profiles, Fetch/HTML/DOM/WebIDL, worklets and native window/input/print services retain adjacent owners. Any required dependency is a blocker.",
     "Historical/superseded specifications remain visible; selected current owners resolve replacement rules. A newer module level does not automatically supersede every lower-level requirement."
-  ]
+  ],
+  "runtime_evidence_scope": "fresh_runtime_passes counts native test cases in separately recorded implementation slices; production probes are separate. Historical source_observations retain their static audit baseline. No WPT/browser or complete requirement-group pass is inferred."
 }

@@ -227,14 +227,17 @@ pub(super) fn is_media(prelude: &str) -> Option<&str> {
 /// Unknown at-rules retain their existing opaque/top-level behavior.
 pub(super) fn walk(source: &str, maximum_blocks: usize, environment: Option<MediaEnvironment>,
     mut visit: impl FnMut(&str, &str, bool) -> bool) -> Result<usize, String> {
-    let text = super::without_comments(source);
+    let text = source;
     let bytes = text.as_bytes();
     let mut at = 0usize;
     let mut blocks = 0usize;
     let mut parents = Vec::new();
     let mut active = true;
     while at < bytes.len() {
-        while bytes.get(at).is_some_and(|b| space(*b)) { at += 1; }
+        loop {
+            while bytes.get(at).is_some_and(|b| space(*b)) { at += 1; }
+            if !super::selector_comments::skip(bytes, &mut at) { break; }
+        }
         if at == bytes.len() { break; }
         if bytes[at] == b'}' {
             if let Some(parent) = parents.pop() { active = parent; }
@@ -250,7 +253,9 @@ pub(super) fn walk(source: &str, maximum_blocks: usize, environment: Option<Medi
             if quote != 0 {
                 if byte == b'\\' { at = (at + 2).min(bytes.len()); continue; }
                 if byte == quote { quote = 0; }
-            } else if matches!(byte, b'\'' | b'"') { quote = byte; }
+            } else if super::selector_comments::skip(bytes, &mut at) { continue; }
+            else if byte == b'\\' { at = (at + 2).min(bytes.len()); continue; }
+            else if matches!(byte, b'\'' | b'"') { quote = byte; }
             else if byte == b'(' { parentheses = parentheses.checked_add(1).ok_or("CSS media parenthesis overflow.")?; }
             else if byte == b')' { parentheses = parentheses.saturating_sub(1); }
             else if byte == b'[' { brackets = brackets.checked_add(1).ok_or("CSS media bracket overflow.")?; }
@@ -264,7 +269,8 @@ pub(super) fn walk(source: &str, maximum_blocks: usize, environment: Option<Medi
         at += 1;
         blocks = blocks.checked_add(1).filter(|count| *count <= maximum_blocks)
             .ok_or_else(|| format!("Complete stylesheet refused: document parser block allowance {maximum_blocks} reached."))?;
-        if let Some(condition) = is_media(prelude) {
+        let media_prelude = prelude.starts_with('@').then(|| super::without_comments(prelude));
+        if let Some(condition) = media_prelude.as_deref().and_then(is_media) {
             if !visit(prelude, "", active) { return Ok(blocks); }
             parents.try_reserve(1).map_err(|_| "CSS conditional stack allocation failed.")?;
             parents.push(active);
@@ -279,7 +285,9 @@ pub(super) fn walk(source: &str, maximum_blocks: usize, environment: Option<Medi
             if quote != 0 {
                 if byte == b'\\' { at = (at + 2).min(bytes.len()); continue; }
                 if byte == quote { quote = 0; }
-            } else if matches!(byte, b'\'' | b'"') { quote = byte; }
+            } else if super::selector_comments::skip(bytes, &mut at) { continue; }
+            else if byte == b'\\' { at = (at + 2).min(bytes.len()); continue; }
+            else if matches!(byte, b'\'' | b'"') { quote = byte; }
             else if byte == b'{' { depth = depth.checked_add(1).ok_or("CSS block nesting overflow.")?; }
             else if byte == b'}' { depth -= 1; }
             if depth != 0 { at += 1; }

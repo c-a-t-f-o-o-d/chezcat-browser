@@ -9,6 +9,12 @@ foundation continues through its own register. CSS needed to satisfy an included
 F09–F13 default-presentation, geometry, namespace or native-control contract stays
 a prerequisite of that HTML contract; it cannot be deferred by this sequencing.
 
+Independent syntax and selector corrections may land before F14 when they require
+no unfinished HTML/XHTML contract and preserve its implementation order. Each
+increment records a source baseline, dated clauses, original cases and finite
+evidence. These preparatory increments do not close C00 or relax complete package,
+Windows frontend, XHTML or browser-test acceptance.
+
 The objective is a standards-based CSS implementation shared by HTML and XHTML,
 with exact feature coverage across parsing, cascade, APIs, layout, painting,
 interaction and dynamic updates. Preserve the substantial original implementation
@@ -20,9 +26,10 @@ closure plus a measured journey. Unrelated speech, printing, worklets or forward
 drafts are not blanket prerequisites for those journeys. CSS program acceptance
 has its own coverage boundary and cannot be inferred from one successful site.
 
-This change supplies planning and static source evidence. **It does not execute
-or complete C00, change the active HTML package order, qualify a CSS package,
-publish a new browser binary, or record new compatibility results.**
+The original source audit remains a static baseline. Later finite implementation
+and native results are recorded separately below and in the coverage register.
+**No complete CSS requirement group or package is qualified.** The HTML package
+order and release acceptance remain in force.
 
 ## What the records contain
 
@@ -130,6 +137,45 @@ two identifier tokens and remain invalid, and `color:r/**/ed` must not become
 `color:red`. Follow each malformed rule with an independent valid rule to verify
 recovery. Replacing comments with spaces and simply deleting comment bytes can
 both change CSS token semantics.
+
+
+## Preparatory implementation: selector comment boundaries
+
+**C01-S01 is a partial syntax/selector increment for C01 and C03.** It addresses
+the selector-comment case in the historical source audit above. Stylesheet and
+native query selectors now retain the distinction between a comment and actual
+whitespace: `a/**/.x` matches one compound, while `a/**/b` remains invalid. Comments
+cannot manufacture identifier, hash or function tokens. Attribute matcher
+delimiters, strict negation, nth formulas, quoted values and comment-contained
+punctuation follow the same finite selector contract.
+
+The implementation is tied to [CSS Syntax 3, 1 October 2026,
+sections 4.3.1–4.3.2 and 6.2](https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/)
+and [Selectors 4, 22 January 2026, section 16](https://www.w3.org/TR/2026/WD-selectors-4-20260122/).
+The coverage register records the baseline revision, exact changed source-file
+identities and implementation scope.
+
+Raw stylesheet bytes and the existing raw query allowance remain charged. The
+selector spelling check retains its former one-separator-per-comment accounting
+without allocating comment payloads; leading/trailing trivia retains its prior
+trimming. Structural syntax work and storage are prepaid even when a comment
+follows the colon. Ordinary class, ID and attribute names keep their prior
+accounting.
+
+| Native component evidence | Result |
+| --- | --- |
+| Original selector regressions | 28 pass |
+| Supplemental budget, pseudo-element and capacity controls | 4 pass |
+| Existing CSS tests | 211 pass |
+| Production selector/cascade probes | 8 pass |
+
+These results use original fixtures and the real CSS, HTML and forms components
+on Linux x86_64 with Rust 1.99.1. They do not establish Windows frontend, HTTP,
+XHTML presentation or unchanged browser WPT acceptance. The complete token model,
+escape/string/URL recovery, declaration/value token semantics and wider selector
+coverage remain open. Declaration/value and finite media-condition normalization
+retain their existing behavior; the literal margin inheritance case above also
+remains open. C00 and complete C01/C03 acceptance retain their planned gates.
 
 ## Architecture and invariants
 
@@ -756,7 +802,7 @@ a verified subset and its open requirements; it must not imply all CSS is done.
 Future specification changes update the inventory and selected feature lock
 through a reviewed delta, preserving prior evidence and unresolved failures.
 
-Before implementation resumes after F14, refresh the source audit against current
+Before the broad program starts after F14, refresh the source audit against current
 main, keep any newly completed contracts, lock C00 inputs, and choose the first
 remaining syntax/property slice. The historical CSS-01–CSS-10 roadmap milestones
 remain source-bound increments; these C-packages are the broader standards plan.

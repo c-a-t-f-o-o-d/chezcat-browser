@@ -245,9 +245,36 @@ pub(super) fn parse(name: &str, source: &str, position: &mut usize) -> Option<Pr
             return None;
         }
         let start = *position + 1;
-        let end = start + source[start..].find(')')?;
+        let bytes = source.as_bytes();
+        let mut end = start;
+        while end < bytes.len() {
+            if selector_comments::skip(bytes, &mut end) { continue; }
+            if bytes[end] == b')' { break; }
+            end += 1;
+        }
+        if bytes.get(end) != Some(&b')') { return None; }
         *position = end + 1;
-        let body = source[start..end].trim_ascii();
+        let raw = &source[start..end];
+        let mut first = 0;
+        skip_selector_space(raw.as_bytes(), &mut first);
+        let mut plus_tail = None;
+        if raw.as_bytes().get(first) == Some(&b'+') {
+            let mut after = first + 1;
+            if selector_comments::skip(raw.as_bytes(), &mut after)
+                && matches!(raw.as_bytes().get(after), Some(b'n' | b'N')) {
+                plus_tail = Some(after);
+            }
+        }
+        // An+B permits a '+' delimiter directly before an n identifier token.
+        // Comments can separate those tokens; actual whitespace cannot.
+        let normalized = if let Some(after) = plus_tail {
+            let mut body = String::from("+");
+            body.push_str(&without_comments(&raw[after..]));
+            body
+        } else {
+            without_comments(raw)
+        };
+        let body = normalized.trim_ascii();
         if body.eq_ignore_ascii_case("odd") {
             (Integer::parse("2")?, Integer::parse("1")?)
         } else if body.eq_ignore_ascii_case("even") {
@@ -363,27 +390,46 @@ impl Predicate {
 
 /// Potential structural syntax prepays a source-sized upper bound before the
 /// parser allocates coefficients and reusable arithmetic storage. Quoted text
-/// containing these names can conservatively pay the same admission cost.
+/// containing contiguous pseudo names can conservatively pay the same cost.
 pub(super) fn query_cost(source: &str) -> usize {
     let bytes = source.as_bytes();
-    if [
-        ":first-child",
-        ":last-child",
-        ":only-child",
-        ":first-of-type",
-        ":last-of-type",
-        ":only-of-type",
-        ":empty",
-        ":nth-",
-    ]
-    .iter()
-    .any(|name| {
-        bytes
-            .windows(name.len())
-            .any(|part| part.eq_ignore_ascii_case(name.as_bytes()))
-    }) {
-        source.len().saturating_mul(64)
-    } else {
-        0
+    let names = [
+        "first-child",
+        "last-child",
+        "only-child",
+        "first-of-type",
+        "last-of-type",
+        "only-of-type",
+        "empty",
+        "nth-",
+    ];
+    let structural_name = |at: usize| {
+        bytes.get(at..).is_some_and(|tail| names.iter().any(|name| {
+            tail.get(..name.len()).is_some_and(|part| part.eq_ignore_ascii_case(name.as_bytes()))
+        }))
+    };
+    let mut at = 0;
+    let mut quote = 0;
+    while let Some(&byte) = bytes.get(at) {
+        if quote != 0 {
+            if byte == b':' && structural_name(at + 1) {
+                return source.len().saturating_mul(64);
+            }
+            if byte == b'\\' { at = (at + 2).min(bytes.len()); continue; }
+            if byte == quote { quote = 0; }
+            at += 1;
+            continue;
+        }
+        if selector_comments::skip(bytes, &mut at) { continue; }
+        if matches!(byte, b'\'' | b'"') {
+            quote = byte;
+        } else if byte == b':' {
+            at += 1;
+            selector_comments::skip(bytes, &mut at);
+            if structural_name(at) { return source.len().saturating_mul(64); }
+            continue;
+        }
+        at += 1;
     }
+    0
 }
