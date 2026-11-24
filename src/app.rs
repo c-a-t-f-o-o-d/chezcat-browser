@@ -6473,3 +6473,7 @@ mod node_list_for_each_tests;
 #[cfg(test)]
 #[path="app_node_list_item_tests.rs"]
 mod node_list_item_tests;
+
+#[cfg(test)]
+#[path="app_html_title_domstring_tests.rs"]
+mod html_title_domstring_tests;
