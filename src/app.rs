@@ -6477,3 +6477,7 @@ mod node_list_item_tests;
 #[cfg(test)]
 #[path="app_html_title_domstring_tests.rs"]
 mod html_title_domstring_tests;
+
+#[cfg(test)]
+#[path="app_html_language_domstring_tests.rs"]
+mod html_language_domstring_tests;

@@ -2271,11 +2271,13 @@ until-found strings store and read the canonical keyword; other truthy values
 store an empty attribute. Other objects use one String-hint conversion; Symbol
 conversion fails without publication. Title and lang reflect DOMString; dir
 reads canonical ltr/rtl/auto or the empty string while retaining authored raw text.
-Title preserves exact UTF-16 through its native DOMString record, including lone
-surrogates, across direct/Attr/null-namespace writes, observation and cloning. Its
-getter pays for logical output, and its setter reuses the admitted attribute
+Title and lang preserve exact UTF-16 through native DOMString records, including lone
+surrogates, across direct/Attr/null-namespace writes, observation and cloning. Each
+getter pays for logical output, and each setter reuses the admitted attribute
 transaction; copy/work/string/retained refusal preserves the record and fresh jobs
-recover. Remaining lang/dir scalar bridges and tooltip UI remain separate.
+recover. Dir retains exact authored DOMString text in the attribute while its
+getter returns only canonical known keywords or the empty string. Language
+selection, bidi rendering and tooltip UI remain separate.
 Brands and native origin access are checked before coercion. Supported child
 HTML attributes are readable; child-document writes remain refused.
 

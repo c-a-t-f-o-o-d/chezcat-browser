@@ -3,8 +3,8 @@
 use super::*;
 use crate::javascript::html_reflection_interface as interface;
 impl Bridge<'_> {
-    pub(super) fn html_title_attribute(&self,node:usize,name:&crate::html::AttributeName)->bool {
-        self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html&&matches!(entry.kind,NodeKind::Element{..}))&&name.html_is("title")
+    pub(super) fn html_text_reflection_attribute(&self,node:usize,name:&crate::html::AttributeName)->bool {
+        self.doc.nodes.get(node).is_some_and(|entry|entry.namespace==crate::html::Namespace::Html&&matches!(entry.kind,NodeKind::Element{..}))&&(name.html_is("title")||name.html_is("lang")||name.html_is("dir"))
     }
     pub(super) fn html_reflection_receiver(&self, object: u32) -> bool {
         self.attr_element_receiver(object)
@@ -65,12 +65,12 @@ impl Bridge<'_> {
         let attribute=interface::attribute(name).ok_or("Unknown HTML reflected attribute.")?;
         let count = self.html_reflection_attributes(object)?.len();
         self.state.work(count.saturating_mul(4))?;
-        if name=="title" {
-            let value=self.html_reflection_attributes(object)?.iter().find(|a|a.name.html_is("title")).map(|a|&a.value);
+        if matches!(name,"title"|"lang") {
+            let value=self.html_reflection_attributes(object)?.iter().find(|a|a.name.html_is(name)).map(|a|&a.value);
             let bytes=value.map_or(0,DomString::logical_bytes);self.state.work(bytes)?;
             if bytes>self.state.limits.host.string_bytes{return Err("HTML reflected value exceeds the string allowance.".into());}
             self.state.copies(bytes)?;
-            return match self.html_reflection_attributes(object)?.iter().find(|a|a.name.html_is("title")) {
+            return match self.html_reflection_attributes(object)?.iter().find(|a|a.name.html_is(name)) {
                 Some(attribute)=>Self::dom_string_copy(&attribute.value),None=>Ok(Value::String(String::new())),
             };
         }
@@ -141,9 +141,9 @@ impl Bridge<'_> {
     ) -> Result<(), String> {
         self.validate_html_reflection(object, true)
             .map_err(|(_, m)| m)?;
-        if name=="title" {
-            let value=self.dom_text(value)?;self.state.copies("title".len())?;
-            let attribute=crate::html::AttributeName::unqualified(script_clone_node::copy_text("title")?);
+        if matches!(name,"title"|"lang"|"dir") {
+            let value=self.dom_text(value)?;self.state.copies(name.len())?;
+            let attribute=crate::html::AttributeName::unqualified(script_clone_node::copy_text(name)?);
             return if self.inert_node_type(object)==Some(1) {self.write_inert_dom_attribute(object,attribute,Some(value),false)}
                 else {let node=self.node(object)?;self.public_dom_attribute(node,attribute,Some(value),script_attr::InputPreparation::Pending)};
         }
