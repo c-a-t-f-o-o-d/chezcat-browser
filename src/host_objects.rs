@@ -886,7 +886,7 @@ impl Runtime {
         self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("DOMTokenList".into()),Some((false,false,true)))?;
         self.define_host_attribute(prototype,window,"length","\0DOMTokenList.get.length",None)?;
         self.define_host_attribute(prototype,window,"value","\0DOMTokenList.get.value",Some("\0DOMTokenList.set.value"))?;
-        for (name,operation,length) in [("item","\0DOMTokenList.item",1),("contains","\0DOMTokenList.contains",1),("add","\0DOMTokenList.add",0),("remove","\0DOMTokenList.remove",0),("supports","\0DOMTokenList.supports",1),("toString","\0DOMTokenList.toString",0)] {
+        for (name,operation,length) in [("item","\0DOMTokenList.item",1),("contains","\0DOMTokenList.contains",1),("add","\0DOMTokenList.add",0),("remove","\0DOMTokenList.remove",0),("toggle","\0DOMTokenList.toggle",1),("supports","\0DOMTokenList.supports",1),("toString","\0DOMTokenList.toString",0)] {
             let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
             self.store_property(self.function_properties[method.id],"name".into(),Value::String(name.into()),Some((false,false,true)))?;

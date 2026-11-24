@@ -3220,7 +3220,7 @@ impl Host for Bridge<'_> {
     fn mutation_content_changes(&mut self,target:u32,property:&str,value:&Value)->Result<Vec<crate::javascript::NativeChildListChange>,String>{self.content_observation_changes(target,property,value)}
 
     fn mutation_attribute_setter_change(&mut self,target:u32,property:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{self.attribute_setter_change(target,property)}
-    fn mutation_attribute_operation_change(&mut self,target:u32,method:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{let method=script_class_list::operation(method).unwrap_or(method);if matches!(method,"add"|"remove"){self.token_attribute_change(target)}else if matches!(method,"setProperty"|"removeProperty"){self.style_attribute_change(target)}else{Ok(None)}}
+    fn mutation_attribute_operation_change(&mut self,target:u32,method:&str)->Result<Option<(u32,crate::javascript::NativeAttributeChange)>,String>{let method=script_class_list::operation(method).unwrap_or(method);if matches!(method,"add"|"remove"|"toggle"){self.token_attribute_change(target)}else if matches!(method,"setProperty"|"removeProperty"){self.style_attribute_change(target)}else{Ok(None)}}
 
     fn mutation_attribute_change(&mut self, target: u32, method: &str, args: &[Value])
         -> Result<Option<crate::javascript::NativeAttributeChange>, String>
@@ -3660,6 +3660,7 @@ impl Host for Bridge<'_> {
         let method=script_class_list::operation(method).unwrap_or(method);
         if index==0 && self.class_list_receiver(object) && matches!(method,"contains"|"supports"){return true;}
         if matches!(method,"add"|"remove")&&self.exact_class_token_receiver(object){return true;}
+        if index==0&&method=="toggle"&&self.exact_class_token_receiver(object){return true;}
         if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return index==0 || method==adjacent_interface::TEXT && index==1;}
@@ -3768,7 +3769,7 @@ impl Host for Bridge<'_> {
             return match method { "item" => &[(0, false)], "getNamedItem" => &[(0, true)], "getNamedItemNS" => &[(0, true), (1, true)], _ => &[] };
         }
         if self.class_list_receiver(object) {
-            return match method { "item"=>&[(0,false)], "contains"|"supports"=>&[(0,true)], _=>&[] };
+            return match method { "item"=>&[(0,false)], "contains"|"supports"|"toggle"=>&[(0,true)], _=>&[] };
         }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
@@ -3874,7 +3875,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && method == "getElementsByName" { return Some(1); }
         if method=="getElementsByClassName" && (object==DOCUMENT || self.attr_element_receiver(object) || matches!(self.inert_node_type(object),Some(1|9))) { return Some(1); }
         if self.class_list_receiver(object) {
-            return match method {"contains"|"item"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
+            return match method {"contains"|"item"|"toggle"=>Some(1),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
         (self.attribute_names_receiver(object) && matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
     }
@@ -4089,7 +4090,7 @@ impl Host for Bridge<'_> {
         if object == HISTORY && matches!(method,"replaceState"|"pushState") { return 2; }
         if self.named_map_receiver(object) { return match method { "item" | "getNamedItem" => 1, "getNamedItemNS" => 2, _ => 0 }; }
         if self.attribute_names_receiver(object) && method == "setAttributeNS" { return 3; }
-        if self.class_list_receiver(object) && matches!(method,"item"|"contains"|"supports") { return 1; }
+        if self.class_list_receiver(object) && matches!(method,"item"|"contains"|"supports"|"toggle") { return 1; }
         if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
         if object == DOCUMENT && method == "getElementsByName" { return 1; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
@@ -9111,3 +9112,7 @@ mod token_list_exact_mutation_tests;
 
 #[path="script_token_list_mutation.rs"]
 mod token_list_mutation;
+
+#[cfg(test)]
+#[path="script_token_list_toggle_tests.rs"]
+mod token_list_toggle_tests;

@@ -6453,3 +6453,7 @@ mod html_class_domstring_tests;
 #[cfg(test)]
 #[path="app_token_list_exact_mutation_tests.rs"]
 mod token_list_exact_mutation_tests;
+
+#[cfg(test)]
+#[path="app_token_list_toggle_tests.rs"]
+mod token_list_toggle_tests;
