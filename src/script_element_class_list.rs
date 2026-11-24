@@ -14,7 +14,7 @@ impl Bridge<'_>{
  }
  pub(super) fn element_class_list_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_element_class_list(object).map_err(|(_,message)|message)?;
-  if !self.class_list_element_receiver(object)&&!self.inert_html_class_element_receiver(object){return Err("Element.classList requires supported native token-list owner storage.".into());}
+  if !self.class_list_element_receiver(object)&&!self.inert_class_element_receiver(object){return Err("Element.classList requires supported native token-list owner storage.".into());}
   Ok(Value::Host(script_class_list::handle(object)))
  }
 }

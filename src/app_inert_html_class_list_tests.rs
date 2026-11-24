@@ -19,7 +19,7 @@ struct Fixture(std::path::PathBuf);
 impl Fixture {
     fn new()->Self {
         static NEXT:AtomicUsize=AtomicUsize::new(0);
-        let path=std::env::temp_dir().join(format!("chezcat-string-code-unit-{}-{}.html",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
+        let path=std::env::temp_dir().join(format!("chezcat-app-inert-html-class-list-tests-{}-{}.html",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));
         std::fs::write(&path,MARKUP).unwrap();Self(path)
     }
 }

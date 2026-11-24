@@ -22,7 +22,7 @@ impl Bridge<'_>{
   self.validate_element_class_name(object,true).map_err(|(_,message)|message)?;
   let value=self.dom_text(value)?;self.state.copies(5)?;
   let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("class")?);
-  if self.inert_node_type(object)==Some(1){self.write_inert_dom_attribute(object,name,Some(value),false)}
+  if self.inert_node_type(object)==Some(1){self.write_inert_dom_attribute_ns(object,name,Some(value))}
   else{let node=self.node(object)?;self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)}
  }
 }

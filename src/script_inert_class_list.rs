@@ -1,4 +1,4 @@
-//! Token operations over immutable inert HTML attribute sources. Holding an Rc
+//! Token operations over immutable inert Element attribute sources. Holding an Rc
 //! view copies no attribute payload and adds no allocation or token cache.
 use super::*;
 use crate::dom_string::DomStringRef;
@@ -22,12 +22,12 @@ fn source<'a>(doc:&'a Document,arena:&Arena,owner:u32)->Result<Source<'a>,String
  }
 }
 impl Bridge<'_>{
- pub(in crate::scripting) fn inert_html_class_element_receiver(&self,owner:u32)->bool{
-  self.inert_node_type(owner)==Some(1)&&self.html_reflection_receiver(owner)
+ pub(in crate::scripting) fn inert_class_element_receiver(&self,owner:u32)->bool{
+  self.inert_node_type(owner)==Some(1)
  }
  fn inert_token_owner(&mut self,object:u32)->Result<u32,String>{
-  let owner=script_class_list::element(object).filter(|&owner|self.inert_html_class_element_receiver(owner)).ok_or("Inert HTML token list is unavailable.")?;
-  if script_class_list::attribute(object)!=Some("class"){return Err("Inert HTML token attribute is unavailable.".into());}
+  let owner=script_class_list::element(object).filter(|&owner|self.inert_class_element_receiver(owner)).ok_or("Inert Element token list is unavailable.")?;
+  if script_class_list::attribute(object)!=Some("class"){return Err("Inert Element token attribute is unavailable.".into());}
   self.native_node_access(owner).map_err(|(_,message)|message)?;
   self.state.work(1)?;self.state.copies(size_of::<usize>())?;Ok(owner)
  }
@@ -36,7 +36,7 @@ impl Bridge<'_>{
   let source=source(self.doc,&self.state.inert_documents,owner)?;
   token_list_reads::read_attributes(self.state,source.attrs()?,"class",read)
  }
- pub(in crate::scripting) fn inert_html_class_list_get(&mut self,object:u32,property:&str)->Result<Value,String>{
+ pub(in crate::scripting) fn inert_class_list_get(&mut self,object:u32,property:&str)->Result<Value,String>{
   if property=="value"{let owner=self.inert_token_owner(object)?;return self.element_attribute_string_get(owner,"class");}
   if property=="length"{return self.inert_token_read(object,token_list_reads::Read::Length);}
   if let Some(index)=collection_index(property){return self.inert_token_read(object,token_list_reads::Read::Index(index,true));}
@@ -44,7 +44,7 @@ impl Bridge<'_>{
   if matches!(property,"entries"|"keys"|"values"){return Err(format!("DOMTokenList operation {property:?} is not implemented."));}
   Ok(Value::Undefined)
  }
- pub(in crate::scripting) fn inert_html_class_list_call(&mut self,object:u32,method:&str,args:&[Value])->Result<Value,String>{
+ pub(in crate::scripting) fn inert_class_list_call(&mut self,object:u32,method:&str,args:&[Value])->Result<Value,String>{
   let owner=self.inert_token_owner(object)?;
   self.class_list_validate(object,method,args).map_err(|(_,message)|message)?;
   if method=="toString"{return self.element_attribute_string_get(owner,"class");}
@@ -55,7 +55,7 @@ impl Bridge<'_>{
    if method=="contains"{return Ok(present);}
    let Value::Bool(present)=present else{unreachable!()};
    if method=="replace"&&!present{return Ok(Value::Bool(false));}
-   if method=="toggle"{let desired=args.get(1).map_or(!present,Value::truthy);if desired!=present{self.inert_html_class_list_call(object,if desired{"add"}else{"remove"},&args[..1])?;}return Ok(Value::Bool(desired));}
+   if method=="toggle"{let desired=args.get(1).map_or(!present,Value::truthy);if desired!=present{self.inert_class_list_call(object,if desired{"add"}else{"remove"},&args[..1])?;}return Ok(Value::Bool(desired));}
   }
   if !matches!(method,"add"|"remove"|"replace"){return Err(format!("DOMTokenList method {method:?} is not implemented."));}
   let(value,absent)={
@@ -67,7 +67,7 @@ impl Bridge<'_>{
   if !value.is_empty()||!absent{
    self.state.copies(5)?;
    let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("class")?);
-   self.write_inert_dom_attribute(owner,name,Some(value),false)?;
+   self.write_inert_dom_attribute_ns(owner,name,Some(value))?;
   }
   Ok(if method=="replace"{Value::Bool(true)}else{Value::Undefined})
  }
