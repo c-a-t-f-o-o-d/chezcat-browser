@@ -189,7 +189,7 @@ f.sandbox=null;if(list.value!=='null')throw 'PutForwards DOMString null';
         );
     }
     #[test]
-    fn iframe_sandbox_saved_child_getters_and_unsupported_list_methods_keep_guards() {
+    fn iframe_sandbox_saved_child_getters_toggle_and_unsupported_list_methods_keep_guards() {
         let (mut doc, mut forms, mut page) = fixture();
         run(
             &mut doc,
@@ -198,10 +198,11 @@ f.sandbox=null;if(list.value!=='null')throw 'PutForwards DOMString null';
             r#"
 var f=document.createElement('iframe'),frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,get=Object.getOwnPropertyDescriptor(w.HTMLIFrameElement.prototype,'sandbox').get;
 if(get.call(f)!==f.sandbox||f.sandbox===f.classList)throw 'saved child accessor receiver';
+if(f.sandbox.toggle('allow-scripts')!==true||f.sandbox.value!=='allow-scripts'||f.sandbox.supports('allow-scripts')||f.contentWindow!==null)throw 'actual detached toggle metadata';
 "#,
         );
         let before = page.state.dom_commits;
-        for source in ["f.sandbox.toggle('allow-scripts');"] {
+        for source in ["f.sandbox.replace('allow-scripts','allow-forms');"] {
             let out = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(out.errors, 1, "{}", page.report());
             assert_eq!(page.state.dom_commits, before);

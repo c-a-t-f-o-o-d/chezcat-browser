@@ -36,6 +36,7 @@ pub(super) fn operation(name: &str) -> Option<&'static str> {
         "\0DOMTokenList.contains"=>"contains",
         "\0DOMTokenList.add"=>"add",
         "\0DOMTokenList.remove"=>"remove",
+        "\0DOMTokenList.toggle"=>"toggle",
         "\0DOMTokenList.supports"=>"supports",
         "\0DOMTokenList.toString"=>"toString",
         _=>return None,
@@ -45,6 +46,7 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
     match name {
         "add" => Some("add"),
         "remove" => Some("remove"),
+        "toggle" => Some("toggle"),
         "contains" => Some("contains"),
         "supports" => Some("supports"),
         "item" => Some("item"),
@@ -124,8 +126,8 @@ impl Bridge<'_> {
             ));
         }
         if method=="supports" && supported_tokens(object).is_none(){return Err(("TypeError","This token attribute does not define supported tokens.".into()));}
-        if matches!(method, "add" | "remove") {
-            for value in args {
+        if matches!(method, "add" | "remove" | "toggle") {
+            for value in args.iter().take(if method=="toggle"{1}else{usize::MAX}) {
                 if self.exact_class_token_receiver(object) {
                     let token=token_list_reads::argument(value).map_err(|message|("TypeError",message))?;
                     if token.is_empty(){return Err(("SyntaxError","Class token must not be empty.".into()));}
@@ -160,7 +162,7 @@ impl Bridge<'_> {
         if property == "length" {return self.read_class_tokens(node,attribute,token_list_reads::Read::Length);}
         if let Some(index)=collection_index(property){return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,true));}
         match property {
-            "toggle" | "replace" | "entries" | "keys" | "values" | "forEach" => Err(
+            "replace" | "entries" | "keys" | "values" | "forEach" => Err(
                 format!("DOMTokenList operation {property:?} is not implemented."),
             ),
             // Ordinary absent properties can inherit from Object.prototype.
@@ -195,6 +197,16 @@ impl Bridge<'_> {
             .map_err(|(_, message)| message)?;
         if method == "toString" {
             return self.class_value(node,attribute);
+        }
+        if method=="toggle" {
+            let value=args.first().ok_or("toggle requires a converted DOMString token.")?;
+            let token=token_list_reads::argument(value)?;
+            let Value::Bool(present)=self.read_class_tokens(node,attribute,token_list_reads::Read::Contains(token))? else{unreachable!()};
+            let desired=args.get(1).map_or(!present,Value::truthy);
+            // A forced no-op retains the original spelling and generation.
+            // Mutation observation publishes only the actual nested commit.
+            if desired!=present {self.class_list_call(object,if desired{"add"}else{"remove"},std::slice::from_ref(value))?;}
+            return Ok(Value::Bool(desired));
         }
         if method=="supports" {
             let token=token_list_reads::argument(args.first().ok_or("supports requires a converted DOMString token.")?)?;
