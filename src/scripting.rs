@@ -9749,3 +9749,7 @@ mod script_legend_align;
 #[cfg(test)]
 #[path="script_legend_inert_import_tests.rs"]
 mod legend_inert_import_tests;
+
+#[cfg(test)]
+#[path="script_legend_native_copy_tests.rs"]
+mod legend_native_copy_tests;

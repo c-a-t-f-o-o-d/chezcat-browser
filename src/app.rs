@@ -6729,3 +6729,7 @@ mod legend_align_tests;
 #[cfg(test)]
 #[path="app_legend_inert_import_tests.rs"]
 mod legend_inert_import_tests;
+
+#[cfg(test)]
+#[path="app_legend_native_copy_tests.rs"]
+mod legend_native_copy_tests;
