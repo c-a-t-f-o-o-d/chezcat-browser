@@ -6749,3 +6749,7 @@ mod ul_compact_tests;
 #[cfg(test)]
 #[path="app_span_interface_tests.rs"]
 mod span_interface_tests;
+
+#[cfg(test)]
+#[path="app_dl_compact_tests.rs"]
+mod dl_compact_tests;

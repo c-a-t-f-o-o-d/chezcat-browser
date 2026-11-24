@@ -109,7 +109,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,length) in [("addEventListener",2),("removeEventListener",2),("dispatchEvent",1)] {
-                if matches!(name,"removeEventListener"|"dispatchEvent"){self.deferred_host_method(prototype,window,name,name,length)?;continue;}
+                if matches!(name,"addEventListener"|"removeEventListener"|"dispatchEvent"){self.deferred_host_method(prototype,window,name,name,length)?;continue;}
                 let method=self.allocate_host_function_with_length(window,name,length).map_err(Fault::new)?;
                 if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                 self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;
@@ -623,6 +623,7 @@ impl Runtime {
             if name == "HTMLHeadingElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHeadingElement.get.align",Some("\0HTMLHeadingElement.set.align"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"type","\0HTMLUListElement.get.type",Some("\0HTMLUListElement.set.type"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLUListElement.get.compact",Some("\0HTMLUListElement.set.compact"))?;}
+            if name == "HTMLDListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDListElement.get.compact",Some("\0HTMLDListElement.set.compact"))?;}
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"align","\0HTMLLegendElement.get.align",Some("\0HTMLLegendElement.set.align"))?;}
             if name == "HTMLDivElement" {self.define_host_attribute(prototype,window,"align","\0HTMLDivElement.get.align",Some("\0HTMLDivElement.set.align"))?;}
