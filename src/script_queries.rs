@@ -20,6 +20,16 @@ pub(super) fn node_list_index(handle: u32) -> Option<usize> {
 }
 
 impl Bridge<'_> {
+    pub(super) fn canonical_name_list_member(&self, object:u32, property:&str)->bool {
+        property=="getElementsByName" && self.identifier_lookup_receiver(object,Some(true))
+    }
+    pub(super) fn validate_name_list(&self,object:u32)->Result<(),(&'static str,String)>{
+        if !self.identifier_lookup_receiver(object,Some(true)){return Err(("TypeError","getElementsByName requires a genuine Document.".into()));}
+        self.native_node_access(object)?;
+        if object!=DOCUMENT{return Err(("NotSupportedError","Live name lists for this Document require an owner-bound traversal.".into()));}
+        Ok(())
+    }
+
     pub(super) fn node_list_iteration_member(&self,handle:u32,property:&str)->bool {
         // Methods and length use ordinary prototype lookup; only native
         // indices retain their protected route.

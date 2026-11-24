@@ -371,7 +371,13 @@ brand/Symbol/abrupt behavior and native copy/string/storage/read-work refusal
 retain recovery. Main raw-name records are component fixtures; App pointer-driven
 native queries retain paint/editor/link/page identity, and production controls
 cover scalar names and unmatched raw queries. Main raw-name producers,
-canonical/inert/child Document expansion and frozen qualification remain separate.
+inert/child Document expansion and frozen qualification remain separate.
+The canonical Document.prototype.getElementsByName operation now has inherited
+metadata and ordinary override/deletion/restoration. Saved functions retain the
+exact displayed-document live backend, genuine Document branding and origin
+checks before conversion. Genuine other Document owners explicitly refuse before
+conversion until owner-bound live traversal is implemented. Original native/App
+checks cover prototype changes and saved-realm calls; no inert/child list is fabricated.
 F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing

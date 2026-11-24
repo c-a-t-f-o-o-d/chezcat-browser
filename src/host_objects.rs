@@ -490,6 +490,7 @@ impl Runtime {
                         ("adoptNode",DOCUMENT_ADOPT_NODE,1),
                         ("createAttribute",super::DOCUMENT_CREATE_ATTRIBUTE,1),
                         ("createAttributeNS",super::DOCUMENT_CREATE_ATTRIBUTE_NS,2),
+                        ("getElementsByName",super::DOCUMENT_GET_ELEMENTS_NAME,1),
                         ("getElementsByTagName",super::DOCUMENT_GET_ELEMENTS_TAG,1),
                         ("getElementsByTagNameNS", super::DOCUMENT_GET_ELEMENTS_TAG_NS, 2),
                         ("getElementsByClassName",super::DOCUMENT_GET_ELEMENTS_CLASS,1),

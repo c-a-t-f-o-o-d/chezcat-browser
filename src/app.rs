@@ -6517,3 +6517,7 @@ mod html_id_materialization_tests;
 #[cfg(test)]
 #[path="app_live_name_domstring_tests.rs"]
 mod live_name_domstring_tests;
+
+#[cfg(test)]
+#[path="app_document_name_method_tests.rs"]
+mod document_name_method_tests;
