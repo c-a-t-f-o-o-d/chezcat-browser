@@ -293,11 +293,17 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 pub(super) fn layout_property(name:&str)->bool{matches!(name,"width"|"height"|"min-width"|"min-height"|"max-width"|"max-height"|"display"|"box-sizing"|"flex-grow"|"flex-shrink"|"flex-basis"|"flex"|"flex-direction"|"flex-wrap"|"flex-flow"|"gap"|"row-gap"|"column-gap")}
+pub(super) fn border_property(name:&str)->bool {
+    matches!(name,
+        "border"|"border-top"|"border-right"|"border-bottom"|"border-left"|
+        "border-width"|"border-style"|"border-color"|
+        "border-top-width"|"border-right-width"|"border-bottom-width"|"border-left-width"|
+        "border-top-style"|"border-right-style"|"border-bottom-style"|"border-left-style"|
+        "border-top-color"|"border-right-color"|"border-bottom-color"|"border-left-color")
+}
 fn box_property(name:&str)->bool {
-    layout_property(name) || matches!(name,"margin"|"margin-top"|"margin-right"|"margin-bottom"|"margin-left"|
-        "padding"|"padding-top"|"padding-right"|"padding-bottom"|"padding-left"|"border"|"border-width"|"border-style"|"border-color"|"background-color"|"background"|"color"|"font-size"|"height")
-        || ["top","right","bottom","left"].iter().any(|side|
-            name==format!("border-{side}") || ["width","style","color"].iter().any(|part|name==format!("border-{side}-{part}")))
+    layout_property(name) || box_spacing::property(name) || border_property(name)
+        || matches!(name,"background-color"|"background"|"color"|"font-size")
 }
 fn border_value(value:&str)->bool {
     parse_border(value).is_some()
@@ -363,10 +369,13 @@ pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         if name=="margin" || name==format!("margin-{side}") {style.margin[index]=length(source.margin[index]);}
         if name=="padding" || name==format!("padding-{side}") {style.padding[index]=length(source.padding[index]);}
         let entire=name=="border" || name==format!("border-{side}");
-        if entire || name=="border-width" || name==format!("border-{side}-width") {style.border_width[index]=source.border_width[index];}
+        if entire || name=="border-width" || name==format!("border-{side}-width") {
+            style.border_width[index]=if inherit && !source.border_solid[index] {Length::Px(0.0)}
+                else {length(source.border_width[index])};
+        }
         if entire || name=="border-style" || name==format!("border-{side}-style") {style.border_solid[index]=source.border_solid[index];}
         if entire || name=="border-color" || name==format!("border-{side}-color") {
-            style.border_color[index]=if inherit{Some(source.border_color[index].unwrap_or(source.color))}else{source.border_color[index]};
+            style.border_color[index]=source.border_color[index];
             style.border_alpha[index]=source.border_alpha[index];
         }
     }
@@ -408,7 +417,11 @@ pub(super) fn apply_font_size(style:&mut Style,parent:&Style,declaration:&Declar
     } else if has_var(&declaration.value) {style.font_size=parent.font_size;*known=parent_known;}
 }
 
+#[cfg(test)]
 pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget)->bool {
+    apply_box_with_parent(style,parent,declaration,variables,budget,true)
+}
+pub(super) fn apply_box_with_parent(style:&mut Style,parent:&Style,declaration:&Declaration,variables:&Variables,budget:&mut Budget,has_element_parent:bool)->bool {
     if !box_property(&declaration.name) || !has_var(&declaration.value) {return false;}
     if declaration.name=="font-size" {apply_font_size(style,parent,declaration,variables,budget,&mut true,true,true);return true;}
     // A var()-bearing declaration participates in the cascade before its
@@ -430,9 +443,11 @@ pub(super) fn apply_box(style:&mut Style,parent:&Style,declaration:&Declaration,
             style.background_clip=None;
             return true;
         }
-        reset_box(style,parent,&declaration.name,value=="inherit" || (inherited && value=="unset"));
+        let inherit=(value=="inherit" || (inherited && value=="unset"))
+            && (!border_property(&declaration.name) || has_element_parent);
+        reset_box(style,parent,&declaration.name,inherit);
     } else if valid_box(&declaration.name,&value) {
-        apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet});
+        apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet},has_element_parent);
     } else {reset_box(style,parent,&declaration.name,inherited);}
     if !available && declaration.name=="background" {style.background_clip=None;}
     true

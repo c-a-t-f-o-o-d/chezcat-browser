@@ -29,7 +29,7 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 289
+    "fresh_runtime_passes": 364
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -763,6 +763,130 @@
         "revert/revert-layer and complete origin/layer cascade behavior are outside this three-keyword increment.",
         "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
         "C00 and complete C04/C05 requirement selections remain unqualified; no complete requirement group or package is closed by this increment."
+      ],
+      "integrated_revision": "d49d8a9bad6a602398a9bf87c0f08bc5f826c3f1",
+      "pull_request": 622
+    },
+    {
+      "id": "C04-S02",
+      "name": "Physical border explicit defaulting and inheritance",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05"
+      ],
+      "baseline_revision": "b0a86973bf15e811ec511ab8f1468be59695a468",
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "3",
+            "4.4",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2024/CRD-css-backgrounds-3-20240311/",
+          "sections": [
+            "3.1",
+            "3.2",
+            "3.3",
+            "3.4"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-color-4-20261123/",
+          "sections": [
+            "15.5"
+          ]
+        }
+      ],
+      "properties": [
+        "border",
+        "border-width",
+        "border-style",
+        "border-color",
+        "border-top",
+        "border-top-width",
+        "border-top-style",
+        "border-top-color",
+        "border-right",
+        "border-right-width",
+        "border-right-style",
+        "border-right-color",
+        "border-bottom",
+        "border-bottom-width",
+        "border-bottom-style",
+        "border-bottom-color",
+        "border-left",
+        "border-left-width",
+        "border-left-style",
+        "border-left-color"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The twenty physical border properties share literal and substituted inherit/initial/unset behavior across existing width, style and color grammars.",
+        "Inherited font-relative widths use final parent font metrics. A real parent with none/hidden supplies zero width; root and synthetic fragment containers instead use initial values.",
+        "Inherited currentcolor retains its keyword identity and resolves using the descendant foreground. Explicit RGB and alpha remain paired.",
+        "Shorthand/longhand priority, side isolation, malformed declaration recovery, source/cache replacement, and work/copy refusal remain covered through native cascades."
+      ],
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "76645adfdb82228adf866d3c8519fcaca0da2a3b",
+          "sha256": "e04979da6567d95d3f039336bda1aec41eaab960548f4ed22a3a186f34a9a58e"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "0bdd6d237b697fbc2062d0a72adfbaed1f320cc0",
+          "sha256": "95ce0c4c3b10c4c6ae3ba1e15cbac5d2efcd1280bb1d16b5f44ed6b49dbd71c2"
+        },
+        "src/css_border_default_tests.rs": {
+          "git_blob": "0bb9cd6a16579886a58e1bcf5b4736da73cf50e6",
+          "sha256": "5847b597d05131dda564f556d18b0af3c57754bd013c540b3889e8f33b5c934f"
+        },
+        "src/css_rgba_border_tests.rs": {
+          "git_blob": "4769131317151af957ba635a94d03586b77c4c11",
+          "sha256": "ac92ce92b80cabee33aa9d42a4e30b56ddd80be3a212bf6d620d1f208b7f419d"
+        }
+      },
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "original_border_regressions": 26,
+        "existing_related_css_tests": 49,
+        "native_tests_total": 75,
+        "production_probe_count": 8,
+        "production_probe_cases": [
+          "literal-keyword-matrix",
+          "computed-units-style-order",
+          "currentcolor-alpha",
+          "root-defaults-generations",
+          "priority-order",
+          "malformed-invalid-variables",
+          "external-cache-parent-change",
+          "refusal-recovery"
+        ],
+        "selection_sha256": "2c2cfd143a1d5748042da2e74e32c28a7d63982db11c3143c3cc33e932925c0c",
+        "source_manifest_sha256": "265061b026afa7b8093a3917db115ab9a90b5f1d59f7a52abb97edc3e2a90ac2",
+        "scope": "Native CSS border defaulting through real CSS/HTML components. Compile-only HTTP metadata and an unavailable Page adapter provide no HTTP or frontend evidence.",
+        "existing_test_correction": "One earlier currentcolor inheritance assertion now preserves the keyword and checks descendant foreground resolution, as required by Color 4 section 15.5. Its explicit RGBA assertions are unchanged."
+      },
+      "remaining": [
+        "Complete property metadata/defaulting, logical borders, additional line styles, border images, device-pixel snapping and general CSSOM consistency remain open. The finite representation still groups none and hidden outside collapsed tables.",
+        "revert/revert-layer and complete origin/layer cascade behavior remain outside this three-keyword increment.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05 selections remain unqualified; no complete requirement group or package is closed by this increment."
       ]
     }
   ],
@@ -6181,7 +6305,8 @@
       "required_selection": null,
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
-        "C04-S01"
+        "C04-S01",
+        "C04-S02"
       ]
     },
     {
@@ -6225,7 +6350,8 @@
       "required_selection": null,
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
-        "C04-S01"
+        "C04-S01",
+        "C04-S02"
       ]
     },
     {
