@@ -35,6 +35,19 @@ pub(crate) fn prefix_end(bytes: &[u8], signed: bool) -> Option<usize> {
     Some(at)
 }
 
+/// HTML integer prefix parsing restricted to the reflected signed-long range.
+/// No attribute normalization or allocation occurs on a read.
+pub(crate) fn html_long(text:&str)->Option<i32>{
+ let bytes=text.as_bytes();let mut at=0;
+ while bytes.get(at).is_some_and(|b|matches!(*b,b' '|b'\t'|b'\n'|b'\r'|b'\x0c')){at+=1;}
+ let negative=bytes.get(at)==Some(&b'-');if negative||bytes.get(at)==Some(&b'+'){at+=1;}
+ let start=at;let limit=if negative{2_147_483_648u32}else{2_147_483_647u32};let mut value=0u32;
+ while let Some(digit)=bytes.get(at).filter(|b|b.is_ascii_digit()){
+  value=value.checked_mul(10)?.checked_add(u32::from(*digit-b'0'))?;if value>limit{return None;}at+=1;
+ }
+ if at==start{None}else if negative{Some((-(i64::from(value)))as i32)}else{Some(value as i32)}
+}
+
 /// HTML admits only ASCII leading whitespace and finite results, with +0.
 /// Callers charge the complete source scan before entering this allocation-free path.
 pub(crate) fn html_float(text:&str)->Option<f64>{
