@@ -6441,3 +6441,7 @@ mod token_list_interface_tests;
 #[cfg(test)]
 #[path="app_css_class_exact_tests.rs"]
 mod css_class_exact_tests;
+
+#[cfg(test)]
+#[path="app_selector_ident_start_tests.rs"]
+mod selector_ident_start_tests;
