@@ -14328,3 +14328,10 @@ pub(crate) mod aria_reflection_interface;
 #[cfg(test)]
 #[path="native_leaf_getter_tests.rs"]
 mod native_leaf_getter_tests;
+
+#[cfg(test)]
+#[path = "string_from_char_code_utf16_tests.rs"]
+mod string_from_char_code_utf16_tests;
+
+#[path = "string_from_char_code.rs"]
+mod string_from_char_code;

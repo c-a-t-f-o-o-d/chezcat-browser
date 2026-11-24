@@ -59,20 +59,20 @@ impl Runtime {
                 // Skipping a UTF-16 prefix still scans UTF-8. A complete
                 // receiver scan bounds each selected-range traversal, while
                 // storage is reserved only for the selected final result.
-                self.string_slice_output(text.encode_utf16().skip(start).take(count), count, text.len())
+                self.string_units_output(text.encode_utf16().skip(start).take(count), count, text.len(), "String slicing")
             }
             SliceInput::Units(units) => {
-                self.string_slice_output(units[start..end].iter().copied(), count, count.saturating_mul(2))
+                self.string_units_output(units[start..end].iter().copied(), count, count.saturating_mul(2), "String slicing")
             }
         }
     }
 
-    fn string_slice_workspace_fault(&self) -> Fault {
-        Fault::new(format!("String slicing workspace limit reached ({} bytes).", self.limits.heap.retained_values))
+    fn string_output_workspace_fault(&self, label:&str) -> Fault {
+        Fault::new(format!("{label} workspace limit reached ({} bytes).", self.limits.heap.retained_values))
     }
 
-    fn string_slice_output<I: Iterator<Item = u16> + Clone>(
-        &mut self, units: I, count: usize, scan_bytes: usize,
+    pub(super) fn string_units_output<I: Iterator<Item = u16> + Clone>(
+        &mut self, units: I, count: usize, scan_bytes: usize, label:&str,
     ) -> Result<Value, Fault> {
         self.work_as(scan_bytes, WorkKind::StringMethodInput)?;
         let mut scalar = true;
@@ -87,17 +87,17 @@ impl Runtime {
         };
         if bytes > self.limits.capacity.string_bytes { return Err(self.string_limit_fault()); }
         let available = self.limits.heap.retained_values.saturating_sub(self.value_bytes);
-        if bytes > available { return Err(self.string_slice_workspace_fault()); }
+        if bytes > available { return Err(self.string_output_workspace_fault(label)); }
         self.work_as(scan_bytes, WorkKind::StringMethodInput)?;
         self.work_as(bytes, WorkKind::ConversionOutput)?;
         let mut owned = 0usize;
         let result = (|| {
             let value = if scalar {
                 let mut text = String::new();
-                text.try_reserve_exact(bytes).map_err(|_| Fault::new("String slicing allocation failed."))?;
+                text.try_reserve_exact(bytes).map_err(|_| Fault::new(format!("{label} allocation failed.")))?;
                 let capacity = text.capacity();
-                if capacity > available { return Err(self.string_slice_workspace_fault()); }
-                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_slice_workspace_fault())?;
+                if capacity > available { return Err(self.string_output_workspace_fault(label)); }
+                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_output_workspace_fault(label))?;
                 owned = capacity;
                 for decoded in char::decode_utf16(units) {
                     self.step()?;
@@ -106,10 +106,10 @@ impl Runtime {
                 Value::String(text)
             } else {
                 let mut output = Vec::new();
-                output.try_reserve_exact(count).map_err(|_| Fault::new("String slicing allocation failed."))?;
-                let capacity = output.capacity().checked_mul(2).ok_or_else(|| self.string_slice_workspace_fault())?;
-                if capacity > available { return Err(self.string_slice_workspace_fault()); }
-                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_slice_workspace_fault())?;
+                output.try_reserve_exact(count).map_err(|_| Fault::new(format!("{label} allocation failed.")))?;
+                let capacity = output.capacity().checked_mul(2).ok_or_else(|| self.string_output_workspace_fault(label))?;
+                if capacity > available { return Err(self.string_output_workspace_fault(label)); }
+                self.value_bytes = self.value_bytes.checked_add(capacity).ok_or_else(|| self.string_output_workspace_fault(label))?;
                 owned = capacity;
                 for unit in units {
                     self.step()?;
@@ -122,7 +122,7 @@ impl Runtime {
         // Only the result backing belongs to this operation. Callback
         // publications completed before it was reserved and keep their charges.
         self.value_bytes = self.value_bytes.checked_sub(owned)
-            .ok_or_else(|| Fault::new("String slicing workspace refund accounting failed."))?;
+            .ok_or_else(|| Fault::new(format!("{label} workspace refund accounting failed.")))?;
         result
     }
 }
