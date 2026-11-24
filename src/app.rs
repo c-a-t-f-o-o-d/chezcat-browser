@@ -6737,3 +6737,7 @@ mod legend_native_copy_tests;
 #[cfg(test)]
 #[path="app_paragraph_align_tests.rs"]
 mod paragraph_align_tests;
+
+#[cfg(test)]
+#[path="app_ul_type_tests.rs"]
+mod ul_type_tests;

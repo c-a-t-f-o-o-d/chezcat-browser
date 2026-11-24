@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3127,6 +3127,7 @@ impl Bridge<'_> {
         if self.time_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
+        if self.ul_type_member(object,property){return true;}
         if self.paragraph_align_member(object,property){return true;}
         if self.legend_align_member(object,property){return true;}
         if self.div_align_member(object,property){return true;}
@@ -3265,6 +3266,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(target,property){return Some("datetime");}
         if self.data_value_member(target,property){return Some("value");}
         if self.heading_align_member(target,property){return Some("align");}
+        if self.ul_type_member(target,property){return Some("type");}
         if self.paragraph_align_member(target,property){return Some("align");}
         if self.legend_align_member(target,property){return Some("align");}
         if self.div_align_member(target,property){return Some("align");}
@@ -3474,6 +3476,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return false;}
         if self.data_value_member(object,property){return false;}
         if self.heading_align_member(object,property){return false;}
+        if self.ul_type_member(object,property){return false;}
         if self.paragraph_align_member(object,property){return false;}
         if self.legend_align_member(object,property){return false;}
         if self.div_align_member(object,property){return false;}
@@ -3615,6 +3618,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return false;}
         if self.data_value_member(object,property){return false;}
         if self.heading_align_member(object,property){return false;}
+        if self.ul_type_member(object,property){return false;}
         if self.paragraph_align_member(object,property){return false;}
         if self.legend_align_member(object,property){return false;}
         if self.div_align_member(object,property){return false;}
@@ -3662,6 +3666,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
+        if self.ul_type_member(object,property){return true;}
         if self.paragraph_align_member(object,property){return true;}
         if self.legend_align_member(object,property){return true;}
         if self.div_align_member(object,property){return true;}
@@ -3724,6 +3729,7 @@ impl Host for Bridge<'_> {
         if method==script_time_datetime::SET&&self.time_datetime_receiver(object){return Some("dateTime");}
         if method==script_data_value::SET&&self.data_value_receiver(object){return Some("value");}
         if method==script_heading_align::SET&&self.heading_align_receiver(object){return Some("align");}
+        if method==script_ul_type::SET&&self.ul_type_receiver(object){return Some("type");}
         if method==script_paragraph_align::SET&&self.paragraph_align_receiver(object){return Some("align");}
         if method==script_legend_align::SET&&self.legend_align_receiver(object){return Some("align");}
         if method==script_div_align::SET&&self.div_align_receiver(object){return Some("align");}
@@ -3816,6 +3822,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
+        if self.ul_type_member(object,property){return true;}
         if self.paragraph_align_member(object,property){return true;}
         if self.legend_align_member(object,property){return true;}
         if self.div_align_member(object,property){return true;}
@@ -4076,6 +4083,7 @@ impl Host for Bridge<'_> {
         if script_time_datetime::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_data_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_heading_align::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_ul_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_paragraph_align::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_legend_align::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_div_align::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4408,6 +4416,7 @@ impl Host for Bridge<'_> {
         if script_time_datetime::operation(method){return self.validate_time_datetime(object);}
         if script_data_value::operation(method){return self.validate_data_value(object);}
         if script_heading_align::operation(method){return self.validate_heading_align(object);}
+        if script_ul_type::operation(method){return self.validate_ul_type(object);}
         if script_paragraph_align::operation(method){return self.validate_paragraph_align(object);}
         if script_legend_align::operation(method){return self.validate_legend_align(object);}
         if script_div_align::operation(method){return self.validate_div_align(object);}
@@ -4646,6 +4655,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return self.validate_time_datetime(object);}
         if self.data_value_member(object,property){return self.validate_data_value(object);}
         if self.heading_align_member(object,property){return self.validate_heading_align(object);}
+        if self.ul_type_member(object,property){return self.validate_ul_type(object);}
         if self.paragraph_align_member(object,property){return self.validate_paragraph_align(object);}
         if self.legend_align_member(object,property){return self.validate_legend_align(object);}
         if self.div_align_member(object,property){return self.validate_div_align(object);}
@@ -4895,6 +4905,7 @@ impl Host for Bridge<'_> {
         if script_time_datetime::operation(method){return self.event_target_interface(object)&&self.time_datetime_receiver(receiver);}
         if script_data_value::operation(method){return self.event_target_interface(object)&&self.data_value_receiver(receiver);}
         if script_heading_align::operation(method){return self.event_target_interface(object)&&self.heading_align_receiver(receiver);}
+        if script_ul_type::operation(method){return self.event_target_interface(object)&&self.ul_type_receiver(receiver);}
         if script_paragraph_align::operation(method){return self.event_target_interface(object)&&self.paragraph_align_receiver(receiver);}
         if script_legend_align::operation(method){return self.event_target_interface(object)&&self.legend_align_receiver(receiver);}
         if script_div_align::operation(method){return self.event_target_interface(object)&&self.div_align_receiver(receiver);}
@@ -5789,6 +5800,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return self.time_datetime_get(object);}
         if self.data_value_member(object,property){return self.data_value_get(object);}
         if self.heading_align_member(object,property){return self.heading_align_get(object);}
+        if self.ul_type_member(object,property){return self.ul_type_get(object);}
         if self.paragraph_align_member(object,property){return self.paragraph_align_get(object);}
         if self.legend_align_member(object,property){return self.legend_align_get(object);}
         if self.div_align_member(object,property){return self.div_align_get(object);}
@@ -6231,6 +6243,7 @@ impl Host for Bridge<'_> {
         if self.time_datetime_member(object,property){return self.time_datetime_set(object,&value);}
         if self.data_value_member(object,property){return self.data_value_set(object,&value);}
         if self.heading_align_member(object,property){return self.heading_align_set(object,&value);}
+        if self.ul_type_member(object,property){return self.ul_type_set(object,&value);}
         if self.paragraph_align_member(object,property){return self.paragraph_align_set(object,&value);}
         if self.legend_align_member(object,property){return self.legend_align_set(object,&value);}
         if self.div_align_member(object,property){return self.div_align_set(object,&value);}
@@ -6652,11 +6665,13 @@ impl Host for Bridge<'_> {
         if method==script_time_datetime::GET{return self.time_datetime_get(object);}
         if method==script_data_value::SET{return Err("Data value setters require the native conversion transaction.".into());}
         if method==script_heading_align::SET{return Err("Heading align setters require the native conversion transaction.".into());}
+        if method==script_ul_type::SET{return Err("UL type setters require the native conversion transaction.".into());}
         if method==script_paragraph_align::SET{return Err("Paragraph align setters require the native conversion transaction.".into());}
         if method==script_legend_align::SET{return Err("Legend align setters require the native conversion transaction.".into());}
         if method==script_div_align::SET{return Err("DIV align setters require the native conversion transaction.".into());}
         if method==script_data_value::GET{return self.data_value_get(object);}
         if method==script_heading_align::GET{return self.heading_align_get(object);}
+        if method==script_ul_type::GET{return self.ul_type_get(object);}
         if method==script_paragraph_align::GET{return self.paragraph_align_get(object);}
         if method==script_legend_align::GET{return self.legend_align_get(object);}
         if method==script_div_align::GET{return self.div_align_get(object);}
@@ -9775,3 +9790,10 @@ mod paragraph_align_tests;
 
 #[path="script_paragraph_align.rs"]
 mod script_paragraph_align;
+
+#[cfg(test)]
+#[path="script_ul_type_tests.rs"]
+mod ul_type_tests;
+
+#[path="script_ul_type.rs"]
+mod script_ul_type;
