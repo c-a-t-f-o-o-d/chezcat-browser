@@ -6,7 +6,7 @@ impl Bridge<'_>{
   if let Some(kind)=self.inert_node_type(object){return matches!(kind,3|4);}
   node_index(object).is_some_and(|node|self.dom_accessible(node)&&matches!(self.doc.nodes[node].kind,NodeKind::Text(_)|NodeKind::Cdata(_)))
  }
- pub(super) fn whole_text_parent(&self,object:u32)->Result<Option<u32>,String>{
+ pub(in crate::scripting) fn whole_text_parent(&self,object:u32)->Result<Option<u32>,String>{
   if let Some(node)=self.state.inert_documents.node(object){return Ok(node.parent);}
   let node=node_index(object).filter(|&node|self.dom_accessible(node)).ok_or("Missing wholeText node.")?;
   Ok(self.state.tree.parents.get(node).copied().flatten().map(|node|if node==0{DOCUMENT}else{node_handle(node)}))

@@ -614,6 +614,7 @@ impl Runtime {
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
             )?;
+            if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"form","\0HTMLLegendElement.get.form",None)?;}
             if name == "HTMLFieldSetElement" {self.define_host_attribute(prototype,window,"validity","\0HTMLFieldSetElement.get.validity",None)?;self.deferred_host_method(prototype,window,"setCustomValidity","\0HTMLFieldSetElement.setCustomValidity",1)?;self.define_host_attribute(prototype,window,"willValidate","\0HTMLFieldSetElement.get.willValidate",None)?;self.define_host_attribute(prototype,window,"validationMessage","\0HTMLFieldSetElement.get.validationMessage",None)?;self.deferred_host_method(prototype,window,"checkValidity","\0HTMLFieldSetElement.checkValidity",0)?;self.deferred_host_method(prototype,window,"reportValidity","\0HTMLFieldSetElement.reportValidity",0)?;self.define_host_attribute(prototype,window,"disabled","\0HTMLFieldSetElement.get.disabled",Some("\0HTMLFieldSetElement.set.disabled"))?;self.define_host_attribute(prototype,window,"name","\0HTMLFieldSetElement.get.name",Some("\0HTMLFieldSetElement.set.name"))?;self.define_host_attribute(prototype,window,"form","\0HTMLFieldSetElement.get.form",None)?;self.define_host_attribute(prototype,window,"type","\0HTMLFieldSetElement.get.type",None)?;}
             if name == "HTMLFormElement" {
                 self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
@@ -970,6 +971,7 @@ impl Runtime {
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
         self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         for (name,operation,length) in [("length","\0HTMLCollection.get.length",0),("item","\0HTMLCollection.item",1),("namedItem","\0HTMLCollection.namedItem",1)] {
+            if name=="namedItem"{self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
             let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
             self.store_property(self.function_properties[method.id],"name".into(),Value::String(if name=="length"{"get length"}else{name}.into()),Some((false,false,true)))?;
