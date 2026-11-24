@@ -9819,3 +9819,7 @@ mod ul_compact_tests;
 
 #[path="script_ul_compact.rs"]
 mod script_ul_compact;
+
+#[cfg(test)]
+#[path="script_span_interface_tests.rs"]
+mod span_interface_tests;

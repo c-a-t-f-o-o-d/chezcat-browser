@@ -109,7 +109,7 @@ impl Runtime {
             self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
             for (name,length) in [("addEventListener",2),("removeEventListener",2),("dispatchEvent",1)] {
-                if name=="removeEventListener"{self.deferred_host_method(prototype,window,name,name,length)?;continue;}
+                if matches!(name,"removeEventListener"|"dispatchEvent"){self.deferred_host_method(prototype,window,name,name,length)?;continue;}
                 let method=self.allocate_host_function_with_length(window,name,length).map_err(Fault::new)?;
                 if let Some(Function::Host {receiver_required,..})=self.functions.get_mut(method.id) {*receiver_required=true;}
                 self.store_property(prototype,name.into(),Value::Function(method.id),Some((true,true,true)))?;
