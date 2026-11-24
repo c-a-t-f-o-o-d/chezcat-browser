@@ -2524,25 +2524,11 @@ impl Bridge<'_> {
         if self.state.limits.test_entry_arenas&&attrs.len()>=self.state.limits.host.element_attributes&&value.is_some()&&slot.is_none(){
             return Err(format!("Element attribute limit reached ({}).",self.state.limits.host.element_attributes));
         }
-        if name.html_is("id") && self.doc.attr(node, "id") != value.as_deref() {
-            self.state.work(self.forms.controls.len())?;
-            self.state.copies(
-                self.forms
-                    .controls
-                    .keys()
-                    .map(|&control| self.doc.attr(control, "form").map_or(0, str::len))
-                    .sum(),
-            )?;
-            let old = self.doc.attr(node, "id");
-            if self.forms.controls.keys().any(|&control| {
-                self.doc.attr(control, "form").is_some_and(|owner| {
-                    !owner.is_empty() && (Some(owner) == old || Some(owner) == value.as_deref())
-                })
-            }) {
-                return Err(
-                    "Changing an id used by an explicit form association is not implemented."
-                        .into(),
-                );
+        if name.html_is("id") {
+            let old=self.doc.dom_attr(node,"id");
+            self.state.work(old.map_or(0,DomString::logical_bytes).min(value.as_ref().map_or(0,DomString::logical_bytes)).saturating_add(1))?;
+            if old!=value.as_ref() && form_id_guards::used(self.doc,self.forms,self.state,[old,value.as_ref()])? {
+                return Err("Changing an id used by an explicit form association is not implemented.".into());
             }
         }
         if name.html_is("disabled") {
@@ -9156,3 +9142,10 @@ mod element_id_accessor_tests;
 
 #[path="script_element_id.rs"]
 mod script_element_id;
+
+#[cfg(test)]
+#[path="script_form_owner_id_exact_tests.rs"]
+mod form_owner_id_exact_tests;
+
+#[path="script_form_id_guards.rs"]
+mod form_id_guards;

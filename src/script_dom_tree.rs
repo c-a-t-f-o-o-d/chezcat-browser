@@ -1208,25 +1208,9 @@ impl Bridge<'_> {
             let image = name == "img";
             if frame { self.validate_blank_frame(node)?; }
             if image { self.validate_plain_image(node)?; }
-            if let Some(id) = self.doc.attr(node, "id").filter(|id| !id.is_empty()) {
-                self.state.work(self.forms.controls.len())?;
-                self.state.copies(
-                    self.forms
-                        .controls
-                        .keys()
-                        .map(|&control| self.doc.attr(control, "form").map_or(0, str::len))
-                        .sum(),
-                )?;
-                if self
-                    .forms
-                    .controls
-                    .keys()
-                    .any(|&control| self.doc.attr(control, "form") == Some(id))
-                {
-                    return Err(
-                        "Moving an id used by an explicit form association is not implemented."
-                            .into(),
-                    );
+            if let Some(id)=self.doc.dom_attr(node,"id").filter(|id|!id.is_empty()) {
+                if form_id_guards::used(self.doc,self.forms,self.state,[Some(id),None])? {
+                    return Err("Moving an id used by an explicit form association is not implemented.".into());
                 }
             }
             nodes.push(node);

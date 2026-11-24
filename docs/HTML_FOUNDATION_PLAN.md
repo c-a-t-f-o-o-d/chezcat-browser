@@ -335,6 +335,15 @@ work and copy limits. Raw main-ID writes, child writes and raw materialization
 retain their existing refusal; frozen qualification and complete ID integration
 remain separate. F01 stays partial.
 
+Exact form-owner ID increment: native initialization borrows authoritative ID/form
+DOMStrings for exact owner matching, preserving first-match nonform blockers and
+explicit misses. ID writes and tree moves share prepaid borrowed comparisons for
+the existing explicit-association refusal. Raw projection aliases can change or
+move without touching a literal owner; projection-equal identity changes still
+refuse atomically. Original component and App fixtures qualify native records.
+Raw main-ID/form producers, general dynamic owner resetting, parser form-owner
+magic and frozen qualification remain separate. F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**
