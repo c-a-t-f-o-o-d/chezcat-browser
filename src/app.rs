@@ -6797,3 +6797,7 @@ mod hr_no_shade_tests;
 #[cfg(test)]
 #[path="app_hr_size_tests.rs"]
 mod hr_size_tests;
+
+#[cfg(test)]
+#[path="app_hr_width_tests.rs"]
+mod hr_width_tests;
