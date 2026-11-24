@@ -360,8 +360,8 @@ pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         return;
     }
     for (side,index) in [("top",0),("right",1),("bottom",2),("left",3)] {
-        if name=="margin" || name==format!("margin-{side}") {style.margin[index]=source.margin[index];}
-        if name=="padding" || name==format!("padding-{side}") {style.padding[index]=source.padding[index];}
+        if name=="margin" || name==format!("margin-{side}") {style.margin[index]=length(source.margin[index]);}
+        if name=="padding" || name==format!("padding-{side}") {style.padding[index]=length(source.padding[index]);}
         let entire=name=="border" || name==format!("border-{side}");
         if entire || name=="border-width" || name==format!("border-{side}-width") {style.border_width[index]=source.border_width[index];}
         if entire || name=="border-style" || name==format!("border-{side}-style") {style.border_solid[index]=source.border_solid[index];}

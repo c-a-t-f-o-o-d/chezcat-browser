@@ -1,6 +1,12 @@
 //! Physical margin and padding lengths share guarded typed sizing arithmetic.
 use super::{border_parts, four, parse_length, Length};
 
+pub(super) fn property(name: &str) -> bool {
+    matches!(name,
+        "margin" | "margin-top" | "margin-right" | "margin-bottom" | "margin-left" |
+        "padding" | "padding-top" | "padding-right" | "padding-bottom" | "padding-left")
+}
+
 pub(super) fn length(value:&str,margin:bool)->Option<Length>{let value=value.trim_ascii();if value.to_ascii_lowercase().starts_with("calc("){return super::sizing_math::length(value,margin);}if value.chars().any(char::is_whitespace){return None;}super::sizing_math::viewport_literal(value,margin).or_else(||parse_length(value,margin,margin))}
 
 pub(super) fn shorthand(value: &str, margin: bool) -> Option<[Length; 4]> {
