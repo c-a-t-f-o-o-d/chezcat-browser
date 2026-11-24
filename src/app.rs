@@ -6781,3 +6781,7 @@ mod ol_compact_tests;
 #[cfg(test)]
 #[path="app_pre_width_tests.rs"]
 mod pre_width_tests;
+
+#[cfg(test)]
+#[path="app_hr_align_tests.rs"]
+mod hr_align_tests;
