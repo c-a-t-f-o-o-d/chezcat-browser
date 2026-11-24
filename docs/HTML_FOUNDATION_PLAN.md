@@ -316,6 +316,16 @@ Component and App pointer/navigation fixtures qualify raw records; production
 probes cover scalar controls. Main raw-ID/for producers, complete fragment/label
 behavior and frozen qualification remain separate; F01 stays partial.
 
+Exact form-name consumer increment: scalar form properties and supported document
+form names compare authoritative native ID/name code units. Replacement-character
+keys skip raw aliases before named-field prototype routing and returned lookup.
+Shared borrowed control matching prepays native reads without copying keys.
+Original component and native App checks cover live names, prototype fallback,
+duplicate refusal, work exhaustion/recovery and paint/editor/link/page identity.
+Raw property keys, main raw-ID/name producers, RadioNodeList, past-names maps,
+complete document named access and frozen qualification remain separate. F01
+stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**

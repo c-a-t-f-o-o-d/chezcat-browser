@@ -6493,3 +6493,7 @@ mod collection_named_exact_tests;
 #[cfg(test)]
 #[path="app_visual_id_exact_tests.rs"]
 mod visual_id_exact_tests;
+
+#[cfg(test)]
+#[path="app_form_named_exact_tests.rs"]
+mod form_named_exact_tests;

@@ -1620,6 +1620,14 @@ unshadowed submit reads the shared prototype operation. Untouched protected
 native member priorities remain, including form text/tag-name reads. Author prototype overrides/deletion do not resurrect a
 hidden per-instance native method. Own form expandos remain guarded.
 
+Scalar named-control properties and the supported document form-name path compare
+authoritative native code units. Raw ID/name records cannot impersonate literal
+replacement-character keys or suppress ordinary prototype lookup. Native reads
+use prepaid borrowed comparisons, preserving current ownership and tree order.
+Duplicate control/form matches still refuse pending RadioNodeList/live collection
+support. Raw property keys, past-names maps, complete document named access and
+main raw-ID/name producers remain separate.
+
 Borrowed submit validates the real HTML form brand. Inert forms have genuine
 interface identity but no active native submission backend and explicitly refuse
 submission. Existing local-file, exact-origin, CSP form-action, request and
