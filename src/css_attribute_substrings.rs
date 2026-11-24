@@ -103,9 +103,9 @@ pub(super) fn matches_units(selector:&AttributeSelector,actual:&[u16],expected:&
         AttributeOperator::Suffix=>count!=0&&actual.len()>=count&&equal(&actual[actual.len()-count..]),
         AttributeOperator::Substring=>{
             if count==0||actual.len()<count{return false;}
-            let mut pattern=Vec::new();if pattern.try_reserve_exact(count).is_err(){return false;}
+            let mut pattern=Vec::new();if pattern.try_reserve_exact(count).is_err(){*budget=0;return false;}
             pattern.extend(expected.encode_utf16().map(fold));
-            let mut prefix=Vec::new();if prefix.try_reserve_exact(count).is_err(){return false;}prefix.resize(count,0);
+            let mut prefix=Vec::new();if prefix.try_reserve_exact(count).is_err(){*budget=0;return false;}prefix.resize(count,0);
             for i in 1..count {
                 let mut matched=prefix[i-1];
                 while matched>0&&pattern[i]!=pattern[matched]{matched=prefix[matched-1];}
