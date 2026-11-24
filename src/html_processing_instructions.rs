@@ -113,13 +113,13 @@ fn copy(text: &str) -> Result<String, String> {
 }
 
 impl Token<'_> {
-    pub(super) fn into_kind(self) -> Result<Option<NodeKind>, String> {
+    pub(super) fn into_kind(self, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<Option<NodeKind>, String> {
         Ok(match self {
             Self::Instruction { target, data } => Some(NodeKind::ProcessingInstruction {
                 target: copy(target)?,
                 data: copy(data)?.into(),
             }),
-            Self::Comment(data) => Some(NodeKind::Comment(comments::copy_data(data)?.into())),
+            Self::Comment(data) => Some(NodeKind::Comment(comments::copy_data(data, check)?.into())),
             Self::Eof => None,
         })
     }

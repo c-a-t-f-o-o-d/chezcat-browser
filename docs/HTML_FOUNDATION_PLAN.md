@@ -19,8 +19,9 @@ from the [coverage register](HTML_FOUNDATION_COVERAGE.json).
 F00 met its requirements, input-lock and baseline criteria and was delivered in [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4). The original
 source-bound native results retain their failures and harness gaps. F01 now has
 shared native document, node, namespace and UTF-16 operations; F02 has shared
-decoders and initial document charset selection; F04 has a partial raw-text
-producer. Required integrations and unchanged browser assertions remain open.
+decoders and initial document charset selection; F04 has named references,
+script/text states and native comment recovery. Required integrations and
+unchanged browser assertions remain open.
 Named release verification is tracked in the [release history](RELEASING.md#published-baseline).
 
 The initial review was anchored to
@@ -548,6 +549,29 @@ increment, not complete upstream cases with unavailable diagnostics. The frozen
 inputs, selections and witnesses are unchanged. Streaming, whole-parser
 allocation/cancellation, Windows App and required browser/corpus acceptance
 remain open; F04 remains partial.
+
+**Comment recovery increment:** unrecognized declarations and invalid end-tag
+openings now retain real bogus Comment nodes in document, inert-document and
+supported checked-fragment entries. HTML-context CDATA declarations become
+literal comments. Empty `</>` emits nothing without disturbing a pending initial
+newline; `</` at EOF remains text. Normal and bogus scans, exact NUL-expanded
+sizing and fallible copying support cancellation. Existing table/formatting,
+document-relative placement, processing instructions and SVG provenance remain.
+
+All 24 frozen new native checks pass, up from three; all 94 existing HTML checks
+pass with two obsolete declaration refusals replaced by exact comment assertions.
+Four separately identified scan/copy checks also pass. The fixed supplementary
+tree comparison improves from 424/562 to 560/562, preserving all prior matches.
+All 26 unchanged WPT comment trees remain matching; the separate adapted
+Comment/Character cohort improves from 398/536 to 534/536. The remaining loaded
+and inert pair retains a literal in-body NUL Text node after a correctly parsed
+comment. Its expected output and place in the selection remain unchanged; fixing
+that character-dispatch contract requires the applicable insertion-mode rules.
+
+Checked DOCTYPE/generic NUL and foreign CDATA boundaries remain. These are native
+component results, not complete upstream cases with diagnostics or Windows App,
+browser, streaming or full-corpus acceptance. F04 and its tokenizer contract
+remain partial.
 
 **Deliverables**
 
