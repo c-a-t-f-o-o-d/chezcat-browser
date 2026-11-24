@@ -58,10 +58,11 @@ Isolation and GPU work keep their separate readiness gates.
 
 **Legend:** ✅ **Merged / verified scope** · 🟡 **Partial / active** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-Current foundation increment: public HTML null-namespace ID writes preserve exact
-UTF-16 through shared native setters, Attr identity, lookup, clone/move and
-observation. Resource refusal/recovery and native App interaction have focused
-checks. SVG raw IDs, raw-ID imports and full form-owner resetting remain open.
+Current foundation increment: native imports and parked template promotion retain
+exact raw HTML IDs with real node/Attr owners and independent source records.
+Promotion shares the prepaid exact form-key guard. Focused native/App checks cover
+resource refusal, recovery and interaction; SVG/foreign raw IDs, other raw
+attribute imports, full owner resetting and frozen qualification remain open.
 
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and

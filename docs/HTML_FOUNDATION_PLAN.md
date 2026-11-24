@@ -298,7 +298,7 @@ bypass candidate hashing and use metered exact matching, preserving lone-surroga
 versus replacement-character identity without tokenizing IDs. Original native
 cases include scalar/pair transitions, cascade, refusal and recovery; public inert
 producers and App pointer-driven paint retain actual node/editor/link/page identity.
-SVG raw-ID writes and raw-ID imports, quirks-mode folding, XML ID typing and frozen
+SVG raw-ID writes and foreign raw-ID imports, quirks-mode folding, XML ID typing and frozen
 qualification remain separate. F01 stays partial.
 
 Exact collection named-lookup increment: HTMLCollection.namedItem retains converted
@@ -313,7 +313,7 @@ omitting raw IDs rather than publishing replacement-character aliases. Table
 anchor spans and fixed state follow actual admission. Label association compares
 borrowed exact native ID/for records while preserving first tree-order matches.
 Component and App pointer/navigation fixtures qualify raw records; production
-probes cover scalar controls. Raw for producers and raw-ID imports, complete fragment/label
+probes cover scalar controls. Raw for producers and foreign raw-ID imports, complete fragment/label
 behavior and frozen qualification remain separate; F01 stays partial.
 
 Exact form-name consumer increment: scalar form properties and supported document
@@ -322,7 +322,7 @@ keys skip raw aliases before named-field prototype routing and returned lookup.
 Shared borrowed control matching prepays native reads without copying keys.
 Original component and native App checks cover live names, prototype fallback,
 duplicate refusal, work exhaustion/recovery and paint/editor/link/page identity.
-Raw property keys, raw name producers and raw-ID imports, RadioNodeList, past-names maps,
+Raw property keys, raw name producers and foreign raw-ID imports, RadioNodeList, past-names maps,
 complete document named access and frozen qualification remain separate. F01
 stays partial.
 
@@ -344,13 +344,23 @@ actual App pointer/paint/editor/link checks. SVG raw-ID writes, child writes, ra
 ID materialization, dynamic form-owner resetting and frozen browser qualification
 remain separate. F01 stays partial.
 
+Exact HTML ID materialization increment: imported and parked HTML nodes retain raw
+ID code units through native copies, source/target owners, stable Attr identities
+and template-content promotion. Promotion uses the shared prepaid exact form-key
+guard, so raw aliases cannot trigger literal-key refusals. Literal explicit-
+association changes, SVG/foreign raw IDs and other unsupported raw attributes
+retain their guards. Original public-producer, native control, resource
+refusal/recovery and App input/paint/editor/link checks qualify this slice; full
+owner resetting and frozen browser qualification remain separate. F01 stays
+partial.
+
 Exact form-owner ID increment: native initialization borrows authoritative ID/form
 DOMStrings for exact owner matching, preserving first-match nonform blockers and
 explicit misses. ID writes and tree moves share prepaid borrowed comparisons for
 the existing explicit-association refusal. Raw projection aliases can change or
 move without touching a literal owner; projection-equal identity changes still
 refuse atomically. Original component and App fixtures qualify native records.
-Raw main-ID/form producers, general dynamic owner resetting, parser form-owner
+Raw form producers and foreign raw-ID imports, general dynamic owner resetting, parser form-owner
 magic and frozen qualification remain separate. F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing
