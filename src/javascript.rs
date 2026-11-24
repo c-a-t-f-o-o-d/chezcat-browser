@@ -10747,7 +10747,7 @@ impl Runtime {
     }
 }
 
-fn int32(value: f64) -> i32 {
+pub(crate) fn int32(value: f64) -> i32 {
     if !value.is_finite() || value == 0.0 {
         0
     } else {
