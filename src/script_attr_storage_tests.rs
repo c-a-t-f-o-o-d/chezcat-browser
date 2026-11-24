@@ -60,6 +60,12 @@ fn browser_attr_detach_reserves_actual_value_capacity_and_reattach_releases_deta
     let(mut doc,mut forms,mut page)=page("<html><body><p title='a&amp;b'></p></body></html>");
     let node=doc.nodes.iter().position(|node|matches!(&node.kind,NodeKind::Element{tag,..} if tag=="p")).unwrap();
     let NodeKind::Element{attrs,..}=&doc.nodes[node].kind else{unreachable!()};
+    assert_eq!(attrs[0].value.as_str(),"a&b");
+    // Keep testing transfer of spare backing without requiring the decoder to
+    // retain encoded-input capacity after its exact-size output reservation.
+    let mut value=String::with_capacity(64);value.push_str("a&b");
+    Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.public_attribute(node,crate::html::AttributeName::unqualified("title".into()),Some(value)).unwrap();
+    let NodeKind::Element{attrs,..}=&doc.nodes[node].kind else{unreachable!()};
     let capacity=attrs[0].value.capacity();assert!(capacity>attrs[0].value.len());
     let attr=handle(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.lookup_attribute_node_at(node,Some(0)).unwrap());
     let before=page.state.retained;let limit=page.state.retained_limit;

@@ -326,6 +326,15 @@ Raw property keys, main raw-ID/name producers, RadioNodeList, past-names maps,
 complete document named access and frozen qualification remain separate. F01
 stays partial.
 
+Canonical Element.id increment: the shared inherited getter reads exact native
+code units and the setter uses the existing attribute transaction. Native main
+records, inert created/parsed elements and supported SVG share the accessor,
+while brand/origin guards precede conversion. Form named-field precedence and
+author prototype overrides remain ordinary lookup. Reads prepay attribute/value
+work and copy limits. Raw main-ID writes, child writes and raw materialization
+retain their existing refusal; frozen qualification and complete ID integration
+remain separate. F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**

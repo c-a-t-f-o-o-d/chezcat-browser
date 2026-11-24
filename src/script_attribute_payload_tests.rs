@@ -9,6 +9,10 @@ fn reserved(text:&str,capacity:usize)->String{let mut value=String::with_capacit
 #[test]
 fn browser_attribute_decoded_capacity_and_id_reflection_refund_actual_owned_payload() {
     let(mut doc,mut forms,mut page)=page("<html><body><p id='a&amp;b' title='c&amp;d'></p></body></html>");let node=element(&doc,"p");
+    assert_eq!(doc.attr(node,"title"),Some("c&d"));
+    // Decoding may reserve exact output size. Deliberately produce spare native
+    // backing so this refund boundary does not depend on decoder allocation.
+    Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.public_attribute(node,crate::html::AttributeName::unqualified("title".into()),Some(reserved("c&d",64))).unwrap();
     let title=attribute(&doc,node,"title");let title_cap=title.value.capacity();assert!(title_cap>title.value.len());
     let before=page.state.retained;page.state.retained_limit=before-title_cap+1-1;
     assert!(Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.public_attribute(node,crate::html::AttributeName::unqualified("title".into()),Some("z".into())).is_err());
@@ -55,8 +59,12 @@ fn browser_attribute_fragment_retains_decoded_capacity_and_clone_pays_only_compa
     let(mut doc,mut forms,mut page)=page("<html><body><div></div></body></html>");let mount=element(&doc,"div");let before=page.state.retained;
     let old_nodes=doc.nodes.capacity();let old_states=page.state.node_state_bytes();
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};bridge.set(node_handle(mount),"innerHTML",Value::String("<span data-key='a&amp;b'></span>".into())).unwrap();let node=element(bridge.doc,"span");
-    let attr=attribute(bridge.doc,node,"data-key");assert!(attr.value.capacity()>attr.value.len());let NodeKind::Element{attrs,..}=&bridge.doc.nodes[node].kind else{unreachable!()};
+    let attr=attribute(bridge.doc,node,"data-key");assert_eq!(attr.value.as_str(),"a&b");let NodeKind::Element{attrs,..}=&bridge.doc.nodes[node].kind else{unreachable!()};
     assert_eq!(bridge.state.retained-before,attrs.capacity()*size_of::<crate::html::Attribute>()+attr.name.owned_bytes()+attr.value.capacity()+"span".len()+child_link_bytes(&bridge.doc.nodes[mount].children)+(bridge.doc.nodes.capacity()-old_nodes)*size_of::<Node>()+bridge.state.node_state_bytes()-old_states);
+    // Retain the decoded fragment's exact accounting check above, then give
+    // the original clone-compaction boundary an explicit spare-capacity source.
+    bridge.public_attribute(node,crate::html::AttributeName::unqualified("data-key".into()),Some(reserved("a&b",64))).unwrap();
+    let attr=attribute(bridge.doc,node,"data-key");assert!(attr.value.capacity()>attr.value.len());
     bridge.state.rebuild(bridge.doc).unwrap();let before=bridge.state.retained;let copied=bridge.main_node_minimum(1).unwrap()+size_of::<crate::html::Attribute>()+"data-key".len()+"a&b".len()+"span".len();bridge.state.retained_limit=before+copied;
     let Value::Host(cloned)=bridge.clone_node(node_handle(node),false).unwrap()else{panic!("real clone")};let cloned=node_index(cloned).unwrap();assert_eq!(bridge.state.retained,before+copied);assert_eq!(bridge.doc.attr(cloned,"data-key"),Some("a&b"));assert_eq!(attribute(bridge.doc,cloned,"data-key").value.capacity(),3);
 }

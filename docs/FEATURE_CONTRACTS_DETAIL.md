@@ -1609,6 +1609,21 @@ site initialization claim. Original App acceptance uses trusted input, actual
 text runs/pixels and stable neighboring editor/link hit targets.
 
 
+## Canonical Element.id reflection
+
+Element.prototype owns the shared enumerable/configurable id accessor. Its getter
+reads authoritative native ID code units, including exact unpaired units in native
+records and inert documents. Its setter performs ordered DOMString conversion and
+uses the existing attribute transaction. Supported HTML/SVG scalar writes retain
+native ID-index updates. Main and inert writes preserve Attr identity and exact
+attribute observation.
+Brand and saved-realm origin validation precede conversion. Author prototype
+replacement/deletion and form named-control precedence retain ordinary lookup.
+Reads prepay attribute scans, value work and copies and preserve state on refusal.
+Raw main-ID writes, child writes, raw materialization and complete ID consumers
+remain separate; this does not close the document foundation.
+
+
 ## Native form interface and named lookup
 
 Real HTML forms use their realm's canonical HTMLFormElement constructor and
