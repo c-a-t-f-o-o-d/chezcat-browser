@@ -6609,3 +6609,7 @@ mod output_html_for_tests;
 #[cfg(test)]
 #[path="app_output_form_tests.rs"]
 mod output_form_tests;
+
+#[cfg(test)]
+#[path="app_output_name_type_tests.rs"]
+mod output_name_type_tests;
