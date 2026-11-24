@@ -11,6 +11,8 @@ pub(crate) use stylesheet_cache::StylesheetCache;
 mod media;
 #[path="css_selector_comments.rs"]
 mod selector_comments;
+#[path="css_selector_groups.rs"]
+mod selector_groups;
 pub use media::{Hover, MediaEnvironment};
 
 pub(crate) fn serialize_media_query_list(source: &str) -> String {
@@ -75,6 +77,9 @@ mod selector_comment_tests;
 #[cfg(test)]
 #[path="css_selector_comment_boundary_tests.rs"]
 mod selector_comment_boundary_tests;
+#[cfg(test)]
+#[path="css_selector_group_tests.rs"]
+mod selector_group_tests;
 #[path="css_translate.rs"]
 mod translate;
 #[path="css_easing.rs"]
@@ -597,6 +602,7 @@ struct Compound {
     hover:bool,
     disabled: bool,
     negations: Vec<Vec<Selector>>,
+    groups: Vec<Vec<Selector>>,
     structural:Vec<structural::Predicate>,
 }
 
@@ -633,7 +639,7 @@ struct Selector {
     specificity: (u16, u16, u16),
 }
 
-impl Selector{fn depends_on_hover(&self)->bool{self.target==SelectorTarget::Element&&self.parts.iter().any(|p|p.hover||p.negations.iter().flatten().any(Selector::depends_on_hover))}}
+impl Selector{fn depends_on_hover(&self)->bool{self.target==SelectorTarget::Element&&self.parts.iter().any(|p|p.hover||p.negations.iter().chain(&p.groups).flatten().any(Selector::depends_on_hover))}}
 
 struct Rule {
     selectors: Vec<Selector>,
@@ -692,11 +698,12 @@ pub fn query_with_topology(
     budget:&mut usize,parents:&[Option<usize>],sibling_slots:&[usize],first_only:bool,copy_budget:&mut usize,
 )->Result<Vec<usize>,String> {
     if source.len()>MAX_SELECTOR_BYTES*16{return Err("Selector query exceeds 8 KiB.".into());}
-    let storage=structural::query_cost(source);
-    let syntax_work=if storage==0{0}else{source.len().saturating_mul(4)};
-    if syntax_work>*budget{*budget=0;return Err("DOM structural selector syntax work allowance exhausted.".into());}
+    let (group_work, group_storage)=selector_groups::query_cost(source);
+    let storage=structural::query_cost(source).max(group_storage);
+    let syntax_work=group_work.max(if storage==0{0}else{source.len().saturating_mul(4)});
+    if syntax_work>*budget{*budget=0;return Err("DOM selector syntax work allowance exhausted.".into());}
     *budget-=syntax_work;
-    if storage>*copy_budget{*copy_budget=0;return Err("DOM structural selector syntax copy allowance exhausted.".into());}
+    if storage>*copy_budget{*copy_budget=0;return Err("DOM selector syntax copy allowance exhausted.".into());}
     *copy_budget-=storage;
     let selectors=parse_selector_list(source,false).ok_or("Invalid selector or selector syntax outside the supported subset.")?;
     // Detached leaves and parked inert slots can extend the document arena
@@ -1662,13 +1669,13 @@ fn parse_sheet(source:&str,rules:&mut Vec<Rule>) {
 }
 
 fn parse_sheet_with_media(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize)->Result<(),String> {
-    parse_sheet_with_media_inner(source,rules,environment,maximum_blocks,None,None).map_err(|error| match error {
+    parse_sheet_with_media_inner(source,rules,environment,maximum_blocks,None,None,None).map_err(|error| match error {
         SheetParseFailure::Budget(message) | SheetParseFailure::Rejected(message) => message,
     })
 }
 enum SheetParseFailure { Budget(String), Rejected(String) }
 fn parse_sheet_with_media_inner(source:&str,rules:&mut Vec<Rule>,environment:Option<MediaEnvironment>,maximum_blocks:usize,
-    mut transform_meter:Option<&mut CssBudget<'_>>,deadline:Option<Instant>)->Result<(),SheetParseFailure> {
+    mut selector_meter:Option<&mut CssBudget<'_>>,mut transform_meter:Option<&mut CssBudget<'_>>,deadline:Option<Instant>)->Result<(),SheetParseFailure> {
     let first=rules.len();
     let mut allocation_failed=false;
     let mut budget_failure=None;
@@ -1682,6 +1689,21 @@ fn parse_sheet_with_media_inner(source:&str,rules:&mut Vec<Rule>,environment:Opt
         }
         blocks=blocks.wrapping_add(1);
         if active && !prelude.trim_start().starts_with('@') {
+            // Functional groups can retain many compound vectors per source
+            // byte. Admit their syntax before allocation on stylesheet misses,
+            // as on native queries; reused parsed sheets need no second charge.
+            if selector_meter.is_some() || transform_meter.is_some() {
+                let (work, storage) = selector_groups::query_cost(prelude);
+                let admitted = if let Some(meter) = selector_meter.as_deref_mut() {
+                    meter.work(work).and_then(|_| meter.copies(storage))
+                } else if let Some(meter) = transform_meter.as_deref_mut() {
+                    meter.work(work).and_then(|_| meter.copies(storage))
+                } else { Ok(()) };
+                if let Err(error) = admitted {
+                    budget_failure = Some(error);
+                    return false;
+                }
+            }
             if let Some(selectors)=parse_selector_list(prelude, true) {
                 let declarations=match parse_declarations_inner(body,MAX_DECLARATIONS,true,transform_meter.as_deref_mut()) {
                     Ok(declarations)=>declarations,
@@ -2306,73 +2328,20 @@ fn sheet_blocks(source: &str, mut visit: impl FnMut(&str, &str) -> bool) {
 }
 
 fn parse_selector_list(source: &str, pseudo_targets: bool) -> Option<Vec<Selector>> {
-    parse_selector_list_at_depth(source,pseudo_targets,0)
-}
-
-fn parse_selector_list_at_depth(source:&str,pseudo_targets:bool,depth:usize)->Option<Vec<Selector>> {
-    if depth>MAX_SELECTOR_NESTING || !selector_comments::within_limit(source,MAX_SELECTOR_BYTES*16,false) {return None;}
-    let mut selectors = Vec::new();
-    let mut start = 0;
-    let mut bracket = false;
-    let mut quote = None;
-    let mut parentheses=0usize;
-    let bytes = source.as_bytes();
-    let mut position = 0;
-    while position < bytes.len() {
-        let byte = bytes[position];
-        if let Some(expected) = quote {
-            if byte == b'\\' {
-                return None; // Escaped selector strings are outside this subset.
-            }
-            if byte == expected {
-                quote = None;
-            }
-            position += 1;
-            continue;
-        }
-        if selector_comments::skip(bytes, &mut position) { continue; }
-        match byte {
-            b'[' if !bracket => bracket = true,
-            b']' if bracket => bracket = false,
-            b'[' | b']' => return None,
-            b'\'' | b'"' if bracket => quote = Some(byte),
-            b'(' if !bracket => {
-                parentheses+=1;
-                if parentheses>MAX_SELECTOR_NESTING {return None;}
-            }
-            b')' if !bracket => {parentheses=parentheses.checked_sub(1)?;}
-            b',' if !bracket && parentheses==0 => {
-                if selectors.len() == 15 {
-                    return None;
-                }
-                let selector=parse_selector_at_depth(&source[start..position],depth)?;
-                if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
-                selectors.push(selector);
-                start = position + 1;
-            }
-            _ => {}
-        }
-        position += 1;
-    }
-    if bracket || quote.is_some() || parentheses!=0 {
-        return None;
-    }
-    let selector=parse_selector_at_depth(&source[start..],depth)?;
-    if !pseudo_targets && selector.target!=SelectorTarget::Element {return None;}
-    selectors.push(selector);
-    Some(selectors)
+    let mut state = selector_groups::ParseState::default();
+    selector_groups::list(source, pseudo_targets, &mut state)
 }
 
 fn parse_selector(source: &str) -> Option<Selector> {
-    parse_selector_at_depth(source,0)
+    let mut state = selector_groups::ParseState::default();
+    parse_selector_at_depth(source, 0, &mut state)
 }
 
-fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
-    if depth>MAX_SELECTOR_NESTING {return None;}
+fn parse_selector_at_depth(source: &str, depth: usize, state: &mut selector_groups::ParseState) -> Option<Selector> {
+    if !state.admit(depth <= MAX_SELECTOR_NESTING) { return None; }
     let source = source.trim_matches(|character: char| character.is_ascii_whitespace());
-    if source.is_empty() || !selector_comments::within_limit(source,MAX_SELECTOR_BYTES,true) {
-        return None;
-    }
+    if source.is_empty() { return None; }
+    if !state.admit(selector_comments::within_limit(source, MAX_SELECTOR_BYTES, true)) { return None; }
     let bytes = source.as_bytes();
     let mut position = 0;
     skip_selector_space(bytes, &mut position);
@@ -2395,6 +2364,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             hover:false,
             disabled: false,
             negations: Vec::new(),
+            groups: Vec::new(),
             structural:Vec::new(),
         };
         if bytes[position] == b'*' {
@@ -2434,7 +2404,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                 }
                 Some(b'[') => {
                     part.attributes
-                        .push(parse_attribute(source, &mut position)?);
+                        .push(parse_attribute(source, &mut position, state)?);
                     specificity.1 += 1;
                 }
                 Some(b':') => {
@@ -2460,15 +2430,20 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
                         position += 1;
                     }
                     let name=&source[start..position];
-                    if name.eq_ignore_ascii_case("not") {
-                        let arguments=parse_negation_arguments(source,&mut position,depth)?;
-                        let maximum=arguments.iter().map(|selector|selector.specificity).max()?;
-                        specificity.0=specificity.0.checked_add(maximum.0)?;
-                        specificity.1=specificity.1.checked_add(maximum.1)?;
-                        specificity.2=specificity.2.checked_add(maximum.2)?;
-                        part.negations.push(arguments);
+                    if name.eq_ignore_ascii_case("not") || name.eq_ignore_ascii_case("is") || name.eq_ignore_ascii_case("where") {
+                        let negation = name.eq_ignore_ascii_case("not");
+                        let arguments = selector_groups::arguments(source, &mut position, depth, !negation, state)?;
+                        if !name.eq_ignore_ascii_case("where") {
+                            let maximum = arguments.iter().map(|selector| selector.specificity).max().unwrap_or((0, 0, 0));
+                            specificity.0 = specificity.0.checked_add(maximum.0).or_else(|| { state.refused = true; None })?;
+                            specificity.1 = specificity.1.checked_add(maximum.1).or_else(|| { state.refused = true; None })?;
+                            specificity.2 = specificity.2.checked_add(maximum.2).or_else(|| { state.refused = true; None })?;
+                        }
+                        let groups = if negation { &mut part.negations } else { &mut part.groups };
+                        state.reserve(groups, 1)?;
+                        groups.push(arguments);
                     } else if structural::name(name) {
-                        part.structural.push(structural::parse(name,source,&mut position)?);specificity.1+=1;
+                        part.structural.push(structural::parse(name,source,&mut position,&mut state.refused)?);specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("root") {
                         part.root=true;specificity.1+=1;
                     } else if name.eq_ignore_ascii_case("hover") {
@@ -2514,6 +2489,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
             return None;
         }
     }
+    if !state.admit(position == bytes.len() || parts.len() < 12) { return None; }
     if position != bytes.len() || relations.len() + 1 != parts.len() {
         return None;
     }
@@ -2525,63 +2501,7 @@ fn parse_selector_at_depth(source:&str,depth:usize)->Option<Selector> {
     })
 }
 
-// The same bounded selector grammar is admitted inside a strict :not list.
-// Pseudo-elements and malformed/unsupported members invalidate the whole list.
-fn parse_negation_arguments(
-    source: &str,
-    position: &mut usize,
-    depth: usize,
-) -> Option<Vec<Selector>> {
-    if depth == MAX_SELECTOR_NESTING || source.as_bytes().get(*position) != Some(&b'(') {
-        return None;
-    }
-    *position += 1;
-    let start = *position;
-    let mut parentheses = 1usize;
-    let mut bracket = false;
-    let mut quote = None;
-    while let Some(&byte) = source.as_bytes().get(*position) {
-        if let Some(expected) = quote {
-            if byte == b'\\' {
-                return None;
-            }
-            if byte == expected {
-                quote = None;
-            }
-        } else {
-            if selector_comments::skip(source.as_bytes(), position) { continue; }
-            match byte {
-                b'[' if !bracket => bracket = true,
-                b']' if bracket => bracket = false,
-                b'[' | b']' => return None,
-                b'\'' | b'"' if bracket => quote = Some(byte),
-                b'(' if !bracket => {
-                    parentheses += 1;
-                    if parentheses > MAX_SELECTOR_NESTING {
-                        return None;
-                    }
-                }
-                b')' if !bracket => {
-                    parentheses -= 1;
-                    if parentheses == 0 {
-                        let arguments = parse_selector_list_at_depth(
-                            &source[start..*position],
-                            false,
-                            depth + 1,
-                        )?;
-                        *position += 1;
-                        return Some(arguments);
-                    }
-                }
-                _ => {}
-            }
-        }
-        *position += 1;
-    }
-    None
-}
-
-fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelector> {
+fn parse_attribute(source: &str, position: &mut usize, state: &mut selector_groups::ParseState) -> Option<AttributeSelector> {
     let bytes = source.as_bytes();
     *position += 1; // '['
     skip_selector_space(bytes, position);
@@ -2668,7 +2588,7 @@ fn parse_attribute(source: &str, position: &mut usize) -> Option<AttributeSelect
     }
     *position += 1;
     let substring_prefix = if matches!(operator, AttributeOperator::Substring) {
-        attribute_substrings::prefix_table(&value, ascii_insensitive)?
+        attribute_substrings::prefix_table(&value, ascii_insensitive).or_else(|| { state.refused = true; None })?
     } else {
         Vec::new()
     };
@@ -2995,6 +2915,10 @@ fn matches_selector(
         if compound.disabled {
             let disabled=context.actually_disabled(node,budget);
             if !disabled || *budget==0 {return false;}
+        }
+        for arguments in &compound.groups {
+            let included = arguments.iter().any(|argument| matches_selector(argument, node, context, budget));
+            if !included || *budget == 0 { return false; }
         }
         for arguments in &compound.negations {
             let excluded=arguments.iter().any(|argument|matches_selector(argument,node,context,budget));
