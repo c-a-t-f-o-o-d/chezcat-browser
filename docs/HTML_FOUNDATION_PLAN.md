@@ -402,7 +402,7 @@ same-origin tuples/opaque origins and denied scheme/credential crossings.
 
 ### F04 — Complete HTML tokenizer and character references
 
-**Current increment:** the generated named-reference table now covers all 2,231
+**Named-reference increment:** the generated named-reference table covers all 2,231
 pinned spellings, including two-scalar values and legacy attribute ambiguity.
 The fixed supplementary Linux native catalog passes all 13,699 cases, with all
 13 new parser regressions and 58 existing HTML tests passing. The
@@ -410,6 +410,27 @@ The fixed supplementary Linux native catalog passes all 13,699 cases, with all
 scope. Full tokenizer diagnostics, streaming, surrounding parser resource and
 cancellation accounting, Windows App integration and the required frozen corpus
 gates remain open; this increment does not complete F04.
+
+**Script-data and PLAINTEXT increment:** the original
+[native script scanner](../src/html_script_data.rs) handles escaped and
+double-escaped states, appropriate end tags and unfinished end-tag EOF. Native HTML SCRIPT
+and STYLE retain literal references, replace source nulls and use fallible text
+copying. Permissive closing tags recover an initial `=` without ending at a quoted
+`>`. Loaded and inert HTML PLAINTEXT consumes through EOF with native character
+insertion, paragraph closure and formatting reconstruction, while retaining
+foreign parentage.
+
+The fixed supplementary comparison improves from 76/110 to 110/110 retained-tree
+matches: 52 unchanged WPT trees (all 26 script-data sources in loaded and inert
+paths), 44 adapted script controls, six PLAINTEXT controls and eight RAWTEXT
+controls. All 20 frozen new native tests pass, up from eight, and all 71 existing
+HTML tests remain passing. Three additional review checks also pass: the initial
+`=` regression has a separate baseline failure; two boundary checks have candidate
+evidence only. These 94 native checks and tree comparisons qualify this source
+increment, not complete upstream cases with unavailable diagnostics. The frozen
+inputs, selections and witnesses are unchanged. Streaming, whole-parser
+allocation/cancellation, Windows App and required browser/corpus acceptance
+remain open; F04 remains partial.
 
 **Deliverables**
 
