@@ -6717,3 +6717,7 @@ mod heading_interface_tests;
 #[cfg(test)]
 #[path="app_heading_align_tests.rs"]
 mod heading_align_tests;
+
+#[cfg(test)]
+#[path="app_div_align_tests.rs"]
+mod div_align_tests;
