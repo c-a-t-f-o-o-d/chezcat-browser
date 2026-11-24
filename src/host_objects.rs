@@ -646,6 +646,10 @@ impl Runtime {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLOutputElement" {
+                self.define_host_attribute(prototype,window,"willValidate","\0HTMLOutputElement.get.willValidate",None)?;
+                self.define_host_attribute(prototype,window,"validationMessage","\0HTMLOutputElement.get.validationMessage",None)?;
+                self.deferred_host_method(prototype,window,"checkValidity","\0HTMLOutputElement.checkValidity",0)?;
+                self.deferred_host_method(prototype,window,"reportValidity","\0HTMLOutputElement.reportValidity",0)?;
                 self.define_host_attribute(prototype,window,"value","\0HTMLOutputElement.get.value",Some("\0HTMLOutputElement.set.value"))?;
                 self.define_host_attribute(prototype,window,"defaultValue","\0HTMLOutputElement.get.defaultValue",Some("\0HTMLOutputElement.set.defaultValue"))?;
                 self.define_host_attribute(prototype,window,"name","\0HTMLOutputElement.get.name",Some("\0HTMLOutputElement.set.name"))?;
