@@ -2974,16 +2974,16 @@ fn matches_selector(
             return false;
         }
         if !compound.classes.is_empty() {
-            let class = context.attribute(node, "class", budget).unwrap_or("");
+            let class = context.dom_attribute(node,"class",budget)
+                .map(crate::dom_string::DomString::view)
+                .unwrap_or(crate::dom_string::DomStringRef::Scalar(""));
             for expected in &compound.classes {
-                // Splitting scans the attribute, and equality can scan matched
-                // length tokens again. Repeated classes and ancestor attempts
-                // pay this cost again against the same caller-owned budget.
-                let cost = class.len().saturating_mul(2).saturating_add(expected.len());
+                // Admit the token scan and exact comparison before inspecting
+                // scalar/raw units, once per compound and ancestor attempt.
+                let cost = class.logical_bytes().saturating_mul(2).saturating_add(expected.len());
                 if !context.text_work(cost, budget)
-                    || !class
-                        .split_ascii_whitespace()
-                        .any(|actual| actual == expected)
+                    || !crate::dom_string::ascii_whitespace_tokens(class)
+                        .any(|actual| actual.equals(expected))
                 {
                     return false;
                 }
@@ -5471,3 +5471,7 @@ mod svg_geometry_tests;
 #[cfg(test)]
 #[path="css_svg_paint_tests.rs"]
 mod svg_paint_tests;
+
+#[cfg(test)]
+#[path="css_class_exact_tests.rs"]
+mod class_exact_tests;

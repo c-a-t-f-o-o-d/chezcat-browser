@@ -139,15 +139,7 @@ impl Filter {
     }
 }
 
-pub(super) fn class_tokens(value: DomStringRef<'_>) -> impl Iterator<Item = DomStringRef<'_>> {
-    let (text, units) = match value {
-        DomStringRef::Scalar(text) => (text, &[][..]),
-        DomStringRef::Raw(units) => ("", units),
-    };
-    let scalar = text.split(class_whitespace).map(DomStringRef::Scalar);
-    let raw = units.split(|unit| matches!(unit, 0x09 | 0x0a | 0x0c | 0x0d | 0x20)).map(DomStringRef::Raw);
-    scalar.chain(raw).filter(|token| !token.is_empty())
-}
+pub(super) use crate::dom_string::ascii_whitespace_tokens as class_tokens;
 
 fn class_token_eq(left: DomStringRef<'_>, right: &[u16], quirks: bool) -> bool {
     if !quirks { return left.code_units().eq(right.iter().copied()); }
@@ -548,9 +540,6 @@ impl Bridge<'_> {
     }
 }
 
-fn class_whitespace(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}')
-}
 
 impl State {
     // No script runs while keys are staged. Admit the complete vector and each

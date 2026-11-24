@@ -6437,3 +6437,7 @@ mod token_list_exact_reads_tests;
 #[cfg(test)]
 #[path = "app_token_list_interface_tests.rs"]
 mod token_list_interface_tests;
+
+#[cfg(test)]
+#[path="app_css_class_exact_tests.rs"]
+mod css_class_exact_tests;

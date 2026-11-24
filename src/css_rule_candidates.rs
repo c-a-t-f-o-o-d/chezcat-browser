@@ -88,14 +88,22 @@ impl RuleCandidates {
         if self.has_classes {
             let before = meter.as_ref().map_or(usize::MAX, |meter| meter.remaining_work());
             let mut work = before;
-            let attribute = context.attribute(node, "class", &mut work).unwrap_or("");
+            let native = context.dom_attribute(node,"class",&mut work);
             if let Some(meter) = meter.as_deref_mut() {
                 meter.work(before - work)?;
                 if work == 0 { return Err("CSS selector job work limit reached.".into()); }
             }
+            // Raw records may contain both unmatched surrogate tokens and
+            // valid scalar tokens. Conservatively run the complete metered
+            // matcher instead of hashing a replacement-character projection.
+            if native.is_some_and(|value|value.raw_units().is_some()){return Ok(None);}
+            let attribute=native.map_or("",crate::dom_string::DomString::render_projection);
             if attribute.len() > MAX_KEY_BYTES { return Ok(None); }
             if let Some(meter) = meter.as_deref_mut() { meter.work(1 + attribute.len() * 2)?; }
-            for class in attribute.split_ascii_whitespace() { keys |= 1u64 << bucket(class); }
+            for class in crate::dom_string::ascii_whitespace_tokens(crate::dom_string::DomStringRef::Scalar(attribute)) {
+                let crate::dom_string::DomStringRef::Scalar(class)=class else{unreachable!()};
+                keys |= 1u64 << bucket(class);
+            }
         }
         if self.has_ids {
             if let Some(meter) = meter.as_deref_mut() { meter.work(1)?; }
