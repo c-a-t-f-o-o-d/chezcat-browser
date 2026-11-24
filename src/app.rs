@@ -6725,3 +6725,7 @@ mod div_align_tests;
 #[cfg(test)]
 #[path="app_legend_align_tests.rs"]
 mod legend_align_tests;
+
+#[cfg(test)]
+#[path="app_legend_inert_import_tests.rs"]
+mod legend_inert_import_tests;
