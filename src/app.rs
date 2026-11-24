@@ -6697,3 +6697,7 @@ mod meter_numeric_tests;
 #[cfg(test)]
 #[path="app_gauge_lifecycle_tests.rs"]
 mod gauge_lifecycle_tests;
+
+#[cfg(test)]
+#[path="app_time_datetime_tests.rs"]
+mod time_datetime_tests;
