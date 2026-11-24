@@ -67,7 +67,9 @@ Owner-bound inert HTML/XML/generic and supported child live traversal now uses
 actual roots, exact HTML names and native list realms with storage/origin checks.
 Ordinary HTML container name setters and Attr routes now retain raw UTF-16
 values for exact live queries, cloning and observation. Control/slot/frame/resource
-raw-name producers, raw-name imports and child mutations remain open;
+raw-name producers and protected raw-name imports remain open. Ordinary name
+imports and template promotion share the producer policy and exact owner/Attr
+behavior with transactional refusal/recovery. Child mutations remain open;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

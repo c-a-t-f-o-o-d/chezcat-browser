@@ -1958,12 +1958,12 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction{..} => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
-        NodeKind::Element { attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(|attr|script_attr::materializable_value(attr,node.namespace))&&crate::html::svg_dom_transfer(node),
+        NodeKind::Element { tag,attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(|attr|script_attr::materializable_value(attr,node.namespace,tag))&&crate::html::svg_dom_transfer(node),
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
-                && !attrs.iter().any(|attr| !script_attr::materializable_value(attr,node.namespace)||!attr.name.namespace.is_empty()
+                && !attrs.iter().any(|attr| !script_attr::materializable_value(attr,node.namespace,tag)||!attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.

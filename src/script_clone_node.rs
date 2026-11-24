@@ -119,7 +119,7 @@ impl Bridge<'_> {
                 ImportSource::Parsed { node, .. } => {
                     let mut metadata = 0usize;
                     if let NodeKind::Element { tag, href, attrs, .. } = &node.kind {
-                        if attrs.iter().any(|attr|!script_attr::materializable_value(attr,node.namespace)){return Err("Native import of unpaired attribute values requires its DOMString consumer integration.".into());}
+                        if attrs.iter().any(|attr|!script_attr::materializable_value(attr,node.namespace,tag)){return Err("Native import of unpaired attribute values requires its DOMString consumer integration.".into());}
                         let svg=node.namespace==crate::html::Namespace::Svg;
                         if svg{if !crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}for attr in attrs{if attr.name.html_is("style"){validate_style(&attr.value,self.state.limits.host.string_bytes)?;}}}
                         if !svg&&(node.namespace != crate::html::Namespace::Html || !(ordinary_clone_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
