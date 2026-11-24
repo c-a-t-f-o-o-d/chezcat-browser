@@ -909,7 +909,7 @@ impl Runtime {
         self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("NamedNodeMap".into()),Some((false,false,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         for(name,operation,length)in[("length","\0NamedNodeMap.get.length",0),("item","\0NamedNodeMap.item",1),("getNamedItem","\0NamedNodeMap.getNamedItem",1),("getNamedItemNS","\0NamedNodeMap.getNamedItemNS",2)]{
-            if name=="item"{self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+            if matches!(name,"item"|"getNamedItem"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
             let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
             self.store_property(self.function_properties[method.id],"name".into(),Value::String(if name=="length"{"get length"}else{name}.into()),Some((false,false,true)))?;

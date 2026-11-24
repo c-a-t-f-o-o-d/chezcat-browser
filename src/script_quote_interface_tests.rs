@@ -63,3 +63,8 @@ fn quote_interface_clone_import_active_content_guards_preserve_source(){
 }
 
 
+
+#[test]
+fn quote_interface_named_attribute_method_first_observation_after_freeze_retains_data_identity_and_brand(){
+ let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"var P=NamedNodeMap.prototype;Object.freeze(P);var q=document.getElementById('q');q.setAttribute('title','first');var map=q.attributes,attr=q.getAttributeNode('title'),a=Object.getOwnPropertyDescriptor(P,'getNamedItem'),method=a.value;if(typeof method!=='function'||a.get!==undefined||!a.enumerable||a.writable||a.configurable||method.name!=='getNamedItem'||method.length!==1||map.getNamedItem!==method||P.getNamedItem!==method)throw 'frozen first-observed native data method';if(method.call(map,'title')!==attr||method.call(map,'absent')!==null)throw 'actual named attribute authority';var calls=0;if(method.call(map,{toString:function(){calls++;return 'title';}})!==attr||calls!==1)throw 'single named attribute conversion';var caught=false;try{method.call({}, {toString:function(){calls++;return 'title';}});}catch(e){caught=e instanceof TypeError;}if(!caught||calls!==1)throw 'map brand before conversion';caught=false;try{new method();}catch(e){caught=e instanceof TypeError;}if(!caught)throw 'native method is not constructor';q.setAttribute('title','changed');if(method.call(map,'title')!==attr||attr.value!=='changed'||q.getAttributeNode('title')!==attr)throw 'live actual attribute identity';var again=Object.getOwnPropertyDescriptor(P,'getNamedItem');if(again.value!==method||again.writable||again.configurable)throw 'stable frozen data identity';"#);
+}
