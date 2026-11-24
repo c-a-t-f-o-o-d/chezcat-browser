@@ -26,6 +26,9 @@ verification for tagged source `122d0b7`. See the
 show the latest recorded outcome for each workload and preserve earlier checkpoints.
 They do not substitute for a new run on the published release or current development
 source. [Capabilities](CAPABILITIES.md) records the current implementation scope.
+The [CSS foundation plan](CSS_FOUNDATION_PLAN.md) compares that source with the
+standards and queues work after HTML/XHTML. Its static audit adds no new browser
+or application outcome to this page.
 
 [Homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Integration fixtures](#recent-shared-increments) · [Latest recorded results](#current-scorecard) · [Measurement method](#measurement-method)
 
@@ -60,9 +63,10 @@ no post-PR #430 live acceptance result is recorded.
 
 The current implementation priority is the **HTML/XHTML document foundation**.
 The [foundation plan](HTML_FOUNDATION_PLAN.md) and [roadmap](ROADMAP.md) define its
-dependency order and acceptance gates. The signed-out shell, search/results,
-watch navigation/Back and playback follow foundation acceptance and retain their
-separate outcome checks. Connected original App fixtures establish package
+dependency order and acceptance gates. The broader [CSS program](CSS_FOUNDATION_PLAN.md)
+starts after F14. The signed-out shell, search/results, watch navigation/Back and
+playback require their actual CSS/platform dependencies and retain separate
+journey checks. Connected original App fixtures establish package
 integration; [capabilities](CAPABILITIES.md) records what is implemented or guarded.
 
 <details>

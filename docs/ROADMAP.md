@@ -8,7 +8,7 @@
 
 *Delivering repeatable web page improvements through shared, spec-aligned browser capabilities.*
 
-[Release horizon](#release-horizon) · [Active work](#active--upcoming-milestones) · [Foundation plan](HTML_FOUNDATION_PLAN.md) · [Architecture](#performance--architecture) · [Verification](#verification-and-documentation) · [Backlog](#reference--backlog)
+[Release horizon](#release-horizon) · [Active work](#active--upcoming-milestones) · [HTML/XHTML plan](HTML_FOUNDATION_PLAN.md) · [CSS plan](CSS_FOUNDATION_PLAN.md) · [Architecture](#performance--architecture) · [Verification](#verification-and-documentation) · [Backlog](#reference--backlog)
 
 </div>
 
@@ -35,15 +35,23 @@ flowchart TD
     CORE["HTML and XML parsing + shared DOM"] --> DOCS["Elements, controls and document lifecycle"]
     DOCS --> COMPONENTS["Native components + default presentation"]
     COMPONENTS --> GATE["Verified document foundation"]
-    GATE --> SHELL["YouTube shell and input"]
+    GATE --> CSS["CSS requirements and implementation"]
+    CSS --> SHELL["YouTube shell and input"]
+    CSS --> COVERAGE["Remaining CSS package acceptance"]
     SHELL --> JOURNEY["Search, results, watch and Back"]
     JOURNEY --> MEDIA["Streaming and original playback"]
 ```
 
 This is a dependency map, **not a calendar**. The [foundation plan](HTML_FOUNDATION_PLAN.md)
 defines the active package order, integration dependencies and closure evidence.
-Full CSS, ECMAScript, media and the wider HTML application platform remain
-explicit related programs; required dependencies cannot be counted as passes.
+The [CSS program](CSS_FOUNDATION_PLAN.md) activates after F14 and uses a
+[source coverage register](CSS_FOUNDATION_COVERAGE.json) and
+[module inventory](CSS_STANDARDS_INVENTORY.json). CSS required by an included
+HTML foundation contract remains a prerequisite of that contract. Product
+milestones require their actual CSS dependencies; unrelated printing, speech,
+worklets and forward drafts are not blanket prerequisites for YouTube.
+ECMAScript, media and the wider HTML application platform retain their explicit
+programs; required dependencies cannot be counted as passes.
 Isolation and GPU work keep their separate readiness gates.
 
 > [!IMPORTANT]
@@ -57,6 +65,13 @@ Isolation and GPU work keep their separate readiness gates.
 ## Active & Upcoming Milestones
 
 **Legend:** ✅ **Merged / verified scope** · 🟡 **Partial / active** · ◻️ **Next / planned** · 🧊 **Deferred**
+
+**Planned after HTML/XHTML:** the CSS foundation has 33 work packages C00–C32,
+25 requirement families and a source audit of 48 areas. The standards inventory
+reviews 166 records, including the requested 2025 snapshot and the 2026 update.
+These are planning counts, not completed features or PR estimates. C00 input
+locking and all CSS acceptance runs remain future work. Existing finite CSS
+implementation is credited in the [plan](CSS_FOUNDATION_PLAN.md#source-baseline-what-already-exists).
 
 Current foundation increment: live getElementsByName filters retain exact UTF-16
 and match authoritative native HTML names. Focused checks cover conversion,
@@ -247,6 +262,8 @@ for `main` or for the published 0.81.0-alpha.2 binary.
 These earlier implementation and workload checkpoints retain their measured
 sources. The active foundation sequence above owns current work order, and the
 [capability matrix](CAPABILITIES.md) records subsequent implementation coverage.
+The [CSS foundation plan](CSS_FOUNDATION_PLAN.md) defines the broader standards
+work after HTML/XHTML; the CSS-01–CSS-10 records below retain their original scope.
 
 ### DOM — Shared page behavior
 

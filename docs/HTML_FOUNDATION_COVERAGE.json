@@ -4196,7 +4196,12 @@
       "id": "CSS",
       "title": "Complete CSS syntax/cascade/layout/animation and CSSOM",
       "boundary": "Implement the exact style/geometry dependencies needed by F09-F13; whole CSS is not declared complete",
-      "status": "related_program"
+      "status": "related_program",
+      "plan": "CSS_FOUNDATION_PLAN.md",
+      "coverage_register": "CSS_FOUNDATION_COVERAGE.json",
+      "standards_inventory": "CSS_STANDARDS_INVENTORY.json",
+      "start_after": "F14",
+      "handoff": "Activate C00 after F14 acceptance. Preserve required F09–F13 style/geometry blockers and the separate dependency/acceptance gates for product journeys."
     },
     {
       "id": "ECMAScript",

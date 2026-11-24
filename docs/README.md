@@ -16,6 +16,7 @@
 | :--- | :--- |
 | 🗺️ **[Roadmap](ROADMAP.md)** | Development priorities, milestones and future architecture |
 | 🧱 **[HTML/XHTML foundation](HTML_FOUNDATION_PLAN.md)** | Active standards plan, package gates and [requirement register](HTML_FOUNDATION_COVERAGE.json) |
+| **[CSS foundation](CSS_FOUNDATION_PLAN.md)** | Planned after HTML/XHTML F14: [source coverage and work packages](CSS_FOUNDATION_COVERAGE.json), [standards inventory](CSS_STANDARDS_INVENTORY.json) and acceptance gates |
 | 📋 **[Capabilities](CAPABILITIES.md)** | Implemented slices and explicit gaps |
 | 🧪 **[Compatibility](COMPATIBILITY.md)** | Actual pinned application outcomes, separated by stage |
 | 🏗️ **[Architecture](ARCHITECTURE.md)** | Ownership, processes, resources and rendering boundaries |
@@ -62,7 +63,7 @@ and identifies files still missing a terminal report.
 
 | Question | Read next |
 | :--- | :--- |
-| **What should become usable next?** | The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md), followed by the YouTube shell/search/navigation/playback milestones. |
+| **What should become usable next?** | The active [HTML/XHTML foundation](HTML_FOUNDATION_PLAN.md), then the [CSS program](CSS_FOUNDATION_PLAN.md). YouTube shell/search/navigation/playback remain product targets with their own required dependencies and measured journeys. |
 | **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha4) for the release-line summary. |
 | **What has actually worked on a page?** | The [latest recorded homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recorded original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
 | **Which build should I run?** | [Build instructions](BUILDING.md) for local development; the [current release record](RELEASING.md#current-verified-release) for verified downloads and exact source identity. |

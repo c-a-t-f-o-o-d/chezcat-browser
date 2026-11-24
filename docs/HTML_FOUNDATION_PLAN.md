@@ -15,6 +15,10 @@
 The HTML/XHTML document foundation precedes the saved YouTube shell, search,
 navigation and playback milestones. Required parser and DOM behavior is selected
 from the [coverage register](HTML_FOUNDATION_COVERAGE.json).
+The broader [CSS foundation program](CSS_FOUNDATION_PLAN.md) is planned after
+F14 acceptance. CSS required to close an included HTML/default-presentation
+contract remains a prerequisite here; product journeys retain their own
+dependency closure and evidence.
 
 F00 met its requirements, input-lock and baseline criteria and was delivered in [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4). The original
 source-bound native results retain their failures and harness gaps. F01 now has
@@ -934,6 +938,8 @@ actual App pixels plus geometry/hit targets, all three modes and representative
 multilingual text. Compare spec-defined behavior and allowed differences, not a
 promise of arbitrary Firefox screenshot equality. Full CSS/fonts/SVG/MathML
 conformance remains a separate program.
+Its broader CSS work is mapped in the [CSS plan](CSS_FOUNDATION_PLAN.md) and
+[coverage register](CSS_FOUNDATION_COVERAGE.json).
 
 ### F14 — Foundation closure and product re-entry
 
@@ -963,6 +969,11 @@ conformance remains a separate program.
 The final report must say exactly which baseline was completed and which wider
 areas remain. It must not say that all websites, all HTML, or YouTube now work
 without the corresponding evidence.
+
+After this gate, activate C00 in the [CSS plan](CSS_FOUNDATION_PLAN.md): reconcile
+new source progress, lock the selected standards and tests, and begin the next
+remaining shared syntax/property contract. Preserve the saved YouTube milestones
+as product consumers; unrelated CSS extensions do not become blanket site gates.
 
 ## Testing protocol and progress accounting
 
@@ -1053,6 +1064,13 @@ test total, API count, lines of code or PR count.
    standard or justify copying another implementation.
 
 ## Related programs
+
+The [CSS foundation plan](CSS_FOUNDATION_PLAN.md),
+[coverage register](CSS_FOUNDATION_COVERAGE.json) and
+[standards inventory](CSS_STANDARDS_INVENTORY.json) supply the post-F14 CSS program.
+They keep existing partial implementation, required integration dependencies,
+specialized renderers and forward drafts distinct. No CSS completion claim
+follows from HTML foundation closure.
 
 The foundation includes local architecture and capacity changes needed by its
 required contracts. Broader architecture and capacity programs remain deferred.
