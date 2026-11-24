@@ -88,7 +88,7 @@ mod tests {
             gap:5px;gap:calc(3px*2);border:3px solid red;border-width:calc(3px*2); \
             font-size:12px;font-size:calc(3px*2);padding-left:calc(3px*2)}");
         assert_eq!(style.width, Length::Px(6.0));
-        assert_eq!(style.inset[0], Length::Px(7.0));
+        assert_eq!(style.inset[0], Length::Px(6.0));
         assert_eq!(style.gap, [Length::Px(6.0); 2]);
         assert_eq!(style.border_width, [Length::Px(3.0); 4]);
         assert_eq!(style.font_size, 12.0);
