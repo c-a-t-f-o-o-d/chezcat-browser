@@ -6601,3 +6601,7 @@ mod remaining_builtin_labels_tests;
 #[cfg(test)]
 #[path="app_output_for_domstring_tests.rs"]
 mod output_for_domstring_tests;
+
+#[cfg(test)]
+#[path="app_output_html_for_tests.rs"]
+mod output_html_for_tests;

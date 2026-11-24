@@ -645,6 +645,9 @@ impl Runtime {
             if name == "HTMLSlotElement" {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
+            if name == "HTMLOutputElement" {
+                self.define_host_attribute(prototype,window,"htmlFor","\0HTMLOutputElement.get.htmlFor",Some("\0HTMLOutputElement.set.htmlFor"))?;
+            }
             if name == "HTMLIFrameElement" {
                 self.define_host_attribute(prototype,window,"sandbox",super::IFRAME_SANDBOX_GET,Some(super::IFRAME_SANDBOX_SET))?;
             }

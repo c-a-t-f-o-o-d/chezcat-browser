@@ -10,15 +10,24 @@ const SANDBOX_BASE:u32=0x8100_0000;
 const SANDBOX_END:u32=SANDBOX_BASE+NODE_HANDLES;
 const INERT_BASE:u32=0xc200_0000;
 const INERT_END:u32=INERT_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION);
+const OUTPUT_BASE:u32=0xc300_0000;
+const OUTPUT_END:u32=OUTPUT_BASE+NODE_HANDLES;
+const INERT_OUTPUT_BASE:u32=0xc400_0000;
+const INERT_OUTPUT_END:u32=INERT_OUTPUT_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION);
 pub(super) fn attribute(handle:u32)->Option<&'static str> {
     if (BASE..END).contains(&handle)||(INERT_BASE+1..INERT_END).contains(&handle){Some("class")}
     else if (SANDBOX_BASE..SANDBOX_END).contains(&handle){Some("sandbox")}
+    else if (OUTPUT_BASE..OUTPUT_END).contains(&handle)||(INERT_OUTPUT_BASE+1..INERT_OUTPUT_END).contains(&handle){Some("for")}
     else {None}
 }
 pub(super) fn element(handle:u32)->Option<u32> {
     if (INERT_BASE+1..INERT_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_BASE));}
-    let base=match attribute(handle)? {"class"=>BASE,_=>SANDBOX_BASE};
+    if (INERT_OUTPUT_BASE+1..INERT_OUTPUT_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_OUTPUT_BASE));}
+    let base=match attribute(handle)? {"class"=>BASE,"for"=>OUTPUT_BASE,_=>SANDBOX_BASE};
     let element=node_handle((handle-base)as usize);node_index(element).map(|_|element)
+}
+pub(super) fn output_for_handle(element:u32)->u32 {
+    if node_index(element).is_some(){OUTPUT_BASE+(element-NODE_BASE)}else{INERT_OUTPUT_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
 }
 pub(super) fn sandbox_handle(element:u32)->u32 {SANDBOX_BASE+(element-NODE_BASE)}
 pub(super) fn handle(element: u32) -> u32 {
@@ -79,10 +88,10 @@ impl Bridge<'_> {
                 .is_some_and(|node| matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg))
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && (attribute(object)!=Some("sandbox") || self.iframe_sandbox_receiver(element)))
+        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && match attribute(object){Some("sandbox")=>self.iframe_sandbox_receiver(element),Some("for")=>self.html_output_receiver(element),Some("class")=>true,_=>false})
     }
     pub(super) fn exact_class_token_receiver(&self,object:u32)->bool {
-        self.class_list_receiver(object)&&attribute(object)==Some("class")&&element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
+        self.class_list_receiver(object)&&matches!(attribute(object),Some("class"|"for"))&&element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
     }
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
@@ -192,16 +201,15 @@ impl Bridge<'_> {
         property: &str,
         value: Value,
     ) -> Result<(), String> {
-        if let Some(owner)=element(object).filter(|&owner|self.inert_class_element_receiver(owner)){
-            if attribute(object)!=Some("class"){return Err("Inert Element token attribute is unavailable.".into());}
-            if property!="value"{return Err("DOMTokenList property write is not implemented.".into());}
-            return self.element_class_name_set(owner,&value);
+        if element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)){
+            return self.inert_class_list_set(object,property,&value);
         }
         let node = self.class_list_node(object)?;
         let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
         if property != "value" {
             return Err("DOMTokenList property write is not implemented.".into());
         }
+        if attribute=="for"{return self.output_for_value_set(node_handle(node),&value);}
         if attribute=="class"&&self.html_class_element(node){return self.html_class_set(node,&value);}
         let value = self.text(&value)?;
         self.attribute(node, attribute, Some(value))
@@ -261,12 +269,12 @@ impl Bridge<'_> {
             return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,false));
         }
         if matches!(method,"add"|"remove")&&self.exact_class_token_receiver(object)
-            &&(self.doc.dom_attr(node,"class").is_some_and(|value|value.raw_units().is_some())||args.iter().any(|value|matches!(value,Value::StringUnits(_)))) {
-            let source=self.doc.dom_attr(node,"class").map(DomString::view).unwrap_or(crate::dom_string::DomStringRef::Scalar(""));
+            &&(self.doc.dom_attr(node,attribute).is_some_and(|value|value.raw_units().is_some())||args.iter().any(|value|matches!(value,Value::StringUnits(_)))) {
+            let source=self.doc.dom_attr(node,attribute).map(DomString::view).unwrap_or(crate::dom_string::DomStringRef::Scalar(""));
             let value=token_list_mutation::serialize(self.state,source,args,method=="add")?;
-            if value.is_empty()&&self.doc.dom_attr(node,"class").is_none(){return Ok(Value::Undefined);}
-            self.state.copies("class".len())?;
-            let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("class")?);
+            if value.is_empty()&&self.doc.dom_attr(node,attribute).is_none(){return Ok(Value::Undefined);}
+            self.state.copies(attribute.len())?;
+            let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text(attribute)?);
             self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)?;
             return Ok(Value::Undefined);
         }
