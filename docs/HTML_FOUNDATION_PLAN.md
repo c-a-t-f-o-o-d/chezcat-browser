@@ -496,6 +496,8 @@ HTMLFieldSetElement now exposes a stable live ValidityState and canonical setCus
 
 HTMLFieldSetElement form content attributes now admit native public/null-namespace and attached Attr writers through the shared attribute transaction, including exact UTF-16 values. Current exact IDs determine the fieldset owner independently of author properties; changing the fieldset owner does not reassociate descendant controls or redirect their native reset. Conversion reentry, actual Attr identity, observer old values, namespace/raw-value guards, captured origin and bounded work/copy/string/storage/deadline refusal/recovery retain existing authority. Inert clone/adoption and native App pointer/reset/paint/editor/link checks remain scoped evidence. Fieldset collections, broader forms, main import/promotion and child lifecycle remain required; F01 stays partial.
 
+HTMLLegendElement now has a canonical native/inert interface and readonly form getter. Only an actual direct HTML fieldset parent supplies ownership, using the shared current fieldset association helper; other parents return null. Exact namespace/local-name brands, illegal direct construction, descriptor and enumeration behavior, author override/delete/restore, captured origin and bounded work/copy/storage/deadline refusal/recovery retain native authority. Exact owner IDs, inert clone/adoption and native App pointer/reset/paint/editor/link evidence remain scoped. Broader form collections/lifecycle, main import/promotion and initial child lifecycle remain required; F01 stays partial.
+
 
 ### F02 — Bytes, encodings and MIME routing
 

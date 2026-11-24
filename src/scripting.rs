@@ -3121,6 +3121,7 @@ impl Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
         if self.form_length_member(object,property){return true;}
+        if self.legend_form_member(object,property){return true;}
         if self.fieldset_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
@@ -3320,7 +3321,7 @@ impl Host for Bridge<'_> {
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLFieldSetElement" | "HTMLMeterElement" | "HTMLOutputElement" | "HTMLProgressElement" | "HTMLSelectElement" | "HTMLLabelElement" | "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement" | "HTMLTextAreaElement");
+            return matches!(interface, "HTMLLegendElement" | "HTMLFieldSetElement" | "HTMLMeterElement" | "HTMLOutputElement" | "HTMLProgressElement" | "HTMLSelectElement" | "HTMLLabelElement" | "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement" | "HTMLTextAreaElement");
         }
         self.exposed_native_prototype(object)
     }
@@ -3451,6 +3452,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return false;}
         if self.control_type_member(object,property){return false;}
         if self.form_length_member(object,property){return false;}
+        if self.legend_form_member(object,property){return false;}
         if self.fieldset_member(object,property){return false;}
         if self.control_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
@@ -3584,6 +3586,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
         if self.form_length_member(object,property){return true;}
+        if self.legend_form_member(object,property){return true;}
         if self.fieldset_member(object,property){return matches!(property,"form"|"type");}
         if self.control_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
@@ -4014,6 +4017,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_control_type::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_form_length::GET&&self.event_target_interface(object){return Some(object);}
+        if method==script_legend_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_fieldset::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_control_form::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4337,6 +4341,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_control_type::interface(method).is_some(){return self.validate_control_type(object,method);}
         if method==script_form_length::GET{return self.validate_form_length(object);}
+        if method==script_legend_form::GET{return self.validate_legend_form(object);}
         if script_fieldset::operation(method){return self.validate_fieldset(object);}
         if script_control_form::interface(method).is_some(){return self.validate_control_form(object,method);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
@@ -4807,6 +4812,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_control_type::interface(method).is_some(){return self.event_target_interface(object)&&self.control_type_matches(receiver,method);}
         if method==script_form_length::GET{return self.event_target_interface(object)&&self.form_length_receiver(receiver);}
+        if method==script_legend_form::GET{return self.event_target_interface(object)&&self.legend_receiver(receiver);}
         if script_fieldset::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_control_form::interface(method).is_some(){return self.event_target_interface(object)&&self.control_form_matches(receiver,method);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
@@ -5692,6 +5698,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.control_type_member(object,property){return self.control_type_get(object,self.control_type_method(object).unwrap());}
         if self.form_length_member(object,property){return self.form_length_get(object);}
+        if self.legend_form_member(object,property){return self.legend_form_get(object);}
         if self.fieldset_member(object,property){return self.fieldset_get(object,match property{"form"=>script_fieldset::FORM,"name"=>script_fieldset::NAME_GET,"disabled"=>script_fieldset::DISABLED_GET,_=>script_fieldset::TYPE});}
         if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
@@ -6541,6 +6548,7 @@ impl Host for Bridge<'_> {
         if script_control_type::interface(method).is_some(){return self.control_type_get(object,method);}
         if method==script_form_length::GET{return self.form_length_get(object);}
         if matches!(method,script_fieldset::NAME_SET|script_fieldset::DISABLED_SET){return Err("Fieldset setters require the native conversion transaction.".into());}
+        if method==script_legend_form::GET{return self.legend_form_get(object);}
         if script_fieldset::operation(method){return self.fieldset_get(object,method);}
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
@@ -9567,3 +9575,10 @@ mod fieldset_validity_tests;
 #[cfg(test)]
 #[path="script_fieldset_form_attribute_tests.rs"]
 mod fieldset_form_attribute_tests;
+
+#[cfg(test)]
+#[path="script_legend_form_tests.rs"]
+mod legend_form_tests;
+
+#[path="script_legend_form.rs"]
+mod script_legend_form;

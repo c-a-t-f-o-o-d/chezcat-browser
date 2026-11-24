@@ -515,6 +515,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("img", "HTMLImageElement"),
     ("input", "HTMLInputElement"),
     ("label", "HTMLLabelElement"),
+    ("legend", "HTMLLegendElement"),
     ("meta", "HTMLMetaElement"),
     ("meter", "HTMLMeterElement"),
     ("output", "HTMLOutputElement"),
