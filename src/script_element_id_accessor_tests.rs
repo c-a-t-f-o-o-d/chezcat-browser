@@ -40,14 +40,14 @@ fn element_id_accessor_saved_child_origin_before_conversion_and_recovery(){
 }
 
 #[test]
-fn element_id_accessor_native_get_limits_are_atomic_and_main_raw_writes_still_refuse(){
+fn element_id_accessor_native_get_limits_are_atomic_and_svg_raw_writes_still_refuse(){
  let(mut doc,mut forms,mut page)=fixture();let target=(0..doc.nodes.len()).find(|&n|doc.attr(n,"id")==Some("target")).unwrap();let NodeKind::Element{attrs,..}=&mut doc.nodes[target].kind else{unreachable!()};attrs.iter_mut().find(|a|a.name.html_is("id")).unwrap().value=DomString::from_units(&[65,0xd800,122],4096).unwrap();
  let before=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;let retained=page.state.retained;let limit=page.state.limits.host.string_bytes;
  for mode in 0..3{page.begin_job();match mode{0=>page.state.host_work=0,1=>page.state.copy_work=0,_=>page.state.limits.host.string_bytes=4};let error=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.element_id_get(node_handle(target)).unwrap_err();assert!(error.contains("work")||error.contains("allowance"),"{error}");assert_eq!(format!("{:?}",doc.nodes),before);assert_eq!(page.state.dom_commits,commits);assert_eq!(page.state.retained,retained);page.state.limits.host.string_bytes=limit;}
  page.begin_job();let value=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.element_id_get(node_handle(target)).unwrap();assert!(matches!(value,Value::StringUnits(units) if units==[65,0xd800,122]));
- run(&mut doc,&mut forms,&mut page,"var p=document.getElementsByTagName('p')[0],calls=0;");
+ run(&mut doc,&mut forms,&mut page,"var p=document.getElementById('shape'),calls=0;");
  let error=page.runtime.execute(r#"p.id={toString:function(){calls++;p.setAttribute('data-effect','yes');return 'B\udfffz';}}"#,&mut Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap_err();assert!(error.contains("Unpaired attribute"),"{error}");
- page.begin_job();run(&mut doc,&mut forms,&mut page,r#"if(calls!==1||p.id!=='A\ud800z'||p.getAttribute('data-effect')!=='yes')throw 'guard and effects';p.id='fresh';if(p.id!=='fresh')throw 'fresh scalar';"#);
+ page.begin_job();run(&mut doc,&mut forms,&mut page,r#"if(calls!==1||p.id!=='shape'||p.getAttribute('data-effect')!=='yes')throw 'guard and effects';p.id='fresh';if(p.id!=='fresh')throw 'fresh scalar';"#);
 }
 
 #[test]

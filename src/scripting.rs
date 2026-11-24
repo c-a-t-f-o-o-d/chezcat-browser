@@ -2495,7 +2495,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -9146,6 +9146,9 @@ mod script_element_id;
 #[cfg(test)]
 #[path="script_form_owner_id_exact_tests.rs"]
 mod form_owner_id_exact_tests;
+#[cfg(test)]
+#[path="script_html_id_domstring_tests.rs"]
+mod html_id_domstring_tests;
 
 #[path="script_form_id_guards.rs"]
 mod form_id_guards;

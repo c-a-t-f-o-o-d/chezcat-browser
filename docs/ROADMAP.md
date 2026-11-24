@@ -58,6 +58,11 @@ Isolation and GPU work keep their separate readiness gates.
 
 **Legend:** ✅ **Merged / verified scope** · 🟡 **Partial / active** · ◻️ **Next / planned** · 🧊 **Deferred**
 
+Current foundation increment: public HTML null-namespace ID writes preserve exact
+UTF-16 through shared native setters, Attr identity, lookup, clone/move and
+observation. Resource refusal/recovery and native App interaction have focused
+checks. SVG raw IDs, raw-ID imports and full form-owner resetting remain open.
+
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and
 [coverage register](HTML_FOUNDATION_COVERAGE.json) replace P1-first scheduling.

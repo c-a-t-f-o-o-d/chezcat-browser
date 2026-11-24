@@ -6505,3 +6505,7 @@ mod element_id_accessor_tests;
 #[cfg(test)]
 #[path="app_form_owner_id_exact_tests.rs"]
 mod form_owner_id_exact_tests;
+
+#[cfg(test)]
+#[path="app_html_id_domstring_tests.rs"]
+mod html_id_domstring_tests;
