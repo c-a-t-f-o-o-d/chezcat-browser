@@ -621,6 +621,7 @@ impl Runtime {
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
             if name == "HTMLDataElement" {self.define_host_attribute(prototype,window,"value","\0HTMLDataElement.get.value",Some("\0HTMLDataElement.set.value"))?;}
             if name == "HTMLHeadingElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHeadingElement.get.align",Some("\0HTMLHeadingElement.set.align"))?;}
+            if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"type","\0HTMLUListElement.get.type",Some("\0HTMLUListElement.set.type"))?;}
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"align","\0HTMLLegendElement.get.align",Some("\0HTMLLegendElement.set.align"))?;}
             if name == "HTMLDivElement" {self.define_host_attribute(prototype,window,"align","\0HTMLDivElement.get.align",Some("\0HTMLDivElement.set.align"))?;}
