@@ -9675,3 +9675,7 @@ mod script_data_value;
 #[cfg(test)]
 #[path="script_quote_interface_tests.rs"]
 mod quote_interface_tests;
+
+#[cfg(test)]
+#[path="script_heading_interface_tests.rs"]
+mod heading_interface_tests;
