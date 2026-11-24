@@ -616,7 +616,8 @@ preserved. These are retained-tree/component results, not complete tokenizer or
 upstream-case acceptance.
 
 Checked-fragment generic NUL guards remain. Legacy internal parsing,
-head-noscript, unknown foreign/uncertain recovery, full insertion modes,
+scripting-enabled and nested-template noscript, unknown foreign/uncertain
+recovery, full insertion modes,
 diagnostics, streaming, whole-parser resource accounting and Windows App/browser/
 full-corpus qualification remain open. The frozen foundation inputs, selections
 and witnesses are unchanged; F04 and F05 remain partial.
@@ -645,6 +646,25 @@ Unknown diagnostic positions may be tracked separately but block a claim of full
 tokenizer-fixture fidelity. Deep input cannot overflow the Rust call stack.
 
 ### F05 — Complete HTML tree construction and document modes
+
+**Head noscript increment:** loaded and inert HTML documents now use an explicit
+scripting-disabled head-noscript insertion mode. Allowed whitespace, comments,
+processing instructions and metadata retain the noscript parent. A duplicate
+html start tag merges missing root attributes; nested head/noscript starts and
+unrelated end tags are ignored. The noscript end tag returns to head. Other
+starts, non-whitespace characters and EOF reprocess through the appropriate
+head/body path; the exceptional br end tag produces the attribute-free body br.
+Initial whitespace stays inside noscript before later characters move to body,
+and a literal NUL triggers that transition before the body DATA filter drops it.
+Raw-text processing and duplicate-nonce provenance remain intact.
+
+All 26 original focused checks pass, up from nine on the unchanged production
+baseline, with all 153 existing native HTML checks still passing. The fixed
+562 supplementary retained-tree comparisons remain matching with unchanged
+expectations. These are Linux native parser/component results. Scripting-enabled
+noscript tokenization, checked-fragment expansion, complete template/foreign
+insertion modes, tokenizer diagnostics and Windows App/browser/full-corpus
+acceptance remain separate. F05 and mode M05 remain partial.
 
 **Deliverables**
 
