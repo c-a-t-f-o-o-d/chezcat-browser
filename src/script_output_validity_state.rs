@@ -1,7 +1,9 @@
-//! Native OUTPUT custom error authority and live readonly validity views.
+//! Shared noncandidate form-control custom errors and live readonly validity views.
 use super::*;
 pub(super) const GET:&str="\0HTMLOutputElement.get.validity";
 pub(super) const SET:&str="\0HTMLOutputElement.setCustomValidity";
+pub(super) const FIELD_GET:&str="\0HTMLFieldSetElement.get.validity";
+pub(super) const FIELD_SET:&str="\0HTMLFieldSetElement.setCustomValidity";
 pub(super) const FLAGS:&[(&str,&str)]=&[
  ("valueMissing","\0ValidityState.get.valueMissing"),
  ("typeMismatch","\0ValidityState.get.typeMismatch"),
@@ -24,25 +26,27 @@ fn owner(handle:u32)->Option<u32>{
 }
 fn handle(object:u32)->u32{if node_index(object).is_some(){MAIN+(object-NODE_BASE)}else{INERT+(object-script_inert_documents::MAIN_IMPLEMENTATION)}}
 pub(super) fn flag(method:&str)->Option<&'static str>{FLAGS.iter().find_map(|&(key,op)|(op==method).then_some(key))}
-pub(super) fn operation(method:&str)->bool{matches!(method,GET|SET)||flag(method).is_some()}
+pub(super) fn operation(method:&str)->bool{matches!(method,GET|SET|FIELD_GET|FIELD_SET)||flag(method).is_some()}
 impl Bridge<'_>{
- pub(super) fn validity_receiver(&self,object:u32)->bool{owner(object).is_some_and(|o|self.html_output_receiver(o))}
- pub(super) fn output_validity_member(&self,object:u32,property:&str)->bool{matches!(property,"validity"|"setCustomValidity")&&self.html_output_receiver(object)}
+ pub(super) fn validity_receiver(&self,object:u32)->bool{owner(object).is_some_and(|o|self.html_output_receiver(o)||self.fieldset_receiver(o))}
+ pub(super) fn output_validity_member(&self,object:u32,property:&str)->bool{matches!(property,"validity"|"setCustomValidity")&&(self.html_output_receiver(object)||self.fieldset_receiver(object))}
  pub(super) fn validity_member(&self,object:u32,property:&str)->bool{self.validity_receiver(object)&&FLAGS.iter().any(|&(key,_)|key==property)}
  pub(super) fn validate_output_validity(&self,object:u32,method:&str)->Result<(),(&'static str,String)>{
-  let output=if flag(method).is_some(){owner(object).filter(|&o|self.html_output_receiver(o)).ok_or_else(||("TypeError","ValidityState requires a genuine native validity object.".into()))?}else{object};
-  self.validate_output_metadata(output)
+  if flag(method).is_some(){
+   let native=owner(object).filter(|&o|self.html_output_receiver(o)||self.fieldset_receiver(o)).ok_or_else(||("TypeError","ValidityState requires a genuine native validity object.".into()))?;
+   if self.fieldset_receiver(native){self.validate_fieldset(native)}else{self.validate_output_metadata(native)}
+  }else if matches!(method,FIELD_GET|FIELD_SET){self.validate_fieldset(object)}else{self.validate_output_metadata(object)}
  }
  pub(super) fn output_validity_call(&mut self,object:u32,method:&str,args:&[Value])->Result<Value,String>{
   self.validate_output_validity(object,method).map_err(|(_,s)|s)?;
   self.state.work(1)?;script_text_content::deadline(self.state)?;
-  if method==GET{return Ok(Value::Host(handle(object)));}
+  if matches!(method,GET|FIELD_GET){return Ok(Value::Host(handle(object)));}
   if let Some(key)=flag(method){
    let output=owner(object).unwrap();self.state.work(self.state.output_custom_errors.lookup_work())?;
    let custom=self.state.output_custom_errors.get(&output).is_some();
    return Ok(Value::Bool(match key{"customError"=>custom,"valid"=>!custom,_=>false}));
   }
-  if method!=SET{return Err("Unknown OUTPUT validity operation.".into());}
+  if !matches!(method,SET|FIELD_SET){return Err("Unknown native validity operation.".into());}
   let value=args.first().ok_or("Custom validity requires one DOMString argument.")?;
   self.state.rebuild(self.doc)?;
   let source=retained_storage::value_bytes(value);

@@ -3589,7 +3589,7 @@ impl Host for Bridge<'_> {
         if property=="type"&&self.output_metadata_member(object,property){return true;}
         if self.fieldset_validation_readonly(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
-        if property=="validity"&&self.html_output_receiver(object)||self.validity_member(object,property){return true;}
+        if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object))||self.validity_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -3730,7 +3730,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        if index==0&&method==script_output_validity_state::SET{return true;}
+        if index==0&&matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return true;}
         if index==0&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
@@ -3783,7 +3783,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
-        if method==script_output_validity_state::SET{return &[(0,true)];}
+        if matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return &[(0,true)];}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
@@ -4140,7 +4140,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if method==script_output_validity_state::SET{return 1;}
+        if matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
@@ -4812,7 +4812,7 @@ impl Host for Bridge<'_> {
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_fieldset_validation::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
-        if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else{self.html_output_receiver(receiver)};}
+        if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else if matches!(method,script_output_validity_state::FIELD_GET|script_output_validity_state::FIELD_SET){self.fieldset_receiver(receiver)}else{self.html_output_receiver(receiver)};}
         if script_output_value::operation(method).is_some(){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
@@ -5697,7 +5697,7 @@ impl Host for Bridge<'_> {
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
         if self.fieldset_validation_readonly(object,property){return self.fieldset_validation(object,if property=="willValidate"{script_fieldset_validation::WILL_GET}else{script_fieldset_validation::MESSAGE_GET});}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
-        if property=="validity"&&self.html_output_receiver(object){return self.output_validity_call(object,script_output_validity_state::GET,&[]);}
+        if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object)){return self.output_validity_call(object,if self.fieldset_receiver(object){script_output_validity_state::FIELD_GET}else{script_output_validity_state::GET},&[]);}
         if self.validity_member(object,property){let method=script_output_validity_state::FLAGS.iter().find(|&&(key,_)|key==property).unwrap().1;return self.output_validity_call(object,method,&[]);}
         if self.output_value_member(object,property){return self.output_value_get(object,property);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
@@ -9559,3 +9559,7 @@ mod fieldset_validation_tests;
 
 #[path="script_fieldset_validation.rs"]
 mod script_fieldset_validation;
+
+#[cfg(test)]
+#[path="script_fieldset_validity_tests.rs"]
+mod fieldset_validity_tests;
