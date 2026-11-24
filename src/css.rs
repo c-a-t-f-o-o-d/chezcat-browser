@@ -2750,7 +2750,7 @@ fn starts_selector_ident(bytes: &[u8], position: usize) -> bool {
         Some(b'-') => bytes
             .get(position + 1)
             .is_some_and(|byte| ident_start(*byte)),
-        Some(byte) => byte.is_ascii_alphabetic() || *byte == b'_',
+        Some(byte) => ident_start(*byte),
         None => false,
     }
 }
@@ -5475,3 +5475,7 @@ mod svg_paint_tests;
 #[cfg(test)]
 #[path="css_class_exact_tests.rs"]
 mod class_exact_tests;
+
+#[cfg(test)]
+#[path="css_selector_ident_start_tests.rs"]
+mod selector_ident_start_tests;
