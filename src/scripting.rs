@@ -3427,9 +3427,9 @@ impl Host for Bridge<'_> {
         if self.collection_receiver(object){return !self.collection_prototype_member(property);}
         if self.node_list_receiver(object) {
             // Genuine main NodeLists retain protected native indexed slots and
-            // existing item/forEach calls. Other properties use their ordinary
-            // backing/prototype, including author length and iterator changes.
-            return collection_index(property).is_some() || matches!(property,"item"|"forEach");
+            // existing item calls. Other properties use their ordinary
+            // backing/prototype, including author callback/length changes.
+            return collection_index(property).is_some() || property=="item";
         }
         if self.element_selector_member(object,property) {return false;}
         if self.inherited_node_property(object,property) {return false;}
@@ -3956,7 +3956,7 @@ impl Host for Bridge<'_> {
         {
             return Some(object);
         }
-        if matches!(method,"item"|"forEach") { if let Some(window) = self.node_list_owner(object) { return Some(window); } }
+        if method=="item" { if let Some(window) = self.node_list_owner(object) { return Some(window); } }
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return Some(object);}
@@ -4133,7 +4133,7 @@ impl Host for Bridge<'_> {
                         | "appendChild"
                         | "removeChild"
                 )
-            || node_list_index(object).is_some() && matches!(method, "item" | "forEach")
+            || node_list_index(object).is_some() && method=="item"
             || object == NAVIGATOR && method == "sendBeacon"
         {
             1
@@ -4593,13 +4593,7 @@ impl Host for Bridge<'_> {
         if let Some(method) = self.dom_method(object, property) {
             return Some(method);
         }
-        if node_list_index(object).is_some() {
-            return match property {
-                "item" => Some("item"),
-                "forEach" => Some("forEach"),
-                _ => None,
-            };
-        }
+        if node_list_index(object).is_some() {return (property=="item").then_some("item");}
         if node_index(object).is_some_and(|node| {
             self.doc
                 .nodes
@@ -4868,10 +4862,6 @@ impl Host for Bridge<'_> {
                 Err(("NotSupportedError", "Animation frame scheduling for a child Window is not implemented.".into())),
             _ => Err(("TypeError", "Animation frame operation requires a Window receiver.".into())),
         })
-    }
-
-    fn indexed_for_each(&self, object: u32, method: &str) -> bool {
-        node_list_index(object).is_some() && method == "forEach"
     }
 
     fn indexed_iteration_owner(&self, object:u32)->Option<u32> {
@@ -5289,7 +5279,7 @@ impl Host for Bridge<'_> {
                 || !matches!(self.tag_collection_get(object, property)?, Value::Undefined));
         }
         if node_list_index(object).is_some() {
-            return Ok(matches!(property, "length" | "item" | "forEach")
+            return Ok(matches!(property, "length" | "item")
                 || !matches!(self.node_list_get(object, property)?, Value::Undefined));
         }
         if self.ui_receiver(object) && matches!(property,"view"|"detail") {return Ok(true);}
@@ -9126,3 +9116,7 @@ mod token_list_replace_tests;
 #[cfg(test)]
 #[path="script_token_list_for_each_tests.rs"]
 mod token_list_for_each_tests;
+
+#[cfg(test)]
+#[path="script_node_list_for_each_tests.rs"]
+mod node_list_for_each_tests;

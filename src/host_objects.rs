@@ -927,9 +927,8 @@ impl Runtime {
     }
 
     fn define_node_list_iteration_interface(&mut self,window:u32)->Result<(),Fault> {
-        // This finite interface promotes indexed iteration and length only.
-        // The existing guarded item/forEach paths remain; forEach is not yet
-        // the Array intrinsic alias specified for a complete IDL iterable.
+        // Indexed iteration and callback traversal share the owner Array
+        // intrinsics. item retains its existing guarded native route.
         let allocation=self.allocate_host_function_with_length(window,"NodeList",0).map_err(Fault::new)?;
         if let Some(Function::Host {constructible,..})=self.functions.get_mut(allocation.id) {*constructible=true;}
         let constructor=Value::Function(allocation.id);
@@ -942,6 +941,7 @@ impl Runtime {
             let method=self.array_iterator_intrinsic(mode);
             self.store_property(prototype,key.into(),method,Some((true,true,true)))?;
         }
+        self.store_property(prototype,"forEach".into(),self.array_for_each_intrinsic(),Some((true,true,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
         self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         self.define_host_attribute(prototype, window, "length", "\0NodeList.get.length", None)?;

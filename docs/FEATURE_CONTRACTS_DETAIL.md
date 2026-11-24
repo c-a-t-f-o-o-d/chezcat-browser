@@ -226,8 +226,12 @@ initialization or visible improvement; connected follow-up behavior is in CP2.
 Use the genuine retained main Document and supported main Node objects. Each
 childNodes getter returns one stable, live NodeList identity for that root. Reads
 observe the actual immediate Element/Text children in tree order, including Text;
-existing item/forEach and readonly indexed/length behavior remain. Out-of-range
-indices return undefined and item returns null; HTMLCollection named aliases are
+native indexed slots and the guarded item operation remain. NodeList.forEach
+uses the owner Array intrinsic: it captures and converts effective length before
+callback validation, then performs live HasProperty/Get with actual Node values.
+The native length getter is read-only; ordinary own properties can shadow its
+effective value for generic iteration. Out-of-range indices return undefined and
+item returns null; HTMLCollection named aliases are
 not introduced. Borrowed Array.prototype.slice reuses the existing host backend:
 it captures initial length, performs ordered conversion/HasProperty/Get, retains
 holes and returns an ordinary static Array of the same actual node identities.
