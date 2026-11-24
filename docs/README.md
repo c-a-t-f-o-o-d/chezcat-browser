@@ -41,27 +41,22 @@
 
 The README introduces the product. These pages serve different purposes: a planned
 milestone is not implemented support, a source merge is not a new downloadable
-release, and a model test is not a live-site outcome. Follow the exact source or
+release, and a component test is not a live-site outcome. Follow the exact source or
 build identity attached to each result.
 
 The verified downloadable baseline is
 [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4),
-from tagged source `122d0b7de5988493481dc4bed168d01969eef488`. Download and runtime
-checks are recorded alongside earlier releases in the [release history](RELEASING.md#published-baseline).
+from tagged source `122d0b7de5988493481dc4bed168d01969eef488`. Its Windows build,
+release checks, four published assets and extracted runtime passed verification.
+The [current release record](RELEASING.md#current-verified-release) links the
+workflow and exact asset hashes; [release history](RELEASING.md#release-history)
+preserves earlier deliveries and candidates.
 
-The `v0.82.0-alpha.2` tag identifies source
-[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
-including integrated changes through PR #430 and release preparation in PR #431.
-Its [change summary](../CHANGELOG.md#0820-alpha2) describes the source scope;
-[Windows release qualification and verified delivery](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-stopped at the normal native-test stage. No alpha.2 packages were published.
-The subsequent [alpha.3 qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
-at `ff5740d` also failed the Windows normal suite.
-Its build and the four hosted capacity failures are recorded in the
-[release history](RELEASING.md#published-baseline). The alpha.4 source includes
-the adapter and capacity corrections. F00 acceptance covers requirements and
-the fixed baseline. Current development has partial F01, F02, F04 and F05 work. All 21 required browser files have been attempted. The register records the measured results and files still missing a terminal report. The [coverage register](HTML_FOUNDATION_COVERAGE.json)
-tracks these distinctions.
+**The document foundation is the active development priority.** F00 acceptance
+covers the requirements and fixed baseline. F01, F02, F04 and F05 remain partial.
+All 21 required browser files have been attempted; the
+[coverage register](HTML_FOUNDATION_COVERAGE.json) records their measured results
+and identifies files still missing a terminal report.
 
 ### Current reading path
 
@@ -69,12 +64,12 @@ tracks these distinctions.
 | :--- | :--- |
 | **What should become usable next?** | The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md), followed by the YouTube shell/search/navigation/playback milestones. |
 | **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha4) for the release-line summary. |
-| **What has actually worked on a page?** | The [latest homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recent original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
-| **Which build should I run?** | [Build instructions](BUILDING.md) for local development; [release history](RELEASING.md#published-baseline) for verified downloads and exact source identities. |
+| **What has actually worked on a page?** | The [latest recorded homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recorded original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
+| **Which build should I run?** | [Build instructions](BUILDING.md) for local development; the [current release record](RELEASING.md#current-verified-release) for verified downloads and exact source identity. |
 
-The current YouTube observation remains a skeleton. Merged engine changes and
-passing original fixtures are useful progress, but they do not establish a
-working homepage, search journey or playback.
+The latest recorded YouTube observation remains a skeleton on its measured
+source. Merged engine changes and passing original fixtures are useful progress,
+but they do not establish a working homepage, search journey or playback.
 
 Fully accepted milestones proceed through the checks in the
 [release procedure](RELEASING.md).

@@ -1118,7 +1118,9 @@
       "processing_instruction_scope": "The HTML tokenizer implements the pinned PI target, data, questionable terminator, reserved/invalid target comment recovery and EOF behavior. Parsed PI nodes use genuine DOM target/data records in supported document and fragment paths. Full tokenizer event and parse-error diagnostics remain required.",
       "source_anchors": [
         "src/html.rs",
-        "src/html_comments.rs"
+        "src/html_comments.rs",
+        "src/html_named_references.rs",
+        "src/html_named_references_data.rs"
       ],
       "contracts": [
         {
@@ -1133,8 +1135,10 @@
         {
           "id": "F04.02",
           "requirement": "Complete generated entity data with multi-code-point/legacy spellings",
-          "status": "unassessed",
-          "verification": [],
+          "status": "partial",
+          "verification": [
+            "The original decoder now uses a reproducibly generated static table from the existing pinned WHATWG html-build entity input: 2,231 spellings, 93 two-scalar mappings and 106 semicolonless legacy names. Data/RCDATA and attribute-value paths retain exact case, longest matches and the legacy attribute exception; emitted values are not recursively decoded or retokenized. Exact checked output sizing, fallible reservation and cancellation polling cover the decoder scans, including long numeric references. The supplementary fixed Linux native catalog passed all 13,699 cases: 11,155 complete-table cases across text, attributes, title, textarea and checked fragments, plus 2,544 legacy-boundary cases. The same pre-change catalog passed 3,859 cases and failed 9,840. All 13 new parser regressions and 58 existing HTML tests passed; the baseline passed 3 of the new tests and all 58 existing tests. Twelve generator/input-integrity controls passed. Upstream data and license identities, the frozen foundation selection and original witnesses are unchanged. This is source-bound component evidence, not Windows App or required browser/tokenizer-corpus acceptance. Full tokenizer diagnostics, streaming, surrounding parser cancellation/resource accounting and tree integration remain open; F04 and this contract remain partial."
+          ],
           "dependency_details": []
         },
         {

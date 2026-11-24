@@ -375,6 +375,15 @@ same-origin tuples/opaque origins and denied scheme/credential crossings.
 
 ### F04 — Complete HTML tokenizer and character references
 
+**Current increment:** the generated named-reference table now covers all 2,231
+pinned spellings, including two-scalar values and legacy attribute ambiguity.
+The fixed supplementary Linux native catalog passes all 13,699 cases, with all
+13 new parser regressions and 58 existing HTML tests passing. The
+[coverage register](HTML_FOUNDATION_COVERAGE.json) records the comparison and its
+scope. Full tokenizer diagnostics, streaming, surrounding parser resource and
+cancellation accounting, Windows App integration and the required frozen corpus
+gates remain open; this increment does not complete F04.
+
 **Deliverables**
 
 - Implement every tokenizer state in the machine-readable register, with

@@ -17,40 +17,18 @@
 > contract, not complete standards or website support. Local tests, App journeys,
 > physical devices, and live services are different evidence scopes.
 
-**Published prerelease [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4)** includes the accepted F00 baseline and partial foundation implementations through `122d0b7`. See the [verified download and extracted-runtime record](RELEASING.md#published-baseline).
+**Current published prerelease: [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).**
+It includes the accepted F00 baseline and partial foundation implementations
+through tagged source `122d0b7`. The Windows build, release checks, four public
+assets and extracted offline runtime passed verification. See the
+[current release record](RELEASING.md#current-verified-release) for delivery evidence.
 
-**Earlier published prerelease 0.82.0-alpha.1** is tagged at `f2e1823` and includes the integrated features measured through `6089546`. The preceding prerelease is 0.81.0-alpha.3 at `57cc1d5`. [Release downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1) · [Source comparison](https://github.com/c-a-t-f-o-o-d/chezcat-browser/compare/v0.81.0-alpha.3...v0.82.0-alpha.1)
-
-**Tagged candidate 0.82.0-alpha.2** identifies
-[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
-including the integrated feature changes through `1de1f24` and release preparation.
-The [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-failed at the normal Windows test stage; packaging/publication were not reached
-and no alpha.2 release assets exist. Alpha.1 was the verified download at the time.
-The immutable alpha.3 candidate at `ff5740d` also failed its hosted normal
-suite. Publication was skipped. The `0.82.0-alpha.4` release delivers F00
-with the adapter and capacity repairs integrated through `7e0d347`. Development work on F01, F02, F04 and F05 has open integration and conformance requirements. The tagged build, four public assets and extracted offline runtime passed delivery verification.
-The matrix describes implemented source slices; earlier measurements keep their
-recorded revisions and do not become alpha.2 runtime results. See the
-[change summary](../CHANGELOG.md) and [release procedure](RELEASING.md).
-
-**Earlier development source after the alpha.2 tag:** [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433)
-at `ce464a4` adds passive HTML content replacement, and
-[PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434) at `117bbb5`
-preserves newly created inert Text identities through supported promotion.
-[PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435) at `ad58c9a`
-extends reservation to supported inert HTML/custom/style and SVG constructors.
-The shared row below records these increments and their remaining boundaries.
-All are outside the immutable alpha.2 candidate and require a newer development build.
-
-**Earlier source snapshot:** public `main` at `a65d37c` (November 17, 2026). This includes
-PRs [#29](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/29),
-[#30](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/30),
-[#31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31),
-[#32](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/32), and
-[#34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34).
-The fixed [0.81.0-alpha.2 downloads](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.2)
-remain at `36adf20`; these later changes do not update those binaries.
+**This matrix describes integrated source capabilities.** Development on `main`
+can extend beyond the published executable. F01, F02, F04 and F05 retain open
+integration and conformance requirements. Each recorded measurement keeps its
+actual source identity; later implementation changes require their own checks.
+The [changelog](../CHANGELOG.md), [compatibility records](COMPATIBILITY.md) and
+[release history](RELEASING.md#release-history) preserve the earlier evidence.
 
 [Browser & platform](#browser-and-platform) · [DOM & JavaScript](#dom-and-javascript)
 · [Rendering](#rendering-and-resources) · [Image & font formats](#image-and-font-formats) · [Media](#media)
@@ -372,6 +350,7 @@ physical desktop or complete live-page results.
 | **Stylesheet requests** | Parser-loaded sheets use source/rule admission without a sheet-count ceiling. Dynamic requests share immutable policy snapshots and a byte reservation that survives queue transfers and clones until the final owner drops. Worker queue capacity and completed encoded-response/header/base/event payloads have byte admission and reserve failure-message storage before accepting a job. External replacements and inline detach/reinsert admit against current node-owned sources; removal releases source bytes/rules. Ownership-map capacity is charged to host retained storage. Parsed LINK mutations use current CSP checks and real completion events. | Complete stylesheet bytes and rules/declarations remain bounded. General parsed STYLE text mutation and CSSOM source editing remain incomplete. |
 | **Document source decoding** | Network/local HTML and plain text use the shared original Encoding decoders. Unicode BOMs override recognized transport labels; HTML then uses an original 1,024-byte prescan with byte attributes, first-duplicate/pragma rules, XML-declaration compatibility and meta-specific UTF-16/x-user-defined remaps. Unknown labels fall through; plain text does not inspect HTML meta. A second leading BOM remains content. Exact decoded UTF-8 size is admitted before fallible allocation, with cancellation during both passes. | The deterministic UTF-8-if-valid/windows-1252 fallback remains. The committed document retains the selected decoder. Its characterSet, charset and inputEncoding getters report the canonical encoding name, including after a refused navigation. Confidence state, parser-triggered encoding changes/restarts, parent/environment inheritance, full MIME/XML routing and unchanged browser evidence remain open. Initial linked CSS and classic-script selection are described below; dynamic stylesheet decoding retains its separate existing path. |
 | **Linked stylesheet decoding** | Initial network/local and dynamic network LINK stylesheets use the shared original decoder with BOM, recognized response charset, exact leading 1,024-byte `@charset` signature, then LINK/document environment fallback. A declaration naming UTF-16 falls back to UTF-8; a UTF-16 response label or BOM remains meaningful. Dynamic completion selects the live reflected LINK charset/document encoding only for its current request. Main and inert-document charset metadata retain exact DOMString values, live Attr identity and mutation old values; unpaired labels use the document fallback. Charset edits preserve the existing fetch and decoded source. Exact decoded output is admitted against remaining sheet/document bytes before allocation with cancellation. Initial reuse separates distinct environment encodings. | Dynamic local-file stylesheets retain their explicit refusal. Canonical HTMLLinkElement charset accessors preserve native branding and author descriptor precedence. Child charset accessor owners, wider LINK reflections, CSS imports, broader syntax/preprocessing conformance and required browser evidence are separate. MIME, CSP, redirect, origin, nonce and local-file checks remain. |
+| **HTML named character references** | The original decoder uses all 2,231 spellings from the pinned WHATWG data, including 93 two-scalar mappings and 106 legacy names. Text, RCDATA and supported attributes/fragments preserve longest matching, case and the attribute semicolon exception. Decoded values remain text. Exact output sizing and fallible reservation handle expanding replacements; loaded-parser callbacks can cancel decoder scans. | All 13,699 fixed supplementary Linux native catalog cases, 13 new parser regressions and 58 existing HTML tests pass. Full tokenizer diagnostics, streaming, surrounding parser cancellation/resource accounting, Windows App integration and required frozen browser/corpus qualification remain separate; F04 remains partial. |
 | **HTML raw-text elements** | Loaded HTML treats iframe, xmp, noembed and noframes content as literal text. Character references remain literal, source nulls become U+FFFD, and an appropriate matching end tag returns to ordinary parsing. Parsed iframe child lists, Text identity, owner, textContent and serialization use the native record. | Frame navigation and activation retain their existing limits. Full tokenizer diagnostics, streaming, tree construction and XML routing remain open. |
 | **Local HTML source** | Opens regular local HTML files using BOM/initial-meta selection and retains the decoded source for inspection. Both encoded input and decoded UTF-8 source retain the 32 MiB allowance; local plain text uses 1 MiB. Network document text has a 2 MiB decoded-source allowance alongside the existing HTTP body bound. | Decoded expansion can refuse the load before document publication; the committed page remains available. HTML tree node and depth bounds still apply. XML/XHTML parsing remains unsupported. |
 | **Loaded HTML tree** | Local and network documents can parse up to 262,144 nodes, including the synthetic root. | Crossing the node bound or the 128-level open-element bound reports a load failure. Script-inserted fragments use their separate checks. |
@@ -514,12 +493,14 @@ profile—not physical audibility or arbitrary-device compatibility.
 | **Published release** | Actual source/tag, payload, extracted checks and downloaded bytes | Signing, exhaustive certification, reproduction or universal support |
 | **Physical/live check** | Explicit observed session and outcome | Results inferred from HTTP 200, titles, elapsed time or zero script errors |
 
-For 0.82.0-alpha.1, the downloaded runtime and source ZIPs, `publication.json` and `SHA256SUMS` passed verification. The extracted executable passed startup and its original App journey. Its version, HTTP User-Agent and About identity were also checked. [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193)
+The current alpha.4 release passed its tagged Windows build and publication
+workflow, verification of all four downloaded assets, and the extracted runtime's
+startup and App/input journey. The [release record](RELEASING.md#current-verified-release)
+binds those results to source `122d0b7`; earlier releases retain their own evidence.
 
-The 0.81.0-alpha.2 release has its own normal/optimized/hosted and scoped desktop evidence.
-Later source changes retain separate checks and do not retroactively change those
-released bytes. Google Search/Images/Maps are not fully supported; ordinary
-YouTube playback remains unsupported.
+Source changes retain separate checks and do not alter released bytes.
+Google Search/Images/Maps are not fully supported; ordinary YouTube playback
+remains unsupported.
 
 ## Implementation map
 

@@ -22,15 +22,13 @@ of complete framework support.
 
 | Channel | What it contains | When it changes |
 | :--- | :--- | :--- |
-| **F00 delivery** | Requirements, pinned inputs, executable adapter and classified historical baseline. | [Verified release and asset hashes](RELEASING.md#published-baseline) |
-| **Failed F00 candidate** | `0.82.0-alpha.3` at `ff5740d`. The hosted normal run had four failures and one ignored test. | [Qualification failed and publication was skipped](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420) |
-| **Failed validation candidate** | `0.82.0-alpha.2` identifies [`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400), including integrated feature changes through `1de1f24` and release preparation. See the [change summary](../CHANGELOG.md). | [Windows release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445) failed at normal native tests; no packages or release assets were published |
-| **Current prerelease** | [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4), tagged at `122d0b7`. The runtime/source ZIPs, publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) |
-| **Earlier verified prerelease** | [0.82.0-alpha.1](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1), tagged at `f2e1823`. Both downloaded ZIPs, the publication record, checksums and extracted runtime passed verification. | [Publication workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193) |
-| **Earlier 0.81 prerelease** | [0.81.0-alpha.3](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.81.0-alpha.3), source `57cc1d5` | Explicit owner request and immutable tag and assets |
-| **Public `main`** | F00 baseline and partial F01/F02/F04 implementation, including verified integration of the capacity repairs at `7e0d347`. | Source development continues through the [foundation register](HTML_FOUNDATION_COVERAGE.json). |
+| **Current prerelease** | [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4), tagged at `122d0b7`, delivers the accepted F00 baseline. Its Windows build, runtime/source ZIPs, publication record, checksums and extracted runtime passed verification. | [Verified release and asset hashes](RELEASING.md#current-verified-release) |
+| **Public `main`** | F00 baseline and partial F01/F02/F04/F05 implementation, with continuing document, encoding, tokenizer and tree-construction work. | Source development continues through the [foundation register](HTML_FOUNDATION_COVERAGE.json). |
 | **Public feature branches** | Reviewable work in progress with its own check status | Meaningful implementation checkpoints, independently of releases |
 | **Development binaries** | Planned CI artifacts identified by source commit, not another GitHub Release | Delivery work `DX-02`; not advertised as available yet |
+
+Earlier releases and validation candidates retain their exact source and outcomes
+in the [release history](RELEASING.md#release-history).
 
 ```mermaid
 flowchart TD
@@ -63,7 +61,7 @@ Isolation and GPU work keep their separate readiness gates.
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and
 [coverage register](HTML_FOUNDATION_COVERAGE.json) replace P1-first scheduling.
-F00 has passed its requirements and baseline gate. F01, F02 and F04 have
+F00 has passed its requirements and baseline gate. F01, F02, F04 and F05 have
 source-bound partial implementations. Required DOM, parser, form, editing,
 lifecycle, native-component and browser integration gates remain open.
 
@@ -136,7 +134,7 @@ does not close its corresponding site checkpoint.
 | State | Package | Integrated foundation | Remaining scope and completion criterion |
 | :--- | :--- | :--- | :--- |
 | ✅ / 🧊 | **P0 · Capacity stabilization** | Iterative flattening and selected compiler/runtime/DOM, compression, image, font, HTTP and media storage/count corrections are integrated. | The broad inventory remains deferred. Re-enter a related family for a demonstrated limit or correctness problem; [remaining policies](CAPABILITIES.md#remaining-capacity-correction) stay recorded rather than being declared unlimited. |
-| 🧊 Retained | **P1 · Template preparation and stamping** | Nested inert templates, queries/attributes, supported clone/import/mutations, real observers, author properties, native focus and selected component fixtures. PR #433 adds passive HTML/custom-host content replacement; PR #434 preserves newly created inert Text identities, and PR #435 extends reservation to supported inert HTML/custom/style and SVG constructors. PR #437/#438 close inert subtree-clone and main-template import reservation; PR #439 extends genuine Event author chains. These are after the alpha.2 tag. | Finish remaining protected native-resource/control promotion, broader owner transitions and connected lifecycle/job behavior. Native quota exhaustion retains guarded direct-promotion refusal. A connected original App must create/update genuine controls and icons with preserved input, focus, observers and resource policy. |
+| 🧊 Retained | **P1 · Template preparation and stamping** | Nested inert templates, queries/attributes, supported clone/import/mutations, real observers, author properties, native focus and selected component fixtures. Passive HTML/custom-host content replacement, supported inert Text/HTML/SVG construction and clone/import reservation preserve native identities. Genuine Event author chains are integrated. | Finish remaining protected native-resource/control promotion, broader owner transitions and connected lifecycle/job behavior. Native quota exhaustion retains guarded direct-promotion refusal. A connected original App must create/update genuine controls and icons with preserved input, focus, observers and resource policy. |
 | 🟡 Partial | **P2 · Shell layout, CSSOM and interaction** | Shared sizing math, variables, viewport lengths, focus/hover/visibility/stacking, supported SVG geometry/paint and real CSSOM readback. | Finish the selected shell's remaining layout, measurement and input contracts. Demonstrate the actual signed-out header, guide and search field with usable keyboard/focus/click behavior and matching pixels/hit targets. |
 | 🟡 Partial | **P3 · Async requests and response bodies** | Real finite main-document text XHR, cancellation/progress, Headers and buffered Response values. | Implement the required Fetch/request/body/stream, response-type and CORS cases. Original App JSON/binary/cancel/policy checks and a selected site request must return actual data. |
 | 🟡 Partial | **P4 · History and route traversal** | Native primitive-state pushState/replaceState and same-document history share the App's real entries and URL. | Add the required object-state serialization, traversal/event behavior and route integration. Demonstrate query/results → watch → Back → a different query, with state and URL agreeing. |
@@ -200,6 +198,13 @@ for `main` or for the published 0.81.0-alpha.2 binary.
 
 </details>
 
+<details>
+<summary><strong>Recorded DOM, CSS and framework milestones</strong> — source-bound evidence</summary>
+
+These earlier implementation and workload checkpoints retain their measured
+sources. The active foundation sequence above owns current work order, and the
+[capability matrix](CAPABILITIES.md) records subsequent implementation coverage.
+
 ### DOM — Shared page behavior
 
 **Goal:** Make standard DOM and language operations work across real library
@@ -253,6 +258,8 @@ Exact versions, build identities, stage results, and first failures belong in
 Raw source line numbers remain in those evidence records, not in permanent
 milestone names. Security defects and demonstrated shared dependencies can change
 implementation order.
+
+</details>
 
 ---
 
