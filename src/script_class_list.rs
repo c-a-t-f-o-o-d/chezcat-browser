@@ -37,6 +37,7 @@ pub(super) fn operation(name: &str) -> Option<&'static str> {
         "\0DOMTokenList.add"=>"add",
         "\0DOMTokenList.remove"=>"remove",
         "\0DOMTokenList.toggle"=>"toggle",
+        "\0DOMTokenList.replace"=>"replace",
         "\0DOMTokenList.supports"=>"supports",
         "\0DOMTokenList.toString"=>"toString",
         _=>return None,
@@ -47,6 +48,7 @@ pub(super) fn method(name: &str) -> Option<&'static str> {
         "add" => Some("add"),
         "remove" => Some("remove"),
         "toggle" => Some("toggle"),
+        "replace" => Some("replace"),
         "contains" => Some("contains"),
         "supports" => Some("supports"),
         "item" => Some("item"),
@@ -126,6 +128,16 @@ impl Bridge<'_> {
             ));
         }
         if method=="supports" && supported_tokens(object).is_none(){return Err(("TypeError","This token attribute does not define supported tokens.".into()));}
+        if method=="replace" {
+            let args=args.get(..2).ok_or_else(||("TypeError","replace requires two converted DOMString tokens.".into()))?;
+            if !self.exact_class_token_receiver(object)&&args.iter().any(|value|!matches!(value,Value::String(_))){return Err(("TypeError","This token attribute requires scalar DOMString arguments.".into()));}
+            let old=token_list_reads::argument(&args[0]).map_err(|message|("TypeError",message))?;
+            let new=token_list_reads::argument(&args[1]).map_err(|message|("TypeError",message))?;
+            // Both empty checks precede either whitespace check.
+            if old.is_empty()||new.is_empty(){return Err(("SyntaxError","Replacement tokens must not be empty.".into()));}
+            if old.code_units().chain(new.code_units()).any(|unit|matches!(unit,0x09|0x0a|0x0c|0x0d|0x20)){return Err(("InvalidCharacterError","Replacement tokens contain ASCII whitespace.".into()));}
+            return Ok(());
+        }
         if matches!(method, "add" | "remove" | "toggle") {
             for value in args.iter().take(if method=="toggle"{1}else{usize::MAX}) {
                 if self.exact_class_token_receiver(object) {
@@ -162,7 +174,7 @@ impl Bridge<'_> {
         if property == "length" {return self.read_class_tokens(node,attribute,token_list_reads::Read::Length);}
         if let Some(index)=collection_index(property){return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,true));}
         match property {
-            "replace" | "entries" | "keys" | "values" | "forEach" => Err(
+            "entries" | "keys" | "values" | "forEach" => Err(
                 format!("DOMTokenList operation {property:?} is not implemented."),
             ),
             // Ordinary absent properties can inherit from Object.prototype.
@@ -197,6 +209,20 @@ impl Bridge<'_> {
             .map_err(|(_, message)| message)?;
         if method == "toString" {
             return self.class_value(node,attribute);
+        }
+        if method=="replace" {
+            let exact=self.exact_class_token_receiver(object);
+            if !exact&&self.doc.dom_attr(node,attribute).is_some_and(|value|value.raw_units().is_some()){return Err("Raw UTF-16 token mutation requires exact serialization integration for this attribute.".into());}
+            let token=token_list_reads::argument(&args[0])?;
+            let Value::Bool(present)=self.read_class_tokens(node,attribute,token_list_reads::Read::Contains(token))? else{unreachable!()};
+            if !present{return Ok(Value::Bool(false));}
+            let source=self.doc.dom_attr(node,attribute).map(DomString::view).unwrap_or(crate::dom_string::DomStringRef::Scalar(""));
+            let value=token_list_mutation::replace(self.state,source,&args[..2])?;
+            self.state.copies(attribute.len())?;
+            let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text(attribute)?);
+            if exact{self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)?;}
+            else{self.attribute_dom_named_prepared(node,name,Some(value),script_attr::InputPreparation::Pending)?;}
+            return Ok(Value::Bool(true));
         }
         if method=="toggle" {
             let value=args.first().ok_or("toggle requires a converted DOMString token.")?;
