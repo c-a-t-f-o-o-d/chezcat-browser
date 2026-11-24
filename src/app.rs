@@ -6741,3 +6741,7 @@ mod paragraph_align_tests;
 #[cfg(test)]
 #[path="app_ul_type_tests.rs"]
 mod ul_type_tests;
+
+#[cfg(test)]
+#[path="app_ul_compact_tests.rs"]
+mod ul_compact_tests;
