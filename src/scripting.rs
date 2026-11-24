@@ -2653,30 +2653,38 @@ impl Bridge<'_> {
 
     fn text_content(&mut self, node: usize) -> Result<DomString, String> {
         self.state.rebuild(self.doc)?;
+        script_text_content::deadline(self.state)?;
         let mut parts = Vec::new();
-        let root = node;
-        let mut stack = vec![node];
+        let mut stack = Vec::new();
+        script_text_replacement::push_values(self.state,&mut stack,node,0)?;
         while let Some(node) = stack.pop() {
             self.state.work(1)?;
-            if node != root
-                && dom_tree::inert_dom_tag(tag(self.doc, node), self.doc.scripting_enabled)
-                && self.iframe_raw_text_child(node).is_none()
-            {
+            // Template contents belong to their separate fragment, even when
+            // the immutable parser input still parks source children here.
+            if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="template" {
                 continue;
             }
-            if !self.state.tree.active[node] && !self.state.detached_nodes.contains(&node) && !self.accessible_iframe_text(node) {
-                continue;
-            }
+            self.check_iframe_child_topology(node)?;
             if let NodeKind::Text(text) | NodeKind::Cdata(text) = &self.doc.nodes[node].kind {
-                parts.try_reserve(1).map_err(|_|"Cannot reserve native textContent parts.")?;
-                parts.push(text);
+                let other=script_text_replacement::bytes(&[&stack],0)?;
+                script_text_replacement::push_values(self.state,&mut parts,text,other)?;
             }
-            stack.extend(self.doc.nodes[node].children.iter().rev().copied());
+            for &child in self.doc.nodes[node].children.iter().rev() {
+                let other=script_text_replacement::bytes(&[&parts],0)?;
+                script_text_replacement::push_values(self.state,&mut stack,child,other)?;
+            }
         }
-        let (logical,_bytes)=DomString::concat_size(&parts)?;
-        if logical>self.state.limits.host.string_bytes{return Err("textContent result exceeds the host string allowance.".into());}
-        self.state.copies(DomString::concat_copy_work(&parts)?)?;
-        let result=DomString::concat(&parts,DomString::storage_bound(self.state.limits.host.string_bytes)?)?;
+        drop(stack);
+        self.state.work(parts.len().checked_mul(6).ok_or("textContent part work overflow.")?)?;
+        // Admit inspection of the source payload before UTF-16 sizing scans.
+        let inspected=parts.iter().try_fold(0usize,|bytes,part|bytes.checked_add(part.used_bytes()).ok_or("textContent source work overflow."))?;
+        self.state.copies(inspected)?;
+        let available=script_text_content::available(self.state,script_text_replacement::bytes(&[&parts],0)?)?;
+        let (copies,budget,raw)=script_text_content::plan(&parts,self.state.limits.host.string_bytes,available)?;
+        self.state.copies(copies.saturating_sub(inspected))?;
+        script_text_content::deadline(self.state)?;
+        let result=DomString::concat_with_scratch(&parts,budget,raw)?;
+        script_text_content::deadline(self.state)?;
         Ok(result)
     }
 
@@ -9373,3 +9381,10 @@ mod output_text_replacement_tests;
 
 #[path="script_text_replacement.rs"]
 mod script_text_replacement;
+
+#[cfg(test)]
+#[path="script_descendant_text_tests.rs"]
+mod descendant_text_tests;
+
+#[path="script_text_content.rs"]
+mod script_text_content;

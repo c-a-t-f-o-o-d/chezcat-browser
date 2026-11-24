@@ -128,6 +128,9 @@ impl DomString {
         bytes.checked_add(units.checked_mul(2).ok_or("DOMString joined scratch byte overflow.")?).ok_or("DOMString joined copy work overflow.".into())
     }
     pub(crate) fn concat(parts:&[&Self],available:usize)->Result<Self,String>{
+        Self::concat_with_scratch(parts,available,usize::MAX)
+    }
+    pub(crate) fn concat_with_scratch(parts:&[&Self],available:usize,scratch:usize)->Result<Self,String>{
         if Self::concat_size(parts)?.1>available{return Err("DOMString concatenation retained allowance exhausted.".into());}
         if parts.iter().all(|part|part.units.is_none()) {
             let bytes=parts.iter().try_fold(0usize,|n,p|n.checked_add(p.projection.len()).ok_or("DOMString concatenation overflow."))?;
@@ -138,7 +141,9 @@ impl DomString {
             return Ok(Self::from(text));
         }
         let length=parts.iter().try_fold(0usize,|n,p|n.checked_add(p.utf16_len()).ok_or("DOMString joined code-unit count overflow."))?;
+        if length.checked_mul(2).is_none_or(|bytes|bytes>scratch){return Err("DOMString joined scratch allowance exhausted.".into());}
         let mut units=Vec::new();units.try_reserve_exact(length).map_err(|_|"Cannot reserve joined DOMString code units.")?;
+        if units.capacity().checked_mul(2).is_none_or(|bytes|bytes>scratch){return Err("DOMString joined scratch allocation exceeds allowance.".into());}
         for part in parts {units.extend(part.code_units());}
         Self::from_units(&units,available)
     }

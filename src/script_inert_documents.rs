@@ -1748,33 +1748,52 @@ impl Bridge<'_> {
         }
     }
 
-    fn inert_dom_text_parts<'a>(&'a self,handles:&[u32])->Result<Vec<&'a DomString>,String>{
-        let mut parts=Vec::new();parts.try_reserve_exact(handles.len()).map_err(|_|"Cannot reserve inert DOMString part references.")?;
+    fn inert_dom_text_parts<'a>(&'a self,handles:&[u32],available:usize)->Result<Vec<&'a DomString>,String>{
+        let mut parts=script_text_content::parts(handles.len(),available)?;
         for &handle in handles {parts.push(self.inert_text_value(handle).ok_or("Inert DOMString source disappeared.")?);}
         Ok(parts)
     }
     fn inert_text_content(&mut self, object: u32) -> Result<Value, String> {
-        let mut pending = vec![object];
+        script_text_content::deadline(self.state)?;
+        let mut pending = Vec::new();
         let mut handles = Vec::new();
+        let mut inspected=0usize;
+        let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(2).ok_or("Inert textContent lookup work overflow.")?;
+        script_text_replacement::push_values(self.state,&mut pending,object,0)?;
         while let Some(id) = pending.pop() {
-            self.state.work(1)?;
+            self.state.work(lookup.checked_mul(3).ok_or("Inert textContent lookup work overflow.")?)?;
             let node = self.state.inert_documents.node(id).ok_or("Unknown inert Node.")?;
-            if self.inert_text_value(id).is_some() {
-                handles.try_reserve(1).map_err(|_|"Cannot reserve inert textContent parts.")?;
-                handles.push(id);
+            if let Some(value)=self.inert_text_value(id) {
+                let bytes=value.used_bytes();
+                self.state.copies(bytes)?;
+                inspected=inspected.checked_add(bytes).ok_or("Inert textContent source work overflow.")?;
+                let other=script_text_replacement::bytes(&[&pending],0)?;
+                script_text_replacement::push_values(self.state,&mut handles,id,other)?;
             } else {
-                pending.try_reserve(node.children.len()).map_err(|_| "Cannot reserve inert text traversal.")?;
-                pending.extend(node.children.iter().rev().copied());
+                for at in (0..node.children.len()).rev() {
+                    self.state.work(lookup)?;
+                    let child=self.state.inert_documents.node(id).unwrap().children[at];
+                    let other=script_text_replacement::bytes(&[&handles],0)?;
+                    script_text_replacement::push_values(self.state,&mut pending,child,other)?;
+                }
             }
         }
-        let (logical,work)={
-            let parts=self.inert_dom_text_parts(&handles)?;
-            (DomString::concat_size(&parts)?.0,DomString::concat_copy_work(&parts)?)
+        drop(pending);
+        self.state.work(handles.len().checked_mul(12).and_then(|work|work.checked_mul(lookup)).ok_or("Inert textContent part work overflow.")?)?;
+        self.state.copies(handles.len().checked_mul(2*size_of::<&DomString>()).ok_or("Inert textContent reference copy overflow.")?)?;
+        let free=script_text_content::available(self.state,script_text_replacement::bytes(&[&handles],0)?)?;
+        let work={
+            let parts=self.inert_dom_text_parts(&handles,free)?;
+            let available=free.checked_sub(script_text_replacement::bytes(&[&parts],0)?).ok_or("Inert textContent parts allowance exhausted.")?;
+            script_text_content::plan(&parts,self.state.limits.host.string_bytes,available)?.0
         };
-        if logical>self.state.limits.host.string_bytes{return Err("Inert textContent result exceeds the host string allowance.".into());}
-        self.state.copies(work)?;
-        let parts=self.inert_dom_text_parts(&handles)?;
-        let text=DomString::concat(&parts,DomString::storage_bound(self.state.limits.host.string_bytes)?)?;
+        self.state.copies(work.saturating_sub(inspected))?;
+        script_text_content::deadline(self.state)?;
+        let parts=self.inert_dom_text_parts(&handles,free)?;
+        let available=free.checked_sub(script_text_replacement::bytes(&[&parts],0)?).ok_or("Inert textContent parts allowance exhausted.")?;
+        let (_,budget,raw)=script_text_content::plan(&parts,self.state.limits.host.string_bytes,available)?;
+        let text=DomString::concat_with_scratch(&parts,budget,raw)?;
+        script_text_content::deadline(self.state)?;
         Ok(Self::dom_string_owned(text))
     }
 
