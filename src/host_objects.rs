@@ -614,9 +614,10 @@ impl Runtime {
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
             )?;
+            if name == "HTMLFieldSetElement" {self.define_host_attribute(prototype,window,"form","\0HTMLFieldSetElement.get.form",None)?;self.define_host_attribute(prototype,window,"type","\0HTMLFieldSetElement.get.type",None)?;}
             if name == "HTMLFormElement" {
                 self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
-                self.define_canvas_operation(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;
+                self.deferred_host_method(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;
             }
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;

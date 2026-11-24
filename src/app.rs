@@ -6657,3 +6657,7 @@ mod control_type_tests;
 #[cfg(test)]
 #[path="app_form_length_tests.rs"]
 mod form_length_tests;
+
+#[cfg(test)]
+#[path="app_fieldset_metadata_tests.rs"]
+mod fieldset_metadata_tests;

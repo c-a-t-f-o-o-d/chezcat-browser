@@ -507,6 +507,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("button", "HTMLButtonElement"),
     ("canvas", "HTMLCanvasElement"),
     ("div", "HTMLDivElement"),
+    ("fieldset", "HTMLFieldSetElement"),
     ("form", "HTMLFormElement"),
     ("head", "HTMLHeadElement"),
     ("html", "HTMLHtmlElement"),
