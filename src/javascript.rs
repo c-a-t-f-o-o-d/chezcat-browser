@@ -533,6 +533,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("p", "HTMLParagraphElement"),
     ("pre", "HTMLPreElement"),
     ("hr", "HTMLHRElement"),
+    ("br", "HTMLBRElement"),
     ("progress", "HTMLProgressElement"),
     ("q", "HTMLQuoteElement"),
     ("select", "HTMLSelectElement"),
