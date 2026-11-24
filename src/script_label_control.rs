@@ -111,3 +111,6 @@ mod tests{
   b.label_pending_push(&mut pending,5,minimum).unwrap();assert_eq!(pending,[1,2,3,4,5]);assert_eq!(pending.capacity(),5);assert_eq!(b.state.copy_work,copies-5*size_of::<u32>());assert_eq!(b.state.retained,retained);
  }
 }
+
+#[path="script_label_form.rs"]
+pub(in crate::scripting) mod label_form;
