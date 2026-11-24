@@ -3097,6 +3097,7 @@ impl Bridge<'_> {
         if self.element_class_name_member(object,property){return true;}
         if self.control_labels_member(object,property){return true;}
         if self.html_label_form_member(object,property){return true;}
+        if self.output_form_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.html_label_for_member(object,property){return true;}
         if self.element_class_list_member(object,property){return true;}
@@ -3407,6 +3408,7 @@ impl Host for Bridge<'_> {
         if self.element_class_name_member(object,property){return false;}
         if self.control_labels_member(object,property){return false;}
         if self.html_label_form_member(object,property){return false;}
+        if self.output_form_member(object,property){return false;}
         if self.html_label_control_member(object,property){return false;}
         if self.html_label_for_member(object,property){return false;}
         if self.element_class_list_member(object,property){return false;}
@@ -3528,6 +3530,7 @@ impl Host for Bridge<'_> {
     fn readonly_property(&self, object: u32, property: &str) -> bool {
         if self.control_labels_member(object,property){return true;}
         if self.html_label_form_member(object,property){return true;}
+        if self.output_form_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -3937,6 +3940,7 @@ impl Host for Bridge<'_> {
         if script_element_class_name::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_input_labels::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
+        if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_label_control::GET&&self.event_target_interface(object){return Some(object);}
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_list::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4249,6 +4253,7 @@ impl Host for Bridge<'_> {
         if script_element_class_name::operation(method){return self.validate_element_class_name(object,method==script_element_class_name::SET);}
         if script_input_labels::interface(method).is_some(){return self.validate_control_labels(object,method);}
         if method==script_label_form::GET{return self.validate_html_label_form(object);}
+        if method==script_output_form::GET{return self.validate_output_form(object);}
         if method==script_label_control::GET{return self.validate_html_label_control(object);}
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
         if script_element_class_list::operation(method){return self.validate_element_class_list(object);}
@@ -4707,6 +4712,7 @@ impl Host for Bridge<'_> {
         if script_element_class_name::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_input_labels::interface(method).is_some(){return self.event_target_interface(object)&&self.control_labels_receiver(receiver,method);}
         if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
+        if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_element_class_list::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
@@ -5582,6 +5588,7 @@ impl Host for Bridge<'_> {
         if self.element_class_name_member(object,property){return self.element_class_name_get(object);}
         if property=="labels"{if let Some(method)=self.control_labels_method(object){return self.html_control_labels_get(object,method);}}
         if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
+        if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
         if self.element_class_list_member(object,property){return self.element_class_list_get(object);}
@@ -6414,6 +6421,7 @@ impl Host for Bridge<'_> {
         if method==script_element_class_name::GET{return self.element_class_name_get(object);}
         if script_input_labels::interface(method).is_some(){return self.html_control_labels_get(object,method);}
         if method==script_label_form::GET{return self.html_label_form_get(object);}
+        if method==script_output_form::GET{return self.output_form_get(object);}
         if method==script_label_control::GET{return self.html_label_control_get(object);}
         if method==script_label_html_for::GET{return self.html_label_for_get(object);}
         if method==script_element_class_list::GET{return self.element_class_list_get(object);}
@@ -9251,6 +9259,8 @@ mod script_element_class_name;
 mod script_element_class_list;
 #[path="script_output_html_for.rs"]
 mod script_output_html_for;
+#[path="script_output_form.rs"]
+mod script_output_form;
 #[cfg(test)]
 #[path="script_element_class_list_accessor_tests.rs"]
 mod element_class_list_accessor_tests;
@@ -9322,3 +9332,7 @@ mod output_for_domstring_tests;
 #[cfg(test)]
 #[path="script_output_html_for_tests.rs"]
 mod output_html_for_tests;
+
+#[cfg(test)]
+#[path="script_output_form_tests.rs"]
+mod output_form_tests;
