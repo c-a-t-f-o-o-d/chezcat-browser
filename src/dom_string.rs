@@ -32,6 +32,15 @@ impl<'a> DomStringRef<'a>{
     pub(crate) fn copy_bytes(self)->Result<usize,String>{match self{Self::Scalar(s)=>Ok(s.len()),Self::Raw(u)=>{let(p,raw)=DomString::projected_size(u)?;p.checked_add(if raw{u.len().checked_mul(2).ok_or("DOMString view copy overflow.")?}else{0}).ok_or("DOMString view copy overflow.".into())}}}
     pub(crate) fn try_owned(self)->Result<DomString,String>{match self{Self::Scalar(s)=>{let mut text=String::new();text.try_reserve_exact(s.len()).map_err(|_|"Cannot reserve copied DOMString view.")?;text.push_str(s);Ok(text.into())},Self::Raw(u)=>DomString::from_units(u,usize::MAX)}}
 }
+/// Borrow exact nonempty tokens separated by Infra ASCII whitespace.
+/// A display projection must never supply class or token identity.
+pub(crate) fn ascii_whitespace_tokens(value:DomStringRef<'_>)->impl Iterator<Item=DomStringRef<'_>> {
+    let (text,units)=match value {DomStringRef::Scalar(text)=>(text,&[][..]),DomStringRef::Raw(units)=>("",units)};
+    let scalar=text.split(|ch|matches!(ch,' '| '\t'|'\n'|'\r'|'\u{c}')).map(DomStringRef::Scalar);
+    let raw=units.split(|unit|matches!(unit,0x09|0x0a|0x0c|0x0d|0x20)).map(DomStringRef::Raw);
+    scalar.chain(raw).filter(|token|!token.is_empty())
+}
+
 impl Iterator for Units<'_> {
     type Item=u16;
     fn next(&mut self)->Option<u16>{match self {Self::Scalar(i)=>i.next(),Self::Raw(i)=>i.next()}}
