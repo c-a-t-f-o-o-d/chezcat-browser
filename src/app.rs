@@ -6789,3 +6789,7 @@ mod hr_align_tests;
 #[cfg(test)]
 #[path="app_hr_color_tests.rs"]
 mod hr_color_tests;
+
+#[cfg(test)]
+#[path="app_hr_no_shade_tests.rs"]
+mod hr_no_shade_tests;
