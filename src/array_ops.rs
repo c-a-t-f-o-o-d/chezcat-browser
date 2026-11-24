@@ -32,6 +32,36 @@ struct FlattenFrame {
 }
 
 impl Runtime {
+    /// Array callback iteration captures length and reads each surviving
+    /// index live. No native list snapshot or callback allowance reset.
+    #[inline(never)]
+    pub(super) fn array_for_each_host(&mut self,handle:u32,args:&[Value],host:&mut dyn Host)->Result<Value,Fault>{
+        let owner=self.validate_indexed_host_iteration(handle,None,host)?;
+        let marker=self.inhibit_transient_collection();
+        let result=(|| {
+            let length_value=self.host_read(handle,"length",host)?;
+            let number=self.binary_number(&length_value,host)?;
+            let length=if number.is_nan()||number<=0.0{0.0}else{number.trunc().min(9_007_199_254_740_991.0)};
+            if length>self.limits.heap.array_length as f64{return Err(Fault::new(format!("Native Array callback length limit reached ({}).",self.limits.heap.array_length)));}
+            let callback=args.first().cloned().unwrap_or(Value::Undefined);
+            if !matches!(callback,Value::Function(_)){return Err(Fault::exception("TypeError","Array callback must be callable."));}
+            let receiver=self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
+            for index in 0..length as usize {
+                self.step()?;
+                self.validate_indexed_host_iteration(handle,Some(owner),host)?;
+                let name=index.to_string();
+                if matches!(self.has_property_value(Value::String(name.clone()),Value::Host(handle),host)?,Value::Bool(true)) {
+                    let value=self.host_read(handle,&name,host)?;
+                    let this=self.copy_value(&receiver)?;
+                    self.call_value(callback.clone(),&[value,Value::Number(index as f64),Value::Host(handle)],this,host)?;
+                }
+            }
+            Ok(Value::Undefined)
+        })();
+        self.restore_transient_marker(marker);
+        result
+    }
+
     /// A native collection is not an Array: ArraySpeciesCreate returns a fresh
     /// ordinary Array without reading constructor/species. Length is captured
     /// once; coercion and indexed reads continue to observe the live source.

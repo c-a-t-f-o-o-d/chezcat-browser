@@ -9122,3 +9122,7 @@ mod token_list_toggle_tests;
 #[cfg(test)]
 #[path="script_token_list_replace_tests.rs"]
 mod token_list_replace_tests;
+
+#[cfg(test)]
+#[path="script_token_list_for_each_tests.rs"]
+mod token_list_for_each_tests;

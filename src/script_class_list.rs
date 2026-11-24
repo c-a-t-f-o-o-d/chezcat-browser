@@ -174,7 +174,7 @@ impl Bridge<'_> {
         if property == "length" {return self.read_class_tokens(node,attribute,token_list_reads::Read::Length);}
         if let Some(index)=collection_index(property){return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,true));}
         match property {
-            "entries" | "keys" | "values" | "forEach" => Err(
+            "entries" | "keys" | "values" => Err(
                 format!("DOMTokenList operation {property:?} is not implemented."),
             ),
             // Ordinary absent properties can inherit from Object.prototype.

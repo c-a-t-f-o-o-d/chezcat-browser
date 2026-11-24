@@ -895,6 +895,7 @@ impl Runtime {
         for (name,mode) in [("keys",super::collections::Mode::Keys),("values",super::collections::Mode::Values),("entries",super::collections::Mode::Entries)] {
             let method=self.array_iterator_intrinsic(mode);self.store_property(prototype,name.into(),method,Some((true,true,true)))?;
         }
+        self.store_property(prototype,"forEach".into(),self.array_for_each_intrinsic(),Some((true,true,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);
         self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         self.put_binding(self.global_environment,"DOMTokenList".into(),Some(constructor),super::Declaration::Var,false)?;
