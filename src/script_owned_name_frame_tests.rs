@@ -1,0 +1,13 @@
+//! Live name lists retain their real Document root and authoritative attributes.
+use super::*;
+fn fixture()->(Document,Forms,Page){let mut d=crate::html::parse("<html><body><input id=main name=child></body></html>");d.scripting_enabled=true;let mut f=Forms::new(&d);let mut p=Page::new();p.set_location(&crate::navigation::address("https://owned-name.test/",&crate::navigation::Location::home()).unwrap());assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);(d,f,p)}
+fn run(d:&mut Document,f:&mut Forms,p:&mut Page,s:&str){assert_eq!(p.console_eval(d,f,s).errors,0,"{}",p.report());}
+#[test]
+fn owned_name_list_child_native_root_realm_and_saved_list_origin(){let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,"var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,child=w.document;");let child=&mut p.state.blank_frames[0].document;let body=(0..child.nodes.len()).find(|&n|tag(child,n)=="body").unwrap();let NodeKind::Element{attrs,..}=&mut child.nodes[body].kind else{unreachable!()};attrs.push(crate::html::Attribute::unqualified("name".into(),"child".into()));run(&mut d,&mut f,&mut p,r#"
+var list=child.getElementsByName('child'),saved=w.Document.prototype.getElementsByName;if(list.length!==1||list[0]!==child.body||!(list instanceof w.NodeList)||list instanceof NodeList||saved.call(document,'child')[0]!==document.getElementById('main'))throw 'actual root and native list realm';var item=list.item,iterator=list.values();if(item.call(list,0)!==child.body||iterator.next().value!==child.body)throw 'child identity and iteration';
+"#);p.set_location(&crate::navigation::address("https://other-owned-name.test/",&crate::navigation::Location::home()).unwrap());let before=(p.state.retained,p.state.node_lists.len(),p.state.dom_commits);for source in ["list.length;","item.call(list,0);","iterator.next();"]{assert_eq!(p.console_eval(&mut d,&mut f,source).errors,1,"{source}");assert_eq!((p.state.retained,p.state.node_lists.len(),p.state.dom_commits),before);}}
+
+#[test]
+fn owned_name_list_borrowed_main_method_initializes_unread_child_owner_roots(){let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"
+var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var child=frame.contentDocument,list=Document.prototype.getElementsByName.call(child,'absent');if(list.length!==0||list.item(0)!==null)throw 'first child-owned native result';var w=frame.contentWindow;if(!(list instanceof w.NodeList)||list instanceof NodeList||Object.getPrototypeOf(list)!==w.NodeList.prototype)throw 'actual previously unread owner roots';
+"#);}

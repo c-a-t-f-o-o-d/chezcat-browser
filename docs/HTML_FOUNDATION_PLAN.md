@@ -375,9 +375,15 @@ inert/child Document expansion and frozen qualification remain separate.
 The canonical Document.prototype.getElementsByName operation now has inherited
 metadata and ordinary override/deletion/restoration. Saved functions retain the
 exact displayed-document live backend, genuine Document branding and origin
-checks before conversion. Genuine other Document owners explicitly refuse before
-conversion until owner-bound live traversal is implemented. Original native/App
-checks cover prototype changes and saved-realm calls; no inert/child list is fabricated.
+checks before conversion. Owner-bound live lists now retain inert HTML/XML/generic
+and supported child Document roots, traverse their actual native links and match
+only HTML elements' null-namespace name attributes by exact code units. Moves,
+adoption and name changes update results; template content remains a separate
+root. Child lists use their real owner realm and preserve origin checks on saved
+reads and iteration. Traversal has paid native lookups, bounded iterative order,
+fallible combined scratch admission including replacement peaks, and refusal/recovery.
+Original native/App checks and production probes qualify this scoped integration;
+raw main-name producers, child writes and frozen browser qualification remain open.
 F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing

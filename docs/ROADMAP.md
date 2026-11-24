@@ -63,7 +63,9 @@ and match authoritative native HTML names. Focused checks cover conversion,
 liveness, admitted storage and refusal/recovery, with native App interaction.
 Canonical Document.prototype.getElementsByName supports ordinary prototype changes,
 saved functions and receiver/origin preflight for the displayed backend.
-Raw main-name producers and inert/child Document live traversal remain open;
+Owner-bound inert HTML/XML/generic and supported child live traversal now uses
+actual roots, exact HTML names and native list realms with storage/origin checks.
+Raw main-name producers and child mutations remain open;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

@@ -7,6 +7,7 @@ pub(super) enum NodeList {
     Snapshot(Vec<usize>),
     HandleSnapshot(Vec<u32>),
     Name(DomString),
+    RootedName { root:u32, name:DomString },
     // A live SameObject list over this real node's immediate children.
     Children(usize),
     InertChildren(u32),
@@ -26,7 +27,6 @@ impl Bridge<'_> {
     pub(super) fn validate_name_list(&self,object:u32)->Result<(),(&'static str,String)>{
         if !self.identifier_lookup_receiver(object,Some(true)){return Err(("TypeError","getElementsByName requires a genuine Document.".into()));}
         self.native_node_access(object)?;
-        if object!=DOCUMENT{return Err(("NotSupportedError","Live name lists for this Document require an owner-bound traversal.".into()));}
         Ok(())
     }
 
@@ -112,6 +112,7 @@ impl Bridge<'_> {
 
     pub(super) fn node_list_owner(&self, handle: u32) -> Option<u32> {
         match self.state.node_lists.get(node_list_index(handle)?)? {
+            NodeList::RootedName{root,..} => Some(self.frame_contains_node(*root).map_or(WINDOW,|(owner,_)|owner)),
             NodeList::FrameChildren(root) => self.frame_contains_node(*root).map(|(owner, _)| owner),
             _ => Some(WINDOW),
         }
@@ -146,6 +147,15 @@ impl Bridge<'_> {
         self.commit_node_list(list,replacement,added,payload);
         self.state.dom.inert_child_lists.commit(map);
         self.state.dom.inert_child_lists.insert(object, handle);
+        Ok(Value::Host(handle))
+    }
+
+    pub(super) fn create_document_name_list(&mut self,root:u32,value:&Value)->Result<Value,String>{
+        self.validate_name_list(root).map_err(|(_,e)|e)?;
+        if root==DOCUMENT{return self.create_name_list(value);}
+        let name=self.dom_text(value)?;let payload=name.capacity();
+        let(handle,replacement,added)=self.prepare_node_list("owner-bound name",payload)?;
+        self.commit_node_list(NodeList::RootedName{root,name},replacement,added,payload);
         Ok(Value::Host(handle))
     }
 
@@ -216,6 +226,11 @@ impl Bridge<'_> {
             return if property == "length" { Ok(Value::Number(children.len() as f64)) }
                 else { Ok(collection_index(property).and_then(|index| children.get(index)).copied()
                     .map_or(Value::Undefined, Value::Host)) };
+        }
+        if matches!(list,NodeList::RootedName{..}) {
+            if property!="length"&&collection_index(property).is_none(){return Ok(Value::Undefined);}
+            let nodes=self.rooted_name_list_nodes(index)?;
+            return Ok(if property=="length"{Value::Number(nodes.len() as f64)}else{collection_index(property).and_then(|at|nodes.get(at)).copied().map_or(Value::Undefined,Value::Host)});
         }
         if matches!(list,NodeList::Name(_)) {
             if property != "length" && collection_index(property).is_none() { return Ok(Value::Undefined); }

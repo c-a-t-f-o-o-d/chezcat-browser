@@ -9246,6 +9246,12 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if method==DOCUMENT_GET_ELEMENTS_NAME {
+            // A borrowed main-realm operation can create a child-owned list
+            // before the child's constructors have ever been read. Initialize
+            // its actual roots after origin validation, before publishing it.
+            if let Some(owner)=host.native_access_owner(object){self.ensure_window_realm(owner,host)?;}
+        }
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {
             host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(w,_)|w)));
             if let Err((kind,message))=host.adjacent_receiver_access(object) {return Err(self.adjacent_fault(kind,&message));}
