@@ -22,15 +22,19 @@ impl Bridge<'_>{
  }
  pub(super) fn element_id_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_element_id(object,false).map_err(|(_,message)|message)?;
+  self.element_attribute_string_get(object,"id")
+ }
+ // The caller validates the genuine Element and captured native authority first.
+ pub(super) fn element_attribute_string_get(&mut self,object:u32,key:&str)->Result<Value,String>{
   let count=self.element_id_attributes(object)?.len();self.state.work(count.saturating_add(1))?;
   let mut found=None;
   for at in 0..count{
    let bytes=self.element_id_attributes(object)?[at].name.bytes();self.state.work(bytes.saturating_add(1))?;
-   if self.element_id_attributes(object)?[at].name.html_is("id"){found=Some(at);break;}
+   if self.element_id_attributes(object)?[at].name.html_is(key){found=Some(at);break;}
   }
   let Some(at)=found else{return Ok(Value::String(String::new()))};
   let bytes=self.element_id_attributes(object)?[at].value.logical_bytes();self.state.work(bytes)?;
-  if bytes>self.state.limits.host.string_bytes{return Err("Element.id exceeds the host string allowance.".into());}
+  if bytes>self.state.limits.host.string_bytes{return Err(if key=="id"{"Element.id exceeds the host string allowance."}else{"Element.className exceeds the host string allowance."}.into());}
   self.state.copies(bytes)?;Self::dom_string_copy(&self.element_id_attributes(object)?[at].value)
  }
  pub(super) fn element_id_set(&mut self,object:u32,value:&Value)->Result<(),String>{
