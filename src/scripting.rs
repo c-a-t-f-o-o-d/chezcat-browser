@@ -9216,3 +9216,7 @@ mod inert_element_properties_tests;
 #[cfg(test)]
 #[path="script_inert_foreign_class_list_tests.rs"]
 mod inert_foreign_class_list_tests;
+
+#[cfg(test)]
+#[path="script_inert_reflection_namespace_tests.rs"]
+mod inert_reflection_namespace_tests;

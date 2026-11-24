@@ -144,7 +144,7 @@ impl Bridge<'_> {
         if matches!(name,"title"|"lang"|"dir") {
             let value=self.dom_text(value)?;self.state.copies(name.len())?;
             let attribute=crate::html::AttributeName::unqualified(script_clone_node::copy_text(name)?);
-            return if self.inert_node_type(object)==Some(1) {self.write_inert_dom_attribute(object,attribute,Some(value),false)}
+            return if self.inert_node_type(object)==Some(1) {self.write_inert_dom_attribute_ns(object,attribute,Some(value))}
                 else {let node=self.node(object)?;self.public_dom_attribute(node,attribute,Some(value),script_attr::InputPreparation::Pending)};
         }
         let text = if name == "hidden" {
@@ -165,7 +165,7 @@ impl Bridge<'_> {
         if self.inert_node_type(object) == Some(1) {
             self.state.copies(name.len())?;
             let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text(name)?);
-            self.write_inert_attribute(object, name, text, false)
+            self.write_inert_attribute_ns(object, name, text)
         } else {
             let node = self.node(object)?;
             self.attribute(node, name, text)
