@@ -42,10 +42,11 @@ pub(super) fn index(handle: u32) -> Option<usize> {
     (ATTR_BASE..ATTR_BASE + ATTR_HANDLES as u32).contains(&handle).then(|| (handle - ATTR_BASE) as usize)
 }
 
-// Inert construction can retain any DOMString. Until native consumers accept
-// all raw units, materialization retains the existing passive-value boundary.
-pub(super) fn materializable_value(attr:&crate::html::Attribute)->bool{
+// Inert construction can retain any DOMString. Native materialization admits
+// exact HTML IDs separately from the existing passive-value boundary.
+pub(super) fn materializable_value(attr:&crate::html::Attribute,namespace:crate::html::Namespace)->bool{
     attr.value.raw_units().is_none()
+        ||namespace==crate::html::Namespace::Html&&attr.name.html_is("id")
         ||attr.name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/")
         ||attr.name.namespace.is_empty()&&attr.name.qualified.starts_with("data-")
 }

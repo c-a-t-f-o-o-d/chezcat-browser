@@ -9149,6 +9149,9 @@ mod form_owner_id_exact_tests;
 #[cfg(test)]
 #[path="script_html_id_domstring_tests.rs"]
 mod html_id_domstring_tests;
+#[cfg(test)]
+#[path="script_html_id_materialization_tests.rs"]
+mod html_id_materialization_tests;
 
 #[path="script_form_id_guards.rs"]
 mod form_id_guards;

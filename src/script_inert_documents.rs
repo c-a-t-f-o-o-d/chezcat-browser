@@ -589,10 +589,10 @@ impl Bridge<'_> {
                 },
             };
             let mut bytes = copied_node_bytes(&raw);
-            if let NodeKind::Element { tag, href, attrs, id ,..} = &raw.kind {
-                if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
-                    self.state.work(self.forms.controls.len())?;
-                    if self.forms.controls.keys().any(|&control| self.doc.attr(control, "form") == Some(id)) {
+            if let NodeKind::Element { tag, href, attrs, ..} = &raw.kind {
+                self.state.work(attrs.len())?;
+                if let Some(id) = attrs.iter().find(|attr|attr.name.html_is("id")).map(|attr|&attr.value) {
+                    if form_id_guards::used(self.doc,self.forms,self.state,[Some(id),None])? {
                         return Err("Inert fragment cannot change explicit native form associations.".into());
                     }
                 }
@@ -1958,12 +1958,12 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction{..} => true,
         // Only the checked template parser feeds this reservation path.
         // It publishes SVG provenance after validating the entire island.
-        NodeKind::Element { attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(script_attr::materializable_value)&&crate::html::svg_dom_transfer(node),
+        NodeKind::Element { attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(|attr|script_attr::materializable_value(attr,node.namespace))&&crate::html::svg_dom_transfer(node),
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
                 && (tag == "style" || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
-                && !attrs.iter().any(|attr| !script_attr::materializable_value(attr)||!attr.name.namespace.is_empty()
+                && !attrs.iter().any(|attr| !script_attr::materializable_value(attr,node.namespace)||!attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
                     // STYLE uses the same native stylesheet admission even if
                     // its parsed markup carries an ordinary `is` attribute.
