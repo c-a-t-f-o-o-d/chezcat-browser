@@ -722,7 +722,7 @@ impl Forms {
                 parents[child] = Some(index);
             }
         }
-        let mut ids = HashMap::new();
+        let mut ids = BTreeMap::new();
         let mut inactive = vec![false; doc.nodes.len()];
         for node in 0..doc.nodes.len() {
             inactive[node] = parents[node].is_some_and(|p| inactive[p])
@@ -732,7 +732,7 @@ impl Forms {
                 )
                 || doc.scripting_enabled && tag(doc, node) == "noscript";
             if !inactive[node] {
-                if let Some(id) = doc.attr(node, "id") {
+                if let Some(id) = doc.dom_attr(node, "id") {
                     ids.entry(id).or_insert(node);
                 }
             }
@@ -750,7 +750,7 @@ impl Forms {
                 result.limited = true;
                 break;
             }
-            let owner = if let Some(id) = doc.attr(node, "form") {
+            let owner = if let Some(id) = doc.dom_attr(node, "form") {
                 ids.get(id).copied().filter(|&id| tag(doc, id) == "form")
             } else {
                 let mut p = parents[node];
@@ -2566,3 +2566,7 @@ mod tests {
 #[cfg(test)]
 #[path="forms_visual_id_exact_tests.rs"]
 mod visual_id_exact_tests;
+
+#[cfg(test)]
+#[path="forms_owner_id_exact_tests.rs"]
+mod owner_id_exact_tests;

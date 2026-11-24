@@ -1643,6 +1643,13 @@ Duplicate control/form matches still refuse pending RadioNodeList/live collectio
 support. Raw property keys, past-names maps, complete document named access and
 main raw-ID/name producers remain separate.
 
+Native control initialization compares authoritative ID/form code units and retains
+first-match nonform blockers and explicit misses. Existing ID-write and tree-move
+refusals use a shared prepaid borrowed comparison. Raw projection aliases cannot
+block unrelated changes or bypass a refusal when actual ID identity changes.
+Raw main-ID/form producers, general owner resetting and parser form-owner magic
+remain separate; submission authority and navigation guards are unchanged.
+
 Borrowed submit validates the real HTML form brand. Inert forms have genuine
 interface identity but no active native submission backend and explicitly refuse
 submission. Existing local-file, exact-origin, CSP form-action, request and
