@@ -48,6 +48,9 @@ mod opacity;
 pub(crate) use opacity::{serialize as serialize_opacity, specified as specified_opacity, Specified as SpecifiedOpacity};
 #[path="css_box_spacing.rs"]
 mod box_spacing;
+#[cfg(test)]
+#[path="css_spacing_default_tests.rs"]
+mod spacing_default_tests;
 #[path="css_radius.rs"]
 mod radius;
 #[path="css_background_clip.rs"]
@@ -3641,7 +3644,11 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
 
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration) {
     let value = declaration.value.trim().to_ascii_lowercase();
-    if custom_properties::layout_property(&declaration.name)&&matches!(value.as_str(),"inherit"|"initial"|"unset"){custom_properties::reset_box(style,parent,&declaration.name,value=="inherit");return;}
+    if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name))
+        && matches!(value.as_str(), "inherit" | "initial" | "unset") {
+        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit");
+        return;
+    }
     match declaration.name.as_str() {
         "display" => {if let Some(parsed)=display_value(&value){style.display=parsed;style.display_alias=match value.as_str(){"list-item"=>Some("list-item"),"table-header-group"=>Some("table-header-group"),"table-footer-group"=>Some("table-footer-group"),_=>None};}},
         "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
