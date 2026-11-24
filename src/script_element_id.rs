@@ -37,7 +37,7 @@ impl Bridge<'_>{
   }
   let Some(at)=found else{return Ok(None)};
   let bytes=self.element_id_attributes(object)?[at].value.logical_bytes();self.state.work(bytes)?;
-  if bytes>self.state.limits.host.string_bytes{return Err(if key=="id"{"Element.id exceeds the host string allowance."}else if key=="class"{"Element.className exceeds the host string allowance."}else{"ARIA reflected value exceeds the host string allowance."}.into());}
+  if bytes>self.state.limits.host.string_bytes{return Err(if key=="id"{"Element.id exceeds the host string allowance."}else if key=="class"{"Element.className exceeds the host string allowance."}else if key=="for"{"HTMLLabelElement.htmlFor exceeds the host string allowance."}else{"ARIA reflected value exceeds the host string allowance."}.into());}
   self.state.copies(bytes)?;Self::dom_string_copy(&self.element_id_attributes(object)?[at].value).map(Some)
  }
  pub(super) fn element_id_set(&mut self,object:u32,value:&Value)->Result<(),String>{

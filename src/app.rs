@@ -6573,3 +6573,7 @@ mod html_aria_domstring_tests;
 #[cfg(test)]
 #[path="app_html_label_for_domstring_tests.rs"]
 mod html_label_for_domstring_tests;
+
+#[cfg(test)]
+#[path="app_html_label_for_accessor_tests.rs"]
+mod html_label_for_accessor_tests;

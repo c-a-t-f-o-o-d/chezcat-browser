@@ -619,6 +619,9 @@ impl Runtime {
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;
             }
+            if name == "HTMLLabelElement" {
+                self.define_host_attribute(prototype,window,"htmlFor","\0HTMLLabelElement.get.htmlFor",Some("\0HTMLLabelElement.set.htmlFor"))?;
+            }
             if name == "HTMLTitleElement" {
                 self.define_host_attribute(prototype,window,"text",super::TITLE_TEXT_GET,Some(super::TITLE_TEXT_SET))?;
             }

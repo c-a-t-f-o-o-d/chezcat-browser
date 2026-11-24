@@ -91,6 +91,8 @@ Displayed HTML registered ARIA metadata now preserves exact producers and Attr
 writes through native import/promotion, control-state isolation and App checks;
 Public HTML label for values now preserve exact producers and transfers through
 actual native target matching and App pointer/editor/paint/link checks;
+Canonical HTMLLabelElement htmlFor now shares exact native reflection, ordinary
+author shadows, owner/origin checks and bounded read/write refusal recovery;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
