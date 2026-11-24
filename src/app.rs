@@ -6761,3 +6761,7 @@ mod li_type_tests;
 #[cfg(test)]
 #[path="app_li_value_tests.rs"]
 mod li_value_tests;
+
+#[cfg(test)]
+#[path="app_ol_type_tests.rs"]
+mod ol_type_tests;
