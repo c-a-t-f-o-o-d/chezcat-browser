@@ -78,6 +78,9 @@ Canonical Element.classList now uses inherited accessors and ordinary PutForward
 ordering over existing main HTML/SVG token lists;
 Inert HTML token lists now share exact native reads and mutations, independent
 cloning/import, stable template promotion and admitted scratch/refusal recovery;
+Genuine inert XML and other namespace Elements now share bounded ordinary
+author properties, exact keys and accessor shadows with native identity,
+clone/import isolation, adoption and origin/refusal checks;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
