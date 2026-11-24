@@ -6605,3 +6605,7 @@ mod output_for_domstring_tests;
 #[cfg(test)]
 #[path="app_output_html_for_tests.rs"]
 mod output_html_for_tests;
+
+#[cfg(test)]
+#[path="app_output_form_tests.rs"]
+mod output_form_tests;

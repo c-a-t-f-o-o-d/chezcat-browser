@@ -21,6 +21,9 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn html_label_form_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_html_label_form(object).map_err(|(_,e)|e)?;
   let Value::Host(control)=self.html_label_control_get(object)?else{return Ok(Value::Null);};
+  self.control_form_owner_get(control)
+ }
+ pub(in crate::scripting) fn control_form_owner_get(&mut self,control:u32)->Result<Value,String>{
   let(_,tag,_)=self.label_element_facts(control).ok_or("Missing label control element.")?;
   self.state.work(tag.len().checked_add(1).ok_or("Label form association work overflow.")?)?;
   if !matches!(self.label_element_facts(control).unwrap().1,"button"|"input"|"output"|"select"|"textarea"){return Ok(Value::Null);}
@@ -38,6 +41,7 @@ impl Bridge<'_>{
   while root!=DOCUMENT{
    count=count.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic label form ancestry.")?;self.state.work(lookup)?;
    let Some(parent)=self.whole_text_parent(root)?else{break;};
+   self.native_node_access(parent).map_err(|(_,message)|message)?;
    if ancestor.is_none()&&self.label_is_html_form(parent)?{ancestor=Some(parent);}
    root=parent;
   }

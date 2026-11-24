@@ -646,6 +646,7 @@ impl Runtime {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLOutputElement" {
+                self.define_host_attribute(prototype,window,"form","\0HTMLOutputElement.get.form",None)?;
                 self.define_host_attribute(prototype,window,"htmlFor","\0HTMLOutputElement.get.htmlFor",Some("\0HTMLOutputElement.set.htmlFor"))?;
             }
             if name == "HTMLIFrameElement" {
