@@ -2008,3 +2008,6 @@ mod inert_contains;
 
 #[path="script_owned_name_traversal.rs"]
 mod owned_name_traversal;
+
+#[path="script_label_control.rs"]
+pub(super) mod label_control;

@@ -93,6 +93,8 @@ Public HTML label for values now preserve exact producers and transfers through
 actual native target matching and App pointer/editor/paint/link checks;
 Canonical HTMLLabelElement htmlFor now shares exact native reflection, ordinary
 author shadows, owner/origin checks and bounded read/write refusal recovery;
+Canonical label control reads now follow exact same-root ID and descendant
+association, native identity, bounded traversal and actual App activation;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
