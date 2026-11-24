@@ -65,7 +65,9 @@ Canonical Document.prototype.getElementsByName supports ordinary prototype chang
 saved functions and receiver/origin preflight for the displayed backend.
 Owner-bound inert HTML/XML/generic and supported child live traversal now uses
 actual roots, exact HTML names and native list realms with storage/origin checks.
-Raw main-name producers and child mutations remain open;
+Ordinary HTML container name setters and Attr routes now retain raw UTF-16
+values for exact live queries, cloning and observation. Control/slot/frame/resource
+raw-name producers, raw-name imports and child mutations remain open;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
