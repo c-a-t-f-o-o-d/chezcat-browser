@@ -3095,6 +3095,7 @@ impl Bridge<'_> {
         if self.aria_reflection_member(object,property){return true;}
         if self.element_id_member(object,property){return true;}
         if self.element_class_name_member(object,property){return true;}
+        if self.element_class_list_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
 
@@ -3400,6 +3401,7 @@ impl Host for Bridge<'_> {
         if self.aria_reflection_member(object,property){return false;}
         if self.element_id_member(object,property){return false;}
         if self.element_class_name_member(object,property){return false;}
+        if self.element_class_list_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
 
@@ -3496,6 +3498,7 @@ impl Host for Bridge<'_> {
     }
 
     fn inherited_assignment(&self, object: u32, property: &str) -> bool {
+        if property=="classList"&&self.canonical_selector_receiver(object){return true;}
         if script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) {return true;}
         if property == "nodeValue" && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
@@ -3916,6 +3919,7 @@ impl Host for Bridge<'_> {
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) && self.event_target_interface(object) {return Some(object);}
         if script_element_id::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_name::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_element_class_list::operation(method)&&self.event_target_interface(object){return Some(object);}
         if anchor_url_interface::operation(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if crate::javascript::child_remove_operation(method) && self.event_target_interface(object) {return Some(object);}
         if charset_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
@@ -4222,6 +4226,7 @@ impl Host for Bridge<'_> {
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
         if script_element_id::operation(method){return self.validate_element_id(object,method==script_element_id::SET);}
         if script_element_class_name::operation(method){return self.validate_element_class_name(object,method==script_element_class_name::SET);}
+        if script_element_class_list::operation(method){return self.validate_element_class_list(object);}
         if anchor_url_interface::operation(method).is_some() {return self.native_node_access(object);}
         if crate::javascript::child_remove_operation(method) {
             self.native_node_access(object)?;
@@ -4674,6 +4679,7 @@ impl Host for Bridge<'_> {
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) {return self.event_target_interface(object)&&self.document_location_owner(receiver).is_some();}
         if script_element_id::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_element_class_name::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
+        if script_element_class_list::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if anchor_url_interface::operation(method).is_some() {return self.event_target_interface(object)&&self.native_anchor(receiver);}
         if crate::javascript::child_remove_operation(method) {
             return self.event_target_interface(object) && match method {
@@ -5536,13 +5542,14 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
-        if matches!(property,"id"|"className"|"baseURI") && self.form_named_control(object,property) {return self.named_form_property(node_index(object).unwrap(),property);}
+        if matches!(property,"id"|"className"|"classList"|"baseURI") && self.form_named_control(object,property) {return self.named_form_property(node_index(object).unwrap(),property);}
         if property=="baseURI" && self.text_content_receiver(object) {return self.node_base_uri_get(object);}
         if self.aria_reflection_member(object,property){return self.aria_reflection_get(object,property);}
         if self.charset_member(object, property) { return self.charset_reflection_get(object); }
         if self.meta_member(object, property) { return self.meta_get(object, meta_attribute(property).unwrap()); }
         if self.element_id_member(object,property){return self.element_id_get(object);}
         if self.element_class_name_member(object,property){return self.element_class_name_get(object);}
+        if self.element_class_list_member(object,property){return self.element_class_list_get(object);}
         if self.html_reflection_member(object,property){return self.html_reflection_get(object,property);}
         if let Some(value)=self.xhr_get(object,property){return value;}
         if self.placeholder_member(object,property){return self.placeholder_get(object);}
@@ -6368,6 +6375,8 @@ impl Host for Bridge<'_> {
         if method==TITLE_TEXT_GET {return self.title_child_text(object,false).map(Self::dom_string_owned);}
         if method==script_element_id::GET{return self.element_id_get(object);}
         if method==script_element_class_name::GET{return self.element_class_name_get(object);}
+        if method==script_element_class_list::GET{return self.element_class_list_get(object);}
+        if method==script_element_class_list::SET{return Err("Element.classList setter requires the ordinary forwarding transaction.".into());}
         if method==script_element_id::SET{return Err("Element.id setter requires the native conversion transaction.".into());}
         if method==script_element_class_name::SET{return Err("Element.className setter requires the native conversion transaction.".into());}
         if let Some((name,false))=anchor_url_interface::operation(method){return self.anchor_reflection_get(object,name);}
@@ -9194,3 +9203,8 @@ mod element_class_name_accessor_tests;
 
 #[path="script_element_class_name.rs"]
 mod script_element_class_name;
+#[path="script_element_class_list.rs"]
+mod script_element_class_list;
+#[cfg(test)]
+#[path="script_element_class_list_accessor_tests.rs"]
+mod element_class_list_accessor_tests;

@@ -6541,3 +6541,7 @@ mod html_metadata_materialization_tests;
 #[cfg(test)]
 #[path="app_element_class_name_accessor_tests.rs"]
 mod element_class_name_accessor_tests;
+
+#[cfg(test)]
+#[path="app_element_class_list_accessor_tests.rs"]
+mod element_class_list_accessor_tests;
