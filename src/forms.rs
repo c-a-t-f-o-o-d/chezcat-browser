@@ -359,7 +359,9 @@ fn select_state(doc: &Document, node: usize) -> (SelectState, bool, usize) {
 }
 
 pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
-    let mut ids = HashMap::new();
+    // Borrow authoritative native records. DomString ordering compares exact
+    // UTF-16 units, so raw IDs and literal replacement characters stay distinct.
+    let mut ids = BTreeMap::new();
     let mut active = vec![false; doc.nodes.len()];
     let mut order = Vec::new();
     let mut stack = if doc.nodes.is_empty() {
@@ -380,7 +382,7 @@ pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
         }
         active[index] = true;
         order.push(index);
-        if let Some(id) = doc.attr(index, "id") {
+        if let Some(id) = doc.dom_attr(index, "id") {
             ids.entry(id).or_insert(index);
         }
         stack.extend(doc.nodes[index].children.iter().rev().copied());
@@ -390,7 +392,7 @@ pub fn label_targets(doc: &Document) -> HashMap<usize, usize> {
         if tag(doc, node) != "label" {
             continue;
         }
-        let target = if let Some(id) = doc.attr(node, "for") {
+        let target = if let Some(id) = doc.dom_attr(node, "for") {
             ids.get(id)
                 .copied()
                 .filter(|&index| kind(doc, index).is_some_and(|k| k != Kind::Hidden))
@@ -2560,3 +2562,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path="forms_visual_id_exact_tests.rs"]
+mod visual_id_exact_tests;

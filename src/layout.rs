@@ -1107,7 +1107,7 @@ fn build_viewport_with_fonts_inner(
     Ok(engine.layout)
 }
 
-impl Engine<'_> {
+impl<'a> Engine<'a> {
     fn finish_border_rects(&mut self, fixed_boxes: &[bool]) {
         for (node, record) in self.boxes.iter().enumerate() {
             if let Some(record) = record {
@@ -2077,6 +2077,12 @@ impl Engine<'_> {
         }
     }
 
+    fn anchor_id(&self,node:usize)->Option<&'a str>{
+        // URL fragments are scalar strings. An unmatched surrogate ID cannot
+        // equal one and must not publish a replacement-character alias.
+        self.doc.dom_attr(node,"id").and_then(|value|value.scalar().ok())
+    }
+
     fn anchor(&mut self, node: usize, id: &str, y: i32) {
         self.layout.anchors.push((id.to_owned(), y));
         self.anchor_nodes.push(node);
@@ -2096,7 +2102,7 @@ impl Engine<'_> {
         match &node.kind {
             NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. } | NodeKind::DocumentFragment | NodeKind::DocumentType(_) => {},
             NodeKind::Text(text) | NodeKind::Cdata(text) => self.text(text, &style, link),
-            NodeKind::Element { tag, id, .. } => {
+            NodeKind::Element { tag, .. } => {
                 if style.display == Display::None
                     || matches!(
                         tag.as_str(),
@@ -2137,7 +2143,7 @@ impl Engine<'_> {
                 }
                 if tag == "br" {
                     self.inline_boxes[index] = true;
-                    if let Some(id) = id {
+                    if let Some(id) = self.anchor_id(index) {
                         self.anchor(index, id, self.flow.y);
                     }
                     self.finish_line(true, self.line_height(&style));
@@ -2149,7 +2155,7 @@ impl Engine<'_> {
                         self.finish_line(false, 0);
                         self.separate("\n");
                     }
-                    if let Some(id) = id {
+                    if let Some(id) = self.anchor_id(index) {
                         self.anchor(index, id, self.flow.y);
                     }
                     self.image(index, &style, link, depth);
@@ -2167,7 +2173,7 @@ impl Engine<'_> {
                         self.finish_line(false, 0);
                         self.separate("\n");
                     }
-                    if let Some(id) = id {
+                    if let Some(id) = self.anchor_id(index) {
                         self.anchor(index, id, self.flow.y);
                     }
                     if self.loaded_image_control(index) {
@@ -2186,7 +2192,7 @@ impl Engine<'_> {
                 } else if style.display.atomic_inline() {
                     self.inline_block(index, &style, link, depth);
                 } else {
-                    if let Some(id) = id {
+                    if let Some(id) = self.anchor_id(index) {
                         self.anchor(index, id, self.flow.y);
                     }
                     self.inline(index, &style, link, depth);
@@ -2321,8 +2327,8 @@ impl Engine<'_> {
             None
         };
         let tag = match &self.doc.nodes[index].kind {
-            NodeKind::Element { tag, id, .. } => {
-                if let Some(id) = id {
+            NodeKind::Element { tag, .. } => {
+                if let Some(id) = self.anchor_id(index) {
                     self.anchor(index, id, y);
                 }
                 tag.clone()
@@ -2600,7 +2606,7 @@ impl Engine<'_> {
             let row_background = row_style.background.and_then(|color| {
                 self.rect_for(row.node,left + gaps[0], top, (width - 2 * gaps[0]).max(0), 0, color)
             });
-            if let NodeKind::Element { id: Some(id), .. } = &self.doc.nodes[row.node].kind {
+            if let Some(id) = self.anchor_id(row.node) {
                 self.anchor(row.node, id, top);
             }
             let mut height = self
@@ -2683,7 +2689,7 @@ impl Engine<'_> {
                             + usize::from(record.hit_box.is_some());
                         content.end.boxes =
                             content.end.boxes.saturating_sub(1).max(content.start.boxes);
-                        if self.doc.attr(node, "id").is_some() {
+                        if self.anchor_id(node).is_some() {
                             content.start.anchors += 1;
                         }
                         self.move_span(content, 0, offset);
@@ -6468,3 +6474,7 @@ mod stacking_tests;
 
 #[path="layout_stacking.rs"]
 mod stacking;
+
+#[cfg(test)]
+#[path="layout_visual_id_exact_tests.rs"]
+mod visual_id_exact_tests;

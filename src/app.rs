@@ -6489,3 +6489,7 @@ mod css_id_exact_tests;
 #[cfg(test)]
 #[path="app_collection_named_exact_tests.rs"]
 mod collection_named_exact_tests;
+
+#[cfg(test)]
+#[path="app_visual_id_exact_tests.rs"]
+mod visual_id_exact_tests;
