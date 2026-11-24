@@ -486,6 +486,8 @@ HTMLFieldSetElement now exposes canonical name DOMString reflection over the act
 
 HTMLFieldSetElement now exposes canonical disabled Boolean reflection over its own actual null-namespace attribute. Assignment uses Boolean truth without author primitive conversion; native writes reuse the existing paid descendant-control refresh, including nested fieldsets and the first-legend exception. Inert reflection, actual Attr identity and observer old values, concrete brands, author overrides and captured origin share the existing attribute transaction. Presence reads inspect paid attribute names without copying values or requiring string/storage allowance; work/copy/storage/deadline refusals preserve attributes and native control state before recovery. Native and App pointer/paint/editor/link evidence stays scoped. Fieldset collections/validation, broader forms, main import/promotion and child lifecycle remain required; F01 stays partial.
 
+HTMLFieldSetElement now exposes canonical readonly willValidate and validationMessage getters plus ordinary checkValidity/reportValidity methods for its noncandidate validation branches. They return false, empty text and true respectively, without invalid dispatch, focus/scroll changes, author argument conversion or descendant-control validation. Native and inert concrete brands, captured origin, author override/delete/restore and work/deadline refusal/recovery remain enforced. Empty/scalar results require no value copying or additional string/retained storage; native and App pointer/paint/editor/link evidence stays scoped. Fieldset ValidityState/custom errors and collections, broader forms, main import/promotion and child lifecycle remain required; F01 stays partial.
+
 
 ### F02 — Bytes, encodings and MIME routing
 
