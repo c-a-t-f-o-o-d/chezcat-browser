@@ -1661,6 +1661,7 @@ impl Runtime {
     ) -> Result<DescriptorTarget, Fault> {
         self.reject_foreign_window(value, host)?;
         if let Value::Host(handle) = value {
+            if !host.native_descriptor_change_allowed(*handle,name){self.validate_native_access(*handle,host)?;return Err(Fault::new("Native lifecycle property descriptors cannot be changed by this subset."));}
             if self.is_browser_global(*handle) { self.ensure_global_intrinsics(name)?; }
             if let Some(object) = self.host_ordinary(*handle, name, host)? {
                 return Ok(DescriptorTarget::Ordinary(object));

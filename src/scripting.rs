@@ -3119,6 +3119,7 @@ impl Bridge<'_> {
         if self.control_labels_member(object,property){return true;}
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
+        if self.control_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
         if self.output_validation_member(object,property){return true;}
         if self.output_validity_member(object,property)||self.validity_member(object,property){return true;}
@@ -3261,6 +3262,9 @@ impl Host for Bridge<'_> {
 
     fn mutation_callback_error(&mut self, message: &str) {
         self.state.error("MutationObserver callback", message);
+    }
+    fn native_descriptor_change_allowed(&self,object:u32,property:&str)->bool{
+        !(self.control_form_member(object,property)&&node_index(object).is_some_and(|node|self.forms.controls.contains_key(&node)))
     }
     fn expando_owner(&self,object:u32)->Option<u32> {
         if self.validity_receiver(object){return Some(WINDOW);}
@@ -3439,6 +3443,7 @@ impl Host for Bridge<'_> {
         if self.control_labels_member(object,property){return false;}
         if self.html_label_form_member(object,property){return false;}
         if self.output_form_member(object,property){return false;}
+        if self.control_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
         if self.output_validation_member(object,property){return false;}
         if self.output_validity_member(object,property)||self.validity_receiver(object){return false;}
@@ -3567,6 +3572,7 @@ impl Host for Bridge<'_> {
         if self.control_labels_member(object,property){return true;}
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
+        if self.control_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
         if property=="validity"&&self.html_output_receiver(object)||self.validity_member(object,property){return true;}
@@ -3988,6 +3994,7 @@ impl Host for Bridge<'_> {
         if script_input_labels::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
+        if script_control_form::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validity_state::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4306,6 +4313,7 @@ impl Host for Bridge<'_> {
         if script_input_labels::interface(method).is_some(){return self.validate_control_labels(object,method);}
         if method==script_label_form::GET{return self.validate_html_label_form(object);}
         if method==script_output_form::GET{return self.validate_output_form(object);}
+        if script_control_form::interface(method).is_some(){return self.validate_control_form(object,method);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
         if script_output_validation::operation(method){return self.validate_output_metadata(object);}
         if script_output_validity_state::operation(method){return self.validate_output_validity(object,method);}
@@ -4770,6 +4778,7 @@ impl Host for Bridge<'_> {
         if script_input_labels::interface(method).is_some(){return self.event_target_interface(object)&&self.control_labels_receiver(receiver,method);}
         if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if script_control_form::interface(method).is_some(){return self.event_target_interface(object)&&self.control_form_matches(receiver,method);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else{self.html_output_receiver(receiver)};}
@@ -5650,6 +5659,7 @@ impl Host for Bridge<'_> {
         if property=="labels"{if let Some(method)=self.control_labels_method(object){return self.html_control_labels_get(object,method);}}
         if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
         if self.output_form_member(object,property){return self.output_form_get(object);}
+        if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
         if property=="validity"&&self.html_output_receiver(object){return self.output_validity_call(object,script_output_validity_state::GET,&[]);}
@@ -6491,6 +6501,7 @@ impl Host for Bridge<'_> {
         if script_input_labels::interface(method).is_some(){return self.html_control_labels_get(object,method);}
         if method==script_label_form::GET{return self.html_label_form_get(object);}
         if method==script_output_form::GET{return self.output_form_get(object);}
+        if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
         if script_output_validation::operation(method){return self.output_validation(object,method);}
@@ -9464,3 +9475,10 @@ mod output_validity_state_tests;
 
 #[path="script_output_validity_state.rs"]
 mod script_output_validity_state;
+
+#[cfg(test)]
+#[path="script_control_form_accessor_tests.rs"]
+mod control_form_accessor_tests;
+
+#[path="script_control_form.rs"]
+mod script_control_form;
