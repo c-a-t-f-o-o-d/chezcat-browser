@@ -6,6 +6,7 @@ enum Mode {
     BeforeHtml,
     BeforeHead,
     InHead,
+    InHeadNoscript,
     AfterHead,
     InBody,
     AfterBody,
@@ -148,6 +149,13 @@ impl Structure {
         self.mode = Mode::AfterHead;
     }
 
+    fn close_head_noscript(&mut self, stack: &mut Vec<usize>) {
+        // This mode admits only void metadata, immediately consumed text-only
+        // elements, and whitespace/leaves. The current node remains noscript.
+        stack.pop();
+        self.mode = Mode::InHead;
+    }
+
     fn merge_attrs(
         doc: &mut Document,
         node: usize,
@@ -216,7 +224,7 @@ impl Structure {
         check: &dyn Fn() -> Result<(), String>,
     ) -> Result<Action, String> {
         let name = token.name.as_str();
-        if matches!(name,"html"|"head"|"body"|"frameset") && stack.iter().skip(1).any(|&n|doc.nodes[n].namespace!=Namespace::Html ||
+        if self.mode != Mode::InHeadNoscript && matches!(name,"html"|"head"|"body"|"frameset") && stack.iter().skip(1).any(|&n|doc.nodes[n].namespace!=Namespace::Html ||
             matches!(&doc.nodes[n].kind,NodeKind::Element{tag,..} if matches!(tag.as_str(),"template"|"noscript"|"object"|"iframe"))){
             return Ok(Action::Consumed);
         }
@@ -255,7 +263,11 @@ impl Structure {
                     self.insert(doc, stack, "head", None, limit)?;
                 }
                 Mode::InHead => {
-                    if !token.closing && (metadata(name) || name == "noscript") {
+                    if !token.closing && name == "noscript" {
+                        self.mode = Mode::InHeadNoscript;
+                        return Ok(Action::Normal);
+                    }
+                    if !token.closing && metadata(name) {
                         return Ok(Action::Normal);
                     }
                     if token.closing && name == "head" {
@@ -266,6 +278,33 @@ impl Structure {
                         return Ok(Action::Consumed);
                     }
                     self.close_head(stack);
+                }
+                Mode::InHeadNoscript => {
+                    if token.closing && name == "noscript" {
+                        self.close_head_noscript(stack);
+                        return Ok(Action::Consumed);
+                    }
+                    if !token.closing && matches!(name,
+                        "basefont" | "bgsound" | "link" | "meta" | "noframes" | "style") {
+                        return Ok(Action::Normal);
+                    }
+                    if !token.closing && matches!(name, "head" | "noscript")
+                        || token.closing && name != "br" {
+                        return Ok(Action::Consumed);
+                    }
+                    self.close_head_noscript(stack);
+                    if token.closing {
+                        // End BR is reprocessed through head and after-head to
+                        // the in-body synthetic BR start tag. Its end-token
+                        // attributes do not belong to that inserted element.
+                        token.closing = false;
+                        token.self_closing = false;
+                        token.clean_syntax = true;
+                        token.duplicate_attributes = false;
+                        token.id = None;
+                        token.href = None;
+                        token.attrs.clear();
+                    }
                 }
                 Mode::AfterHead => {
                     if !token.closing && name == "body" {
@@ -319,6 +358,9 @@ impl Structure {
     }
 
     pub(super) fn supports_data_nulls(&self, doc: &Document, stack: &[usize]) -> bool {
+        // The explicit head-noscript mode reprocesses before DATA filtering.
+        // Preserve the older boundary for noscript inside a metadata subtree
+        // whose full template insertion-mode handling is still separate.
         self.mode != Mode::InHead || !stack.iter().any(|&node| {
             doc.nodes[node].namespace == Namespace::Html
                 && matches!(&doc.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "noscript")
@@ -411,6 +453,9 @@ impl Structure {
         stack: &mut Vec<usize>,
         limit: usize,
     ) -> Result<(), String> {
+        if self.mode == Mode::InHeadNoscript {
+            self.close_head_noscript(stack);
+        }
         if self.html.is_none() {
             self.insert(doc, stack, "html", None, limit)?;
         }

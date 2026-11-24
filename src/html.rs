@@ -35,6 +35,10 @@ mod text_state_boundary_tests;
 mod data_character_tests;
 
 #[cfg(test)]
+#[path = "html_head_noscript_tests.rs"]
+mod head_noscript_tests;
+
+#[cfg(test)]
 #[path = "html_named_reference_tests.rs"]
 mod named_reference_tests;
 
