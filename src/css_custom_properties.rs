@@ -305,13 +305,14 @@ pub(super) fn border_property(name:&str)->bool {
         "border-top-color"|"border-right-color"|"border-bottom-color"|"border-left-color")
 }
 fn box_property(name:&str)->bool {
-    layout_property(name) || box_spacing::property(name) || border_property(name) || inset_property(name)
+    layout_property(name) || box_spacing::property(name) || border_property(name) || inset_property(name) || image_placement::property(name)
         || matches!(name,"background-color"|"background"|"color"|"font-size")
 }
 fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if image_placement::property(name) {return image_placement::valid(name,value);}
     if inset_property(name) {
         return if name=="inset" {inset_values(value).is_some()} else {inset_length(value).is_some()};
     }
@@ -348,6 +349,7 @@ fn inherited_layout_length(value:Length,parent:&Style)->Length{
     Length::Px(pixels.clamp(-(f32::MAX as f64),f32::MAX as f64)as f32)
 }
 pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
+    if image_placement::property(name) {image_placement::reset(style,parent,name,inherit);return;}
     let initial=Style::default(); let source=if inherit{parent}else{&initial};
     let length=|value|if inherit{inherited_layout_length(value,parent)}else{value};
     match name{
@@ -433,13 +435,14 @@ pub(super) fn apply_box_with_parent(style:&mut Style,parent:&Style,declaration:&
     if declaration.name=="font-size" {apply_font_size(style,parent,declaration,variables,budget,&mut true,true,true);return true;}
     // A var()-bearing declaration participates in the cascade before its
     // substituted grammar is known. Failure uses unset (the parent's computed
-    // color/font-size for inherited text properties, initial box components); it cannot
+    // color/font-size or image-rendering for inherited properties, initial box components); it cannot
     // resurrect an earlier author declaration.
     let substituted=variables.substitute(&declaration.value,budget);
     let available=substituted.is_ok();
     let result=substituted.ok().flatten();
     let value=result.as_deref().unwrap_or("").trim().to_ascii_lowercase();
-    let inherited=matches!(declaration.name.as_str(),"color"|"font-size");
+    let inherited=matches!(declaration.name.as_str(),"color"|"font-size")
+        || declaration.name=="image-rendering" && has_element_parent;
     if value.contains("calc("){let (work,copies)=sizing_math::cost(&value);if budget.work(work).and_then(|_|budget.copy(copies)).is_err(){reset_box(style,parent,&declaration.name,inherited);return true;}}
     if matches!(value.as_str(),"inherit"|"initial"|"unset") {
         // The finite background shorthand can inherit an existing single image
@@ -451,7 +454,7 @@ pub(super) fn apply_box_with_parent(style:&mut Style,parent:&Style,declaration:&
             return true;
         }
         let inherit=(value=="inherit" || (inherited && value=="unset"))
-            && (!(border_property(&declaration.name) || inset_property(&declaration.name)) || has_element_parent);
+            && (!(border_property(&declaration.name) || inset_property(&declaration.name) || image_placement::property(&declaration.name)) || has_element_parent);
         reset_box(style,parent,&declaration.name,inherit);
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet},has_element_parent);

@@ -29,7 +29,7 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 479
+    "fresh_runtime_passes": 615
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -906,6 +906,8 @@
         "CSS-F07"
       ],
       "baseline_revision": "1d7289994f4385fbde6c5baf2f39f7cea433af3e",
+      "integrated_revision": "040433aa90ba88c1fe8ede1993042fb018fcaf79",
+      "pull_request": 632,
       "specification_bindings": [
         {
           "url": "https://www.w3.org/TR/2025/WD-css-position-3-20251007/",
@@ -1023,6 +1025,167 @@
         "revert/revert-layer, complete origin/layer cascade behavior and dynamic viewport distinctions remain outside this finite increment.",
         "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
         "C00 and complete C04/C05/C10 selections remain unqualified; no complete requirement group or package is closed."
+      ]
+    },
+    {
+      "id": "C04-S04",
+      "name": "Image and background placement defaulting and computed positions",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05",
+        "C11"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05",
+        "CSS-F14"
+      ],
+      "baseline_revision": "eb7cca9e5b8d11913d5ce7da1c8449dc7a633be2",
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2023/CRD-css-images-3-20231218/",
+          "sections": [
+            "4.5",
+            "4.6",
+            "5.2"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2024/CRD-css-backgrounds-3-20240311/",
+          "sections": [
+            "2.4",
+            "2.6",
+            "2.6.1",
+            "2.9"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2024/WD-css-values-4-20240312/",
+          "sections": [
+            "5.3",
+            "6.1",
+            "6.1.2",
+            "8.3",
+            "10.1",
+            "10.11"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "4.4",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/",
+          "sections": [
+            "3.1",
+            "3.2",
+            "3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/",
+          "sections": [
+            "4.3.13"
+          ]
+        }
+      ],
+      "properties": [
+        "object-position",
+        "background-position",
+        "object-fit",
+        "image-rendering",
+        "background-repeat",
+        "background-size"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The six properties share literal and substituted inherit/initial/unset behavior, with initial centered object position, top-left background position, fill object fit, auto image rendering, repeat backgrounds and auto background size.",
+        "Only image-rendering inherits naturally. Explicit inheritance uses a real element parent; synthetic document and fragment contexts do not provide parent values, while genuine null-namespace element parents do.",
+        "Physical object positions accept one, two or four components. Background positions also accept the three-component edge-offset form. Axes are parsed atomically, and center cannot take an edge offset.",
+        "Positions accept signed px/pt/pc/em/rem/percentage/vw/vh, unitless zero and the existing typed calc arithmetic, with strict numeric token boundaries. Percentage coefficients stay separate from length offsets and use image free space, including negative free space; right and bottom offsets reverse both percentage and length contributions.",
+        "Computed position offsets use the declaring element's final font and root metrics once. Supplied viewport dimensions resolve viewport terms before inheritance; unavailable viewport terms remain unresolved. Cached stylesheet sources recompute values after viewport, parent-inline and source changes.",
+        "Invalid literals leave earlier valid values intact. Missing, cyclic or invalid substituted winners apply the property's unset behavior without reviving an earlier declaration. The four companion keyword properties retain their existing finite ranges and image-rendering compatibility aliases.",
+        "Inline declaration admission shares the property-specific grammar and charges its supplied work/copy budget before value parsing. Raw inline style declarations use the same computed-value path.",
+        "Native layout presentation carries these values into fitted-image and background painting, including image origins and extents, supported sizing and repetition, clipping, uncovered pixels and link hit regions."
+      ],
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "987b90f5d2b00c0c01ef0edfab5d89382cb1c97f",
+          "sha256": "aad550de81af2272b5119660791932a297a91c6146b8081e6809df68f3fbb8c7"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "db604e4961ea6ad2a02ad6348ea3777b293b2a99",
+          "sha256": "0c290da5138398267141318311922e14d28c83ebef5721cc8399eca5596aa1f6"
+        },
+        "src/css_image_placement.rs": {
+          "git_blob": "15ceed5c2c557f4170fc05838758daa2dd7a56b3",
+          "sha256": "148c42780b36e03d5c533b07fe4dc2de27480a2e9547c80534f0a111de0b6384"
+        },
+        "src/css_image_placement_tests.rs": {
+          "git_blob": "1cbefcd5f499675c9bd358e0c8fbd01738918e75",
+          "sha256": "d772d8edee606a8c344f3f1779b9903c0d5ab81d9d490ffb7875dd5e5340d751"
+        },
+        "src/css_sizing_math.rs": {
+          "git_blob": "ec0f9b8b3fd2d0facb19b36772b6ee1e27373858",
+          "sha256": "c7cd2dbe803b2857ee985975415d30f3a1bcfce52e7a65d25ba8ab88a1f41654"
+        },
+        "src/css_box_spacing.rs": {
+          "git_blob": "a7dde8a8632a55cc40de85c9ba17ff91fdcf7e1e",
+          "sha256": "7c8a627c932f9afc391efa549322c5df556290f6c868565b1c34714743dda5f6"
+        },
+        "src/layout.rs": {
+          "git_blob": "bbdf32280143c92ed8a2f78298f3adb29bdde983",
+          "sha256": "138ff93ec2b55e710e74ada1d54f836f48b7bfca5ce38a16e93f199498215458"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        }
+      },
+      "native_evidence": {
+        "status": "PASS",
+        "production_probe_cases": [
+          "defaults-vars",
+          "position-grammar",
+          "computed-inheritance",
+          "typed-viewport",
+          "substitution-atomicity",
+          "cache-recompute",
+          "inline-admission",
+          "refusal-recovery",
+          "native-object-paint",
+          "native-background-paint"
+        ],
+        "scope": "Selected native CSS computation, inline declaration admission, layout presentation, exact image/background pixels, clipping and hit testing. Windows frontend, real HTTP, XHTML presentation and full browser acceptance are not covered.",
+        "existing_test_corrections": [
+          "The valid three-component background-position top 4px right is asserted as horizontal end with a 4px top offset. Object-position three-component rejection and ordinary noninheritance remain unchanged."
+        ],
+        "original_image_placement_regressions": 38,
+        "existing_related_css_layout_and_paint_tests": 98,
+        "native_tests_total": 136,
+        "production_probe_count": 10,
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "selection_sha256": "c75ddf9ef2760369fb5ea754e7db1988eb56c84e48f9626739e947a70e13a4ed",
+        "source_manifest_sha256": "bc391c392f2c9a899e913c8a6d4ae5bdfe11c045307e54cab9e6265e94f7345c"
+      },
+      "remaining": [
+        "Logical position keywords, additional units and math functions, two-keyword background repetition, space/round repetition, explicit numeric background sizes and multiple background layers remain outside this finite increment.",
+        "Image functions, gradients, resource loading, codec capabilities and additional resampling algorithms are not established by these placement/defaulting changes.",
+        "revert/revert-layer, complete origin/layer cascade behavior, dynamic viewport distinctions and general CSSOM serialization remain open. No script CSSOM whitelist members are added by inline helper admission.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05/C11 selections remain unqualified; no complete requirement group or package is closed."
       ]
     }
   ],
@@ -6443,7 +6606,8 @@
       "preparatory_slices": [
         "C04-S01",
         "C04-S02",
-        "C04-S03"
+        "C04-S03",
+        "C04-S04"
       ]
     },
     {
@@ -6489,7 +6653,8 @@
       "preparatory_slices": [
         "C04-S01",
         "C04-S02",
-        "C04-S03"
+        "C04-S03",
+        "C04-S04"
       ]
     },
     {
@@ -6752,7 +6917,10 @@
         "LA28"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S04"
+      ]
     },
     {
       "id": "C12",

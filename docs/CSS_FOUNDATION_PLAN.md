@@ -302,6 +302,62 @@ origin/layer rollback and full CSSOM serialization remain open. Windows
 frontend, real HTTP loading, XHTML presentation and unchanged browser WPT were
 not executed. No complete C00/C04/C05/C10 requirement or package is closed.
 
+## Preparatory implementation: image and background placement
+
+**C04-S04 is a partial increment for C04, C05 and C11.** Its finite contract
+covers object-position, background-position, object-fit, image-rendering,
+background-repeat and background-size, with shared literal and substituted
+inherit, initial and unset behavior. Only image-rendering inherits naturally.
+Object positions initially center the image; background positions initially
+align it to the top left. The companion properties retain their existing keyword
+ranges and image-rendering compatibility aliases.
+
+Physical object positions accept one, two or four components; background
+positions also accept three-component edge offsets. Parsing is atomic across
+both axes. The supported value grammar includes signed px/pt/pc/em/rem/%/vw/vh,
+unitless zero and the existing typed calc arithmetic. Percentages apply to the
+space between the positioning area and the fitted image, including negative free
+space. Right and bottom edge offsets reverse percentage and length contributions.
+Font-relative terms use final declaring-element font and root metrics once,
+before explicit inheritance. Viewport terms use the supplied environment and
+recompute after viewport changes; unavailable viewport terms stay unresolved.
+
+Invalid literals preserve earlier valid declarations, while invalid substituted
+winners apply the property's unset behavior. Document and fragment context
+containers do not supply an element parent. Inline admission uses the same
+property-specific grammar and its supplied work/copy budget. This helper coverage
+does not add script CSSOM property members.
+
+Native cases target actual layout presentation, fitted-image and background
+pixels, clipping and link hit regions. The selection includes original asymmetric
+bitmaps with independently calculated image origins and extents, positive and
+negative free space, inherited font offsets, supported image fitting, background
+repetition and background sizing.
+
+The finite contract follows [CSS Images 3, 18 December 2023, sections 4.5,
+4.6 and 5.2](https://www.w3.org/TR/2023/CRD-css-images-3-20231218/),
+[CSS Backgrounds 3, 11 March 2024, sections 2.4, 2.6 and 2.9](https://www.w3.org/TR/2024/CRD-css-backgrounds-3-20240311/),
+[CSS Values 4, 12 March 2024, sections 5.3, 6.1, 8.3 and 10](https://www.w3.org/TR/2024/WD-css-values-4-20240312/),
+[CSS Cascade 5, 13 January 2022, sections 4.4 and 7.2–7.3.3](https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/),
+[CSS Variables 1, 16 June 2022, sections 3.1–3.3](https://www.w3.org/TR/2022/CR-css-variables-1-20220616/)
+and [CSS Syntax 3, 1 October 2026, section 4.3.13](https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/).
+
+| Native component evidence | Result |
+| --- | --- |
+| Original image-placement regressions | 38 pass |
+| Existing related CSS, layout and paint tests | 98 pass |
+| Native test total | 136 pass |
+| Production computation, admission, cache, refusal and paint scenarios | 10 pass |
+
+These are native results on Linux x86_64 with Rust 1.99.1.
+
+Logical positions, additional units/math functions, two-keyword/space/round
+background repetition, numeric background sizes, multiple layers, image loading,
+new rendering algorithms, rollback keywords and general CSSOM remain outside
+this finite increment. Windows frontend, real HTTP loading, XHTML presentation
+and unchanged browser WPT were not executed. No complete C00/C04/C05/C11
+requirement or package is closed.
+
 ## Architecture and invariants
 
 ### One syntax and property model

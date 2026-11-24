@@ -48,6 +48,8 @@ mod opacity;
 pub(crate) use opacity::{serialize as serialize_opacity, specified as specified_opacity, Specified as SpecifiedOpacity};
 #[path="css_box_spacing.rs"]
 mod box_spacing;
+#[path="css_image_placement.rs"]
+mod image_placement;
 #[cfg(test)]
 #[path="css_spacing_default_tests.rs"]
 mod spacing_default_tests;
@@ -569,101 +571,9 @@ impl Style {
     }
 }
 
+#[cfg(test)]
 fn object_position(value: &str) -> Option<[ObjectPosition; 2]> {
-    fn keyword(value: &str) -> Option<(usize, f32)> {
-        match value {
-            "left" => Some((0, 0.0)),
-            "right" => Some((0, 1.0)),
-            "top" => Some((1, 0.0)),
-            "bottom" => Some((1, 1.0)),
-            _ => None,
-        }
-    }
-    fn component(value: &str) -> Option<ObjectPosition> {
-        if value == "center" {
-            return Some(ObjectPosition::CENTER);
-        }
-        match parse_length(value, false, true)? {
-            Length::Percent(n) => Some(ObjectPosition {
-                fraction: n / 100.0,
-                offset: Length::Px(0.0),
-            }),
-            offset => Some(ObjectPosition {
-                fraction: 0.0,
-                offset,
-            }),
-        }
-    }
-    fn edge(value: &str, offset: Option<&str>) -> Option<(usize, ObjectPosition)> {
-        let (axis, fraction) = keyword(value)?;
-        let mut result = ObjectPosition {
-            fraction,
-            offset: Length::Px(0.0),
-        };
-        if let Some(offset) = offset {
-            let parsed = component(offset)?;
-            if offset == "center" {
-                return None;
-            }
-            result.fraction += parsed.fraction * if fraction == 0.0 { 1.0 } else { -1.0 };
-            result.offset = match parsed.offset {
-                Length::Px(n) => Length::Px(if fraction == 0.0 { n } else { -n }),
-                Length::Em(n) => Length::Em(if fraction == 0.0 { n } else { -n }),
-                Length::Rem(n) => Length::Rem(if fraction == 0.0 { n } else { -n }),
-                _ => return None,
-            };
-        }
-        Some((axis, result))
-    }
-    let words: Vec<_> = value.split_ascii_whitespace().collect();
-    if words.is_empty() || words.len() > 4 {
-        return None;
-    }
-    let mut result = [ObjectPosition::CENTER; 2];
-    if words.len() == 1 {
-        if let Some((axis, p)) = edge(words[0], None) {
-            result[axis] = p;
-        } else {
-            result[0] = component(words[0])?;
-        }
-        return Some(result);
-    }
-    if words.len() == 2 {
-        match (keyword(words[0]), keyword(words[1])) {
-            (Some((a, _)), Some((b, _))) if a != b => {
-                result[a] = edge(words[0], None)?.1;
-                result[b] = edge(words[1], None)?.1;
-            }
-            (Some((0, _)), None) => {
-                result[0] = edge(words[0], None)?.1;
-                result[1] = component(words[1])?;
-            }
-            (Some((1, _)), None) if words[1] == "center" => result[1] = edge(words[0], None)?.1,
-            (None, Some((1, _))) => {
-                result[0] = component(words[0])?;
-                result[1] = edge(words[1], None)?.1;
-            }
-            (None, Some((0, _))) if words[0] == "center" => result[0] = edge(words[1], None)?.1,
-            (None, None) => {
-                result = [component(words[0])?, component(words[1])?];
-            }
-            _ => return None,
-        }
-        return Some(result);
-    }
-    // CSS Values <position> has 1, 2 or 4 values. Three-value syntax
-    // belongs to background-position and is not valid for object-position.
-    if words.len() != 4 {
-        return None;
-    }
-    let (first, a) = edge(words[0], Some(words[1]))?;
-    let (second, b) = edge(words[2], Some(words[3]))?;
-    if first == second {
-        return None;
-    }
-    result[first] = a;
-    result[second] = b;
-    Some(result)
+    image_placement::position(value, false)
 }
 
 #[derive(Debug)]
@@ -1133,6 +1043,7 @@ fn compute_cascade(
         };
         eligible[index] = true;
         let mut style = Style::inherited(&parent);
+        if !has_element_parent { style.image_rendering = ImageRendering::Auto; }
         style.root_font_size = root_font_size;
         user_agent(
             &mut style,
@@ -1457,6 +1368,7 @@ fn compute_cascade(
         let viewport_length=|value|sizing_math::resolve_viewport(value,environment);
         style.width=viewport_length(style.width);style.height=viewport_length(style.height);style.min_width=viewport_length(style.min_width);style.min_height=viewport_length(style.min_height);style.max_width=style.max_width.map(viewport_length);style.max_height=style.max_height.map(viewport_length);style.flex_basis=viewport_length(style.flex_basis);style.margin=style.margin.map(viewport_length);style.padding=style.padding.map(viewport_length);style.gap=style.gap.map(viewport_length);
         style.inset=style.inset.map(viewport_length);
+        image_placement::computed(&mut style, environment);
         // Height inherits its computed length, not a parent's em/rem token.
         // Percentages and auto retain their containing-block/used-value role.
         if matches!(style.height, Length::Em(_) | Length::Rem(_)) {
@@ -3152,7 +3064,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
     for decl in declarations {
         let name = decl.name.as_str();
         if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
-        if custom_properties::inset_property(name) {
+        if custom_properties::inset_property(name) || image_placement::property(name) {
             if let Some(meter) = meter.as_deref_mut() {
                 meter.source(name.len().saturating_add(decl.value.len()))?;
             }
@@ -3195,6 +3107,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "width" | "height" | "min-width" | "min-height" if !variable && !wide && sizing_value(&value,Length::Auto).is_none() => continue,
             "max-width" | "max-height" if !variable && !wide && max_sizing_value(&value).is_none() => continue,
             "top" | "right" | "bottom" | "left" if !variable && !wide && inset_length(&value).is_none() => continue,
+            s if image_placement::property(s) && !variable && !wide && !image_placement::valid(s, &value) => continue,
             "row-gap" | "column-gap" if !variable && !wide && value != "normal" && max_sizing_value(&value).is_none() => continue,
             s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
             s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
@@ -3245,9 +3158,7 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
                 "line-height"=>line_height::literal(&lower,LineHeight::Factor(1.5)).is_some(),
                 "white-space"=>matches!(lower.as_str(),"normal"|"nowrap"|"pre"|"pre-wrap"|"break-spaces"),
                 "text-align"=>matches!(lower.as_str(),"left"|"start"|"center"|"right"|"end"),
-                "background-position"=>object_position(&lower).is_some(),
-                "background-repeat"=>matches!(lower.as_str(),"repeat"|"no-repeat"|"repeat-x"|"repeat-y"),
-                "background-size"=>matches!(lower.as_str(),"auto"|"contain"|"cover"),
+                name if image_placement::property(name)=>image_placement::valid(name,&lower),
                 _=>true,
             };
             if !valid{continue;}
@@ -3669,6 +3580,10 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
 
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_element_parent: bool) {
     let value = declaration.value.trim().to_ascii_lowercase();
+    if image_placement::property(&declaration.name) {
+        image_placement::apply(style, parent, &declaration.name, &value, has_element_parent);
+        return;
+    }
     let border = custom_properties::border_property(&declaration.name);
     let inset = custom_properties::inset_property(&declaration.name);
     if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name) || border || inset)
@@ -3706,41 +3621,6 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_eleme
                 style.color = color;
             }
         }
-        "object-fit" => {
-            if let Some(fit) = match value.as_str() {
-                "fill" | "initial" | "unset" => Some(ObjectFit::Fill),
-                "contain" => Some(ObjectFit::Contain),
-                "cover" => Some(ObjectFit::Cover),
-                "none" => Some(ObjectFit::None),
-                "scale-down" => Some(ObjectFit::ScaleDown),
-                "inherit" => Some(parent.object_fit),
-                _ => None,
-            } {
-                style.object_fit = fit;
-            }
-        }
-        "image-rendering" => {
-            if let Some(rendering) = match value.as_str() {
-                "auto" | "initial" => Some(ImageRendering::Auto),
-                "smooth" | "optimizequality" => Some(ImageRendering::Smooth),
-                "high-quality" => Some(ImageRendering::HighQuality),
-                "crisp-edges" | "optimizespeed" => Some(ImageRendering::CrispEdges),
-                "pixelated" => Some(ImageRendering::Pixelated),
-                "inherit" | "unset" => Some(parent.image_rendering),
-                _ => None,
-            } {
-                style.image_rendering = rendering;
-            }
-        }
-        "object-position" => {
-            if value == "inherit" {
-                style.object_position = parent.object_position;
-            } else if value == "initial" || value == "unset" {
-                style.object_position = [ObjectPosition::CENTER; 2];
-            } else if let Some(position) = object_position(&value) {
-                style.object_position = position;
-            }
-        }
         "background-color" => {
             if value == "inherit" {
                 style.background = parent.background;
@@ -3766,38 +3646,6 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_eleme
                     url,
                     stylesheet: declaration.stylesheet,
                 });
-            }
-        }
-        "background-repeat" => {
-            if let Some(repeat) = match value.as_str() {
-                "repeat" | "initial" | "unset" => Some([true, true]),
-                "no-repeat" => Some([false, false]),
-                "repeat-x" => Some([true, false]),
-                "repeat-y" => Some([false, true]),
-                "inherit" => Some(parent.background_repeat),
-                _ => None,
-            } {
-                style.background_repeat = repeat;
-            }
-        }
-        "background-position" => {
-            if value == "inherit" {
-                style.background_position = parent.background_position;
-            } else if value == "initial" || value == "unset" {
-                style.background_position = [ObjectPosition::START; 2];
-            } else if let Some(position) = object_position(&value) {
-                style.background_position = position;
-            }
-        }
-        "background-size" => {
-            if let Some(size) = match value.as_str() {
-                "auto" | "initial" | "unset" => Some(BackgroundSize::Auto),
-                "contain" => Some(BackgroundSize::Contain),
-                "cover" => Some(BackgroundSize::Cover),
-                "inherit" => Some(parent.background_size),
-                _ => None,
-            } {
-                style.background_size = size;
             }
         }
         "background" => {
@@ -4580,8 +4428,8 @@ mod background_tests {
         let styles = compute(&doc, &HashMap::new());
         let style = &styles[node(&doc, "target")];
         assert_eq!(style.background_position, [
-            ObjectPosition { fraction: 1.0, offset: Length::Px(-2.0) },
-            ObjectPosition { fraction: 0.75, offset: Length::Px(0.0) },
+            ObjectPosition { fraction: 1.0, offset: Length::Px(0.0) },
+            ObjectPosition { fraction: 0.0, offset: Length::Px(4.0) },
         ]);
         assert_eq!(style.background_repeat, [false, true]);
         assert_eq!(style.background_size, BackgroundSize::Contain);
@@ -5545,3 +5393,7 @@ mod border_default_tests;
 #[cfg(test)]
 #[path = "css_inset_value_tests.rs"]
 mod inset_value_tests;
+
+#[cfg(test)]
+#[path = "css_image_placement_tests.rs"]
+mod image_placement_tests;
