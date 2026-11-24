@@ -293,6 +293,9 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
 }
 
 pub(super) fn layout_property(name:&str)->bool{matches!(name,"width"|"height"|"min-width"|"min-height"|"max-width"|"max-height"|"display"|"box-sizing"|"flex-grow"|"flex-shrink"|"flex-basis"|"flex"|"flex-direction"|"flex-wrap"|"flex-flow"|"gap"|"row-gap"|"column-gap")}
+pub(super) fn inset_property(name:&str)->bool {
+    matches!(name,"inset"|"top"|"right"|"bottom"|"left")
+}
 pub(super) fn border_property(name:&str)->bool {
     matches!(name,
         "border"|"border-top"|"border-right"|"border-bottom"|"border-left"|
@@ -302,13 +305,16 @@ pub(super) fn border_property(name:&str)->bool {
         "border-top-color"|"border-right-color"|"border-bottom-color"|"border-left-color")
 }
 fn box_property(name:&str)->bool {
-    layout_property(name) || box_spacing::property(name) || border_property(name)
+    layout_property(name) || box_spacing::property(name) || border_property(name) || inset_property(name)
         || matches!(name,"background-color"|"background"|"color"|"font-size")
 }
 fn border_value(value:&str)->bool {
     parse_border(value).is_some()
 }
 fn valid_box(name:&str,value:&str)->bool {
+    if inset_property(name) {
+        return if name=="inset" {inset_values(value).is_some()} else {inset_length(value).is_some()};
+    }
     if matches!(name,"width"|"height"|"min-width"|"min-height"|"flex-basis"){return sizing_value(value,Length::Auto).is_some();}
     if matches!(name,"max-width"|"max-height"){return max_sizing_value(value).is_some();}
     if name=="display"{return display_value(value).is_some();}
@@ -366,6 +372,7 @@ pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         return;
     }
     for (side,index) in [("top",0),("right",1),("bottom",2),("left",3)] {
+        if name=="inset" || name==side {style.inset[index]=length(source.inset[index]);}
         if name=="margin" || name==format!("margin-{side}") {style.margin[index]=length(source.margin[index]);}
         if name=="padding" || name==format!("padding-{side}") {style.padding[index]=length(source.padding[index]);}
         let entire=name=="border" || name==format!("border-{side}");
@@ -444,7 +451,7 @@ pub(super) fn apply_box_with_parent(style:&mut Style,parent:&Style,declaration:&
             return true;
         }
         let inherit=(value=="inherit" || (inherited && value=="unset"))
-            && (!border_property(&declaration.name) || has_element_parent);
+            && (!(border_property(&declaration.name) || inset_property(&declaration.name)) || has_element_parent);
         reset_box(style,parent,&declaration.name,inherit);
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet},has_element_parent);

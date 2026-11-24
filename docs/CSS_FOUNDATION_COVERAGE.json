@@ -29,7 +29,7 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 364
+    "fresh_runtime_passes": 479
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -887,6 +887,142 @@
         "revert/revert-layer and complete origin/layer cascade behavior remain outside this three-keyword increment.",
         "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
         "C00 and complete C04/C05 selections remain unqualified; no complete requirement group or package is closed by this increment."
+      ],
+      "integrated_revision": "65072a5bfd5d15d69fd52b82f5869a5dce9c0b2c",
+      "pull_request": 628
+    },
+    {
+      "id": "C04-S03",
+      "name": "Physical inset values and computed inheritance",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05",
+        "C10"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05",
+        "CSS-F07"
+      ],
+      "baseline_revision": "1d7289994f4385fbde6c5baf2f39f7cea433af3e",
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2025/WD-css-position-3-20251007/",
+          "sections": [
+            "3.1",
+            "3.2",
+            "3.3",
+            "3.5"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "4.4",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2024/WD-css-values-4-20240312/",
+          "sections": [
+            "5.3",
+            "6.1",
+            "6.1.2",
+            "10.1",
+            "10.11"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/",
+          "sections": [
+            "3.1",
+            "3.2",
+            "3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/",
+          "sections": [
+            "4.3.13"
+          ]
+        }
+      ],
+      "properties": [
+        "inset",
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The five physical inset properties share literal and substituted inherit/initial/unset behavior; longhands affect only their side and the shorthand expands one through four components atomically.",
+        "The shared finite grammar accepts auto, signed px/pt/pc/em/rem/percentage/vw/vh and existing typed calc arithmetic. Invalid numeric token boundaries and unsupported dimensions are rejected.",
+        "Inherited font-relative lengths use final parent metrics once, while percentages remain deferred. Explicit inheritance without an element parent uses initial auto values; synthetic document/fragment contexts do not supply an element parent.",
+        "Viewport components use the supplied environment before descendant inheritance and recompute when viewport dimensions change, including with cached stylesheet sources.",
+        "Inline declaration admission uses the same inset grammar and charges its supplied work/copy budget before inset value parsing.",
+        "Native relative, absolute and fixed layout consumes the computed offsets, with verified border rectangles, preserved normal flow, stretched positioned boxes and link hit targets."
+      ],
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "6272a80de5d8b1d10e3f88ecff0be32043d2e5f3",
+          "sha256": "1f22693f05834db0b6aaa654ec1a7ae0524620f89596a518c02630473e8b271a"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "e5657cb9d65886f3a10c29f3bedea56d4d9d1633",
+          "sha256": "c181d8d2a4c7c397eb7346d6af5db25bf8c8e566235e793ab068ce8e15430176"
+        },
+        "src/css_inset_value_tests.rs": {
+          "git_blob": "a8d73f3dc4f34b29ef9a52ab7c7e7922f028f4f7",
+          "sha256": "a0c1ab02ab19a8aa0a85e344d26abf7497772bd64122fba8d2ddb30bd7d29a36"
+        },
+        "src/css_box_spacing.rs": {
+          "git_blob": "a7dde8a8632a55cc40de85c9ba17ff91fdcf7e1e",
+          "sha256": "7c8a627c932f9afc391efa549322c5df556290f6c868565b1c34714743dda5f6"
+        }
+      },
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "original_inset_regressions": 34,
+        "existing_related_css_and_layout_tests": 81,
+        "native_tests_total": 115,
+        "production_probe_count": 11,
+        "production_probe_cases": [
+          "literal-variable-defaults",
+          "inherited-font-units",
+          "parentless-roots",
+          "typed-values-shorthands",
+          "malformed-token-atomicity",
+          "priority-order",
+          "invalid-computed-values",
+          "source-cache-environment",
+          "refusal-recovery",
+          "used-position-geometry",
+          "inline-inset-budget"
+        ],
+        "selection_sha256": "ee65379b5073ba90a8fb6e3df2e46fda7384909290e31ca4fafb2cd9c7244b12",
+        "source_manifest_sha256": "fceb44edaed10bb986720dfc7d086009ce2e765d14b04b79d3d7679915b775f9",
+        "scope": "Native CSS computation, inline declaration admission, layout geometry and hit testing. Windows frontend, real HTTP and full browser acceptance are not covered.",
+        "existing_test_corrections": [
+          "An inherited -3em offset at a 16px parent font is asserted as -48px, preserving the other atomicity and positioning expectations.",
+          "The supported inset calculation calc(3px*2) is asserted as 6px; unrelated border and font grammar expectations are unchanged."
+        ]
+      },
+      "remaining": [
+        "Logical and anchor insets, sticky scroll clamping, complete positioned layout, additional units/math functions and general CSSOM serialization remain open.",
+        "revert/revert-layer, complete origin/layer cascade behavior and dynamic viewport distinctions remain outside this finite increment.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05/C10 selections remain unqualified; no complete requirement group or package is closed."
       ]
     }
   ],
@@ -6306,7 +6442,8 @@
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
         "C04-S01",
-        "C04-S02"
+        "C04-S02",
+        "C04-S03"
       ]
     },
     {
@@ -6351,7 +6488,8 @@
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
         "C04-S01",
-        "C04-S02"
+        "C04-S02",
+        "C04-S03"
       ]
     },
     {
@@ -6568,7 +6706,10 @@
         "LA28"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S03"
+      ]
     },
     {
       "id": "C11",
