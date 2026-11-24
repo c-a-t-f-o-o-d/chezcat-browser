@@ -6693,3 +6693,7 @@ mod progress_numeric_tests;
 #[cfg(test)]
 #[path="app_meter_numeric_tests.rs"]
 mod meter_numeric_tests;
+
+#[cfg(test)]
+#[path="app_gauge_lifecycle_tests.rs"]
+mod gauge_lifecycle_tests;

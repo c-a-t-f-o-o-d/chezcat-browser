@@ -14,7 +14,7 @@ pub(super) fn ordinary_clone_element(name:&str)->bool{
     name.bytes().any(|byte|!byte.is_ascii_lowercase()&&!byte.is_ascii_digit())
         ||crate::html::valid_custom_element_name(name)
         ||TEXT_CONTAINERS.iter().any(|tag|!matches!(*tag,"button"|"legend")&&tag.eq_ignore_ascii_case(name))
-        ||["nav","main","section","article","aside","header","footer","address","figure","figcaption","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
+        ||["progress","meter","nav","main","section","article","aside","header","footer","address","figure","figcaption","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
 }
 
 pub(super) fn copy_text(text:&str)->Result<String,String>{
