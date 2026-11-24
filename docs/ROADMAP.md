@@ -97,6 +97,8 @@ Canonical label control reads now follow exact same-root ID and descendant
 association, native identity, bounded traversal and actual App activation;
 Canonical label form reads now preserve native stored owners and bounded
 inert connected/detached association with descriptor and App evidence;
+Input labels now use a stable live NodeList with exact native association,
+hidden-state identity recovery and admitted nested traversal scratch;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

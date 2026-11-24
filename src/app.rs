@@ -6585,3 +6585,7 @@ mod html_label_control_tests;
 #[cfg(test)]
 #[path="app_html_label_form_tests.rs"]
 mod html_label_form_tests;
+
+#[cfg(test)]
+#[path="app_html_input_labels_tests.rs"]
+mod html_input_labels_tests;

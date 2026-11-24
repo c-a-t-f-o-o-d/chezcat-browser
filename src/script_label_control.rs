@@ -71,6 +71,9 @@ impl Bridge<'_>{
   self.state.copies(size_of::<u32>())?;pending.push(node);Ok(())
  }
  pub(in crate::scripting) fn html_label_control_get(&mut self,object:u32)->Result<Value,String>{
+  self.label_control_with_scratch(object,0)
+ }
+ fn label_control_with_scratch(&mut self,object:u32,other:usize)->Result<Value,String>{
   self.validate_html_label_control(object).map_err(|(_,e)|e)?;
   let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(8).and_then(|n|n.checked_mul(8)).ok_or("Label lookup work overflow.")?;
   self.state.work(lookup)?;self.state.rebuild(self.doc)?;
@@ -85,7 +88,7 @@ impl Bridge<'_>{
     let Some(parent)=self.whole_text_parent(root)?else{break;};self.native_node_access(parent).map_err(|(_,e)|e)?;root=parent;
    }
   }
-  let available=self.state.retained_limit.saturating_sub(self.state.retained);
+  let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(other).ok_or("Label traversal shared scratch allowance exhausted.")?;
   let mut pending=Vec::new();self.label_pending_push(&mut pending,root,available)?;let mut visited=0usize;
   while let Some(node)=pending.pop(){
    visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic label tree.")?;self.state.work(lookup)?;
@@ -114,3 +117,6 @@ mod tests{
 
 #[path="script_label_form.rs"]
 pub(in crate::scripting) mod label_form;
+
+#[path="script_input_labels.rs"]
+pub(in crate::scripting) mod input_labels;
