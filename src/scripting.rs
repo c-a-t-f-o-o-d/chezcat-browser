@@ -2328,25 +2328,18 @@ impl Bridge<'_> {
         Ok(None)
     }
 
-    fn image_named(&mut self, name: &str) -> Result<Option<usize>, String> {
+    fn image_named(&mut self, name: crate::dom_string::DomStringRef<'_>) -> Result<Option<usize>, String> {
+        if name.logical_bytes()>self.state.limits.host.string_bytes{return Err("Image collection key exceeds the host string allowance.".into());}
         if name.is_empty() {
             return Ok(None);
         }
-        if name.len() > self.state.limits.host.string_bytes {
-            return Err(format!("Image collection name exceeds {} KiB.", self.state.limits.host.string_bytes / 1024).into());
-        }
-        self.state.copies(name.len())?;
         self.state.rebuild(self.doc)?;
         for position in 0..self.state.tree.order.len() {
             let node = self.state.tree.order[position];
             self.state.work(1)?;
             if tag(self.doc, node) == "img" {
-                for attribute in ["id", "name"] {
-                    let value = self.doc.attr(node, attribute);
-                    self.state.copies(value.map_or(0, str::len))?;
-                    if value == Some(name) {
-                        return Ok(Some(node));
-                    }
+                if self.collection_element_named_match(node_handle(node),name)? {
+                    return Ok(Some(node));
                 }
             }
         }
@@ -2369,7 +2362,7 @@ impl Bridge<'_> {
         let node = if let Some(index) = collection_index(property) {
             self.image_at(index)?
         } else {
-            self.image_named(property)?
+            self.image_named(crate::dom_string::DomStringRef::Scalar(property))?
         };
         Ok(node.map_or(Value::Undefined, |node| Value::Host(node_handle(node))))
     }
@@ -3656,6 +3649,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if index==0 && self.class_list_receiver(object) && matches!(method,"contains"|"supports"){return true;}
         if matches!(method,"add"|"remove")&&self.exact_class_token_receiver(object){return true;}
@@ -6571,8 +6565,12 @@ impl Host for Bridge<'_> {
                     self.image_at(timer_integer(&args[0])? as u32 as usize)?
                 }
                 "namedItem" => {
-                    let name = self.text(&args[0])?;
-                    self.image_named(&name)?
+                    let name = match &args[0] {
+                        Value::String(s)=>crate::dom_string::DomStringRef::Scalar(s),
+                        Value::StringUnits(u)=>crate::dom_string::DomStringRef::Raw(u),
+                        _=>return Err("Image namedItem requires its converted DOMString key.".into()),
+                    };
+                    self.image_named(name)?
                 }
                 _ => {
                     return Err(format!(
@@ -9129,3 +9127,7 @@ mod html_language_domstring_tests;
 #[cfg(test)]
 #[path="script_css_id_exact_tests.rs"]
 mod css_id_exact_tests;
+
+#[cfg(test)]
+#[path="script_collection_named_exact_tests.rs"]
+mod collection_named_exact_tests;
