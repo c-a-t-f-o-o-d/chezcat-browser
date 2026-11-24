@@ -292,6 +292,15 @@ doctype identity; stale/cross-owner/late-allocation failure and recovery checks.
 Do not conflate legitimate whole-document replacement with preserving aliases
 within an existing document mutation.
 
+Exact ID-selector consumer increment: direct selectors and cached stylesheet
+candidate filtering read authoritative native ID DOMString values. Raw records
+bypass candidate hashing and use metered exact matching, preserving lone-surrogate
+versus replacement-character identity without tokenizing IDs. Original native
+cases include scalar/pair transitions, cascade, refusal and recovery; public inert
+producers and App pointer-driven paint retain actual node/editor/link/page identity.
+Main-document raw ID producers, quirks-mode folding, XML ID typing and frozen
+qualification remain separate. F01 stays partial.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**

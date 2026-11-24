@@ -6481,3 +6481,7 @@ mod html_title_domstring_tests;
 #[cfg(test)]
 #[path="app_html_language_domstring_tests.rs"]
 mod html_language_domstring_tests;
+
+#[cfg(test)]
+#[path="app_css_id_exact_tests.rs"]
+mod css_id_exact_tests;

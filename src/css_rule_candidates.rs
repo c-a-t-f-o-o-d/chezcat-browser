@@ -106,10 +106,20 @@ impl RuleCandidates {
             }
         }
         if self.has_ids {
-            if let Some(meter) = meter.as_deref_mut() { meter.work(1)?; }
-            if let NodeKind::Element { id: Some(id), .. } = &context.doc.nodes[node].kind {
+            let before = meter.as_ref().map_or(usize::MAX, |meter| meter.remaining_work());
+            let mut work = before;
+            let native = context.dom_attribute(node,"id",&mut work);
+            if let Some(meter) = meter.as_deref_mut() {
+                meter.work(before - work)?;
+                if work == 0 { return Err("CSS selector job work limit reached.".into()); }
+            }
+            // A raw ID cannot be keyed by its replacement-character projection.
+            // Full matching remains exact and shares the existing work budget.
+            if native.is_some_and(|value|value.raw_units().is_some()){return Ok(None);}
+            if let Some(id) = native {
+                let id = id.render_projection();
                 if id.len() > MAX_KEY_BYTES { return Ok(None); }
-                if let Some(meter) = meter.as_deref_mut() { meter.work(id.len())?; }
+                if let Some(meter) = meter.as_deref_mut() { meter.work(1 + id.len())?; }
                 keys |= 1u64 << bucket(id);
             }
         }

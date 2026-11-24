@@ -9125,3 +9125,7 @@ mod html_title_domstring_tests;
 #[cfg(test)]
 #[path="script_html_language_domstring_tests.rs"]
 mod html_language_domstring_tests;
+
+#[cfg(test)]
+#[path="script_css_id_exact_tests.rs"]
+mod css_id_exact_tests;
