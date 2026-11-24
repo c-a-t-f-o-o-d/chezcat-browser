@@ -909,7 +909,7 @@ impl Runtime {
         self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("NamedNodeMap".into()),Some((false,false,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         for(name,operation,length)in[("length","\0NamedNodeMap.get.length",0),("item","\0NamedNodeMap.item",1),("getNamedItem","\0NamedNodeMap.getNamedItem",1),("getNamedItemNS","\0NamedNodeMap.getNamedItemNS",2)]{
-            if matches!(name,"item"|"getNamedItem"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+            if matches!(name,"item"|"getNamedItem"|"getNamedItemNS"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
             let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
             self.store_property(self.function_properties[method.id],"name".into(),Value::String(if name=="length"{"get length"}else{name}.into()),Some((false,false,true)))?;
@@ -1643,6 +1643,12 @@ mod expando_tests {
     fn quote_interface_aliases_allocate_one_constructor_callable_per_owner(){
         for owner in [77,88]{let mut runtime=Runtime::for_test();runtime.bind_browser_global(owner).unwrap();runtime.define_event_target_interface(owner).unwrap();runtime.define_node_interfaces(owner,&[],None).unwrap();
             for class in ["HTMLQuoteElement","HTMLImageElement"]{assert_eq!(runtime.functions.iter().filter(|f|matches!(f,Function::Host{object,method,..}if *object==owner&&*method==class)).count(),1,"{class}/{owner}");}
+        }
+    }
+    #[test]
+    fn heading_interface_aliases_allocate_one_constructor_callable_per_owner(){
+        for owner in [77,88]{let mut runtime=Runtime::for_test();runtime.bind_browser_global(owner).unwrap();runtime.define_event_target_interface(owner).unwrap();runtime.define_node_interfaces(owner,&[],None).unwrap();
+            for class in ["HTMLHeadingElement","HTMLQuoteElement"]{assert_eq!(runtime.functions.iter().filter(|f|matches!(f,Function::Host{object,method,..}if *object==owner&&*method==class)).count(),1,"{class}/{owner}");}
         }
     }
     struct Native { enabled:bool, reads:usize }

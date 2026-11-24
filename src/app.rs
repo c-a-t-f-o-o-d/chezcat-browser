@@ -6709,3 +6709,7 @@ mod data_value_tests;
 #[cfg(test)]
 #[path="app_quote_interface_tests.rs"]
 mod quote_interface_tests;
+
+#[cfg(test)]
+#[path="app_heading_interface_tests.rs"]
+mod heading_interface_tests;
