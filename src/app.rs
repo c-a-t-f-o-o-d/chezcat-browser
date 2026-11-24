@@ -6689,3 +6689,7 @@ mod legend_form_tests;
 #[cfg(test)]
 #[path="app_progress_numeric_tests.rs"]
 mod progress_numeric_tests;
+
+#[cfg(test)]
+#[path="app_meter_numeric_tests.rs"]
+mod meter_numeric_tests;

@@ -51,6 +51,7 @@ pub(super) fn passive_name_attribute(namespace:crate::html::Namespace,tag:&str,n
 pub(super) fn html_label_or_output_for_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html && matches!(tag,"label"|"output") && name.html_is("for")
 }
+pub(super) fn html_meter_number_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="meter"&&["value","min","max","low","high","optimum"].iter().any(|key|name.html_is(key))}
 pub(super) fn html_progress_number_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="progress"&&(name.html_is("value")||name.html_is("max"))}
 pub(super) fn html_output_form_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html && matches!(tag,"output"|"fieldset") && name.html_is("form")
@@ -64,6 +65,7 @@ pub(super) fn materializable_value(attr:&crate::html::Attribute,namespace:crate:
         ||html_aria_attribute(namespace,&attr.name)
         ||html_label_or_output_for_attribute(namespace,tag,&attr.name)
         ||html_output_form_attribute(namespace,tag,&attr.name)
+        ||html_meter_number_attribute(namespace,tag,&attr.name)
         ||html_progress_number_attribute(namespace,tag,&attr.name)
         ||namespace==crate::html::Namespace::Html&&["id","class","title","lang","dir"].iter().any(|name|attr.name.html_is(name))
         ||passive_name_attribute(namespace,tag,&attr.name)
@@ -575,7 +577,7 @@ impl Bridge<'_> {
     }
     pub(super) fn public_dom_attribute(&mut self,node:usize,name:AttributeName,value:Option<DomString>,input:InputPreparation)->Result<(),String>{
         if value.as_ref().is_some_and(|v|v.raw_units().is_some()) {
-            if !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !self.meta_content_attribute(node,&name) && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !html_aria_attribute(self.doc.nodes[node].namespace,&name) && !html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (self.doc.nodes[node].namespace!=crate::html::Namespace::Html || !name.namespace.is_empty() || !name.qualified.starts_with("data-")) {return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+            if !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !self.meta_content_attribute(node,&name) && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !html_aria_attribute(self.doc.nodes[node].namespace,&name) && !html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && (self.doc.nodes[node].namespace!=crate::html::Namespace::Html || !name.namespace.is_empty() || !name.qualified.starts_with("data-")) {return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
             self.attribute_dom_named_prepared(node,name,value,input)
         }else{self.public_attribute_prepared(node,name,value.map(|v|v.into_parts().0),input)}
     }
@@ -642,7 +644,7 @@ impl Bridge<'_> {
         if !matches!(key, "id" | "class" | "style" | "title" | "hidden" | "disabled" | "role" | "lang" | "dir" | "nonce" | "attributionsrc")
             && !inert_attribute_name(key) && !placeholder_attribute && !image_attribute && !anchor_attribute && !input_attribute && !button_attribute && !content_editable
             && !canvas_attribute && !media_source && !media_controls && !style_metadata && !slot_name && !custom_attribute && !sandbox_attribute && !tab_index && !self.meta_content_attribute(node, &name)
-            && !html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) {
+            && !html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) {
             return Err(format!("Supported attributes exclude {key:?} on {} in this native/metadata subset; no attribute was changed.",tag(self.doc,node)));
         }
         if key == "src" && image_attribute {
