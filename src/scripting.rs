@@ -3120,6 +3120,7 @@ impl Bridge<'_> {
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
+        if self.form_length_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
         if self.output_validation_member(object,property){return true;}
@@ -3445,6 +3446,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return false;}
         if self.output_form_member(object,property){return false;}
         if self.control_type_member(object,property){return false;}
+        if self.form_length_member(object,property){return false;}
         if self.control_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
         if self.output_validation_member(object,property){return false;}
@@ -3575,6 +3577,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return true;}
         if self.output_form_member(object,property){return true;}
         if self.control_type_member(object,property){return true;}
+        if self.form_length_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
@@ -3998,6 +4001,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_output_form::GET&&self.event_target_interface(object){return Some(object);}
         if script_control_type::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
+        if method==script_form_length::GET&&self.event_target_interface(object){return Some(object);}
         if script_control_form::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4318,6 +4322,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.validate_html_label_form(object);}
         if method==script_output_form::GET{return self.validate_output_form(object);}
         if script_control_type::interface(method).is_some(){return self.validate_control_type(object,method);}
+        if method==script_form_length::GET{return self.validate_form_length(object);}
         if script_control_form::interface(method).is_some(){return self.validate_control_form(object,method);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
         if script_output_validation::operation(method){return self.validate_output_metadata(object);}
@@ -4784,6 +4789,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if method==script_output_form::GET{return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_control_type::interface(method).is_some(){return self.event_target_interface(object)&&self.control_type_matches(receiver,method);}
+        if method==script_form_length::GET{return self.event_target_interface(object)&&self.form_length_receiver(receiver);}
         if script_control_form::interface(method).is_some(){return self.event_target_interface(object)&&self.control_form_matches(receiver,method);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
@@ -5666,6 +5672,7 @@ impl Host for Bridge<'_> {
         if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.control_type_member(object,property){return self.control_type_get(object,self.control_type_method(object).unwrap());}
+        if self.form_length_member(object,property){return self.form_length_get(object);}
         if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
@@ -6509,6 +6516,7 @@ impl Host for Bridge<'_> {
         if method==script_label_form::GET{return self.html_label_form_get(object);}
         if method==script_output_form::GET{return self.output_form_get(object);}
         if script_control_type::interface(method).is_some(){return self.control_type_get(object,method);}
+        if method==script_form_length::GET{return self.form_length_get(object);}
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
@@ -9497,3 +9505,9 @@ mod control_type_tests;
 
 #[path="script_control_type.rs"]
 mod script_control_type;
+
+#[cfg(test)]
+#[path="script_form_length_tests.rs"]
+mod form_length_tests;
+
+use script_inert_documents::label_control::form_length as script_form_length;

@@ -23,10 +23,16 @@ impl Bridge<'_>{
   let Value::Host(control)=self.html_label_control_get(object)?else{return Ok(Value::Null);};
   self.control_form_owner_get(control)
  }
- pub(in crate::scripting) fn control_form_owner_get(&mut self,control:u32)->Result<Value,String>{
+ pub(in crate::scripting) fn control_form_owner_get(&mut self,control:u32)->Result<Value,String>{self.control_form_owner_with_tree(control,false)}
+ // Counts inspect connected physical main-tree records without exposing their
+ // handles. The caller validates its genuine form and origin before entering.
+ pub(in crate::scripting) fn control_form_count_owner(&mut self,control:u32)->Result<Value,String>{self.control_form_owner_with_tree(control,true)}
+ pub(in crate::scripting) fn form_count_physical_record(&self,object:u32)->bool{self.inert_node_type(object).is_none()&&node_index(object).is_some_and(|n|n<self.doc.nodes.len()&&self.state.dom.connected.get(n)==Some(&true)&&!self.inert_adopted_node(object))}
+ pub(in crate::scripting) fn form_count_parent(&self,object:u32)->Result<Option<u32>,String>{if self.form_count_physical_record(object){Ok(self.state.tree.parents.get(node_index(object).unwrap()).copied().flatten().map(|n|if n==0{DOCUMENT}else{node_handle(n)}))}else{self.whole_text_parent(object)}}
+ fn control_form_owner_with_tree(&mut self,control:u32,physical:bool)->Result<Value,String>{
   let(_,tag,_)=self.label_element_facts(control).ok_or("Missing label control element.")?;
   self.state.work(tag.len().checked_add(1).ok_or("Label form association work overflow.")?)?;
-  if !matches!(self.label_element_facts(control).unwrap().1,"button"|"input"|"output"|"select"|"textarea"){return Ok(Value::Null);}
+  if !matches!(self.label_element_facts(control).unwrap().1,"button"|"fieldset"|"input"|"object"|"output"|"select"|"textarea"){return Ok(Value::Null);}
   // Native controls own real parser/lifecycle state. Do not reconstruct or
   // replace their owner from a label's current ancestor or author properties.
   if self.inert_node_type(control).is_none(){if let Some(node)=node_index(control){
@@ -40,20 +46,21 @@ impl Bridge<'_>{
   let mut root=control;let mut ancestor=None;let mut count=0usize;
   while root!=DOCUMENT{
    count=count.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic label form ancestry.")?;self.state.work(lookup)?;
-   let Some(parent)=self.whole_text_parent(root)?else{break;};
-   self.native_node_access(parent).map_err(|(_,message)|message)?;
+   let parent=if physical{self.form_count_parent(root)?}else{self.whole_text_parent(root)?};
+   let Some(parent)=parent else{break;};
+   if !(physical&&self.form_count_physical_record(parent)){self.native_node_access(parent).map_err(|(_,message)|message)?;}
    if ancestor.is_none()&&self.label_is_html_form(parent)?{ancestor=Some(parent);}
    root=parent;
   }
   let connected=root==DOCUMENT||self.inert_node_type(root)==Some(9);
   let attribute=if connected{self.label_attribute_slot(control,"form")?}else{None};
-  let Some(attribute)=attribute else{return match ancestor{Some(form)=>self.label_checked_form(form),None=>Ok(Value::Null)};};
+  let Some(attribute)=attribute else{return match ancestor{Some(form)if physical&&self.form_count_physical_record(form)=>Ok(Value::Host(form)),Some(form)=>self.label_checked_form(form),None=>Ok(Value::Null)};};
   if self.label_element_facts(control).unwrap().2[attribute].value.is_empty(){return Ok(Value::Null);}
   let available=self.state.retained_limit.saturating_sub(self.state.retained);
   let mut pending=Vec::new();self.label_pending_push(&mut pending,root,available)?;let mut visited=0usize;
   while let Some(node)=pending.pop(){
    visited=visited.checked_add(1).filter(|&n|n<=maximum).ok_or("Invalid or cyclic label form tree.")?;self.state.work(lookup)?;
-   if self.label_id_matches(node,control,attribute)?{return self.label_checked_form(node);}
+   if self.label_id_matches(node,control,attribute)?{return if physical&&self.form_count_physical_record(node){Ok(if self.label_is_html_form(node)?{Value::Host(node)}else{Value::Null})}else{self.label_checked_form(node)};}
    if self.template_receiver(node){continue;}
    let count=self.label_child_count(node)?;
    for at in (0..count).rev(){self.state.work(lookup)?;let child=self.label_child_at(node,at)?;self.label_pending_push(&mut pending,child,available)?;}
