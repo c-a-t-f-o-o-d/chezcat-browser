@@ -9797,3 +9797,7 @@ mod ul_type_tests;
 
 #[path="script_ul_type.rs"]
 mod script_ul_type;
+
+#[cfg(test)]
+#[path="script_span_interface_tests.rs"]
+mod span_interface_tests;
