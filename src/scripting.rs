@@ -9745,3 +9745,7 @@ mod legend_align_tests;
 
 #[path="script_legend_align.rs"]
 mod script_legend_align;
+
+#[cfg(test)]
+#[path="script_legend_inert_import_tests.rs"]
+mod legend_inert_import_tests;
