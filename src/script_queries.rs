@@ -6,7 +6,7 @@ use super::*;
 pub(super) enum NodeList {
     Snapshot(Vec<usize>),
     HandleSnapshot(Vec<u32>),
-    Name(String),
+    Name(DomString),
     // A live SameObject list over this real node's immediate children.
     Children(usize),
     InertChildren(u32),
@@ -140,7 +140,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn create_name_list(&mut self, value: &Value) -> Result<Value,String> {
-        let name = self.text(value)?;
+        let name = self.dom_text(value)?;
         let payload=name.capacity();
         let (handle,replacement,added)=self.prepare_node_list("identity",payload)?;
         self.commit_node_list(NodeList::Name(name),replacement,added,payload);
@@ -154,9 +154,12 @@ impl Bridge<'_> {
             if self.doc.nodes[node].namespace!=crate::html::Namespace::Html{continue;}
             let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{unreachable!()};
             self.state.work(attrs.len())?;self.state.copies(attrs.iter().map(|attr|attr.name.bytes()).sum())?;
-            let value=self.doc.attr(node,"name");self.state.copies(value.map_or(0,str::len))?;
+            let value=self.doc.dom_attr(node,"name");
             let NodeList::Name(name)=&self.state.node_lists[index] else{unreachable!()};
-            if value==Some(name.as_str()) {
+            let work=value.map_or(0,DomString::logical_bytes).min(name.logical_bytes()).saturating_add(1);
+            self.state.work(work)?;
+            let NodeList::Name(name)=&self.state.node_lists[index] else{unreachable!()};
+            if value==Some(name) {
                 if kept!=position{self.state.copies(size_of::<usize>())?;nodes[kept]=node;}
                 kept+=1;
             }

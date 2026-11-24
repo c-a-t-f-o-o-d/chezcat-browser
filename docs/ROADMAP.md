@@ -58,11 +58,11 @@ Isolation and GPU work keep their separate readiness gates.
 
 **Legend:** ✅ **Merged / verified scope** · 🟡 **Partial / active** · ◻️ **Next / planned** · 🧊 **Deferred**
 
-Current foundation increment: native imports and parked template promotion retain
-exact raw HTML IDs with real node/Attr owners and independent source records.
-Promotion shares the prepaid exact form-key guard. Focused native/App checks cover
-resource refusal, recovery and interaction; SVG/foreign raw IDs, other raw
-attribute imports, full owner resetting and frozen qualification remain open.
+Current foundation increment: live getElementsByName filters retain exact UTF-16
+and match authoritative native HTML names. Focused checks cover conversion,
+liveness, admitted storage and refusal/recovery, with native App interaction.
+Raw main-name producers and canonical/inert/child Document expansion remain open;
+frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
 YouTube journey.** The [reviewed plan](HTML_FOUNDATION_PLAN.md) and
