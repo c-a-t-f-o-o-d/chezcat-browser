@@ -1198,7 +1198,7 @@
         ],
         "scope": "These are native tree-output comparisons. Parse-error diagnostics, testcase scripting and browser integrations retain their separate requirements."
       },
-      "current_source_scope": "Loaded and inert full HTML document entry paths now insert native html, head, and body or frameset records from the token stream. Metadata after head, duplicate root/body attributes, comment placement and EOF have original checks. Other insertion-mode branches, table/formatting recovery, scripting-dependent noscript and tokenizer/foreign integrations remain open. Supported DATA character recovery now applies structural transitions before ignoring literal NUL, retains table whitespace classification and avoids formatting reconstruction for ignored tokens. Head-noscript, foreign/uncertain recovery and broader mode integration remain separate.",
+      "current_source_scope": "Loaded and inert full HTML document entry paths now insert native html, head, and body or frameset records from the token stream. Metadata after head, duplicate root/body attributes, comment placement and EOF have original checks. Other insertion-mode branches, table/formatting recovery, scripting-enabled noscript and tokenizer/foreign integrations remain open. Supported DATA character recovery now applies structural transitions before ignoring literal NUL, retains table whitespace classification and avoids formatting reconstruction for ignored tokens. Scripting-disabled head-noscript now has explicit token reprocessing, allowed metadata/leaves, ignored-tag handling, root-attribute merging and EOF recovery. Scripting-enabled and nested-template noscript, foreign/uncertain recovery and broader mode integration remain separate.",
       "source_anchors": [
         "src/html.rs",
         "src/html_document_structure.rs",
@@ -1208,7 +1208,8 @@
         "src/html_svg_namespace.rs",
         "src/html_data_characters.rs",
         "src/html_data_character_tests.rs",
-        "src/html_data_character_scan_tests.rs"
+        "src/html_data_character_scan_tests.rs",
+        "src/html_head_noscript_tests.rs"
       ],
       "contracts": [
         {
@@ -1216,7 +1217,8 @@
           "requirement": "All registered insertion modes and current select rules",
           "status": "partial",
           "verification": [
-            "Loaded/inert DATA NUL now follows supported initial/head/after-head/body/after-body/after-html transitions before being ignored. Original regressions verify doctype opportunity, exact whitespace/comment parents, select/option and native template context. Head-noscript, foreign/uncertain and complete insertion-mode coverage remain open; the contract remains partial."
+            "Loaded/inert DATA NUL now follows supported initial/head/after-head/body/after-body/after-html transitions before being ignored. Original regressions verify doctype opportunity, exact whitespace/comment parents, select/option and native template context. Scripting-enabled and nested-template noscript, foreign/uncertain and complete insertion-mode coverage remain open; the contract remains partial.",
+            "Explicit scripting-disabled head-noscript mode retains admitted metadata/whitespace/leaves, merges duplicate html attributes, ignores nested head/noscript starts and unrelated end tags, and reprocesses other tokens into head/body. Literal NUL transitions before DATA filtering; end BR creates the required attribute-free body BR. All 26 original focused native checks pass, up from nine, with 153 existing HTML checks and all 562 unchanged supplementary tree comparisons passing. These are Linux native component results, not Windows App/browser or full-corpus acceptance."
           ],
           "dependency_details": []
         },
@@ -2907,11 +2909,22 @@
       "title": "The \"in head noscript\" insertion mode",
       "anchor": "parsing-main-inheadnoscript",
       "work_package": "F05",
-      "status": "unassessed",
+      "status": "partial",
       "branch_registry_required": true,
       "scope": "required",
       "standard_url": "https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inheadnoscript",
-      "verification": []
+      "verification": [
+        "Explicit scripting-disabled head-noscript mode retains admitted metadata/whitespace/leaves, merges duplicate html attributes, ignores nested head/noscript starts and unrelated end tags, and reprocesses other tokens into head/body. Literal NUL transitions before DATA filtering; end BR creates the required attribute-free body BR. All 26 original focused native checks pass, up from nine, with 153 existing HTML checks and all 562 unchanged supplementary tree comparisons passing. These are Linux native component results, not Windows App/browser or full-corpus acceptance."
+      ],
+      "source_anchors": [
+        "src/html_document_structure.rs",
+        "src/html_head_noscript_tests.rs"
+      ],
+      "remaining": [
+        "Scripting flag supplied by actual document and parser lifecycle; scripting-enabled head noscript raw-text behavior.",
+        "Complete template, fragment and foreign insertion-mode integration.",
+        "Required unchanged browser tests, diagnostics and full selected-corpus acceptance."
+      ]
     },
     {
       "id": "M06",
