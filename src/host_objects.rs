@@ -524,6 +524,7 @@ impl Runtime {
             self.define_html_collection_interface(window)?;
             self.define_token_list_interface(window)?;
             self.define_named_node_map_interface(window)?;
+            self.define_validity_state_interface(window)?;
             self.define_window_interface(window)?;
             Ok(())
         })();
@@ -646,6 +647,8 @@ impl Runtime {
                 self.define_host_attribute(prototype, window, "name", HTML_SLOT_NAME_GET, Some(HTML_SLOT_NAME_SET))?;
             }
             if name == "HTMLOutputElement" {
+                self.define_host_attribute(prototype,window,"validity","\0HTMLOutputElement.get.validity",None)?;
+                self.deferred_host_method(prototype,window,"setCustomValidity","\0HTMLOutputElement.setCustomValidity",1)?;
                 self.define_host_attribute(prototype,window,"willValidate","\0HTMLOutputElement.get.willValidate",None)?;
                 self.define_host_attribute(prototype,window,"validationMessage","\0HTMLOutputElement.get.validationMessage",None)?;
                 self.deferred_host_method(prototype,window,"checkValidity","\0HTMLOutputElement.checkValidity",0)?;
@@ -899,6 +902,28 @@ impl Runtime {
         }
         self.put_binding(self.global_environment,"NamedNodeMap".into(),Some(constructor),super::Declaration::Var,false)?;self.global_attributes.insert("NamedNodeMap".into(),(false,true,true));
         self.native_constructor_prototypes.insert((window,"NamedNodeMap"),prototype);Ok(())
+    }
+
+    fn define_validity_state_interface(&mut self,window:u32)->Result<(),Fault>{
+        let allocation=self.allocate_host_function_with_length(window,"ValidityState",0).map_err(Fault::new)?;
+        if let Some(Function::Host{constructible,..})=self.functions.get_mut(allocation.id){*constructible=true;}
+        let constructor=Value::Function(allocation.id);let prototype=self.new_object(None)?;
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("ValidityState".into()),Some((false,false,true)))?;
+        for (key,operation) in [("valueMissing","\0ValidityState.get.valueMissing"),
+ ("typeMismatch","\0ValidityState.get.typeMismatch"),
+ ("patternMismatch","\0ValidityState.get.patternMismatch"),
+ ("tooLong","\0ValidityState.get.tooLong"),
+ ("tooShort","\0ValidityState.get.tooShort"),
+ ("rangeUnderflow","\0ValidityState.get.rangeUnderflow"),
+ ("rangeOverflow","\0ValidityState.get.rangeOverflow"),
+ ("stepMismatch","\0ValidityState.get.stepMismatch"),
+ ("badInput","\0ValidityState.get.badInput"),
+ ("customError","\0ValidityState.get.customError"),
+ ("valid","\0ValidityState.get.valid")]{self.define_host_attribute(prototype,window,key,operation,None)?;}
+        self.put_binding(self.global_environment,"ValidityState".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("ValidityState".into(),(false,true,true));self.native_constructor_prototypes.insert((window,"ValidityState"),prototype);Ok(())
     }
 
     fn define_token_list_interface(&mut self,window:u32)->Result<(),Fault> {

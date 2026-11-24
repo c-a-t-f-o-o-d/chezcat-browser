@@ -6641,3 +6641,7 @@ mod output_form_attribute_tests;
 #[cfg(test)]
 #[path="app_output_validation_tests.rs"]
 mod output_validation_tests;
+
+#[cfg(test)]
+#[path="app_output_validity_state_tests.rs"]
+mod output_validity_state_tests;
