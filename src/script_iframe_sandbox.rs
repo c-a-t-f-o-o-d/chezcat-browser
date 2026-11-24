@@ -199,10 +199,11 @@ f.sandbox=null;if(list.value!=='null')throw 'PutForwards DOMString null';
 var f=document.createElement('iframe'),frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var w=frame.contentWindow,get=Object.getOwnPropertyDescriptor(w.HTMLIFrameElement.prototype,'sandbox').get;
 if(get.call(f)!==f.sandbox||f.sandbox===f.classList)throw 'saved child accessor receiver';
 if(f.sandbox.toggle('allow-scripts')!==true||f.sandbox.value!=='allow-scripts'||f.sandbox.supports('allow-scripts')||f.contentWindow!==null)throw 'actual detached toggle metadata';
+if(f.sandbox.replace('allow-scripts','allow-forms')!==true||f.sandbox.value!=='allow-forms'||f.sandbox.supports('allow-forms')||f.contentWindow!==null)throw 'actual detached replacement metadata';
 "#,
         );
         let before = page.state.dom_commits;
-        for source in ["f.sandbox.replace('allow-scripts','allow-forms');"] {
+        for source in ["f.sandbox.forEach(function(){});"] {
             let out = page.console_eval(&mut doc, &mut forms, source);
             assert_eq!(out.errors, 1, "{}", page.report());
             assert_eq!(page.state.dom_commits, before);

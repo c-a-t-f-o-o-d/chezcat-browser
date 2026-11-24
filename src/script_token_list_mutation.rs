@@ -13,7 +13,17 @@ fn units<'a,'b:'a>(tokens:&'a [DomStringRef<'b>])->impl Iterator<Item=u16>+'a {
     tokens.iter().enumerate().flat_map(|(index,token)|std::iter::once(0x20).take(usize::from(index!=0)).chain(token.code_units()))
 }
 
+#[derive(Clone,Copy)]
+enum Mode{Add,Remove,Replace}
 pub(super) fn serialize<'a>(state:&mut State,source:DomStringRef<'a>,args:&'a [Value],add:bool)->Result<DomString,String>{
+    serialize_mode(state,source,args,if add{Mode::Add}else{Mode::Remove})
+}
+pub(super) fn replace<'a>(state:&mut State,source:DomStringRef<'a>,args:&'a [Value])->Result<DomString,String>{
+    serialize_mode(state,source,args,Mode::Replace)
+}
+fn serialize_mode<'a>(state:&mut State,source:DomStringRef<'a>,args:&'a [Value],mode:Mode)->Result<DomString,String>{
+    let add=matches!(mode,Mode::Add);
+    let replacement=if matches!(mode,Mode::Replace){Some((token_list_reads::argument(args.first().ok_or("Missing old token." )?)?,token_list_reads::argument(args.get(1).ok_or("Missing replacement token.")?)?))}else{None};
     state.work(args.len())?;
     let arg_bytes=args.iter().try_fold(0usize,|count,value|count.checked_add(token_list_reads::argument(value)?.logical_bytes()).ok_or_else(||"Token mutation argument work overflow.".to_owned()))?;
     // Admit token counting and traversal before either inspects source units.
@@ -24,12 +34,18 @@ pub(super) fn serialize<'a>(state:&mut State,source:DomStringRef<'a>,args:&'a [V
     state.copies(required)?;
     let mut tokens=Vec::new();tokens.try_reserve_exact(count).map_err(|_|"Cannot reserve token mutation snapshot.")?;
     let metadata=tokens.capacity().checked_mul(size_of::<DomStringRef<'_>>()).filter(|&bytes|bytes<=available).ok_or("Token mutation snapshot returned allocation exceeds allowance.")?;
-    for token in ascii_whitespace_tokens(source){
-        if !add {
+    for mut token in ascii_whitespace_tokens(source){
+        if matches!(mode,Mode::Remove) {
             state.work(token.logical_bytes().saturating_mul(args.len()).saturating_add(arg_bytes).saturating_add(args.len()))?;
             let mut removed=false;
             for value in args {if token.same_units(token_list_reads::argument(value)?){removed=true;break;}}
             if removed{continue;}
+        }
+        if let Some((old,new))=replacement {
+            state.work(token.logical_bytes().saturating_mul(2).saturating_add(arg_bytes).saturating_add(2))?;
+            // Mapping both spellings before unique insertion preserves the
+            // first old-or-new position with one final native transaction.
+            if token.same_units(old)||token.same_units(new){token=new;}
         }
         insert(state,&mut tokens,token)?;
     }
