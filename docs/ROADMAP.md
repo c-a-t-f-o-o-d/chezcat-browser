@@ -87,6 +87,8 @@ Inert id and common HTML native reflection writes now preserve same-spelling
 namespaced attributes with exact native lookup, identity and refusal/recovery;
 Nullable ARIA getters and inert setters now retain exact native DOMString
 values, null/empty separation, namespaces and original refusal/origin behavior;
+Displayed HTML registered ARIA metadata now preserves exact producers and Attr
+writes through native import/promotion, control-state isolation and App checks;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

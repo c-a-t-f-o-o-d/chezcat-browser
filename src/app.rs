@@ -6565,3 +6565,7 @@ mod inert_reflection_namespace_tests;
 #[cfg(test)]
 #[path="app_aria_domstring_reflection_tests.rs"]
 mod aria_domstring_reflection_tests;
+
+#[cfg(test)]
+#[path="app_html_aria_domstring_tests.rs"]
+mod html_aria_domstring_tests;
