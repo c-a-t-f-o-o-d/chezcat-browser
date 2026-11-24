@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/whatwg/html-build",
+  "revision": "283a3531a61106d07d9a7d9fb3e6f3b9bfd33d70",
+  "foundation": {
+    "coverage_pin": "html_build_entities",
+    "input_manifest": "tools/reference/html-foundation/inputs.json",
+    "html_revision": "0e292f402d0c3dd17fe00c1bb2ef3a3c94cd8bce"
+  },
+  "inventory": {
+    "name_count": 2231,
+    "multi_codepoint_count": 93,
+    "semicolonless_legacy_count": 106,
+    "max_name_bytes": 32
+  },
+  "files": [
+    {
+      "path": "entities.json",
+      "upstream_path": "entities/out/entities.json",
+      "bytes": 145897,
+      "git_blob": "557170b41f47a13a46ec695561eb5fe76da73bdb",
+      "sha256": "d741d877ac77c4194c4ad526b5b4a19aef8dfe411ab840a466891cdbb9f362e6"
+    },
+    {
+      "path": "LICENSE",
+      "upstream_path": "LICENSE",
+      "bytes": 16315,
+      "git_blob": "f2dcda46deccefd245749202a88a7837e35c6daa",
+      "sha256": "85dc6f5ccb57a6fe8c33d158f9fc8fc7ee5655a5d3db2cdd131c6a3d0f48a864"
+    }
+  ]
+}

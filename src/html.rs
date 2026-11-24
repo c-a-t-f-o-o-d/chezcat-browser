@@ -1,9 +1,8 @@
 //! A small HTML subset parser. It builds an arena of nodes without recursion.
 //!
-//! This is not a complete HTML tree builder: table recovery, general foreign content,
-//! and the full named-character-reference table are not implemented.
-//! Common Latin-1 and punctuation references use a hand-selected name table.
-//! Numeric references, legacy name matching, and attribute ambiguity follow
+//! Tree construction and foreign content remain partial. Named character
+//! references use the complete pinned normative table. Numeric references,
+//! legacy matching, and attribute ambiguity follow
 //! https://html.spec.whatwg.org/multipage/parsing.html#character-reference-state
 //! An unfinished tag consumes the rest of the input. Loaded documents report
 //! tree capacity exhaustion before commit. Small internal parses keep a prefix.
@@ -11,6 +10,13 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use crate::dom_string::DomString;
+
+#[path = "html_named_references.rs"]
+mod named_references;
+
+#[cfg(test)]
+#[path = "html_named_reference_tests.rs"]
+mod named_reference_tests;
 
 #[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
@@ -364,7 +370,7 @@ fn parse_internal(
     };
     if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
         let text = if matches!(context, Some("title" | "textarea")) {
-            decode_entities(input).replace('\0', "\u{fffd}")
+            named_references::decode(input, false, loaded.map(|tree| tree.check_cancel))?.replace('\0', "\u{fffd}")
         } else {
             html_raw_text(input, None)?
         };
@@ -399,7 +405,7 @@ fn parse_internal(
                 svg.root = None;
             }
             if let Some(start)=&mut structure {
-                let text=decode_entities(&input[position..end]);
+                let text=named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?;
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
                 if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit)? {
                     formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
@@ -416,7 +422,7 @@ fn parse_internal(
 
 
             let appended = if checked {
-                let mut text = decode_entities(&input[position..end]);
+                let mut text = named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?;
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
                 if !text.is_empty(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
                 append_text_value(&mut document, *stack.last().unwrap(), text, node_limit)?
@@ -480,7 +486,7 @@ fn parse_internal(
             position+=rest.find('>').map_or(rest.len(),|end|end+1);continue;
         }
 
-        let mut tag = match read_tag_mode(input, position, checked) {
+        let mut tag = match read_tag_mode(input, position, checked, loaded.map(|tree| tree.check_cancel))? {
             TagToken::Complete(tag) => tag,
             TagToken::Incomplete => break,
             TagToken::Unsupported(error) => return Err(error.into()),
@@ -674,7 +680,7 @@ fn parse_internal(
                 // entities after finding that tag so '&lt;/textarea&gt;' stays
                 // text rather than prematurely closing the element.
                 let mut content =
-                    decode_entities(&input[position..content_end]).replace('\0', "\u{fffd}");
+                    named_references::decode(&input[position..content_end], false, check)?.replace('\0', "\u{fffd}");
                 if tag.name == "textarea" && content.starts_with('\n') {
                     content.remove(0);
                 }
@@ -739,7 +745,7 @@ fn checked_empty_table_end(input: &str, open: &Tag, stack: &[usize], document: &
             "body" | "main" | "div" | "section" | "article" | "header" | "footer" | "aside" | "nav" |
             "blockquote" | "figure" | "figcaption" | "ul" | "ol" | "li" | "dl" | "dt" | "dd")));
     if flow && open.clean_syntax && !open.closing && !open.self_closing && input[open.end..].starts_with("</") {
-        if let TagToken::Complete(end) = read_tag_mode(input, open.end, true) {
+        if let TagToken::Complete(end) = read_tag_mode(input, open.end, true, None)? {
             if end.name == "table" && end.clean_syntax && !end.self_closing && end.attrs.is_empty() {
                 return Ok(end.end);
             }
@@ -796,7 +802,7 @@ fn append_markup_leaf(document:&mut Document,parent:usize,kind:NodeKind)->Result
 }
 
 fn append_text(document: &mut Document, parent: usize, source: &str, node_limit: usize) -> Result<bool,String> {
-    append_text_value(document, parent, decode_entities(source), node_limit)
+    append_text_value(document, parent, named_references::decode(source, false, None)?, node_limit)
 }
 
 fn append_text_value(document: &mut Document, parent: usize, text: String, node_limit: usize) -> Result<bool,String> {
@@ -845,7 +851,7 @@ fn tag_space(byte: u8, checked: bool) -> bool {
     if checked { matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c') } else { byte.is_ascii_whitespace() }
 }
 
-fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
+fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<TagToken, String> {
     let bytes = input.as_bytes();
     let mut position = start + 1;
     let closing = bytes.get(position) == Some(&b'/');
@@ -853,7 +859,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         position += 1;
     }
     if !bytes.get(position).is_some_and(u8::is_ascii_alphabetic) {
-        return TagToken::NotATag;
+        return Ok(TagToken::NotATag);
     }
     let name_start = position;
     while position < bytes.len()
@@ -869,7 +875,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
     let mut clean_syntax = (svg_namespace::shape_element(&name) || checked_native_fragment)
         && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
     let mut self_closing = false;
-    if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary."); }
+    if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return Ok(TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary.")); }
     let mut attrs: Vec<(String, String)> = Vec::new();
     let mut seen = HashSet::new();
     let mut duplicate_attributes = false;
@@ -882,7 +888,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
             break;
         }
         if bytes[position] == b'>' {
-            return TagToken::Complete(Tag {
+            return Ok(TagToken::Complete(Tag {
                 name,
                 id: attrs
                     .iter()
@@ -898,7 +904,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
                 clean_syntax: clean_syntax && !duplicate_attributes && !input[start..position].contains(['\0', '\x0b']),
                 end: position + 1,
                 duplicate_attributes,
-            });
+            }));
         }
         if bytes[position] == b'/' {
             self_closing = bytes.get(position + 1) == Some(&b'>');
@@ -915,7 +921,7 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
             position += 1;
         }
         if position == attribute_start {
-            if checked { return TagToken::Unsupported("HTML fragment attribute-name recovery is not implemented."); }
+            if checked { return Ok(TagToken::Unsupported("HTML fragment attribute-name recovery is not implemented.")); }
             // A stray '=' must still advance the parser.
             clean_syntax = false;
             position += 1;
@@ -963,17 +969,17 @@ fn read_tag_mode(input: &str, start: usize, checked: bool) -> TagToken {
         // Hashing avoids quadratic scans when a tag contains many attributes.
         let attribute = attribute.to_ascii_lowercase();
         if seen.insert(attribute.clone()) {
-            attrs.push((attribute, decode_entities_in(value, true)));
+            attrs.push((attribute, named_references::decode(value, true, check)?));
         } else {
             duplicate_attributes = true;
         }
     }
 
-    if checked_native_fragment {
+    Ok(if checked_native_fragment {
         TagToken::Unsupported(if name == "table" { "Incomplete HTML fragment table tag." } else { "Incomplete HTML fragment TEXTAREA tag." })
     } else {
         TagToken::Incomplete
-    }
+    })
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
@@ -1100,7 +1106,7 @@ fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool,
                 .get(name_end)
                 .is_some_and(|byte| tag_space(*byte, checked) || matches!(byte, b'/' | b'>'))
         {
-            return match read_tag_mode(input, opening, checked) {
+            return match read_tag_mode(input, opening, checked, check)? {
                 TagToken::Complete(tag) if checked && name == "textarea"
                     && (!tag.clean_syntax || tag.self_closing || !tag.attrs.is_empty()) =>
                     Err("HTML fragment TEXTAREA end-tag recovery is not implemented.".into()),
@@ -1137,282 +1143,9 @@ pub(crate) fn is_void(name: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 fn decode_entities(input: &str) -> String {
-    decode_entities_in(input, false)
-}
-
-fn decode_entities_in(input: &str, attribute: bool) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut position = 0;
-    while let Some(offset) = input[position..].find('&') {
-        let opening = position + offset;
-        output.push_str(&input[position..opening]);
-        let rest = &input[opening + 1..];
-        if let Some((character, consumed)) = character_reference(rest, attribute) {
-            output.push(character);
-            position = opening + 1 + consumed;
-            continue;
-        }
-        output.push('&');
-        position = opening + 1;
-    }
-    output.push_str(&input[position..]);
-    output
-}
-
-fn character_reference(input: &str, attribute: bool) -> Option<(char, usize)> {
-    let bytes = input.as_bytes();
-    if bytes.first() == Some(&b'#') {
-        let mut position = 1;
-        let radix = if matches!(bytes.get(position), Some(b'x' | b'X')) {
-            position += 1;
-            16
-        } else {
-            10
-        };
-        let first_digit = position;
-        let mut number = 0u32;
-        while let Some(digit) = bytes
-            .get(position)
-            .and_then(|byte| char::from(*byte).to_digit(radix))
-        {
-            // Continue consuming a long numeric reference once, even after it
-            // overflows; saturation guarantees the replacement character.
-            number = number.saturating_mul(radix).saturating_add(digit);
-            position += 1;
-        }
-        if position == first_digit {
-            return None;
-        }
-        if bytes.get(position) == Some(&b';') {
-            position += 1;
-        }
-        return Some((numeric_character(number), position));
-    }
-
-    // A bounded longest match among our supported names. Names are case
-    // sensitive. Only the legacy names below can omit their semicolon.
-    let mut matched = None;
-    for (index, byte) in bytes.iter().take(32).enumerate() {
-        if !byte.is_ascii_alphanumeric() {
-            break;
-        }
-        let end = index + 1;
-        if let Some((character, legacy)) = named_character(&input[..end]) {
-            if bytes.get(end) == Some(&b';') {
-                return Some((character, end + 1));
-            }
-            if legacy {
-                matched = Some((character, end));
-            }
-        }
-    }
-    let (character, consumed) = matched?;
-    if attribute
-        && bytes
-            .get(consumed)
-            .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'=')
-    {
-        return None;
-    }
-    Some((character, consumed))
-}
-
-fn numeric_character(number: u32) -> char {
-    // These are HTML's numeric-reference corrections, not byte decoding. The
-    // undefined Windows-1252 positions (81, 8D, 8F, 90, 9D) remain controls.
-    let corrected = match number {
-        0 => 0xfffd,
-        0x80 => 0x20ac,
-        0x82 => 0x201a,
-        0x83 => 0x0192,
-        0x84 => 0x201e,
-        0x85 => 0x2026,
-        0x86 => 0x2020,
-        0x87 => 0x2021,
-        0x88 => 0x02c6,
-        0x89 => 0x2030,
-        0x8a => 0x0160,
-        0x8b => 0x2039,
-        0x8c => 0x0152,
-        0x8e => 0x017d,
-        0x91 => 0x2018,
-        0x92 => 0x2019,
-        0x93 => 0x201c,
-        0x94 => 0x201d,
-        0x95 => 0x2022,
-        0x96 => 0x2013,
-        0x97 => 0x2014,
-        0x98 => 0x02dc,
-        0x99 => 0x2122,
-        0x9a => 0x0161,
-        0x9b => 0x203a,
-        0x9c => 0x0153,
-        0x9e => 0x017e,
-        0x9f => 0x0178,
-        _ => number,
-    };
-    char::from_u32(corrected).unwrap_or('\u{fffd}')
-}
-
-fn named_character(name: &str) -> Option<(char, bool)> {
-    // Hand-selected from the standard's name/code-point facts, not an imported
-    // entity database. All printable Latin-1 names and common web punctuation
-    // are included. Unlisted names are unsupported; a legacy prefix can still
-    // match, as it does in HTML's longest-match algorithm.
-    let legacy = match name {
-        "amp" | "AMP" => '&',
-        "lt" | "LT" => '<',
-        "gt" | "GT" => '>',
-        "quot" | "QUOT" => '"',
-        "nbsp" => '\u{00a0}',
-        "iexcl" => '¡',
-        "cent" => '¢',
-        "pound" => '£',
-        "curren" => '¤',
-        "yen" => '¥',
-        "brvbar" => '¦',
-        "sect" => '§',
-        "uml" => '¨',
-        "copy" | "COPY" => '©',
-        "ordf" => 'ª',
-        "laquo" => '«',
-        "not" => '¬',
-        "shy" => '\u{00ad}',
-        "reg" | "REG" => '®',
-        "macr" => '¯',
-        "deg" => '°',
-        "plusmn" => '±',
-        "sup2" => '²',
-        "sup3" => '³',
-        "acute" => '´',
-        "micro" => 'µ',
-        "para" => '¶',
-        "middot" => '·',
-        "cedil" => '¸',
-        "sup1" => '¹',
-        "ordm" => 'º',
-        "raquo" => '»',
-        "frac14" => '¼',
-        "frac12" => '½',
-        "frac34" => '¾',
-        "iquest" => '¿',
-        "Agrave" => 'À',
-        "Aacute" => 'Á',
-        "Acirc" => 'Â',
-        "Atilde" => 'Ã',
-        "Auml" => 'Ä',
-        "Aring" => 'Å',
-        "AElig" => 'Æ',
-        "Ccedil" => 'Ç',
-        "Egrave" => 'È',
-        "Eacute" => 'É',
-        "Ecirc" => 'Ê',
-        "Euml" => 'Ë',
-        "Igrave" => 'Ì',
-        "Iacute" => 'Í',
-        "Icirc" => 'Î',
-        "Iuml" => 'Ï',
-        "ETH" => 'Ð',
-        "Ntilde" => 'Ñ',
-        "Ograve" => 'Ò',
-        "Oacute" => 'Ó',
-        "Ocirc" => 'Ô',
-        "Otilde" => 'Õ',
-        "Ouml" => 'Ö',
-        "times" => '×',
-        "Oslash" => 'Ø',
-        "Ugrave" => 'Ù',
-        "Uacute" => 'Ú',
-        "Ucirc" => 'Û',
-        "Uuml" => 'Ü',
-        "Yacute" => 'Ý',
-        "THORN" => 'Þ',
-        "szlig" => 'ß',
-        "agrave" => 'à',
-        "aacute" => 'á',
-        "acirc" => 'â',
-        "atilde" => 'ã',
-        "auml" => 'ä',
-        "aring" => 'å',
-        "aelig" => 'æ',
-        "ccedil" => 'ç',
-        "egrave" => 'è',
-        "eacute" => 'é',
-        "ecirc" => 'ê',
-        "euml" => 'ë',
-        "igrave" => 'ì',
-        "iacute" => 'í',
-        "icirc" => 'î',
-        "iuml" => 'ï',
-        "eth" => 'ð',
-        "ntilde" => 'ñ',
-        "ograve" => 'ò',
-        "oacute" => 'ó',
-        "ocirc" => 'ô',
-        "otilde" => 'õ',
-        "ouml" => 'ö',
-        "divide" => '÷',
-        "oslash" => 'ø',
-        "ugrave" => 'ù',
-        "uacute" => 'ú',
-        "ucirc" => 'û',
-        "uuml" => 'ü',
-        "yacute" => 'ý',
-        "thorn" => 'þ',
-        "yuml" => 'ÿ',
-        _ => {
-            let character = match name {
-                "apos" => '\'',
-                "euro" => '€',
-                "trade" | "TRADE" => '™',
-                "ndash" => '–',
-                "mdash" => '—',
-                "lsquo" | "OpenCurlyQuote" => '‘',
-                "rsquo" | "CloseCurlyQuote" => '’',
-                "sbquo" => '‚',
-                "ldquo" | "OpenCurlyDoubleQuote" => '“',
-                "rdquo" | "CloseCurlyDoubleQuote" => '”',
-                "bdquo" => '„',
-                "hellip" => '…',
-                "bull" | "bullet" => '•',
-                "dagger" => '†',
-                "Dagger" => '‡',
-                "permil" => '‰',
-                "lsaquo" => '‹',
-                "rsaquo" => '›',
-                "OElig" => 'Œ',
-                "oelig" => 'œ',
-                "Scaron" => 'Š',
-                "scaron" => 'š',
-                "Zcaron" => 'Ž',
-                "zcaron" => 'ž',
-                "Yuml" => 'Ÿ',
-                "circ" => 'ˆ',
-                "tilde" => '˜',
-                "fnof" => 'ƒ',
-                "ensp" => '\u{2002}',
-                "emsp" => '\u{2003}',
-                "thinsp" => '\u{2009}',
-                "NonBreakingSpace" => '\u{00a0}',
-                "NewLine" => '\n',
-                "Tab" => '\t',
-                "minus" => '−',
-                "ne" => '≠',
-                "le" => '≤',
-                "ge" => '≥',
-                "notin" | "notinva" => '∉',
-                "larr" => '←',
-                "rarr" => '→',
-                "uarr" => '↑',
-                "darr" => '↓',
-                "harr" => '↔',
-                _ => return None,
-            };
-            return Some((character, false));
-        }
-    };
-    Some((legacy, true))
+    named_references::decode(input, false, None).unwrap()
 }
 
 #[cfg(test)]
