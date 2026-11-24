@@ -43,14 +43,14 @@ pub(super) fn index(handle: u32) -> Option<usize> {
 }
 
 // Inert construction can retain any DOMString. Native materialization admits
-// exact HTML IDs and ordinary names through their native consumer policies.
+// exact IDs, common HTML metadata and ordinary names through native consumers.
 pub(super) fn passive_name_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html && name.html_is("name")
         && tag!="slot" && script_clone_node::ordinary_clone_element(tag)
 }
 pub(super) fn materializable_value(attr:&crate::html::Attribute,namespace:crate::html::Namespace,tag:&str)->bool{
     attr.value.raw_units().is_none()
-        ||namespace==crate::html::Namespace::Html&&attr.name.html_is("id")
+        ||namespace==crate::html::Namespace::Html&&["id","class","title","lang","dir"].iter().any(|name|attr.name.html_is(name))
         ||passive_name_attribute(namespace,tag,&attr.name)
         ||attr.name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/")
         ||attr.name.namespace.is_empty()&&attr.name.qualified.starts_with("data-")

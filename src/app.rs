@@ -6533,3 +6533,7 @@ mod passive_name_domstring_tests;
 #[cfg(test)]
 #[path="app_passive_name_materialization_tests.rs"]
 mod passive_name_materialization_tests;
+
+#[cfg(test)]
+#[path="app_html_metadata_materialization_tests.rs"]
+mod html_metadata_materialization_tests;

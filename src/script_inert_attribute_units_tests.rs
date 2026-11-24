@@ -12,13 +12,14 @@ var owner=document.implementation.createDocument(null,'Root'),node=owner.documen
 "#);}
 #[test]
 fn inert_attribute_units_native_transfer_refuses_before_source_or_activation_changes(){
+ // Common title now materializes; retain an unsupported raw-role sink for all refusal assertions.
  let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"
-var owner=document.implementation.createHTMLDocument('owner'),span=owner.createElement('span'),img=owner.createElement('img');owner.body.appendChild(span);span.setAttribute('title','passive\ud800');span.setAttribute('data-raw','kept\udfff');img.setAttribute('src','https://no-inert-raw.test/\ud800');img.setAttribute('onload','throw "never"\ud800');var title=span.getAttributeNode('title');
+var owner=document.implementation.createHTMLDocument('owner'),span=owner.createElement('span'),img=owner.createElement('img');owner.body.appendChild(span);span.setAttribute('title','passive\ud800');span.setAttribute('role','guarded\ud800');span.setAttribute('data-raw','kept\udfff');img.setAttribute('src','https://no-inert-raw.test/\ud800');img.setAttribute('onload','throw "never"\ud800');var title=span.getAttributeNode('title');
 "#);
  p.state.rebuild(&d).unwrap();let before=(d.nodes.len(),p.state.retained,p.state.dom_commits);
  for code in ["document.body.appendChild(span);","document.importNode(span,true);","document.importNode(img,true);"]{assert_eq!(p.console_eval(&mut d,&mut f,code).errors,1,"{code}");assert_eq!((d.nodes.len(),p.state.retained,p.state.dom_commits),before);}
  run(&mut d,&mut f,&mut p,r#"
-if(span.parentNode!==owner.body||span.ownerDocument!==owner||title.ownerElement!==span||title.value!=='passive\ud800'||img.getAttribute('src')!=='https://no-inert-raw.test/\ud800')throw 'refusal source prefix';span.removeAttribute('title');var result=document.body.appendChild(span);if(result!==span||span.ownerDocument!==document||!span.isConnected||span.getAttribute('data-raw')!=='kept\udfff'||title.ownerElement!==null||title.value!=='passive\ud800')throw 'supported metadata same identity after refusal';
+if(span.parentNode!==owner.body||span.ownerDocument!==owner||title.ownerElement!==span||title.value!=='passive\ud800'||img.getAttribute('src')!=='https://no-inert-raw.test/\ud800')throw 'refusal source prefix';span.removeAttribute('role');span.removeAttribute('title');var result=document.body.appendChild(span);if(result!==span||span.ownerDocument!==document||!span.isConnected||span.getAttribute('data-raw')!=='kept\udfff'||title.ownerElement!==null||title.value!=='passive\ud800')throw 'supported metadata same identity after refusal';
 "#);
  assert!(!p.has_navigation_request());assert!(p.take_dynamic_scripts().is_empty()&&p.take_dynamic_stylesheets().is_empty());let(a,b,c)=p.take_image_changes();assert!(a.is_empty()&&b.is_empty()&&c.is_empty());
 }
