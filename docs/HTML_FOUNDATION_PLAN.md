@@ -399,6 +399,19 @@ F01 stays partial.
 
 Ordinary HTML name materialization now shares the namespace, local-tag and null-namespace attribute policy with public producers. Native import copies exact raw names without changing source owners; parked and cloned template contents preserve Attr identity through promotion and update exact live queries. Work, copy and retained-storage refusal preserve source and destination state with fresh recovery. Native controls, slots, frames, resource elements and foreign or namespace-qualified raw names remain guarded. Original native/App and production checks qualify this slice; child writes and frozen browser qualification remain separate. F01 stays partial.
 
+Common HTML metadata materialization now admits exact null-namespace class, title, lang
+and dir values on supported HTML elements. Imports retain independent attributes and
+source ownership; parked and cloned template contents preserve exact metadata through
+promotion. Class tokens, live class queries and CSS alias exclusion use actual code
+units; title/lang retain raw values and dir keeps invalid-value reflection semantics.
+Imported native controls retain real editor values. Work, copy and retained-storage
+refusal preserve source/destination state and fresh recovery. Original native/App and
+production checks qualify this slice, including actual class-based painting. Foreign or
+namespace-qualified raw metadata and unsupported active raw attributes retain their
+guards; frozen browser qualification remains separate. F01 stays partial.
+
+Inert className property integration remains separate; inert class producers in this slice use native attributes.
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**

@@ -9171,3 +9171,7 @@ mod passive_name_domstring_tests;
 #[cfg(test)]
 #[path="script_passive_name_materialization_tests.rs"]
 mod passive_name_materialization_tests;
+
+#[cfg(test)]
+#[path="script_html_metadata_materialization_tests.rs"]
+mod html_metadata_materialization_tests;
