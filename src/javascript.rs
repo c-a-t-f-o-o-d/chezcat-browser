@@ -9256,7 +9256,7 @@ impl Runtime {
             host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(w,_)|w)));
             if let Err((kind,message))=host.adjacent_receiver_access(object) {return Err(self.adjacent_fault(kind,&message));}
         }
-        if method == NODE_VALUE_SET {
+        if matches!(method,NODE_VALUE_SET|"\0Element.set.className") {
             // A retained child may have been detached since this accessor was
             // saved. Resolve its current native owner before invoking toString.
             host.native_operation_caller(self.native_access_caller

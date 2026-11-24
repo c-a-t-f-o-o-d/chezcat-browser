@@ -360,6 +360,7 @@ impl Runtime {
                         self.store_property(prototype,key.into(),Value::Function(method.id),Some((true,true,true)))?;
                     }
                     self.define_host_attribute(prototype,window,"id","\0Element.get.id",Some("\0Element.set.id"))?;
+                    self.define_host_attribute(prototype,window,"className","\0Element.get.className",Some("\0Element.set.className"))?;
                     for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_host_attribute(prototype,window,key,get,Some(set))?;}
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;

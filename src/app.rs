@@ -6537,3 +6537,7 @@ mod passive_name_materialization_tests;
 #[cfg(test)]
 #[path="app_html_metadata_materialization_tests.rs"]
 mod html_metadata_materialization_tests;
+
+#[cfg(test)]
+#[path="app_element_class_name_accessor_tests.rs"]
+mod element_class_name_accessor_tests;

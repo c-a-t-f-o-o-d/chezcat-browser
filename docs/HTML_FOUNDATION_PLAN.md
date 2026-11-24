@@ -410,7 +410,18 @@ production checks qualify this slice, including actual class-based painting. For
 namespace-qualified raw metadata and unsupported active raw attributes retain their
 guards; frozen browser qualification remains separate. F01 stays partial.
 
-Inert className property integration remains separate; inert class producers in this slice use native attributes.
+
+Canonical Element.className now reflects the actual class DOMString through inherited
+getter/setter metadata, saved accessors and ordinary prototype
+override/deletion/restoration. Genuine receiver and captured-origin checks precede
+conversion; inert HTML property writes now update native attributes, stable Attr
+identities and exact observation values. Main and inert public producers retain raw
+units through import and template promotion, with class tokens, live queries and CSS
+alias exclusion using the actual record. Paid reads and work/copy/string/storage refusal
+retain fresh recovery. Original native/App and production checks qualify this base
+reflection, including class-based pixels and preserved editor/link/page identity.
+Initial child writes, main raw SVG writes, SVGAnimatedString-specific interfaces, inert
+classList and frozen browser qualification remain separate. F01 stays partial.
 
 ### F02 — Bytes, encodings and MIME routing
 
