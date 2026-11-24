@@ -6721,3 +6721,7 @@ mod heading_align_tests;
 #[cfg(test)]
 #[path="app_div_align_tests.rs"]
 mod div_align_tests;
+
+#[cfg(test)]
+#[path="app_legend_align_tests.rs"]
+mod legend_align_tests;
