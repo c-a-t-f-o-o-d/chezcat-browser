@@ -247,8 +247,8 @@ The selection covers all twenty property names, side/component isolation,
 parent/root distinctions, font and style ordering, multigeneration inheritance,
 currentcolor and alpha, importance and inline priority, invalid declarations and
 substitution, changed external/parent styles, and work/copy refusal with recovery.
-One earlier test's currentcolor expectation was corrected to the normative keyword
-inheritance rule before freezing this selection; its explicit RGBA checks remain.
+Currentcolor inheritance coverage checks the retained keyword and descendant
+foreground, together with explicit RGBA values.
 
 These are original native CSS/HTML component results on Linux x86_64 with Rust
 1.99.1. The existing `none`/`hidden`/`solid` representation and used-value width
@@ -256,6 +256,51 @@ rounding remain finite: additional styles, collapsed-table distinctions, border
 images, logical borders, device-pixel snapping and general CSSOM stay open.
 Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT
 were not executed. No complete C00/C04/C05 requirement or package is closed.
+
+## Preparatory implementation: physical inset values
+
+**C04-S03 is a partial increment for C04, C05 and C10.** The five physical
+properties inset, top, right, bottom and left now share literal and substituted
+inherit, initial and unset behavior. They remain noninherited by default, with
+initial auto values. The shorthand expands one through four components in
+top/right/bottom/left order and applies them atomically.
+
+The finite value grammar includes auto, signed px/pt/pc/em/rem/percentage/vw/vh
+and the existing typed calc arithmetic. Calculation groups remain intact in
+shorthands; malformed numbers, split dimensions and unsupported dimensional
+operations do not replace an earlier valid literal. A winning substituted value
+that becomes invalid resets its affected sides to auto.
+
+Explicit inheritance uses final parent font metrics once. Percentages remain
+dependent on the containing block. Viewport components resolve using the supplied
+environment before child inheritance and recompute after viewport changes, even
+when stylesheet rules are cached. Document and fragment context containers do
+not supply element-parent inheritance; genuine null-namespace element parents do.
+
+Inline declaration admission shares the same grammar and respects its supplied
+work and copy budget. Native relative, absolute and fixed layout uses these
+values for actual border rectangles and link hit targets, including preserved
+normal flow and stretched absolute boxes.
+
+This finite contract follows [CSS Positioned Layout 3, 7 October 2025, sections
+3.1–3.5](https://www.w3.org/TR/2025/WD-css-position-3-20251007/),
+[CSS Cascade 5, 13 January 2022, sections 4.4 and 7.2–7.3.3](https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/),
+[CSS Values 4, 12 March 2024, sections 5.3, 6.1 and 10.1–10.11](https://www.w3.org/TR/2024/WD-css-values-4-20240312/),
+[CSS Variables 1, 16 June 2022, sections 3.1–3.3](https://www.w3.org/TR/2022/CR-css-variables-1-20220616/)
+and [CSS Syntax 3, 1 October 2026, section 4.3.13](https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/).
+
+| Native component evidence | Result |
+| --- | --- |
+| Original inset regressions | 34 pass |
+| Existing related CSS and layout tests | 81 pass |
+| Production cascade, cache, geometry and refusal scenarios | 10 pass |
+| Inline inset budget refusal and recovery probe | 1 pass |
+
+These are native results on Linux x86_64 with Rust 1.99.1. Logical/anchor insets,
+sticky scroll clamping, complete positioning, additional units/math functions,
+origin/layer rollback and full CSSOM serialization remain open. Windows
+frontend, real HTTP loading, XHTML presentation and unchanged browser WPT were
+not executed. No complete C00/C04/C05/C10 requirement or package is closed.
 
 ## Architecture and invariants
 

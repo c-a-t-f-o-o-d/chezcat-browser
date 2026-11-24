@@ -1456,6 +1456,7 @@ fn compute_cascade(
         }
         let viewport_length=|value|sizing_math::resolve_viewport(value,environment);
         style.width=viewport_length(style.width);style.height=viewport_length(style.height);style.min_width=viewport_length(style.min_width);style.min_height=viewport_length(style.min_height);style.max_width=style.max_width.map(viewport_length);style.max_height=style.max_height.map(viewport_length);style.flex_basis=viewport_length(style.flex_basis);style.margin=style.margin.map(viewport_length);style.padding=style.padding.map(viewport_length);style.gap=style.gap.map(viewport_length);
+        style.inset=style.inset.map(viewport_length);
         // Height inherits its computed length, not a parent's em/rem token.
         // Percentages and auto retain their containing-block/used-value role.
         if matches!(style.height, Length::Em(_) | Length::Rem(_)) {
@@ -3151,6 +3152,11 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
     for decl in declarations {
         let name = decl.name.as_str();
         if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
+        if custom_properties::inset_property(name) {
+            if let Some(meter) = meter.as_deref_mut() {
+                meter.source(name.len().saturating_add(decl.value.len()))?;
+            }
+        }
         let value = decl.value.to_ascii_lowercase();
         let variable = value.contains("var(");
         let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
@@ -3164,7 +3170,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
                 else { &["padding-top","padding-right","padding-bottom","padding-left"] }
             }
             "inset" => {
-                if !variable && !wide && lengths(&value, true, true).is_none() { continue; }
+                if !variable && !wide && inset_values(&value).is_none() { continue; }
                 &["top","right","bottom","left"]
             }
             "flex" => {
@@ -3188,7 +3194,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "touch-action" if touch_action::specified(&value).is_none() => continue,
             "width" | "height" | "min-width" | "min-height" if !variable && !wide && sizing_value(&value,Length::Auto).is_none() => continue,
             "max-width" | "max-height" if !variable && !wide && max_sizing_value(&value).is_none() => continue,
-            "top" | "right" | "bottom" | "left" if !variable && !wide && parse_length(&value, true, true).is_none() => continue,
+            "top" | "right" | "bottom" | "left" if !variable && !wide && inset_length(&value).is_none() => continue,
             "row-gap" | "column-gap" if !variable && !wide && value != "normal" && max_sizing_value(&value).is_none() => continue,
             s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
             s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
@@ -3441,13 +3447,26 @@ fn four<T: Copy>(values: &[T]) -> Option<[T; 4]> {
     })
 }
 
-fn lengths(value: &str, auto: bool, negative: bool) -> Option<[Length; 4]> {
-    let values: Option<Vec<_>> = value
-        .split_ascii_whitespace()
-        .take(5)
-        .map(|v| parse_length(v, auto, negative))
-        .collect();
-    four(&values?)
+fn inset_length(value: &str) -> Option<Length> {
+    let value = value.trim_ascii();
+    if !value.eq_ignore_ascii_case("auto")
+        && !value.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("calc(")) {
+        let end = translate::number_end(value)?;
+        if !matches!(value[end..].to_ascii_lowercase().as_str(),
+            "" | "px" | "pt" | "pc" | "em" | "rem" | "%" | "vw" | "vh") {
+            return None;
+        }
+    }
+    box_spacing::length(value, true)
+}
+
+fn inset_values(value: &str) -> Option<[Length; 4]> {
+    let parts = border_parts(value)?;
+    let mut values = [Length::Auto; 4];
+    for (slot, part) in values.iter_mut().zip(&parts) {
+        *slot = inset_length(part)?;
+    }
+    four(&values[..parts.len()])
 }
 
 fn border_length(value: &str) -> Option<Length> {
@@ -3651,20 +3670,17 @@ fn apply_font_with_availability(style: &mut Style,parent:&Style,declaration:&Dec
 fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_element_parent: bool) {
     let value = declaration.value.trim().to_ascii_lowercase();
     let border = custom_properties::border_property(&declaration.name);
-    if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name) || border)
+    let inset = custom_properties::inset_property(&declaration.name);
+    if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name) || border || inset)
         && matches!(value.as_str(), "inherit" | "initial" | "unset") {
-        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit" && (!border || has_element_parent));
+        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit" && (!(border || inset) || has_element_parent));
         return;
     }
     match declaration.name.as_str() {
         "display" => {if let Some(parsed)=display_value(&value){style.display=parsed;style.display_alias=match value.as_str(){"list-item"=>Some("list-item"),"table-header-group"=>Some("table-header-group"),"table-footer-group"=>Some("table-footer-group"),_=>None};}},
         "overflow" | "overflow-x" | "overflow-y" => { overflow::apply(style, parent, &declaration.name, &value); }
         "inset" => {
-            if value == "inherit" {
-                style.inset = parent.inset;
-            } else if value == "initial" || value == "unset" {
-                style.inset = [Length::Auto; 4];
-            } else if let Some(values) = lengths(&value, true, true) {
+            if let Some(values) = inset_values(&value) {
                 style.inset = values;
             }
         }
@@ -3675,11 +3691,7 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_eleme
                 "bottom" => 2,
                 _ => 3,
             };
-            if value == "inherit" {
-                style.inset[side] = parent.inset[side];
-            } else if value == "initial" || value == "unset" {
-                style.inset[side] = Length::Auto;
-            } else if let Some(length) = parse_length(&value, true, true) {
+            if let Some(length) = inset_length(&value) {
                 style.inset[side] = length;
             }
         }
@@ -5037,7 +5049,8 @@ mod tests {
         assert_eq!(by_id("child").position, Position::Static);
         assert_eq!(by_id("child").inset, [Length::Auto; 4]);
         assert_eq!(by_id("inherit").position, Position::Relative);
-        assert_eq!(by_id("inherit").inset, by_id("parent").inset);
+        assert_eq!(by_id("inherit").inset,
+            [Length::Px(1.0), Length::Percent(2.0), Length::Px(-48.0), Length::Auto]);
         assert_eq!(by_id("override").position, Position::Sticky);
         assert_eq!(by_id("invalid").position, Position::Absolute);
         assert_eq!(
@@ -5528,3 +5541,7 @@ mod css_id_exact_tests;
 #[cfg(test)]
 #[path = "css_border_default_tests.rs"]
 mod border_default_tests;
+
+#[cfg(test)]
+#[path = "css_inset_value_tests.rs"]
+mod inset_value_tests;
