@@ -6773,3 +6773,7 @@ mod ol_reversed_tests;
 #[cfg(test)]
 #[path="app_ol_start_tests.rs"]
 mod ol_start_tests;
+
+#[cfg(test)]
+#[path="app_ol_compact_tests.rs"]
+mod ol_compact_tests;

@@ -628,6 +628,7 @@ impl Runtime {
             if name == "HTMLLIElement" {self.define_host_attribute(prototype,window,"value","\0HTMLLIElement.get.value",Some("\0HTMLLIElement.set.value"))?;}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"start","\0HTMLOListElement.get.start",Some("\0HTMLOListElement.set.start"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLUListElement.get.compact",Some("\0HTMLUListElement.set.compact"))?;}
+            if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLOListElement.get.compact",Some("\0HTMLOListElement.set.compact"))?;}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"reversed","\0HTMLOListElement.get.reversed",Some("\0HTMLOListElement.set.reversed"))?;}
             if name == "HTMLDListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDListElement.get.compact",Some("\0HTMLDListElement.set.compact"))?;}
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
