@@ -9,7 +9,7 @@ foundation continues through its own register. CSS needed to satisfy an included
 F09–F13 default-presentation, geometry, namespace or native-control contract stays
 a prerequisite of that HTML contract; it cannot be deferred by this sequencing.
 
-Independent syntax and selector corrections may land before F14 when they require
+Independent syntax, selector and property corrections may land before F14 when they require
 no unfinished HTML/XHTML contract and preserve its implementation order. Each
 increment records a source baseline, dated clauses, original cases and finite
 evidence. These preparatory increments do not close C00 or relax complete package,
@@ -174,8 +174,48 @@ on Linux x86_64 with Rust 1.99.1. They do not establish Windows frontend, HTTP,
 XHTML presentation or unchanged browser WPT acceptance. The complete token model,
 escape/string/URL recovery, declaration/value token semantics and wider selector
 coverage remain open. Declaration/value and finite media-condition normalization
-retain their existing behavior; the literal margin inheritance case above also
-remains open. C00 and complete C01/C03 acceptance retain their planned gates.
+retain their existing behavior. The literal margin inheritance case is addressed
+by C04-S01 below. C00 and complete C01/C03 acceptance retain their planned gates.
+
+
+## Preparatory implementation: physical spacing defaulting
+
+**C04-S01 is a partial property/defaulting increment for C04 and C05.** It
+addresses the literal margin inheritance case in the historical audit. The ten
+physical margin/padding properties now share `inherit`, `initial` and `unset`
+behavior between literal declarations and the existing variable-substitution
+path. Initial/unset restore zero spacing; longhands affect only their named side,
+and shorthands reset their four components together.
+
+Explicit inheritance uses the parent's computed font-relative lengths. Parent
+`em`, `rem` and mixed `calc()` font coefficients become absolute before use by
+a child with different font metrics; percentages and `auto` retain their
+containing-block/used-value role. Already inherited lengths do not rescale in
+further descendants. Ordinary descendants still do not inherit margin or padding.
+
+This finite contract follows [CSS Cascade 5, 13 January 2022, sections 3, 4.4,
+7.2 and 7.3.1–7.3.3](https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/) and
+[CSS Box 3, 11 April 2024, sections 1.1, 3 and 4](https://www.w3.org/TR/2024/REC-css-box-3-20240411/).
+The coverage register binds the selected properties, keywords, source-file
+identities and native evidence separately from the original static audit.
+
+| Native component evidence | Result |
+| --- | --- |
+| Original spacing/defaulting regressions | 16 pass |
+| Existing related CSS tests | 30 pass |
+| Production defaulting/cascade/cache/refusal probes | 6 pass |
+
+The regression selection covers root and body defaults, all physical sides,
+literal/variable parity, parent font metrics, percentages, multigeneration
+inheritance, shorthand/longhand priority, invalid declarations, changed external
+sources and parent styles, and work/copy refusal with recovery. These results
+use the real native CSS/HTML components on Linux x86_64 with Rust 1.99.1.
+
+Complete property metadata/defaulting, border and logical-property semantics,
+`revert`/`revert-layer`, full origins/layers and broader CSSOM consistency remain
+open. Windows frontend, HTTP loading, XHTML presentation and unchanged browser
+WPT acceptance were not executed for this increment. No complete C04/C05
+requirement group or package is closed by these native results.
 
 ## Architecture and invariants
 

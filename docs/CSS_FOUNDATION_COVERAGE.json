@@ -9,7 +9,7 @@
     "state": "planned",
     "foundation_rule": "Required CSS/default-presentation dependencies of F09–F13 remain HTML foundation blockers; the later broad CSS program does not defer them.",
     "product_rule": "A product milestone requires its explicit dependency closure and actual journey evidence. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for YouTube. A whole-CSS claim is not permitted while required applicable coverage remains open.",
-    "preparatory_work": "Independent syntax/selector corrections may land before F14 when they require no unfinished HTML/XHTML contract and preserve its implementation order. Each records its own baseline, dated clauses, original cases and finite evidence; full program and package acceptance remain gated."
+    "preparatory_work": "Independent syntax/selector/property corrections may land before F14 when they require no unfinished HTML/XHTML contract and preserve its implementation order. Each records its own baseline, dated clauses, original cases and finite evidence; full program and package acceptance remain gated."
   },
   "source_baseline": {
     "revision": "6d1212e18acb37028bbba63290eddc323ecd5a23",
@@ -29,7 +29,7 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 243
+    "fresh_runtime_passes": 289
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -657,6 +657,112 @@
         "Full Selectors coverage, namespace/escape handling, forgiving/relative selector families and remaining capacity work remain open.",
         "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
         "C00 inputs and complete C01/C03 requirement selections remain unqualified; no complete requirement group or package is closed by this increment."
+      ],
+      "integrated_revision": "fbe399ecd137915c297eaa922bca435c7dfdd88e",
+      "pull_request": 619
+    },
+    {
+      "id": "C04-S01",
+      "name": "Physical margin and padding explicit defaulting",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05"
+      ],
+      "baseline_revision": "cfeb273a69bbff3fb292133a81181e8e08b48608",
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "3",
+            "4.4",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2024/REC-css-box-3-20240411/",
+          "sections": [
+            "1.1",
+            "3.1",
+            "3.2",
+            "4.1",
+            "4.2"
+          ]
+        }
+      ],
+      "properties": [
+        "margin",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "padding",
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "Literal inherit/initial/unset for the ten physical margin/padding properties uses the existing defaulting path shared with substituted values.",
+        "Explicit inheritance resolves parent font-relative em/rem and calc coefficients while retaining percentages and auto for later used-value resolution.",
+        "Shorthand and side-specific resets retain existing declaration priority and source ordering. Invalid literal values preserve earlier valid declarations; invalid substituted winners reset their affected components.",
+        "Parent style and external stylesheet changes recompute inherited spacing through fresh and cached native cascades; existing source admission and work/copy refusal remain effective."
+      ],
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "1770d0c3cf8c12cf72efd3823a99890e6c691ec1",
+          "sha256": "d76a2c2432390937d20975a3fb224d1eb38754e674257cd978b77e50d32837be"
+        },
+        "src/css_box_spacing.rs": {
+          "git_blob": "21ebd319750096db40ed125959846dd9c59f0248",
+          "sha256": "4d41c5b82c05fb09fb53b0ddfedcc1f36af72d29f526d99d70a43a585a6ac018"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "f69be312b84e1525439d29122da4dc30de6c22be",
+          "sha256": "1a67fb3294dee503e4b8d72eff6d7fe388e156ed4b194b81c2ed21cc26a6c140"
+        },
+        "src/css_spacing_default_tests.rs": {
+          "git_blob": "458bacb566980d24fd0d7f12e07ace77bd84dc98",
+          "sha256": "d67c9badfd6bc67d408f9ec5a3031ae712a9a74813307345734daac4b02880d8"
+        }
+      },
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "original_spacing_regressions": 16,
+        "existing_related_css_tests": 30,
+        "native_tests_total": 46,
+        "production_probe_count": 6,
+        "production_probe_cases": [
+          "literal-defaults",
+          "parent-computed-units",
+          "noninheritance-invalid-values",
+          "priority-order",
+          "external-cache-parent-change",
+          "refusal-recovery"
+        ],
+        "selection_sha256": "e12fc21ac6cad3f2605e62866b0f271ed3c695c4ac123876eeecfbae508f00a5",
+        "source_manifest_sha256": "4b275c9abbc8e74ba2bc1c7413b7c115d09a5ef145d118f079af5c01c2df5918",
+        "scope": "Native CSS spacing/defaulting and related CSS components through real CSS and HTML implementations. Compile-only HTTP metadata and an unavailable Page adapter provide no HTTP or frontend evidence."
+      },
+      "remaining": [
+        "Border and other property defaulting, common property metadata, logical properties, full grammar/support detection and general CSSOM consistency remain open.",
+        "revert/revert-layer and complete origin/layer cascade behavior are outside this three-keyword increment.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05 requirement selections remain unqualified; no complete requirement group or package is closed by this increment."
       ]
     }
   ],
@@ -1084,7 +1190,10 @@
         "Prove overlapping shorthand/longhand importance and source ordering through stylesheet, cssText, setProperty, enumeration, readback and used layout.",
         "Represent invalid syntax, valid-but-unimplemented semantics, resource-unavailable computation and ordinary initial values distinctly."
       ],
-      "fresh_runtime_result": null
+      "fresh_runtime_result": null,
+      "subsequent_implementation_slices": [
+        "C04-S01"
+      ]
     },
     {
       "id": "P-VAL-01",
@@ -6070,7 +6179,10 @@
         "LA27"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S01"
+      ]
     },
     {
       "id": "C05",
@@ -6111,7 +6223,10 @@
         "P-VAR-01"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S01"
+      ]
     },
     {
       "id": "C06",
@@ -7486,5 +7601,5 @@
     "Full SVG/MathML, Unicode data/font formats, codec profiles, Fetch/HTML/DOM/WebIDL, worklets and native window/input/print services retain adjacent owners. Any required dependency is a blocker.",
     "Historical/superseded specifications remain visible; selected current owners resolve replacement rules. A newer module level does not automatically supersede every lower-level requirement."
   ],
-  "runtime_evidence_scope": "fresh_runtime_passes counts native test cases in separately recorded implementation slices; production probes are separate. Historical source_observations retain their static audit baseline. No WPT/browser or complete requirement-group pass is inferred."
+  "runtime_evidence_scope": "fresh_runtime_passes sums recorded native test-case pass executions across separately source-bound implementation slices, including repeated regression cases. It is neither a current-revision retest total nor a unique-test/conformance count. Production probes are separate. Historical source_observations retain their static audit baseline. No WPT/browser or complete requirement-group pass is inferred."
 }
