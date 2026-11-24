@@ -746,6 +746,9 @@ pub trait Host {
     /// Preserve a native named-read/presence fallback after ordinary own keys.
     /// Only explicitly opted-in native receivers use this; other hosts do not.
     fn ordinary_native_fallback(&self, _object:u32, _property:&str) -> bool { false }
+    /// Preserve a native lifecycle property while exposing its canonical getter.
+    fn native_descriptor_change_allowed(&self,_object:u32,_property:&str)->bool{true}
+
     fn instance_ancestry(&self, _object:u32) -> Option<NativeAncestry> { None }
     /// Actual exposed immediate prototype, distinct from a read-only Object tail.
     fn exposed_native_prototype(&self, _object:u32) -> bool { false }
