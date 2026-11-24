@@ -2934,7 +2934,7 @@ fn matches_selector(
         }
         *budget -= 1;
         let Some(crate::html::Node {
-            kind: NodeKind::Element { tag, id, expanded_name, .. },
+            kind: NodeKind::Element { tag, expanded_name, .. },
             namespace,
             ..
         }) = context.doc.nodes.get(node)
@@ -2967,11 +2967,15 @@ fn matches_selector(
         {
             return false;
         }
-        if compound.ids.iter().any(|expected| {
-            !id.as_ref()
-                .is_some_and(|id| context.equal(id, expected, false, budget))
-        }) {
-            return false;
+        if !compound.ids.is_empty() {
+            let Some(id) = context.dom_attribute(node,"id",budget) else { return false; };
+            let id = id.view();
+            for expected in &compound.ids {
+                // Compare authoritative code units, never the render projection.
+                // Admit the complete borrowed scan before reading its units.
+                let cost = id.logical_bytes().saturating_add(expected.len());
+                if !context.text_work(cost,budget) || !id.equals(expected) { return false; }
+            }
         }
         if !compound.classes.is_empty() {
             let class = context.dom_attribute(node,"class",budget)
@@ -5249,7 +5253,7 @@ mod tests {
             ",input",
             "input,[broken",
             "input, [type~=]",
-            "\u{2003}input",
+            "\u{2003}input:unknown",
         ] {
             let mut rules = Vec::new();
             parse_sheet(&format!("{selector}{{color:red}}"), &mut rules);
@@ -5258,6 +5262,13 @@ mod tests {
                 "unsupported selector became a rule: {selector}"
             );
         }
+        // Non-ASCII code points are identifier starts, not CSS whitespace.
+        // Acceptance must retain the whole type name rather than broaden to input.
+        let selector = parse_selector("\u{2003}input").unwrap();
+        assert_eq!(selector.parts[0].tag.as_deref(),Some("\u{2003}input"));
+        let doc = crate::html::parse("<!doctype html><input>");
+        let order:Vec<_>=(0..doc.nodes.len()).collect();let mut work=100_000;
+        assert!(query_first(&doc,"\u{2003}input",&order,None,&mut work).unwrap().is_none());
         assert!(parse_selector(&["div"; 12].join(" ~ ")).is_some());
         assert!(parse_selector(&["div"; 13].join(" ~ ")).is_none());
         assert!(
@@ -5479,3 +5490,7 @@ mod class_exact_tests;
 #[cfg(test)]
 #[path="css_selector_ident_start_tests.rs"]
 mod selector_ident_start_tests;
+
+#[cfg(test)]
+#[path="css_id_exact_tests.rs"]
+mod css_id_exact_tests;
