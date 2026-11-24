@@ -2502,7 +2502,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_title_attribute(node,&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3685,6 +3685,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if property=="title"&&self.html_reflection_receiver(object){return true;}
         if matches!(property,"className"|"classList")&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
         if property=="value"&&self.class_list_receiver(object)&&script_class_list::attribute(object)==Some("class")&&script_class_list::element(object).and_then(node_index).is_some_and(|node|self.html_class_element(node)){return true;}
         if property=="charset" && node_index(object).is_some_and(|node|self.resource_charset_element(node)) {return true;}
@@ -9116,3 +9117,7 @@ mod node_list_for_each_tests;
 #[cfg(test)]
 #[path="script_node_list_item_tests.rs"]
 mod node_list_item_tests;
+
+#[cfg(test)]
+#[path="script_html_title_domstring_tests.rs"]
+mod html_title_domstring_tests;
