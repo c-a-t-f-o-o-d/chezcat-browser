@@ -3676,6 +3676,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if self.aria_reflection_attribute(object,property){return true;}
         if matches!(property,"id"|"className")&&self.canonical_selector_receiver(object){return true;}
         if matches!(property,"title"|"lang"|"dir")&&self.html_reflection_receiver(object){return true;}
         if matches!(property,"className"|"classList")&&self.attr_element_receiver(object)&&node_index(object).is_some_and(|node|self.html_class_element(node)){return true;}
@@ -9220,3 +9221,7 @@ mod inert_foreign_class_list_tests;
 #[cfg(test)]
 #[path="script_inert_reflection_namespace_tests.rs"]
 mod inert_reflection_namespace_tests;
+
+#[cfg(test)]
+#[path="script_aria_domstring_reflection_tests.rs"]
+mod aria_domstring_reflection_tests;

@@ -59,28 +59,9 @@ impl Bridge<'_> {
         self.validate_aria_reflection(object, false)
             .map_err(|(_, m)| m)?;
         let key = interface::property(property).ok_or("Unknown ARIA string reflection.")?;
-        let work = self
-            .aria_reflection_attributes(object)?
-            .len()
-            .saturating_mul(key.len() + 1);
-        self.state.work(work)?;
-        fn raw<'a>(attrs: &'a [crate::html::Attribute], key: &str) -> Option<&'a str> {
-            attrs
-                .iter()
-                .find(|a| a.name.namespace.is_empty() && a.name.qualified == key)
-                .map(|a| a.value.as_str())
-        }
-        let bytes = raw(self.aria_reflection_attributes(object)?, key).map(str::len);
-        let Some(bytes) = bytes else {
-            return Ok(Value::Null);
-        };
-        if bytes > self.state.limits.host.string_bytes {
-            return Err("ARIA reflected value exceeds the string allowance.".into());
-        }
-        self.state.copies(bytes)?;
-        Ok(Value::String(script_clone_node::copy_text(
-            raw(self.aria_reflection_attributes(object)?, key).unwrap(),
-        )?))
+        // Retain the child light-DOM preflight before the shared exact reader.
+        self.aria_reflection_attributes(object)?;
+        Ok(self.element_optional_attribute_string_get(object,key)?.unwrap_or(Value::Null))
     }
     pub(super) fn aria_reflection_set(
         &mut self,
@@ -94,15 +75,15 @@ impl Bridge<'_> {
         let value = if matches!(value, Value::Null | Value::Undefined) {
             None
         } else {
-            Some(self.text(value)?)
+            Some(self.dom_text(value)?)
         };
+        self.state.copies(key.len())?;
+        let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text(key)?);
         if self.inert_node_type(object) == Some(1) {
-            self.state.copies(key.len())?;
-            let name = crate::html::AttributeName::unqualified(script_clone_node::copy_text(key)?);
-            self.write_inert_attribute(object, name, value, false)
+            self.write_inert_dom_attribute_ns(object, name, value)
         } else {
             let node = self.node(object)?;
-            self.attribute(node, key, value)
+            self.public_dom_attribute(node,name,value,script_attr::InputPreparation::Pending)
         }
     }
 }
