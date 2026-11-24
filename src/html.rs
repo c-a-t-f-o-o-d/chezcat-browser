@@ -13,6 +13,20 @@ use crate::dom_string::DomString;
 
 #[path = "html_named_references.rs"]
 mod named_references;
+#[path = "html_script_data.rs"]
+mod script_data;
+
+#[cfg(test)]
+#[path = "html_script_data_tests.rs"]
+mod script_data_tests;
+
+#[cfg(test)]
+#[path = "html_script_end_tag_tests.rs"]
+mod script_end_tag_tests;
+
+#[cfg(test)]
+#[path = "html_text_state_boundary_tests.rs"]
+mod text_state_boundary_tests;
 
 #[cfg(test)]
 #[path = "html_named_reference_tests.rs"]
@@ -384,6 +398,7 @@ fn parse_internal(
     let mut formatting=active_formatting::Formatting::default();
     let mut position = 0;
     let mut title_seen = false;
+    let mut plaintext = false;
     // If unsupported foreign recovery escapes through an unrelated ancestor,
     // later elements cannot safely be classified from this subset's stack.
     let mut uncertain_foreign_recovery = false;
@@ -398,14 +413,15 @@ fn parse_internal(
         tokens = tokens.wrapping_add(1);
         let parent = *stack.last().unwrap();
         let rest = &input[position..];
-        if !rest.starts_with('<') {
-            let end = position + rest.find('<').unwrap_or(rest.len());
+        if plaintext || !rest.starts_with('<') {
+            let end = if plaintext { input.len() } else { position + rest.find('<').unwrap_or(rest.len()) };
             if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
                 if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
                 svg.root = None;
             }
             if let Some(start)=&mut structure {
-                let text=named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?;
+                let text=if plaintext {html_raw_text(&input[position..end],loaded.map(|tree| tree.check_cancel))?}
+                    else {named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?};
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
                 if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit)? {
                     formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
@@ -426,6 +442,9 @@ fn parse_internal(
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
                 if !text.is_empty(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
                 append_text_value(&mut document, *stack.last().unwrap(), text, node_limit)?
+            } else if plaintext {
+                append_text_value(&mut document, parent,
+                    html_raw_text(&input[position..end], loaded.map(|tree| tree.check_cancel))?, node_limit)?
             } else { append_text(&mut document, parent, &input[position..end], node_limit)? };
             if !appended {
                 if fail_on_capacity { return Err(node_limit_error()); }
@@ -606,7 +625,10 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
-        close_implied(&mut stack, &document, &tag.name);
+        let native_plaintext = tag.name == "plaintext" && !uncertain_foreign_recovery
+            && svg.root.is_none() && matches!(document.nodes[*stack.last().unwrap()].namespace,
+                Namespace::None | Namespace::Html);
+        if tag.name != "plaintext" || native_plaintext { close_implied(&mut stack, &document, &tag.name); }
         if fail_on_capacity && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
             if tag.name=="a"{formatting.end(&mut document,&mut stack,&tag.name,&mut tables,formatting_limits)?;}
             let table_foster=foster;
@@ -673,8 +695,16 @@ fn parse_internal(
         formatting.topology.linked(node,parent)?;
         if raw {
             let check = loaded.map(|tree| tree.check_cancel);
-            let (content_end, after_end_tag) = raw_text_end_mode(input, position, &tag.name, checked, check)?;
-            if checked && tag.name == "script" && input[position..content_end].contains("<!--") { return Err("HTML fragment escaped script-data tokenization is not implemented.".into()); }
+            let native_script = tag.name == "script" && document.nodes[node].namespace == Namespace::Html;
+            let (content_end, after_end_tag) = if native_script {
+                match script_data::end(input, position, check)? {
+                    Some(opening) => text_end_tag(input, opening, &tag.name, checked, true, check)?,
+                    None => (input.len(), input.len()),
+                }
+            } else { raw_text_end_mode(input, position, &tag.name, checked, check)? };
+            if checked && !native_script && tag.name == "script" && input[position..content_end].contains("<!--") {
+                return Err("HTML fragment foreign escaped script-data tokenization is not implemented.".into());
+            }
             if matches!(tag.name.as_str(), "title" | "textarea") {
                 // RCDATA recognizes only its own end tag as markup. Decode
                 // entities after finding that tag so '&lt;/textarea&gt;' stays
@@ -696,7 +726,7 @@ fn parse_internal(
                     if fail_on_capacity { return Err(node_limit_error()); }
                     break;
                 }
-            } else if html_raw {
+            } else if html_raw || document.nodes[node].namespace == Namespace::Html {
                 let content = html_raw_text(&input[position..content_end], check)?;
                 if !append_text_value(&mut document, node, content, node_limit)? {
                     if fail_on_capacity { return Err(node_limit_error()); }
@@ -720,6 +750,10 @@ fn parse_internal(
                 tables.opened(node,parent,slot,stack.len())?;
             }
             stack.push(node);
+            // PLAINTEXT changes tokenization, not the tree insertion mode.
+            // Its remaining character tokens still reconstruct formatting and
+            // follow the existing table/ordinary character insertion paths.
+            if native_plaintext { plaintext = true; }
             if fail_on_capacity && document.nodes[node].namespace==Namespace::Html {formatting.opened(&document,&stack,node)?;}
             if !checked && document.nodes[node].namespace == Namespace::Html &&
                 svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
@@ -869,6 +903,9 @@ fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn
         position += 1;
     }
     let name = input[name_start..position].to_ascii_lowercase();
+    // Closing text-token attributes are parsed then discarded by the caller.
+    let text_end = closing && matches!(name.as_str(),
+        "script" | "style" | "title" | "textarea" | "iframe" | "xmp" | "noembed" | "noframes");
     // Only explicitly supported SVG elements and these checked fragments use
     // strict token evidence. Other elements retain the normal tokenizer rules.
     let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea");
@@ -914,6 +951,9 @@ fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn
         }
 
         let attribute_start = position;
+        // Before-attribute-name '=' starts an attribute whose name begins with
+        // '='. Preserve it so a second '=' enters a real quoted/unquoted value.
+        if text_end && !checked && bytes[position] == b'=' { position += 1; }
         while position < bytes.len()
             && !tag_space(bytes[position], checked)
             && !matches!(bytes[position], b'=' | b'/' | b'>')
@@ -1004,6 +1044,7 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
             | "main"
             | "blockquote"
             | "pre"
+            | "plaintext"
             | "hr"
     ) {
         close_in_scope(
@@ -1106,14 +1147,7 @@ fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool,
                 .get(name_end)
                 .is_some_and(|byte| tag_space(*byte, checked) || matches!(byte, b'/' | b'>'))
         {
-            return match read_tag_mode(input, opening, checked, check)? {
-                TagToken::Complete(tag) if checked && name == "textarea"
-                    && (!tag.clean_syntax || tag.self_closing || !tag.attrs.is_empty()) =>
-                    Err("HTML fragment TEXTAREA end-tag recovery is not implemented.".into()),
-                TagToken::Complete(tag) => Ok((opening, tag.end)),
-                _ if checked => Err("HTML fragment raw-text end-tag recovery is not implemented.".into()),
-                _ => Ok((input.len(), input.len())),
-            };
+            return text_end_tag(input, opening, name, checked, false, check);
         }
         position = opening + 1;
     }
@@ -1121,6 +1155,24 @@ fn raw_text_end_mode(input: &str, start: usize, name: &str, checked: bool,
         return Err("HTML fragment TEXTAREA requires a complete matching end tag.".into());
     }
     Ok((input.len(), input.len()))
+}
+
+fn text_end_tag(input: &str, opening: usize, name: &str, checked: bool, native_script: bool,
+    check: Option<&dyn Fn() -> Result<(), String>>) -> Result<(usize, usize), String> {
+    // Script end-token attributes have no activation or fragment authority.
+    // Apply ordinary token recovery while retaining the surrounding fragment's
+    // NULL, context and native-resource checks.
+    match read_tag_mode(input, opening, checked && !native_script, check)? {
+        TagToken::Complete(tag) if checked && name == "textarea"
+            && (!tag.clean_syntax || tag.self_closing || !tag.attrs.is_empty()) =>
+            Err("HTML fragment TEXTAREA end-tag recovery is not implemented.".into()),
+        TagToken::Complete(tag) => Ok((opening, tag.end)),
+        // Once the appropriate name and a delimiter have been consumed, EOF
+        // discards the incomplete tag; it does not emit its buffered spelling.
+        TagToken::Incomplete if !checked || native_script => Ok((opening, input.len())),
+        _ if checked => Err("HTML fragment raw-text end-tag recovery is not implemented.".into()),
+        _ => Ok((input.len(), input.len())),
+    }
 }
 
 pub(crate) fn is_void(name: &str) -> bool {

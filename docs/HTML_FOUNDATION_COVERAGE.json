@@ -1120,7 +1120,11 @@
         "src/html.rs",
         "src/html_comments.rs",
         "src/html_named_references.rs",
-        "src/html_named_references_data.rs"
+        "src/html_named_references_data.rs",
+        "src/html_script_data.rs",
+        "src/html_script_data_tests.rs",
+        "src/html_script_end_tag_tests.rs",
+        "src/html_text_state_boundary_tests.rs"
       ],
       "contracts": [
         {
@@ -1128,7 +1132,8 @@
           "requirement": "All registered tokenizer states and branch/EOF/reconsume conditions",
           "status": "partial",
           "verification": [
-            "HTML iframe, xmp, noembed and noframes use literal Text records with appropriate end-tag matching, EOF handling and null replacement. Supplementary original parser, cancellation/admission, DOM and connected App checks exercise the producer. The original F04-loaded-iframe-rawtext witness stays in the frozen selection. Full tokenizer state/transition, streaming, diagnostics and tree integration remain open."
+            "HTML iframe, xmp, noembed and noframes use literal Text records with appropriate end-tag matching, EOF handling and null replacement. Supplementary original parser, cancellation/admission, DOM and connected App checks exercise the producer. The original F04-loaded-iframe-rawtext witness stays in the frozen selection. Full tokenizer state/transition, streaming, diagnostics and tree integration remain open.",
+            "Script-data/PLAINTEXT increment: the original native HTML scanner in src/html_script_data.rs handles escaped/double-escaped transitions, appropriate end tags and unfinished end-tag EOF. SCRIPT and STYLE keep references literal, replace source nulls with U+FFFD and use fallible text copying. Initial '=' recovery in permissive closing tags preserves quoted '>' characters. Loaded/inert native HTML PLAINTEXT consumes through EOF using existing character insertion, paragraph closure and active-formatting reconstruction; foreign parentage remains intact. The fixed supplementary Linux comparison improves from 76/110 to 110/110 matching retained trees: 34/52 to 52/52 unchanged WPT scriptdata01 trees (all 26 sources in loaded and inert paths), 34/44 to 44/44 adapted script controls, 0/6 to 6/6 adapted PLAINTEXT controls and 8/8 retained RAWTEXT controls. All 20 frozen new tests in src/html_script_data_tests.rs pass, up from eight; all 71 existing HTML tests remain passing. Three additional review/integration tests pass: the initial-equals regression in src/html_script_end_tag_tests.rs has a separate baseline failure, while the two tests in src/html_text_state_boundary_tests.rs have candidate-only evidence. The resulting 94 native checks are source-bound component evidence; the additional three are not added to the frozen baseline selection. Tree equality does not establish unavailable parse diagnostics or complete upstream-case acceptance. Scan cancellation and text-copy admission do not complete whole-parser allocation/cancellation accounting. Frozen foundation inputs, selections and original witnesses are unchanged. Diagnostics, streaming, wider tokenizer/tree integration, Windows App and required browser/corpus acceptance remain open; F04.01 and F04 remain partial."
           ],
           "dependency_details": []
         },
