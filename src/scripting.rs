@@ -3249,6 +3249,7 @@ impl Host for Bridge<'_> {
         if property=="id"&&self.canonical_selector_receiver(target){return Some("id");}
         if property=="className"&&self.canonical_selector_receiver(target){return Some("class");}
         if self.html_label_for_member(target,property){return Some("for");}
+        if self.fieldset_disabled_member(target,property){return Some("disabled");}
         if self.fieldset_name_member(target,property){return Some("name");}
         if self.output_name_member(target,property){return Some("name");}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(target) {return Some("href");}
@@ -3674,6 +3675,7 @@ impl Host for Bridge<'_> {
         if method==script_element_id::SET&&self.canonical_selector_receiver(object){return Some("id");}
         if method==script_element_class_name::SET&&self.canonical_selector_receiver(object){return Some("className");}
         if method==script_label_html_for::SET&&self.html_label_receiver(object){return Some("htmlFor");}
+        if method==script_fieldset::DISABLED_SET&&self.fieldset_receiver(object){return Some("disabled");}
         if method==script_fieldset::NAME_SET&&self.fieldset_receiver(object){return Some("name");}
         if method==script_output_metadata::NAME_SET&&self.html_output_receiver(object){return Some("name");}
         if let Some((property,true))=script_output_value::operation(method){return self.html_output_receiver(object).then_some(property);}
@@ -4562,7 +4564,7 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
-        if self.fieldset_name_member(object,property){return self.validate_fieldset(object);}
+        if self.fieldset_name_member(object,property)||self.fieldset_disabled_member(object,property){return self.validate_fieldset(object);}
         if self.xhr_index(object).is_some(){return self.xhr_validate_set(object,property,value);}
 
         if property == "nodeValue" && self.text_content_receiver(object) { self.native_node_access(object)?; }
@@ -5684,7 +5686,7 @@ impl Host for Bridge<'_> {
         if self.output_form_member(object,property){return self.output_form_get(object);}
         if self.control_type_member(object,property){return self.control_type_get(object,self.control_type_method(object).unwrap());}
         if self.form_length_member(object,property){return self.form_length_get(object);}
-        if self.fieldset_member(object,property){return self.fieldset_get(object,match property{"form"=>script_fieldset::FORM,"name"=>script_fieldset::NAME_GET,_=>script_fieldset::TYPE});}
+        if self.fieldset_member(object,property){return self.fieldset_get(object,match property{"form"=>script_fieldset::FORM,"name"=>script_fieldset::NAME_GET,"disabled"=>script_fieldset::DISABLED_GET,_=>script_fieldset::TYPE});}
         if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
@@ -6116,6 +6118,7 @@ impl Host for Bridge<'_> {
         if property=="id"&&self.canonical_selector_receiver(object){return self.element_id_set(object,&value);}
         if property=="className"&&self.canonical_selector_receiver(object){return self.element_class_name_set(object,&value);}
         if self.html_label_for_member(object,property){return self.html_label_for_set(object,&value);}
+        if self.fieldset_disabled_member(object,property){return self.fieldset_disabled_set(object,&value);}
         if self.fieldset_name_member(object,property){return self.fieldset_name_set(object,&value);}
         if self.output_name_member(object,property){return self.output_name_set(object,&value);}
         if self.output_value_member(object,property){return self.output_value_set(object,property,&value);}
@@ -6530,7 +6533,7 @@ impl Host for Bridge<'_> {
         if method==script_output_form::GET{return self.output_form_get(object);}
         if script_control_type::interface(method).is_some(){return self.control_type_get(object,method);}
         if method==script_form_length::GET{return self.form_length_get(object);}
-        if method==script_fieldset::NAME_SET{return Err("Fieldset name setter requires the native conversion transaction.".into());}
+        if matches!(method,script_fieldset::NAME_SET|script_fieldset::DISABLED_SET){return Err("Fieldset setters require the native conversion transaction.".into());}
         if script_fieldset::operation(method){return self.fieldset_get(object,method);}
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
@@ -9537,3 +9540,7 @@ mod script_fieldset;
 #[cfg(test)]
 #[path="script_fieldset_name_tests.rs"]
 mod fieldset_name_tests;
+
+#[cfg(test)]
+#[path="script_fieldset_disabled_tests.rs"]
+mod fieldset_disabled_tests;
