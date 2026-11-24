@@ -2,12 +2,11 @@
 //! https://html.spec.whatwg.org/multipage/forms.html#dom-lfe-labels
 use super::*;
 pub(in crate::scripting) const GET:&str="\0HTMLInputElement.get.labels";
-pub(in crate::scripting) fn interface(method:&str)->Option<&'static str>{match method{GET=>Some("HTMLInputElement"),"\0HTMLButtonElement.get.labels"=>Some("HTMLButtonElement"),"\0HTMLTextAreaElement.get.labels"=>Some("HTMLTextAreaElement"),_=>None}}
+pub(in crate::scripting) fn interface(method:&str)->Option<&'static str>{crate::javascript::CONTROL_LABEL_GETTERS.iter().find(|(_,get)|*get==method).map(|(interface,_)|*interface)}
 impl Bridge<'_>{
  pub(in crate::scripting) fn control_labels_method(&self,object:u32)->Option<&'static str>{
-  match self.concrete_html_interface(object).or_else(||self.inert_interface(object))?{
-   "HTMLInputElement"=>Some(GET),"HTMLButtonElement"=>Some("\0HTMLButtonElement.get.labels"),"HTMLTextAreaElement"=>Some("\0HTMLTextAreaElement.get.labels"),_=>None
-  }
+  let interface=self.concrete_html_interface(object).or_else(||self.inert_interface(object))?;
+  crate::javascript::CONTROL_LABEL_GETTERS.iter().find(|(name,_)|*name==interface).map(|(_,get)|*get)
  }
  pub(in crate::scripting) fn control_labels_receiver(&self,object:u32,method:&str)->bool{interface(method).is_some()&&self.control_labels_method(object)==Some(method)}
  pub(in crate::scripting) fn control_labels_member(&self,object:u32,property:&str)->bool{property=="labels"&&self.control_labels_method(object).is_some()}

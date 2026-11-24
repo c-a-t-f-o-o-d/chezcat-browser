@@ -652,7 +652,7 @@ impl Runtime {
             if name == "HTMLTextAreaElement" {
                 self.define_host_attribute(prototype,window,"value",super::TEXTAREA_VALUE_GET,Some(super::TEXTAREA_VALUE_SET))?;
             }
-            for (interface,get) in [("HTMLInputElement","\0HTMLInputElement.get.labels"),("HTMLButtonElement","\0HTMLButtonElement.get.labels"),("HTMLTextAreaElement","\0HTMLTextAreaElement.get.labels")]{
+            for &(interface,get) in super::CONTROL_LABEL_GETTERS{
                 if name==interface{self.define_host_attribute(prototype,window,"labels",get,None)?;}
             }
             if name == "HTMLInputElement" {

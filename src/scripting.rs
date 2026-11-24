@@ -3280,7 +3280,7 @@ impl Host for Bridge<'_> {
         // Container prototypes identify the objects, but their enumerable
         // native attributes still live outside the ordinary descriptor store.
         if let Some(interface) = self.concrete_html_interface(object) {
-            return matches!(interface, "HTMLLabelElement" | "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement" | "HTMLTextAreaElement");
+            return matches!(interface, "HTMLMeterElement" | "HTMLOutputElement" | "HTMLProgressElement" | "HTMLSelectElement" | "HTMLLabelElement" | "HTMLButtonElement" | "HTMLUListElement" | "HTMLInputElement" | "HTMLCanvasElement" | "HTMLTextAreaElement");
         }
         self.exposed_native_prototype(object)
     }
@@ -9300,3 +9300,7 @@ use script_inert_documents::label_control::input_labels as script_input_labels;
 #[cfg(test)]
 #[path="script_button_textarea_labels_tests.rs"]
 mod button_textarea_labels_tests;
+
+#[cfg(test)]
+#[path="script_remaining_builtin_labels_tests.rs"]
+mod remaining_builtin_labels_tests;

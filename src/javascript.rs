@@ -515,6 +515,10 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("input", "HTMLInputElement"),
     ("label", "HTMLLabelElement"),
     ("meta", "HTMLMetaElement"),
+    ("meter", "HTMLMeterElement"),
+    ("output", "HTMLOutputElement"),
+    ("progress", "HTMLProgressElement"),
+    ("select", "HTMLSelectElement"),
     ("script", "HTMLScriptElement"),
     ("link", "HTMLLinkElement"),
     ("slot", "HTMLSlotElement"),
@@ -522,6 +526,17 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("textarea", "HTMLTextAreaElement"),
     ("title", "HTMLTitleElement"),
     ("ul", "HTMLUListElement"),
+];
+
+/// Canonical readonly labels operations for ordinary built-in labelable controls.
+pub(crate) const CONTROL_LABEL_GETTERS:&[(&str,&str)]=&[
+    ("HTMLInputElement","\0HTMLInputElement.get.labels"),
+    ("HTMLButtonElement","\0HTMLButtonElement.get.labels"),
+    ("HTMLTextAreaElement","\0HTMLTextAreaElement.get.labels"),
+    ("HTMLMeterElement","\0HTMLMeterElement.get.labels"),
+    ("HTMLOutputElement","\0HTMLOutputElement.get.labels"),
+    ("HTMLProgressElement","\0HTMLProgressElement.get.labels"),
+    ("HTMLSelectElement","\0HTMLSelectElement.get.labels"),
 ];
 
 /// Exact ordinary interfaces for supported HTML nodes, including elements
