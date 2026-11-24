@@ -6613,3 +6613,7 @@ mod output_form_tests;
 #[cfg(test)]
 #[path="app_output_name_type_tests.rs"]
 mod output_name_type_tests;
+
+#[cfg(test)]
+#[path="app_output_text_replacement_tests.rs"]
+mod output_text_replacement_tests;

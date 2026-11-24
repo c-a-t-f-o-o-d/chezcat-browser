@@ -2683,7 +2683,7 @@ impl Bridge<'_> {
     fn text_content_container(&self, node: usize) -> bool {
         text_container(tag(self.doc,node))
             || self.doc.nodes.get(node).is_some_and(|item| item.namespace==crate::html::Namespace::Html
-                && matches!(item.kind,NodeKind::Element{..}) && script_clone_node::ordinary_clone_element(tag(self.doc,node)))
+                && matches!(item.kind,NodeKind::Element{..}) && (tag(self.doc,node)=="output" || script_clone_node::ordinary_clone_element(tag(self.doc,node))))
     }
 
     fn set_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
@@ -2703,6 +2703,10 @@ impl Bridge<'_> {
     }
 
     fn replace_main_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
+        self.state.work(1)?;
+        if self.state.execution_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Err("DOM computation time limit reached.".into());
+        }
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
@@ -2715,8 +2719,9 @@ impl Bridge<'_> {
         // already-loaded script/style/image resources must never become stale.
         let mut descendants = Vec::new();
         let mut stack = Vec::new();
-        stack.try_reserve(self.doc.nodes[node].children.len()).map_err(|_| "textContent traversal reservation failed.")?;
-        stack.extend(self.doc.nodes[node].children.iter().copied());
+        for &child in &self.doc.nodes[node].children {
+            script_text_replacement::push(self.state,&mut stack,child,text.capacity())?;
+        }
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
@@ -2724,11 +2729,14 @@ impl Bridge<'_> {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
-            descendants.try_reserve(1).map_err(|_| "textContent retained-node reservation failed.")?;
-            descendants.push(child);
-            stack.try_reserve(self.doc.nodes[child].children.len()).map_err(|_| "textContent traversal reservation failed.")?;
-            stack.extend(self.doc.nodes[child].children.iter().copied());
+            let other=script_text_replacement::bytes(&[&stack],text.capacity())?;
+            script_text_replacement::push(self.state,&mut descendants,child,other)?;
+            for &nested in &self.doc.nodes[child].children {
+                let other=script_text_replacement::bytes(&[&descendants],text.capacity())?;
+                script_text_replacement::push(self.state,&mut stack,nested,other)?;
+            }
         }
+        drop(stack);
         if !text.is_empty() && self.doc.nodes.len().saturating_add(self.state.blank_frame_nodes) >= self.state.node_limit {
             return Err("DOM appended-node limit reached (256 per document).".into());
         }
@@ -2738,8 +2746,8 @@ impl Bridge<'_> {
             self.state.work(1)?;
             if tag(self.doc, index) == "button" {
                 self.state.work(self.doc.nodes.len())?;
-                captions.try_reserve(1).map_err(|_| "textContent caption reservation failed.")?;
-                captions.push(index);
+                let other=script_text_replacement::bytes(&[&descendants],text.capacity())?;
+                script_text_replacement::push(self.state,&mut captions,index,other)?;
             }
             current = self.state.tree.parents.get(index).copied().flatten();
         }
@@ -2750,16 +2758,17 @@ impl Bridge<'_> {
         // Text, while the empty string creates no child at all.
         let detached_parent = self.state.detached_nodes.contains(&node);
         let text_bytes = if text.is_empty() { 0 } else { text.capacity() };
+        let scratch=script_text_replacement::bytes(&[&descendants,&captions],if text.is_empty(){text.capacity()}else{0})?;
         let count = usize::from(!text.is_empty());
         let minimum = self.main_node_minimum(count)?;
         let (child_growth, child_bytes) = if text.is_empty() { (None, 0) } else {
             let available = self.state.retained_limit.saturating_sub(self.state.retained)
-                .checked_sub(text_bytes).and_then(|bytes|bytes.checked_sub(minimum))
+                .checked_sub(scratch).and_then(|bytes|bytes.checked_sub(text_bytes)).and_then(|bytes|bytes.checked_sub(minimum))
                 .ok_or("textContent child/text/node storage allowance exhausted.")?;
             retained_storage::capacity(&self.doc.nodes[node].children, 1, available)?
         };
         let available = self.state.retained_limit.saturating_sub(self.state.retained)
-            .checked_sub(text_bytes).and_then(|bytes|bytes.checked_sub(child_bytes)).ok_or("textContent node backing allowance exhausted.")?;
+            .checked_sub(scratch).and_then(|bytes|bytes.checked_sub(text_bytes)).and_then(|bytes|bytes.checked_sub(child_bytes)).ok_or("textContent node backing allowance exhausted.")?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(count, available)?;
         // An empty replacement creates no retained Text, even if its incoming
         // buffer has spare capacity. Old detached children remain charged.
@@ -9357,3 +9366,10 @@ mod output_form_tests;
 #[cfg(test)]
 #[path="script_output_name_type_tests.rs"]
 mod output_name_type_tests;
+
+#[cfg(test)]
+#[path="script_output_text_replacement_tests.rs"]
+mod output_text_replacement_tests;
+
+#[path="script_text_replacement.rs"]
+mod script_text_replacement;
