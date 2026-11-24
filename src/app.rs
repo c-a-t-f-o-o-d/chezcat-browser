@@ -6701,3 +6701,7 @@ mod gauge_lifecycle_tests;
 #[cfg(test)]
 #[path="app_time_datetime_tests.rs"]
 mod time_datetime_tests;
+
+#[cfg(test)]
+#[path="app_data_value_tests.rs"]
+mod data_value_tests;
