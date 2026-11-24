@@ -6785,3 +6785,7 @@ mod pre_width_tests;
 #[cfg(test)]
 #[path="app_hr_align_tests.rs"]
 mod hr_align_tests;
+
+#[cfg(test)]
+#[path="app_hr_color_tests.rs"]
+mod hr_color_tests;
