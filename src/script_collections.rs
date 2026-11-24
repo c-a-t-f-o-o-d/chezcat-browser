@@ -139,7 +139,7 @@ impl Filter {
     }
 }
 
-fn class_tokens(value: DomStringRef<'_>) -> impl Iterator<Item = DomStringRef<'_>> {
+pub(super) fn class_tokens(value: DomStringRef<'_>) -> impl Iterator<Item = DomStringRef<'_>> {
     let (text, units) = match value {
         DomStringRef::Scalar(text) => (text, &[][..]),
         DomStringRef::Raw(units) => ("", units),

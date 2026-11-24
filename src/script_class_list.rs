@@ -64,16 +64,12 @@ impl Bridge<'_> {
         self.state.work(attrs.len())?;
         self.state
             .copies(attrs.iter().map(|attr| attr.name.bytes()).sum())?;
-        let raw = self.doc.attr(node, attribute).unwrap_or("");
-        if raw.len() > self.state.limits.host.string_bytes {
-            return Err("Class attribute exceeds the host string bound.".into());
-        }
-        self.state.copies(raw.len())?;
-        Ok(Value::String(raw.to_owned()))
+        let Some(raw)=self.doc.dom_attr(node,attribute) else{return Ok(Value::String(String::new()));};
+        Self::dom_string_value(self.state,raw)
     }
     fn class_tokens(&mut self, node: usize, attribute:&str) -> Result<Vec<String>, String> {
         let Value::String(raw) = self.class_value(node,attribute)? else {
-            unreachable!()
+            return Err("Raw UTF-16 token mutation requires exact serialization integration.".into());
         };
         self.state.work(raw.len())?;
         self.state.copies(raw.len())?;
@@ -126,16 +122,8 @@ impl Bridge<'_> {
         if property == "value" {
             return self.class_value(node,attribute);
         }
-        if property == "length" || collection_index(property).is_some() {
-            let tokens = self.class_tokens(node,attribute)?;
-            return if property == "length" {
-                Ok(Value::Number(tokens.len() as f64))
-            } else {
-                Ok(collection_index(property)
-                    .and_then(|index| tokens.get(index))
-                    .map_or(Value::Undefined, |token| Value::String(token.clone())))
-            };
-        }
+        if property == "length" {return self.read_class_tokens(node,attribute,token_list_reads::Read::Length);}
+        if let Some(index)=collection_index(property){return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,true));}
         match property {
             "toggle" | "replace" | "entries" | "keys" | "values" | "forEach" => Err(
                 format!("DOMTokenList operation {property:?} is not implemented."),
@@ -173,10 +161,20 @@ impl Bridge<'_> {
             return self.class_value(node,attribute);
         }
         if method=="supports" {
-            let Value::String(token)=args.first().ok_or("supports requires a converted DOMString token.")? else{return Err("supports requires a converted DOMString token.".into());};
+            let token=token_list_reads::argument(args.first().ok_or("supports requires a converted DOMString token.")?)?;
             let supported=supported_tokens(object).ok_or("This token attribute has no supported token set.")?;
-            self.state.work(token.len().saturating_mul(supported.len().max(1)))?;
-            return Ok(Value::Bool(supported.iter().any(|name|token.eq_ignore_ascii_case(name))));
+            self.state.work(token.logical_bytes().saturating_mul(supported.len().max(1)))?;
+            let fold=|unit:u16|if (0x41..=0x5a).contains(&unit){unit+0x20}else{unit};
+            return Ok(Value::Bool(supported.iter().any(|name|token.code_units().map(fold).eq(name.encode_utf16().map(fold)))));
+        }
+        if method=="contains" {
+            let token=token_list_reads::argument(args.first().ok_or("contains requires a converted DOMString token.")?)?;
+            return self.read_class_tokens(node,attribute,token_list_reads::Read::Contains(token));
+        }
+        if method=="item" {
+            let value=args.first().ok_or("item requires an index.")?.to_number();
+            let index=if value.is_finite(){value.trunc().rem_euclid(4_294_967_296.0)as usize}else{0};
+            return self.read_class_tokens(node,attribute,token_list_reads::Read::Index(index,false));
         }
         let mut tokens = self.class_tokens(node,attribute)?;
         match method {
@@ -207,21 +205,6 @@ impl Bridge<'_> {
                 self.update_class_tokens(node, attribute, &tokens)?;
                 Ok(Value::Undefined)
             }
-            "contains" => {
-                let token = self.text(args.first().ok_or("contains requires a token.")?)?;
-                Ok(Value::Bool(tokens.contains(&token)))
-            }
-            "item" => {
-                let value = args.first().ok_or("item requires an index.")?.to_number();
-                let index = if value.is_finite() {
-                    value.trunc().rem_euclid(4_294_967_296.0) as usize
-                } else {
-                    0
-                };
-                Ok(tokens
-                    .get(index)
-                    .map_or(Value::Null, |token| Value::String(token.clone())))
-            }
             _ => Err(format!(
                 "DOMTokenList method {method:?} is not implemented."
             )),
@@ -246,14 +229,25 @@ impl Bridge<'_> {
     pub(super) fn class_list_keys(&mut self, object: u32) -> Result<Vec<String>, String> {
         let node = self.class_list_node(object)?;
         let attribute=attribute(object).ok_or("Invalid token attribute kind.")?;
-        let tokens = self.class_tokens(node,attribute)?;
-        self.state.work(tokens.len())?;
+        let Value::Number(count)=self.read_class_tokens(node,attribute,token_list_reads::Read::Length)? else{unreachable!()};
+        let count=count as usize;
+        self.state.work(count)?;
         self.state.copies(
-            tokens
-                .len()
+            count
                 .checked_mul(20)
                 .ok_or("Class token index accounting overflow.")?,
         )?;
-        Ok((0..tokens.len()).map(|index| index.to_string()).collect())
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let _required=count.checked_mul(size_of::<String>()+20).filter(|&n|n<=available).ok_or("Token read keys retained allowance exhausted.")?;
+        let mut keys=Vec::new();keys.try_reserve_exact(count).map_err(|_|"Cannot reserve token read keys.")?;
+        let mut storage=keys.capacity().checked_mul(size_of::<String>()).filter(|&n|n<=available).ok_or("Token read keys allocation exceeds allowance.")?;
+        for index in 0..count{
+            let mut key=String::new();key.try_reserve_exact(20).map_err(|_|"Cannot reserve token read key spelling.")?;
+            storage=storage.checked_add(key.capacity()).filter(|&n|n<=available).ok_or("Token read key spelling exceeds allowance.")?;
+            use std::fmt::Write;
+            write!(&mut key,"{index}").map_err(|_|"Cannot format token read key spelling.")?;
+            keys.push(key);
+        }
+        Ok(keys)
     }
 }

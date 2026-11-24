@@ -3649,6 +3649,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0 && self.class_list_receiver(object) && matches!(method,"contains"|"supports"){return true;}
         if index==0&&(script_inert_documents::identifier_lookup::operation(method).is_some()||object==DOCUMENT&&method=="getElementById"){return true;}
         if let Some(edit)=character_data_interface::operation(method){return edit.data_index()==Some(index);}
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return index==0 || method==adjacent_interface::TEXT && index==1;}
@@ -9060,3 +9061,10 @@ mod inert_attribute_units_tests;
 #[cfg(test)]
 #[path="script_identifier_lookup_tests.rs"]
 mod identifier_lookup_tests;
+
+#[cfg(test)]
+#[path = "script_token_list_exact_reads_tests.rs"]
+mod token_list_exact_reads_tests;
+
+#[path = "script_token_list_reads.rs"]
+mod token_list_reads;
