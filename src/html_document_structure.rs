@@ -318,12 +318,45 @@ impl Structure {
         }
     }
 
+    pub(super) fn supports_data_nulls(&self, doc: &Document, stack: &[usize]) -> bool {
+        self.mode != Mode::InHead || !stack.iter().any(|&node| {
+            doc.nodes[node].namespace == Namespace::Html
+                && matches!(&doc.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "noscript")
+        })
+    }
+
+    fn body_text(
+        doc: &mut Document,
+        stack: &mut Vec<usize>,
+        mut text: String,
+        limit: usize,
+        formatting: &mut active_formatting::Formatting,
+        check: &dyn Fn() -> Result<(), String>,
+        html_data: bool,
+    ) -> Result<(), String> {
+        if html_data && doc.nodes[*stack.last().unwrap()].namespace == Namespace::Html {
+            text = data_characters::without_nulls(text, check)?;
+        }
+        if text.is_empty() {
+            return Ok(());
+        }
+        formatting.reconstruct(doc, stack, limit, None)?;
+        if append_text_value(doc, *stack.last().unwrap(), text, limit)? {
+            Ok(())
+        } else {
+            Err(format!("HTML document node limit reached ({limit} nodes)."))
+        }
+    }
+
     pub(super) fn text(
         &mut self,
         doc: &mut Document,
         stack: &mut Vec<usize>,
         mut text: String,
         limit: usize,
+        formatting: &mut active_formatting::Formatting,
+        check: &dyn Fn() -> Result<(), String>,
+        html_data: bool,
     ) -> Result<(), String> {
         let append = |doc: &mut Document, parent: usize, text: String| -> Result<(), String> {
             if append_text_value(doc, parent, text, limit)? {
@@ -333,16 +366,19 @@ impl Structure {
             }
         };
         if self.nested_metadata(stack) {
-            return append(doc, *stack.last().unwrap(), text);
+            return Self::body_text(doc, stack, text, limit, formatting, check, html_data);
         }
         if self.mode == Mode::InBody {
-            return append(doc, *stack.last().unwrap(), text);
+            return Self::body_text(doc, stack, text, limit, formatting, check, html_data);
         }
+        let body_whitespace = matches!(self.mode, Mode::AfterBody | Mode::AfterHtml);
         let leading = text.bytes().take_while(|&b| ascii_space(b)).count();
         if leading > 0 {
             let retain = !matches!(self.mode, Mode::BeforeHtml | Mode::BeforeHead);
             if leading == text.len() {
-                return if retain {
+                return if body_whitespace {
+                    Self::body_text(doc, stack, text, limit, formatting, check, html_data)
+                } else if retain {
                     append(doc, *stack.last().unwrap(), text)
                 } else {
                     Ok(())
@@ -354,7 +390,11 @@ impl Structure {
                     .try_reserve_exact(leading)
                     .map_err(|_| "Cannot reserve initial whitespace.")?;
                 prefix.push_str(&text[..leading]);
-                append(doc, *stack.last().unwrap(), prefix)?;
+                if body_whitespace {
+                    Self::body_text(doc, stack, prefix, limit, formatting, check, html_data)?;
+                } else {
+                    append(doc, *stack.last().unwrap(), prefix)?;
+                }
             }
             text.drain(..leading);
         }
@@ -362,7 +402,7 @@ impl Structure {
             return Ok(());
         }
         self.body_for_content(doc, stack, limit)?;
-        append(doc, *stack.last().unwrap(), text)
+        Self::body_text(doc, stack, text, limit, formatting, check, html_data)
     }
 
     fn body_for_content(

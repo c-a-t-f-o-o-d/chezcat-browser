@@ -349,6 +349,8 @@ impl Tables {
         stack: &mut Vec<usize>,
         mut text: String,
         limit: usize,
+        check: &dyn Fn() -> Result<(), String>,
+        html_data: bool,
     ) -> Result<Option<String>, String> {
         let Some(table) = self.active(stack) else {
             return Ok(Some(text));
@@ -380,6 +382,12 @@ impl Tables {
         let parent = *stack.last().unwrap();
         if !table_parent(name(doc, parent)) {
             return Ok(Some(text));
+        }
+        if html_data {
+            text = data_characters::without_nulls(text, check)?;
+        }
+        if text.is_empty() {
+            return Ok(None);
         }
         if self.pending_parent.is_some_and(|n| n != parent) {
             return Err("Table text parent changed before its token boundary.".into());
