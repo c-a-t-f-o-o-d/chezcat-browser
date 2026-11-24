@@ -95,6 +95,8 @@ Canonical HTMLLabelElement htmlFor now shares exact native reflection, ordinary
 author shadows, owner/origin checks and bounded read/write refusal recovery;
 Canonical label control reads now follow exact same-root ID and descendant
 association, native identity, bounded traversal and actual App activation;
+Canonical label form reads now preserve native stored owners and bounded
+inert connected/detached association with descriptor and App evidence;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the

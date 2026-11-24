@@ -3095,6 +3095,7 @@ impl Bridge<'_> {
         if self.aria_reflection_member(object,property){return true;}
         if self.element_id_member(object,property){return true;}
         if self.element_class_name_member(object,property){return true;}
+        if self.html_label_form_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.html_label_for_member(object,property){return true;}
         if self.element_class_list_member(object,property){return true;}
@@ -3402,6 +3403,7 @@ impl Host for Bridge<'_> {
         if self.aria_reflection_member(object,property){return false;}
         if self.element_id_member(object,property){return false;}
         if self.element_class_name_member(object,property){return false;}
+        if self.html_label_form_member(object,property){return false;}
         if self.html_label_control_member(object,property){return false;}
         if self.html_label_for_member(object,property){return false;}
         if self.element_class_list_member(object,property){return false;}
@@ -3520,6 +3522,7 @@ impl Host for Bridge<'_> {
     }
 
     fn readonly_property(&self, object: u32, property: &str) -> bool {
+        if self.html_label_form_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -3927,6 +3930,7 @@ impl Host for Bridge<'_> {
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) && self.event_target_interface(object) {return Some(object);}
         if script_element_id::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_name::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if method==script_label_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_label_control::GET&&self.event_target_interface(object){return Some(object);}
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_list::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4236,6 +4240,7 @@ impl Host for Bridge<'_> {
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
         if script_element_id::operation(method){return self.validate_element_id(object,method==script_element_id::SET);}
         if script_element_class_name::operation(method){return self.validate_element_class_name(object,method==script_element_class_name::SET);}
+        if method==script_label_form::GET{return self.validate_html_label_form(object);}
         if method==script_label_control::GET{return self.validate_html_label_control(object);}
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
         if script_element_class_list::operation(method){return self.validate_element_class_list(object);}
@@ -4691,6 +4696,7 @@ impl Host for Bridge<'_> {
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) {return self.event_target_interface(object)&&self.document_location_owner(receiver).is_some();}
         if script_element_id::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_element_class_name::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
+        if method==script_label_form::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_element_class_list::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
@@ -5563,6 +5569,7 @@ impl Host for Bridge<'_> {
         if self.meta_member(object, property) { return self.meta_get(object, meta_attribute(property).unwrap()); }
         if self.element_id_member(object,property){return self.element_id_get(object);}
         if self.element_class_name_member(object,property){return self.element_class_name_get(object);}
+        if self.html_label_form_member(object,property){return self.html_label_form_get(object);}
         if self.html_label_control_member(object,property){return self.html_label_control_get(object);}
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
         if self.element_class_list_member(object,property){return self.element_class_list_get(object);}
@@ -6392,6 +6399,7 @@ impl Host for Bridge<'_> {
         if method==TITLE_TEXT_GET {return self.title_child_text(object,false).map(Self::dom_string_owned);}
         if method==script_element_id::GET{return self.element_id_get(object);}
         if method==script_element_class_name::GET{return self.element_class_name_get(object);}
+        if method==script_label_form::GET{return self.html_label_form_get(object);}
         if method==script_label_control::GET{return self.html_label_control_get(object);}
         if method==script_label_html_for::GET{return self.html_label_for_get(object);}
         if method==script_element_class_list::GET{return self.element_class_list_get(object);}
@@ -9268,3 +9276,9 @@ mod script_html_label_control_tests;
 
 
 use script_inert_documents::label_control as script_label_control;
+
+#[cfg(test)]
+#[path="script_html_label_form_tests.rs"]
+mod html_label_form_tests;
+
+use script_inert_documents::label_control::label_form as script_label_form;
