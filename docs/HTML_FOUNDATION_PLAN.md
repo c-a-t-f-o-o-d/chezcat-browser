@@ -423,6 +423,9 @@ reflection, including class-based pixels and preserved editor/link/page identity
 Initial child writes, main raw SVG writes, SVGAnimatedString-specific interfaces, inert
 classList and frozen browser qualification remain separate. F01 stays partial.
 
+Canonical Element.classList now has inherited getter/setter metadata, stable supported main HTML/SVG token-list identity, saved accessors and ordinary prototype changes. Its PutForwards setter validates the genuine receiver and captured origin before reading the current classList property, then forwards the original value to the selected object value setter. Author getters, setters, proxies, abrupt effects and late native DOMString conversion retain their order; false Set results are ignored even for strict callers. Native attribute identity, observations and resource refusal/recovery remain shared with DOMTokenList.value. Original native/App and production checks qualify this slice, including class-based paint with preserved editor/link/page identity. Default inert, child and other token-list owner storage and frozen browser qualification remain separate. F01 stays partial.
+
+
 ### F02 — Bytes, encodings and MIME routing
 
 **Deliverables**

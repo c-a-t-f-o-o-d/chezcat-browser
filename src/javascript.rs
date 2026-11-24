@@ -9268,6 +9268,28 @@ impl Runtime {
         if matches!(method,document_location_interface::GET|document_location_interface::SET) {
             return self.document_location_call(object,method,args,host);
         }
+        if method=="\0Element.set.classList" {
+            // Web IDL PutForwards reads the receiver's current property before
+            // forwarding the original value. Only the selected value setter
+            // converts it. The enclosing native call inhibits transient
+            // collection while the getter and setter can reenter script.
+            host.native_operation_caller(self.native_access_caller
+                .unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+            host.validate_call(object,method,&[])
+                .map_err(|(kind,message)|Fault::exception(kind,message))?;
+            let target=self.read_property(&Value::Host(object),"classList",host)?;
+            if !matches!(target,Value::Object(_)|Value::Function(_)|Value::Host(_)) {
+                return Err(Fault::exception("TypeError","Element.classList forwarding requires an object."));
+            }
+            let value=self.copy_value(args.first().unwrap_or(&Value::Undefined))?;
+            // Set(Q, "value", V, false) ignores a false internal Set result,
+            // even when this accessor was called from a strict author script.
+            let previous_strict=std::mem::replace(&mut self.strict,false);
+            let result=self.write_reference(Reference::Property(target,"value".into()),value,host);
+            self.strict=previous_strict;
+            result?;
+            return Ok(Value::Undefined);
+        }
         // Canonical attribute getters ignore arguments; setters use one value.
         let attribute_setter=html_reflection_interface::operation(method).map(|(_,setter)|setter)
             .or_else(||aria_reflection_interface::operation(method).map(|(_,_,setter)|setter));
