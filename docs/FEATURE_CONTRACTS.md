@@ -37,17 +37,11 @@ Use current source-linked evidence for status; preserve the lasting requirements
 
 At the historical `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
 
-Tagged candidate `0.82.0-alpha.2` identifies
-[`14134ab`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/14134aba8ac2ab001c8ec13db77f68fa220b1400),
-including integrated feature work through `1de1f24` and release preparation.
-Its [release workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-failed at the normal Windows test stage, before packages or publication. No
-alpha.2 assets were published. This changes no acceptance requirement or
-historical measurement; the verified downloadable baseline is [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).
-
-The immutable alpha.3 F00 candidate also failed hosted normal verification.
-The alpha.4 source includes the normal adapter and capacity repairs. See the
-[release record](RELEASING.md#published-baseline) for delivery evidence.
+The current verified release is
+[0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).
+Its Windows build, release checks and published downloads passed verification.
+See the [release record](RELEASING.md#current-verified-release) for delivery
+evidence and [release history](RELEASING.md#release-history) for earlier candidates.
 
 The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md) and its
 [coverage register](HTML_FOUNDATION_COVERAGE.json) now govern active development.

@@ -165,20 +165,15 @@ they are not production dependencies and are not required by `verify_offline.py`
 
 ## Source and runtime identity
 
-The verified F00 release is [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4), source `122d0b7de5988493481dc4bed168d01969eef488`. Extract the Windows runtime ZIP with its resources together. [Asset hashes and runtime evidence](RELEASING.md#published-baseline)
-The earlier alpha.3 candidate at `ff5740d` failed hosted normal qualification.
-The [release record](RELEASING.md#published-baseline) identifies the verified download.
-The earlier immutable `0.82.0-alpha.2` tag identifies
-`14134aba8ac2ab001c8ec13db77f68fa220b1400`; the
-[tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-failed at the normal native-test stage before the optimized release build and
-package publication. Alpha.2 has no published release assets. A local build
-remains a development build unless the normal tagged
-workflow binds the matching immutable tag.
+The verified F00 release is
+[v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4),
+source `122d0b7de5988493481dc4bed168d01969eef488`. Extract the Windows runtime ZIP
+with its resources together. See the
+[release record](RELEASING.md#current-verified-release) for verified assets and
+runtime evidence, and [release history](RELEASING.md#release-history) for earlier candidates.
 
-Published `0.82.0-alpha.1` identifies tagged source
-`f2e1823266a7c08c89bce7293572d801da62053c`. Its downloaded package, PE, HTTP User-Agent,
-CLI and About identities passed the [release checks](RELEASING.md#published-baseline).
+A local build remains a development build unless the normal tagged workflow
+binds the matching immutable tag.
 
 About shows the development build identity and source state. As a historical
 example, the verified clean integrated build at

@@ -540,8 +540,8 @@ records this shared rendering correction. Each new checkpoint still requires
 exact normal/build/executable verification.
 At 1280x800, zoom100 and normal JavaScript, the original panels now share a row;
 at 640x800 they retain their original stacking. Vue execution is separate; the
-latest unchanged W3 first-root failure is recorded under CP6. No reactive
-interaction or full-framework pass is claimed.
+historical W3 first-root failure at that checkpoint is recorded under CP6.
+No reactive interaction or full-framework pass is claimed.
 
 Attribute selectors share one parser and matcher across CSS and supported DOM
 queries, `matches` and `closest`. In addition to presence, exact and token matching,
