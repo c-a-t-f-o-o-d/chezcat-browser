@@ -1,27 +1,36 @@
-//! HTMLInputElement.labels retains a live native NodeList identity.
+//! Built-in control labels retain live native NodeList identities.
 //! https://html.spec.whatwg.org/multipage/forms.html#dom-lfe-labels
 use super::*;
 pub(in crate::scripting) const GET:&str="\0HTMLInputElement.get.labels";
+pub(in crate::scripting) fn interface(method:&str)->Option<&'static str>{match method{GET=>Some("HTMLInputElement"),"\0HTMLButtonElement.get.labels"=>Some("HTMLButtonElement"),"\0HTMLTextAreaElement.get.labels"=>Some("HTMLTextAreaElement"),_=>None}}
 impl Bridge<'_>{
- pub(in crate::scripting) fn html_input_labels_receiver(&self,object:u32)->bool{
-  self.concrete_html_interface(object)==Some("HTMLInputElement")||self.inert_interface(object)==Some("HTMLInputElement")
+ pub(in crate::scripting) fn control_labels_method(&self,object:u32)->Option<&'static str>{
+  match self.concrete_html_interface(object).or_else(||self.inert_interface(object))?{
+   "HTMLInputElement"=>Some(GET),"HTMLButtonElement"=>Some("\0HTMLButtonElement.get.labels"),"HTMLTextAreaElement"=>Some("\0HTMLTextAreaElement.get.labels"),_=>None
+  }
  }
- pub(in crate::scripting) fn html_input_labels_member(&self,object:u32,property:&str)->bool{property=="labels"&&self.html_input_labels_receiver(object)}
- pub(in crate::scripting) fn validate_html_input_labels(&self,object:u32)->Result<(),(&'static str,String)>{
-  if !self.html_input_labels_receiver(object){return Err(("TypeError","HTMLInputElement.labels requires a genuine HTML input.".into()));}
+ pub(in crate::scripting) fn control_labels_receiver(&self,object:u32,method:&str)->bool{interface(method).is_some()&&self.control_labels_method(object)==Some(method)}
+ pub(in crate::scripting) fn control_labels_member(&self,object:u32,property:&str)->bool{property=="labels"&&self.control_labels_method(object).is_some()}
+ pub(in crate::scripting) fn validate_control_labels(&self,object:u32,method:&str)->Result<(),(&'static str,String)>{
+  if !self.control_labels_receiver(object,method){return Err(("TypeError","Labels accessor requires its genuine HTML control interface.".into()));}
   self.native_node_access(object)?;
-  if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child input label lists require their tree lifecycle hooks.".into()));}
+  if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child control label lists require their tree lifecycle hooks.".into()));}
   Ok(())
  }
- pub(in crate::scripting) fn html_input_labels_get(&mut self,object:u32)->Result<Value,String>{
-  self.validate_html_input_labels(object).map_err(|(_,e)|e)?;
-  let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(8).and_then(|n|n.checked_mul(8)).ok_or("Input labels lookup work overflow.")?;
+ pub(in crate::scripting) fn html_control_labels_get(&mut self,object:u32,method:&str)->Result<Value,String>{
+  self.validate_control_labels(object,method).map_err(|(_,e)|e)?;
+  let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(8).and_then(|n|n.checked_mul(8)).ok_or("Control labels lookup work overflow.")?;
   self.state.work(lookup)?;
   if !self.labelable_element(object)?{return Ok(Value::Null);}
-  self.create_input_labels_list(object)
+  self.create_control_labels_list(object)
  }
- pub(in crate::scripting) fn input_labels_list_nodes(&mut self,object:u32)->Result<Vec<u32>,String>{
-  self.validate_html_input_labels(object).map_err(|(_,e)|e)?;
+ #[cfg(test)]
+ pub(in crate::scripting) fn html_input_labels_get(&mut self,object:u32)->Result<Value,String>{self.html_control_labels_get(object,GET)}
+ #[cfg(test)]
+ pub(in crate::scripting) fn input_labels_list_nodes(&mut self,object:u32)->Result<Vec<u32>,String>{self.validate_control_labels(object,GET).map_err(|(_,e)|e)?;self.control_labels_list_nodes(object)}
+ pub(in crate::scripting) fn control_labels_list_nodes(&mut self,object:u32)->Result<Vec<u32>,String>{
+  let method=self.control_labels_method(object).ok_or("Control labels require a supported genuine HTML control.")?;
+  self.validate_control_labels(object,method).map_err(|(_,e)|e)?;
   let lookup=self.state.inert_documents.adopted.lookup_work().checked_add(8).and_then(|n|n.checked_mul(8)).ok_or("Input labels lookup work overflow.")?;
   self.state.work(lookup)?;self.state.rebuild(self.doc)?;
   if !self.labelable_element(object)?{return Ok(Vec::new());}
