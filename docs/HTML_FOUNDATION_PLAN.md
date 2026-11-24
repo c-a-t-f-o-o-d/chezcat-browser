@@ -482,6 +482,8 @@ HTMLFormElement now exposes a canonical readonly length getter that counts actua
 
 HTMLFieldSetElement now has a canonical native/inert interface and readonly form/type getters. Form ownership uses the existing exact current association helper with connected explicit IDs and detached ancestors; type returns fieldset. Concrete namespace/local-name brands, illegal direct construction, author override/delete/restore, captured origin and bounded work/copy/string/storage/deadline refusal/recovery retain native authority. Existing disabled-fieldset/first-legend widget behavior remains separate from metadata reads. Focused native and in-process App pointer/paint/editor/link checks are scoped evidence. Fieldset elements/validation, broader name/reflection and form lifecycle, main import/promotion and child lifecycle remain required; F01 stays partial.
 
+HTMLFieldSetElement now exposes canonical name DOMString reflection over the actual null-namespace attribute. Native and inert setters convert once, preserve exact UTF-16, use current Attr identity after conversion and retain native observer, live-name and selector behavior. Author overrides remain ordinary descriptors; canonical borrowed accessors keep concrete brand and captured-origin checks. Reads and writes preserve work/copy/string/storage/deadline refusal and recovery, with scoped native and App pointer/paint/editor/link evidence. This does not complete disabled IDL reflection, fieldset collections/validation, broader forms, main import/promotion or child lifecycle; F01 stays partial.
+
 
 ### F02 — Bytes, encodings and MIME routing
 

@@ -545,3 +545,5 @@ Paths are repository-root-relative references, not additional runtime payloads.
 
 For full lasting acceptance requirements, consult [feature contracts](FEATURE_CONTRACTS.md).
 For task order, use the [roadmap](ROADMAP.md); this matrix is not a release schedule.
+
+HTMLFieldSetElement now exposes canonical name DOMString reflection over the actual null-namespace attribute. Native and inert setters convert once, preserve exact UTF-16, use current Attr identity after conversion and retain native observer, live-name and selector behavior. Author overrides remain ordinary descriptors; canonical borrowed accessors keep concrete brand and captured-origin checks. Reads and writes preserve work/copy/string/storage/deadline refusal and recovery, with scoped native and App pointer/paint/editor/link evidence. This does not complete disabled IDL reflection, fieldset collections/validation, broader forms, main import/promotion or child lifecycle; F01 stays partial.
