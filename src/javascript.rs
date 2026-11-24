@@ -10272,6 +10272,9 @@ impl Runtime {
         if matches!(method, "charAt" | "charCodeAt" | "codePointAt") && object.is_string() {
             return self.string_character_value(&object,method,args,host);
         }
+        if method == "trim" && object.is_string() {
+            return self.string_trim_value(&object);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
                 "toString" | "valueOf" => Ok(object),
@@ -10289,7 +10292,6 @@ impl Runtime {
             return match method {
                 "split" => self.split_string(&text, args),
                 "toString" | "valueOf" => self.checked_value(Value::String(text)),
-                "trim" => self.checked_value(Value::String(text.trim_matches(js_space).into())),
                 "toLowerCase" => self.checked_value(Value::String(text.to_lowercase())),
                 "toUpperCase" => self.checked_value(Value::String(text.to_uppercase())),
                 "includes" | "startsWith" | "endsWith" => {
@@ -14341,3 +14343,10 @@ mod character_position_tests;
 
 #[path = "character_position.rs"]
 mod character_position;
+
+#[cfg(test)]
+#[path = "string_trim_utf16_tests.rs"]
+mod string_trim_utf16_tests;
+
+#[path = "string_trim.rs"]
+mod string_trim;
