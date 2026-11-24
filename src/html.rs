@@ -15,6 +15,8 @@ use crate::dom_string::DomString;
 mod named_references;
 #[path = "html_script_data.rs"]
 mod script_data;
+#[path = "html_data_characters.rs"]
+mod data_characters;
 
 #[cfg(test)]
 #[path = "html_script_data_tests.rs"]
@@ -27,6 +29,10 @@ mod script_end_tag_tests;
 #[cfg(test)]
 #[path = "html_text_state_boundary_tests.rs"]
 mod text_state_boundary_tests;
+
+#[cfg(test)]
+#[path = "html_data_character_tests.rs"]
+mod data_character_tests;
 
 #[cfg(test)]
 #[path = "html_named_reference_tests.rs"]
@@ -423,9 +429,10 @@ fn parse_internal(
                 let text=if plaintext {html_raw_text(&input[position..end],loaded.map(|tree| tree.check_cancel))?}
                     else {named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?};
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
-                if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit)? {
-                    formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
-                    start.text(&mut document,&mut stack,text,node_limit)?;
+                let check=loaded.unwrap().check_cancel;
+                let html_data=!uncertain_foreign_recovery && start.supports_data_nulls(&document,&stack);
+                if let Some(text)=tables.characters(&mut document,&mut stack,text,node_limit,check,html_data)? {
+                    start.text(&mut document,&mut stack,text,node_limit,&mut formatting,check,html_data)?;
                 }
                 position=end;continue;
             }
@@ -532,9 +539,10 @@ fn parse_internal(
                 svg.root = None;
                 if let Some(start)=&mut structure{
                     initial=false;
-                    if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit)? {
-                        formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;
-                        start.text(&mut document,&mut stack,text,node_limit)?;
+                    let check=loaded.unwrap().check_cancel;
+                    let html_data=!uncertain_foreign_recovery && start.supports_data_nulls(&document,&stack);
+                    if let Some(text)=tables.characters(&mut document,&mut stack,"<".into(),node_limit,check,html_data)? {
+                        start.text(&mut document,&mut stack,text,node_limit,&mut formatting,check,html_data)?;
                     }
                     position+=1;continue;
                 }

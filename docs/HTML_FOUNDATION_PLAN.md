@@ -567,15 +567,45 @@ pass with two obsolete declaration refusals replaced by exact comment assertions
 Four separately identified scan/copy checks also pass. The fixed supplementary
 tree comparison improves from 424/562 to 560/562, preserving all prior matches.
 All 26 unchanged WPT comment trees remain matching; the separate adapted
-Comment/Character cohort improves from 398/536 to 534/536. The remaining loaded
-and inert pair retains a literal in-body NUL Text node after a correctly parsed
-comment. Its expected output and place in the selection remain unchanged; fixing
-that character-dispatch contract requires the applicable insertion-mode rules.
+Comment/Character cohort improves from 398/536 to 534/536. At that checkpoint,
+the remaining loaded and inert pair retained a literal in-body NUL Text node
+after a correctly parsed comment. The DATA character increment below resolves
+that pair without changing its expected output or place in the selection.
 
 Checked DOCTYPE/generic NUL and foreign CDATA boundaries remain. These are native
 component results, not complete upstream cases with diagnostics or Windows App,
 browser, streaming or full-corpus acceptance. F04 and its tokenizer contract
 remain partial.
+
+
+**DATA character increment:** loaded and inert HTML documents now apply the
+supported structural and table transitions before ignoring literal DATA NUL.
+Initial NUL still ends the doctype opportunity; head/after-head and document-tail
+reprocessing puts subsequent comments and whitespace in their correct parents.
+Column groups retain their original leading whitespace before reprocessing the
+NUL. Pending table characters ignore NUL before nonspace classification, so
+whitespace does not become fostered text. Ignored characters create neither
+empty Text nodes nor reconstructed formatting elements. Later retained text
+still reconstructs normally, including whitespace delegated from document-tail
+modes without changing those modes prematurely.
+
+The filter runs after tokenization and character-reference decoding. It cannot
+turn malformed text into a tag or decode a reference twice; numeric `&#0;` and
+raw-text/comment replacement characters remain distinct. Counting and fallible
+exact-size copying poll cancellation, and text without NUL keeps its allocation.
+All 25 frozen new native checks pass, up from two, and all 122 existing HTML
+checks remain passing. Six separately identified helper/review checks pass.
+The unchanged 562-case supplementary comparison improves from 560 to 562 matching
+trees: 26/26 unchanged WPT comment comparisons and 536/536 separately adapted
+Comment/Character comparisons. Every previous match and every expected tree is
+preserved. These are retained-tree/component results, not complete tokenizer or
+upstream-case acceptance.
+
+Checked-fragment generic NUL guards remain. Legacy internal parsing,
+head-noscript, unknown foreign/uncertain recovery, full insertion modes,
+diagnostics, streaming, whole-parser resource accounting and Windows App/browser/
+full-corpus qualification remain open. The frozen foundation inputs, selections
+and witnesses are unchanged; F04 and F05 remain partial.
 
 **Deliverables**
 
