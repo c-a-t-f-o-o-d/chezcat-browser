@@ -89,6 +89,8 @@ Nullable ARIA getters and inert setters now retain exact native DOMString
 values, null/empty separation, namespaces and original refusal/origin behavior;
 Displayed HTML registered ARIA metadata now preserves exact producers and Attr
 writes through native import/promotion, control-state isolation and App checks;
+Public HTML label for values now preserve exact producers and transfers through
+actual native target matching and App pointer/editor/paint/link checks;
 frozen browser qualification stays separate.
 
 **Active priority: complete the document foundation before returning to the
