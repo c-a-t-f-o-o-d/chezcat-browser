@@ -6417,3 +6417,7 @@ mod string_box_utf16_tests;
 #[cfg(test)]
 #[path = "app_reflect_own_keys_tests.rs"]
 mod reflect_own_keys_tests;
+
+#[cfg(test)]
+#[path = "app_from_char_code_utf16_tests.rs"]
+mod from_char_code_utf16_tests;

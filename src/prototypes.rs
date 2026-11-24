@@ -2443,21 +2443,7 @@ impl Runtime {
                 let id = self.ordinary_id(object)?;
                 self.error_text(id, host)
             }
-            Builtin::StringFromCharCode => {
-                // call_value bounds the argument count. Decode only after all
-                // conversions so adjacent UTF-16 units can form a surrogate pair.
-                let mut units = Vec::with_capacity(args.len());
-                for value in args {
-                    let number = self.binary_number(value, host)?;
-                    let unit = if number.is_finite() {
-                        number.trunc().rem_euclid(65536.0) as u16
-                    } else {
-                        0
-                    };
-                    units.push(unit);
-                }
-                self.units_string(&units).map(Value::String)
-            }
+            Builtin::StringFromCharCode => self.string_from_char_code(args,host),
             Builtin::StringMethod(method) => {
                 if matches!(method,"replace"|"replaceAll") {
                     return self.string_replace_value(this,args,method=="replaceAll",host);
@@ -2866,33 +2852,15 @@ mod tests {
     }
 
     #[test]
-    fn string_from_char_code_preserves_explicit_lone_surrogate_limitation() {
-        for source in [
-            "String.fromCharCode(0xD800);",
-            "String.fromCharCode(0xDC00);",
-            "String.fromCharCode(0xD800,65);",
-            "String.fromCharCode(0xDC00,0xD800);",
-        ] {
-            let mut runtime = Runtime::for_test();
-            let error = runtime.execute(source, &mut NoHost).unwrap_err();
-            assert!(error.contains("lone UTF-16 surrogate"), "{source}: {error}");
-        }
-        let mut runtime = Runtime::for_test();
-        let error = runtime
-            .execute(
-                "let calls=0,done=false;try{String.fromCharCode(0xD800,{valueOf:function(){calls++;return 65;}});}catch(e){calls+=10;}done=true;",
-                &mut NoHost,
-            )
-            .unwrap_err();
-        assert!(error.contains("lone UTF-16 surrogate"), "{error}");
-        runtime.begin_job();
-        assert_eq!(
-            runtime
-                .execute("calls+':'+done;", &mut NoHost)
-                .unwrap()
-                .to_text(),
-            "1:false"
-        );
+    fn string_from_char_code_preserves_exact_lone_units_after_all_conversions() {
+        succeeds(r#"
+var cases=[[[0xd800],'\ud800'],[[0xdc00],'\udc00'],[[0xd800,65],'\ud800A'],[[0xdc00,0xd800],'\udc00\ud800']];
+for(var c of cases){if(String.fromCharCode.apply(null,c[0])!==c[1])throw 'exact lone units';}
+var calls=0,done=false,result;
+try{result=String.fromCharCode(0xd800,{valueOf:function(){calls++;return 65;}});}catch(e){calls+=10;}
+done=true;if(calls!==1||!done||result!=='\ud800A')throw 'complete ordered producer';
+'ok';
+"#);
     }
 
     #[test]
