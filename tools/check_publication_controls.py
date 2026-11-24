@@ -26,6 +26,13 @@ def original_icon(image=None):
 
 
 class PublicationControls(unittest.TestCase):
+    def test_css_planning_documents_have_exact_public_paths(self):
+        self.assertTrue(publication.check_tree(['docs/CSS_FOUNDATION_PLAN.md',
+            'docs/CSS_FOUNDATION_COVERAGE.json','docs/CSS_STANDARDS_INVENTORY.json']))
+        for path in ['docs/CSS_RESEARCH_NOTES.md','docs/CSS_FOUNDATION_RESULTS.json',
+                     'docs/css-plan/local.json']:
+            with self.subTest(path=path),self.assertRaises(ValueError):
+                publication.check_tree([path])
     def test_unreviewed_record_and_output_categories_rejected(self):
         for path in ['LOCAL_NOTES.md','docs/LOCAL_NOTES.md','docs/drafts/note.md',
                      'tools/run-output.json','tools/output/run.json','outputs/run.json',
@@ -57,6 +64,8 @@ class PublicationControls(unittest.TestCase):
             subprocess.run(['git','init','-q'],cwd=root,check=True,capture_output=True)
             admitted=['README.md','src/new_feature.rs','tools/check_new_feature.py',
                       'tools/reference/example/input.json','docs/ROADMAP.md',
+                      'docs/CSS_FOUNDATION_PLAN.md','docs/CSS_FOUNDATION_COVERAGE.json',
+                      'docs/CSS_STANDARDS_INVENTORY.json',
                       '.github/workflows/check.yml','.github/ISSUE_TEMPLATE/bug.md',
                       'resources/chezcat-x64.o','assets/chezcat.ico']
             excluded=['LOCAL_NOTES.md','docs/LOCAL_NOTES.md','tools/run-output.json',
