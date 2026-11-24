@@ -44,6 +44,6 @@ fn html_id_materialization_native_input_import_uses_actual_editor_and_exact_id()
 #[test]
 fn html_id_materialization_raw_id_policy_keeps_svg_foreign_and_other_values_guarded(){
  let id=crate::html::Attribute{name:crate::html::AttributeName::unqualified("id".into()),value:DomString::from_units(&[65,0xd800,122],4096).unwrap()};
- assert!(script_attr::materializable_value(&id,crate::html::Namespace::Html));assert!(!script_attr::materializable_value(&id,crate::html::Namespace::Svg));assert!(!script_attr::materializable_value(&id,crate::html::Namespace::Other));
- let other=crate::html::Attribute{name:crate::html::AttributeName::unqualified("form".into()),value:id.value};assert!(!script_attr::materializable_value(&other,crate::html::Namespace::Html));
+ assert!(script_attr::materializable_value(&id,crate::html::Namespace::Html,"div"));assert!(!script_attr::materializable_value(&id,crate::html::Namespace::Svg,"div"));assert!(!script_attr::materializable_value(&id,crate::html::Namespace::Other,"div"));
+ let other=crate::html::Attribute{name:crate::html::AttributeName::unqualified("form".into()),value:id.value};assert!(!script_attr::materializable_value(&other,crate::html::Namespace::Html,"div"));
 }
