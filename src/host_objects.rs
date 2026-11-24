@@ -615,6 +615,7 @@ impl Runtime {
                 Some((false, false, true)),
             )?;
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
+            if name == "HTMLDataElement" {self.define_host_attribute(prototype,window,"value","\0HTMLDataElement.get.value",Some("\0HTMLDataElement.set.value"))?;}
             if name == "HTMLMeterElement" {self.define_host_attribute(prototype,window,"value","\0HTMLMeterElement.get.value",Some("\0HTMLMeterElement.set.value"))?;self.define_host_attribute(prototype,window,"min","\0HTMLMeterElement.get.min",Some("\0HTMLMeterElement.set.min"))?;self.define_host_attribute(prototype,window,"max","\0HTMLMeterElement.get.max",Some("\0HTMLMeterElement.set.max"))?;self.define_host_attribute(prototype,window,"low","\0HTMLMeterElement.get.low",Some("\0HTMLMeterElement.set.low"))?;self.define_host_attribute(prototype,window,"high","\0HTMLMeterElement.get.high",Some("\0HTMLMeterElement.set.high"))?;self.define_host_attribute(prototype,window,"optimum","\0HTMLMeterElement.get.optimum",Some("\0HTMLMeterElement.set.optimum"))?;}
             if name == "HTMLProgressElement" {self.define_host_attribute(prototype,window,"value","\0HTMLProgressElement.get.value",Some("\0HTMLProgressElement.set.value"))?;self.define_host_attribute(prototype,window,"max","\0HTMLProgressElement.get.max",Some("\0HTMLProgressElement.set.max"))?;self.define_host_attribute(prototype,window,"position","\0HTMLProgressElement.get.position",None)?;}
             if name == "HTMLLegendElement" {self.define_host_attribute(prototype,window,"form","\0HTMLLegendElement.get.form",None)?;}
@@ -905,6 +906,7 @@ impl Runtime {
         self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("NamedNodeMap".into()),Some((false,false,true)))?;
         let values=self.array_iterator_intrinsic(super::collections::Mode::Values);self.store_symbol_property(prototype,self.symbol_iterator.unwrap(),values,Some((false,true,true)))?;
         for(name,operation,length)in[("length","\0NamedNodeMap.get.length",0),("item","\0NamedNodeMap.item",1),("getNamedItem","\0NamedNodeMap.getNamedItem",1),("getNamedItemNS","\0NamedNodeMap.getNamedItemNS",2)]{
+            if name=="item"{self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
             let method=self.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(method.id){*receiver_required=true;}
             self.store_property(self.function_properties[method.id],"name".into(),Value::String(if name=="length"{"get length"}else{name}.into()),Some((false,false,true)))?;
