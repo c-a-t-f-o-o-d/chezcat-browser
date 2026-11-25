@@ -1124,10 +1124,10 @@ impl Bridge<'_> {
                         | "object"
                         | "select"
                         | "option"
-                        | "optgroup"
                         | "textarea"
                         | "video" | "audio" | "source"
                 )
+                || tag(self.doc, index) == "optgroup" && self.doc.nodes[index].namespace != crate::html::Namespace::Html
                 || tag(self.doc, index) == "noscript" && self.doc.scripting_enabled
             {
                 return Err("Changing native control contents or inert resource subtrees is not implemented.".into());

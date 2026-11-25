@@ -7007,3 +7007,7 @@ mod optgroup_fragment_tests;
 #[cfg(test)]
 #[path="app_optgroup_adoption_tests.rs"]
 mod optgroup_adoption_tests;
+
+#[cfg(test)]
+#[path="app_optgroup_content_tests.rs"]
+mod optgroup_content_tests;

@@ -2697,7 +2697,7 @@ impl Bridge<'_> {
     fn text_content_container(&self, node: usize) -> bool {
         text_container(tag(self.doc,node))
             || self.doc.nodes.get(node).is_some_and(|item| item.namespace==crate::html::Namespace::Html
-                && matches!(item.kind,NodeKind::Element{..}) && (tag(self.doc,node)=="output" || script_clone_node::ordinary_clone_element(tag(self.doc,node))))
+                && matches!(item.kind,NodeKind::Element{..}) && (matches!(tag(self.doc,node),"output"|"optgroup") || script_clone_node::ordinary_clone_element(tag(self.doc,node))))
     }
 
     fn set_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
@@ -2720,6 +2720,10 @@ impl Bridge<'_> {
         self.state.work(1)?;
         if self.state.execution_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             return Err("DOM computation time limit reached.".into());
+        }
+        if self.doc.nodes[node].namespace == crate::html::Namespace::Html && tag(self.doc,node) == "optgroup" {
+            self.state.rebuild(self.doc)?;
+            self.mutation_ancestors(node)?;
         }
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
@@ -10859,3 +10863,7 @@ mod optgroup_fragment_tests;
 #[cfg(test)]
 #[path="script_optgroup_adoption_tests.rs"]
 mod optgroup_adoption_tests;
+
+#[cfg(test)]
+#[path="script_optgroup_content_tests.rs"]
+mod optgroup_content_tests;
