@@ -36,6 +36,8 @@ mod grid;
 #[path = "layout_order.rs"]
 mod item_order;
 use grid::GridGroup;
+#[path = "layout_table_rows.rs"]
+mod table_rows;
 
 #[cfg(test)]
 #[path = "layout_background_tests.rs"]
@@ -149,7 +151,8 @@ enum FormattingContext {
 }
 
 struct TableRow {
-    node: usize,
+    node: Option<usize>,
+    parent: usize,
     cells: Vec<usize>,
 }
 
@@ -2502,41 +2505,6 @@ impl<'a> Engine<'a> {
         self.separate("\n");
     }
 
-    fn table_rows(&self, node: usize) -> Vec<TableRow> {
-        let mut pending: Vec<_> = self.doc.nodes[node]
-            .children
-            .iter()
-            .rev()
-            .copied()
-            .collect();
-        let mut rows = Vec::new();
-        let (mut visits, mut cells) = (0usize, 0usize);
-        while let Some(node) = pending.pop() {
-            visits += 1;
-            if visits > 8_192 || rows.len() == 2_048 || cells == 2_048 {
-                break;
-            }
-            match self.styles[node].display {
-                Display::TableRow => {
-                    let row: Vec<_> = self.doc.nodes[node]
-                        .children
-                        .iter()
-                        .copied()
-                        .filter(|&cell| self.styles[cell].display == Display::TableCell)
-                        .take(128.min(2_048 - cells))
-                        .collect();
-                    cells += row.len();
-                    rows.push(TableRow { node, cells: row });
-                }
-                Display::TableRowGroup => {
-                    pending.extend(self.doc.nodes[node].children.iter().rev().copied())
-                }
-                _ => {}
-            }
-        }
-        rows
-    }
-
     fn table_columns(&mut self, rows: &[TableRow], depth: usize) -> Vec<(i32, i32, f32)> {
         let mut columns =
             vec![(0, 0, 0.0f32); rows.iter().map(|row| row.cells.len()).max().unwrap_or(0)];
@@ -2554,8 +2522,9 @@ impl<'a> Engine<'a> {
     }
 
     /// A separate-border table subset: shared non-spanning columns, intrinsic
-    /// widths, percentage hints and one paint pass per cell. Span resolution,
-    /// collapsed borders and anonymous table-object repair remain unsupported.
+    /// widths, percentage hints and one paint pass per cell. Consecutive cells
+    /// may generate an anonymous row. Span resolution, collapsed borders and
+    /// anonymous cells around ordinary non-table children remain unsupported.
     fn table(
         &mut self,
         index: usize,
@@ -2621,15 +2590,19 @@ impl<'a> Engine<'a> {
             self.visits += 1;
             let top = self.flow.y;
             let start = self.mark();
-            let row_style = self.styles[row.node].clone();
-            let row_background = row_style.background.and_then(|color| {
-                self.rect_for(row.node,left + gaps[0], top, (width - 2 * gaps[0]).max(0), 0, color)
+            let row_style = row.node.map(|node| self.styles[node].clone());
+            let row_background = row.node.and_then(|node| {
+                self.styles[node].background.and_then(|color| {
+                    self.rect_for(node, left + gaps[0], top, row_width, 0, color)
+                })
             });
-            if let Some(id) = self.anchor_id(row.node) {
-                self.anchor(row.node, id, top);
+            if let Some(node) = row.node {
+                if let Some(id) = self.anchor_id(node) {
+                    self.anchor(node, id, top);
+                }
             }
-            let mut height = self
-                .length(row_style.height, 0, &row_style)
+            let mut height = row_style.as_ref()
+                .and_then(|style| self.length(style.height, 0, style))
                 .unwrap_or(0)
                 .max(0);
             let mut placed = Vec::new();
@@ -2688,7 +2661,7 @@ impl<'a> Engine<'a> {
                 let alignment = self
                     .doc
                     .attr(node, "valign")
-                    .or_else(|| self.doc.attr(row.node, "valign"))
+                    .or_else(|| row.node.and_then(|row| self.doc.attr(row, "valign")))
                     .unwrap_or("middle");
                 let extra = (height - cell_height).max(0);
                 let offset = if alignment.eq_ignore_ascii_case("bottom") {
@@ -2725,27 +2698,29 @@ impl<'a> Engine<'a> {
                     height,
                 );
             }
-            self.spans[row.node] = Some(Span {
-                start,
-                end: self.mark(),
-            });
-            if row_style.position == Position::Relative {
-                self.relatives.push(row.node);
+            if let Some(node) = row.node {
+                self.spans[node] = Some(Span {
+                    start,
+                    end: self.mark(),
+                });
+                if row_style.as_ref().is_some_and(|style| style.position == Position::Relative) {
+                    self.relatives.push(node);
+                }
+                self.layout.client_boxes[node] = Some(ClientBox {
+                    width: row_width,
+                    height,
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                    padding: [0; 4],
+                });
             }
-            self.layout.client_boxes[row.node] = Some(ClientBox {
-                width: row_width,
-                height,
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-                padding: [0; 4],
-            });
             // Row groups have no separate paint pass. Their rendered extent
             // spans their rows, including spacing between those rows but not
             // the gaps to adjacent groups. Stop at this table so nested tables
             // cannot contribute their own rows to an outer group's bounds.
-            let mut ancestor = self.parents[row.node];
+            let mut ancestor = Some(row.parent);
             for _ in 0..MAX_DEPTH {
                 let Some(parent) = ancestor else { break };
                 if parent == index {
@@ -6517,6 +6492,14 @@ mod visual_id_exact_tests;
 #[cfg(test)]
 #[path="layout_image_ratio_tests.rs"]
 mod image_ratio_tests;
+
+#[cfg(test)]
+#[path = "layout_table_anonymous_tests.rs"]
+mod table_anonymous_tests;
+
+#[cfg(test)]
+#[path = "layout_table_anonymous_guard_tests.rs"]
+mod table_anonymous_guard_tests;
 
 #[cfg(test)]
 #[path = "layout_order_tests.rs"]
