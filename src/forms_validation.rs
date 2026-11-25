@@ -43,14 +43,21 @@ impl Forms{
     }
     /// Snapshot actual connected tree order before the first invalid listener.
     /// All scratch and result capacities coexist inside the caller's allowance.
-    pub(crate) fn validation_snapshot(&self,doc:&Document,owner:usize,submitter:Option<usize>,mut available:usize)->Result<ValidationSnapshot,String>{
+    pub(crate) fn validation_snapshot(&self,doc:&Document,owner:usize,submitter:Option<usize>,available:usize)->Result<ValidationSnapshot,String>{
         if !self.validation_enabled(doc,owner,submitter)?{return Ok(ValidationSnapshot{nodes:Vec::new(),peak_bytes:0});}
+        self.required_snapshot(doc,owner,0,available)
+    }
+    /// Explicit validation methods ignore novalidate and use the form's actual
+    /// tree root, including a retained detached ordinary native form.
+    pub(crate) fn required_snapshot(&self,doc:&Document,owner:usize,root:usize,mut available:usize)->Result<ValidationSnapshot,String>{
+        self.validation_enabled(doc,owner,None)?;
+        if root>=doc.nodes.len(){return Err("Validation tree root is unavailable.".into());}
         let mut nodes=Vec::new();let mut seen=Vec::new();let mut stack=Vec::new();
         let result_bytes=reserve(&mut nodes,self.controls.len(),&mut available)?;
         let seen_bytes=reserve(&mut seen,doc.nodes.len(),&mut available)?;
         let stack_bytes=reserve(&mut stack,doc.nodes.len(),&mut available)?;
         let peak_bytes=result_bytes.checked_add(seen_bytes).and_then(|n|n.checked_add(stack_bytes)).ok_or("Validation peak storage overflow.")?;
-        seen.resize(doc.nodes.len(),false);if !doc.nodes.is_empty(){stack.push(0);}
+        seen.resize(doc.nodes.len(),false);stack.push(root);
         while let Some(node)=stack.pop(){
             if node>=doc.nodes.len()||seen[node]{return Err("Invalid validation tree topology; nothing was submitted.".into());}seen[node]=true;
             if self.controls.get(&node).is_some_and(|c|self.required_value_missing(owner,c)){nodes.push(node);}

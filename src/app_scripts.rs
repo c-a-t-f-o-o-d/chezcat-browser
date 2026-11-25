@@ -393,9 +393,15 @@ impl App {
     /// latest focus request against current layout before the next native edit.
     pub(super) fn apply_script_focus(&mut self)->bool {
         if self.script_jobs_paused(){return false;}
-        let Some(node)=self.scripting.as_mut().and_then(|page|page.take_focus_request()) else{return false;};
-        self.focus_control(node);
-        true
+        let focus=self.scripting.as_mut().and_then(|page|page.take_focus_request());
+        let report=self.scripting.as_mut().and_then(|page|page.take_validation_report());
+        if let Some(node)=focus{self.focus_control(node);}
+        if let Some(report)=report{self.apply_validation_report(report);}
+        focus.is_some()||report.is_some()
+    }
+    fn apply_validation_report(&mut self,node:Option<usize>){
+        if let Some(node)=node{self.error(self.forms.required_message(node));}
+        else if self.status.starts_with("Complete the required field: "){self.status.clear();self.failed=false;}
     }
     pub(super) fn process_script_requests(&mut self) -> bool {
         self.apply_media_pause();
@@ -412,12 +418,14 @@ impl App {
             return false;
         };
         let focus = page.take_focus_request();
+        let validation_report=page.take_validation_report();
         let navigation = page.take_navigation();
         let requests = page.take_dynamic_scripts();
-        let changed = history_changed || scrolled || focus.is_some() || navigation.is_some() || !requests.is_empty();
+        let changed = history_changed || scrolled || focus.is_some() || validation_report.is_some() || navigation.is_some() || !requests.is_empty();
         if let Some(node) = focus {
             self.focus_control(node);
         }
+        if let Some(report)=validation_report{self.apply_validation_report(report);}
         if let Some(request) = navigation {
             if self.script_navigation_since.elapsed() >= Duration::from_secs(10) {
                 self.script_navigation_since = Instant::now();

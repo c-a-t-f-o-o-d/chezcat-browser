@@ -684,6 +684,8 @@ pub(crate) const TEXTAREA_VALUE_GET: &str = "\0HTMLTextAreaElement.get.value";
 pub(crate) const TEXTAREA_VALUE_SET: &str = "\0HTMLTextAreaElement.set.value";
 pub(crate) const HTML_FORM_SUBMIT: &str = "\0HTMLFormElement.submit";
 pub(crate) const HTML_FORM_RESET: &str = "\0HTMLFormElement.reset";
+pub(crate) const HTML_FORM_CHECK:&str="\0HTMLFormElement.checkValidity";
+pub(crate) const HTML_FORM_REPORT:&str="\0HTMLFormElement.reportValidity";
 pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
 
@@ -763,6 +765,12 @@ pub trait Host {
     }
     fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
     fn finish_native_promise_effect(&mut self) {}
+    fn begin_form_validation(&mut self,_object:u32,_report:bool)->Result<usize,String>{Err("Form validation is not authorized by this host.".into())}
+    fn next_form_validation_event(&mut self,_token:usize)->Result<Option<usize>,String>{Err("Form validation is unavailable.".into())}
+    fn form_validation_event_result(&mut self,_token:usize,_accepted:bool)->Result<(),String>{Err("Form validation is unavailable.".into())}
+    fn complete_form_validation(&mut self,_token:usize)->Result<bool,String>{Err("Form validation is unavailable.".into())}
+    /// Release the held snapshot even after fatal callback or job exhaustion.
+    fn finish_form_validation(&mut self,_token:usize){}
     fn begin_form_reset(&mut self,_object:u32)->Result<Option<usize>,String>{Err("Form reset is not authorized by this host.".into())}
     fn prepare_form_reset(&mut self,_object:u32)->Result<(),String>{Err("Form reset is not authorized by this host.".into())}
     fn next_form_reset_output(&mut self,_object:u32)->Result<Option<u32>,String>{Err("Form reset is not authorized by this host.".into())}
@@ -9447,7 +9455,7 @@ impl Runtime {
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
+                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));
@@ -9477,6 +9485,23 @@ impl Runtime {
         }
         if method==event_interface::PATH_METHOD {
             return self.event_path_array(object,host);
+        }
+        if matches!(method,HTML_FORM_CHECK|HTML_FORM_REPORT){
+            let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+            host.native_operation_caller(caller);
+            let token=host.begin_form_validation(object,method==HTML_FORM_REPORT).map_err(Fault::new)?;
+            let result=(||{
+                loop{
+                    self.step()?;host.native_operation_caller(caller);
+                    let Some(event)=host.next_form_validation_event(token).map_err(Fault::new)? else{break;};
+                    let accepted=self.dispatch_native_event(event,host)?;
+                    host.native_operation_caller(caller);
+                    host.form_validation_event_result(token,accepted).map_err(Fault::new)?;
+                }
+                host.complete_form_validation(token).map_err(Fault::new)
+            })();
+            host.finish_form_validation(token);
+            return result.map(Value::Bool);
         }
         if method==HTML_FORM_RESET {
             let Some(token)=host.begin_form_reset(object).map_err(Fault::new)? else {return Ok(Value::Undefined)};
