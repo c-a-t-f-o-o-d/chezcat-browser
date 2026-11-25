@@ -682,6 +682,8 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"noHref","\0HTMLAreaElement.get.noHref",Some("\0HTMLAreaElement.set.noHref"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLOptionElement.get.disabled",Some("\0HTMLOptionElement.set.disabled"))?;}
             if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLSelectElement.get.disabled",Some("\0HTMLSelectElement.set.disabled"))?;}
+            if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLButtonElement.get.disabled",Some("\0HTMLButtonElement.set.disabled"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLInputElement.get.disabled",Some("\0HTMLInputElement.set.disabled"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLTextAreaElement.get.disabled",Some("\0HTMLTextAreaElement.set.disabled"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"required","\0HTMLTextAreaElement.get.required",Some("\0HTMLTextAreaElement.set.required"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"readOnly","\0HTMLTextAreaElement.get.readOnly",Some("\0HTMLTextAreaElement.set.readOnly"))?;}

@@ -7179,3 +7179,11 @@ mod control_names_input_tests;
 #[cfg(test)]
 #[path="app_control_names_button_tests.rs"]
 mod control_names_button_tests;
+
+#[cfg(test)]
+#[path="app_control_disabled_input_tests.rs"]
+mod control_disabled_input_tests;
+
+#[cfg(test)]
+#[path="app_control_disabled_button_tests.rs"]
+mod control_disabled_button_tests;
