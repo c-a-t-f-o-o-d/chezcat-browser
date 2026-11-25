@@ -21,7 +21,7 @@ fn fixture_with(extra: &str) -> (Document, Forms, Page) {
         "<!doctype html><title>Original DOM string protocol</title><body>",
         "<form id=form><button id=button type=button>Original button</button>",
         "<input id=neighbor name=keep value=original></form>",
-        "<ul id=list><li>Original item</li></ul><section id=opaque>Retained opaque element</section>",
+        "<ul id=list><li>Original item</li></ul><picture id=opaque>Retained opaque element</picture>",
         "<a id=anchor href='../destination?q=one#part'>Original link</a>"
     );
     let mut doc = crate::html::parse(&[markup, extra].concat());
