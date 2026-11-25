@@ -1860,6 +1860,9 @@ impl Bridge<'_> {
     }
 
     pub(super) fn named_form_property(&mut self, form: usize, name: &str) -> Result<Value, String> {
+        self.named_form_property_dom(form,crate::dom_string::DomStringRef::Scalar(name))
+    }
+    pub(super) fn named_form_property_dom(&mut self, form:usize,name:crate::dom_string::DomStringRef<'_>)->Result<Value,String>{
         self.state.rebuild(self.doc)?;
         if name.is_empty() {
             return Ok(Value::Undefined);
@@ -1874,7 +1877,7 @@ impl Bridge<'_> {
             if control.owner != Some(form) || control.kind == Kind::Image {
                 continue;
             }
-            if self.collection_element_named_match(node_handle(node),crate::dom_string::DomStringRef::Scalar(name))? {
+            if self.collection_element_named_match(node_handle(node),name)? {
                 if found.is_some() {
                     return Err(
                         "Multiple named controls require RadioNodeList, which is not implemented."
