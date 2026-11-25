@@ -1046,6 +1046,24 @@ independent native refusals with unchanged tree, commit generation and retained
 node identity. Full foreign, specialized-mode, broader Page, Windows/frontend,
 visual and browser-conformance acceptance remain separate; F05 stays partial.
 
+**PRE/LISTING and XMP paragraph increments:** native loaded/inert PRE and LISTING
+close an in-button-scope P and suppress exactly one initial decoded LF before DATA
+NUL filtering, table buffering, formatting reconstruction or Text allocation.
+Emitted noncharacter tokens consume the opportunity; discarded empty end syntax
+does not emit a token. XMP shares the scoped paragraph closure and actual-pop
+placement refresh, while retaining its leading LF and existing RAWTEXT scanner.
+
+All 19 frozen PRE/LISTING cases pass, up from seven, alongside 89 unchanged
+affected controls (108 candidate passes). The subsequent XMP increment passes all
+15 frozen new cases, up from four, and all 108 affected controls, including those
+19 PRE/LISTING cases (123 candidate passes). Both use original Cargo test builds
+and unchanged expected outcomes. Exact trees, formatting identities, table/cell/
+caption placement, actual node admission and cancellation/recovery are measured.
+Checked PRE, checked LISTING/XMP refusal, context-only text, TEXTAREA/raw, flat and
+foreign/uncertain boundaries remain. These native Linux parser results do not
+establish Page, Windows frontend, browser or XML/XHTML qualification. F05 stays
+partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
