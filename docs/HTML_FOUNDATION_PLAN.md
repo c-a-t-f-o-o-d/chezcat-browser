@@ -950,6 +950,40 @@ selection. Checked listing/select restrictions, enabled-noscript behavior and
 broader form/marker/template/foreign/mode/Windows/browser requirements remain
 separate; F05 stays partial.
 
+**Button-start increment:** a native HTML button start closes an earlier button
+in ordinary scope before existing active-formatting reconstruction and insertion.
+The shared scope helper is reused unchanged. If an actual stack pop exposes a
+table context, existing table placement is refreshed before reconstruction;
+the table module and its modes are unchanged.
+
+All 16 frozen new native checks pass, up from one, with all 343 prior HTML checks
+passing, for 359 total. All six optimized native scenarios pass after reproducing
+missing behavior in the baseline. Exact sibling/text/attribute trees, scope and
+paragraph boundaries, formatting identities, table placement, template/root and
+foreign guards, capacities and cancellation/recovery are measured. No existing
+assertion or resource policy changes. Unsupported button fragment contexts and
+Bridge button-control admission remain unchanged. These are native parser
+results; Page, Windows, JavaScript, network, visual and native control lifecycle
+are not established. Broader insertion-mode and foreign requirements remain
+separate; F05 stays partial.
+
+**Generic end-tag increment:** supported native ordinary end tags now search
+backward for an exact target and stop at an intervening special HTML element.
+The target is checked before the special category, and synthetic roots and
+conservative foreign boundaries are retained. The bounded lookup allocates no
+nodes. Existing application and cleanup, strict checked gates, formatting and
+scoped ends, specialized form/template/marker and document/table paths, and
+foreign or uncertain fallback retain their separate handling.
+
+All 21 frozen new native checks pass, up from seven; all 359 prior HTML checks
+remain passing, for 380 total. All eight optimized native scenarios pass, up
+from three. Original expectations are unchanged. Exact retained trees and
+following text, native option/ruby/noscript cases, formatting identity, table
+placement, foreign/root guards, capacities and cancellation/recovery are
+measured. Added admitted connected/detached Page assertions remain unexecuted
+by the native selection. Full foreign, specialized-mode, Page, Windows and
+browser acceptance remain separate; F05 stays partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,

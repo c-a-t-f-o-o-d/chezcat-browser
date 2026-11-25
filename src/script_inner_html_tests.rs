@@ -514,3 +514,39 @@ verify(document.createElement('div'));verify(document.getElementById('root'));
 "#);
     assert_eq!(outcome.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn inner_html_generic_end_barriers_preserve_connected_and_detached_owner_links() {
+    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<span>A<section>B</span>C</section>D</span>E';
+  var span=target.firstChild,section=span.childNodes[1];
+  if(target.innerHTML!=='<span>A<section>BC</section>D</span>E'||
+     target.childNodes.length!==2||section.parentNode!==span||section.firstChild.data!=='BC'||
+     span.lastChild.data!=='D'||target.lastChild.data!=='E'||section.ownerDocument!==document||
+     section.isConnected!==target.isConnected)throw Error('generic barrier ownership');
+  target.innerHTML='<label>A<dialog>B</label>C';
+  var label=target.firstChild,dialog=label.lastChild;
+  if(target.innerHTML!=='<label>A<dialog>B</dialog></label>C'||dialog.parentNode!==label||
+     target.lastChild.data!=='C'||dialog.ownerDocument!==document)throw Error('generic non-special traversal');
+  target.innerHTML='<ruby><rt>A<section>B</rt>C</section>D</rt>E</ruby>F';
+  var ruby=target.firstChild,rt=ruby.firstChild;
+  if(target.innerHTML!=='<ruby><rt>A<section>BC</section>D</rt>E</ruby>F'||
+     rt.childNodes[1].parentNode!==rt||rt.childNodes[1].firstChild.data!=='BC'||
+     ruby.lastChild.data!=='E'||target.lastChild.data!=='F'||rt.ownerDocument!==document)throw Error('generic ruby target');
+  target.innerHTML='<span><b data-note=kept>A<section>B</span>C</section>D</span>E';
+  var first=target.firstChild.firstChild,copy=target.childNodes[1];
+  if(target.innerHTML!=='<span><b data-note="kept">A<section>BC</section>D</b></span><b data-note="kept">E</b>'||
+     first===copy||copy.parentNode!==target||copy.getAttribute('data-note')!=='kept'||
+     copy.ownerDocument!==document)throw Error('generic formatting identity');
+  var retained=target.firstChild,before=target.innerHTML,refused=false;
+  try { target.innerHTML='<select><option><span>A</span></option></select>'; } catch(e) { refused=true; }
+  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('rich select refusal remains atomic');
+  refused=false;
+  try { target.innerHTML='<span>A<section>B</span>C</section>D<table><tr></tr></table>'; } catch(e) { refused=true; }
+  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('later table refusal remains atomic');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
