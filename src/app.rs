@@ -6825,3 +6825,7 @@ mod font_face_tests;
 #[cfg(test)]
 #[path="app_font_size_tests.rs"]
 mod font_size_tests;
+
+#[cfg(test)]
+#[path="app_pre_alias_tests.rs"]
+mod pre_alias_tests;
