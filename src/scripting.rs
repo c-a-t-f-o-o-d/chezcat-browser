@@ -10729,3 +10729,7 @@ mod datalist_options_tests;
 
 #[path="script_datalist_options.rs"]
 mod script_datalist_options;
+
+#[cfg(test)]
+#[path="script_datalist_detached_copy_tests.rs"]
+mod datalist_detached_copy_tests;
