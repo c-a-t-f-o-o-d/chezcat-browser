@@ -1427,6 +1427,7 @@ impl Forms {
             {
                 continue;
             }
+            if control.kind==Kind::TextArea{textarea_wrap::append_textarea_entry(doc,node,control,&mut query,encoded_limit)?;continue;}
             let value =
                 if control.kind == Kind::Hidden && control.name.eq_ignore_ascii_case("_charset_") {
                     "UTF-8".to_owned()
@@ -1570,8 +1571,12 @@ pub fn encode_query_component(text: &str, limit: usize) -> Result<String,String>
 }
 
 fn encode_into(text: &str, output: &mut String, limit: usize) -> Result<(), String> {
+    encode_chars(text.chars(),output,limit)
+}
+
+fn encode_chars<I:Iterator<Item=char>>(chars:I,output:&mut String,limit:usize)->Result<(),String>{
     // Convert lone CR/LF to CRLF before UTF-8 application/x-www-form-urlencoded.
-    let mut chars = text.chars().peekable();
+    let mut chars = chars.peekable();
     while let Some(ch) = chars.next() {
         let mut utf8 = [0u8; 4];
         let bytes = if ch == '\r' {
@@ -2684,3 +2689,6 @@ pub(crate) use textarea_defaults::TextareaDefaultPlan;
 
 /// Reflected textarea limits share HTML prefixes, with an independent native cap.
 pub(crate) fn textarea_max_length(value:Option<&str>)->usize{value.and_then(crate::decimal_number::html_long).filter(|n|*n>=0).map_or(MAX_VALUE_UNITS,|n|n as usize).min(MAX_VALUE_UNITS)}
+
+#[path="forms_textarea_wrap.rs"]
+mod textarea_wrap;

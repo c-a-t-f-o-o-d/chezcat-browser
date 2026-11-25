@@ -7075,3 +7075,7 @@ mod textarea_max_length_tests;
 #[cfg(test)]
 #[path="app_textarea_min_length_tests.rs"]
 mod textarea_min_length_tests;
+
+#[cfg(test)]
+#[path="app_textarea_wrap_tests.rs"]
+mod textarea_wrap_tests;

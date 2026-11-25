@@ -68,3 +68,16 @@ mod tests{
 /// Positive reflected unsigned dimensions use HTML integer prefixes and a 31-bit maximum.
 /// The scalar projection preserves ASCII prefixes of raw UTF-16 attributes.
 pub(crate) fn html_positive_with_fallback(text:&str,default:u32)->u32{html_long(text).filter(|value|*value>0).map_or(default,|value|value as u32)}
+
+/// HTML nonnegative integer prefixes with saturation at a caller's useful bound.
+/// A huge positive width stays wide; it never overflows into the invalid default.
+pub(crate) fn html_nonnegative_bounded(text:&str,bound:usize)->Option<usize>{
+ let bytes=text.as_bytes();let mut at=0;
+ while bytes.get(at).is_some_and(|b|matches!(*b,b' '|b'\t'|b'\n'|b'\r'|b'\x0c')){at+=1;}
+ let negative=bytes.get(at)==Some(&b'-');if negative||bytes.get(at)==Some(&b'+'){at+=1;}
+ let start=at;let mut value=0usize;let mut nonzero=false;
+ while let Some(digit)=bytes.get(at).filter(|b|b.is_ascii_digit()){
+  let digit=usize::from(*digit-b'0');nonzero|=digit!=0;value=value.saturating_mul(10).saturating_add(digit).min(bound);at+=1;
+ }
+ if at==start||negative&&nonzero{None}else{Some(value)}
+}
