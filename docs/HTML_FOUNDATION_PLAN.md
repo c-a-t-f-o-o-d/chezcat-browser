@@ -652,6 +652,10 @@ Canonical HTMLSelectElement.name now reflects the exact null-namespace name thro
 
 Canonical HTMLTextAreaElement.name now reflects the exact null-namespace name through its defining prototype accessor. Native and inert DOMString reflection preserves raw UTF-16 Attr identity, aliases, observations, namespace distinctions and live named lookup. Once-only author conversion, reentry, abrupt completion, concrete brands, saved accessors and origin checks use shared transactions. SELECT and TEXTAREA share prepared native submission-name admission under existing 8192-byte name and 128 KiB aggregate form limits, retaining other control defaults, option and group payloads. Native serialization uses scalar encoding and reset retains the current name. Dirty live editors, reset defaults, cursor positions, flags and input/change events remain stable. Work/copy/storage/cancellation refusal is atomic with fresh-job recovery. Actual App pointer checks retain native names, paint, editor and links. Inert textarea value editors and broader lifecycle integration remain separate; F01 stays partial.
 
+Canonical HTMLTextAreaElement.disabled now reflects actual null-namespace disabled presence through its defining prototype accessor. Native and inert boolean reflection preserves exact raw UTF-16 Attr aliases, namespace distinctions, observation, author overrides and saved accessor authority without invoking author string conversion. The existing checked native disability refresh retains first-legend exemptions and inherited fieldset disability separately from own-attribute reflection. Native disabled controls bypass required validation and submission; script editing remains allowed and native reset retains the current disabled attribute. Dirty live editors, reset defaults, cursor positions, names, flags and input/change events remain intact. Work/copy/storage/cancellation refusal preserves native and DOM state with fresh-job recovery. Actual App pointer checks retain effective native disability, paint, editor and links. Broader textarea editing and lifecycle interfaces remain separate; F01 stays partial.
+
+Canonical HTMLTextAreaElement.required now reflects actual null-namespace required presence through its defining prototype accessor. Exact native and inert boolean reflection retains raw UTF-16 Attr aliases, namespace distinctions, observation, saved accessors, author overrides and truthiness without author conversion. Native required state publishes only after checked attribute publication and feeds existing empty-value validation; read-only and disabled textareas bypass that validation. Native reset keeps the current required attribute while restoring the actual default and clearing dirty value state. Dirty live editors, default text, cursor positions, names, other flags and input/change events remain stable during reflection. Work/copy/storage/cancellation refusal preserves native validation, DOM and observer state with fresh-job recovery. Actual App pointer checks retain native required flags, paint, editor and links. Broader constraint-validation and textarea lifecycle interfaces remain separate; F01 stays partial.
+
 HTMLHRElement now provides the canonical owner-realm interface for exact HTML hr elements and its legacy align DOMString accessor over actual native/inert attributes. Assignments perform once-only DOMString conversion through the bounded attribute transaction. Exact UTF-16 backing, current Attr identity, observer old values and independent clone/import metadata retain actual owners through supported adoption, connection and shallow native template parking. Parsed void leaves retain null children; metadata does not fabricate separator content or presentation. Concrete brands, exact namespace/case, captured origin and work/copy/storage/string/node/deadline refusal preserve state with fresh recovery. Actual App pointer actions update align-attribute-driven CSS paint while preserving neighboring editor selection and link hits; scoped production probes exercise the built executable. Native separator presentation, initial child lifecycle and broader HTML interfaces remain required; F01 stays partial.
 
 HTMLHRElement now reflects its legacy color DOMString independently of align over actual native/inert attributes. Arbitrary strings and exact UTF-16 backing are reflected without color parsing or normalization. Once-only conversion, actual Attr identity, observer old values, independent copies and supported adoption, connection and native template parking retain real metadata and owners. Align and its actual Attr handle remain unchanged by color writes or removal. Concrete brands, exact namespace/case, captured origin and work/copy/storage/string/node/deadline refusal preserve state with fresh recovery. Actual App pointer actions update color-attribute-driven CSS paint while preserving neighboring editor selection and link hits; scoped production probes exercise the built executable. Native separator presentation, initial child lifecycle and broader HTML interfaces remain required; F01 stays partial.
@@ -1030,11 +1034,13 @@ remain passing, for 380 total. All eight optimized native scenarios pass, up
 from three. Original native expectations are unchanged. Exact retained trees and
 following text, native option/ruby/noscript cases, formatting identity, table
 placement, foreign/root guards, capacities and cancellation/recovery are
-measured. Connected/detached Page assertions remain unexecuted
-by the native selection. Refusal checks inspect native errors directly while
-retaining tree, commit-generation and node-identity assertions; actual Page
-validation remains required. Full foreign, specialized-mode, Page, Windows and
-browser acceptance remain separate; F05 stays partial.
+measured. Subsequent combined-source validation passes 397 native HTML/parser-
+and-adapter checks and all 20 directly affected innerHTML tests in the original
+Linux Cargo crate, for 417 passes. The latter execute the real Page, Bridge,
+JavaScript runtime and native DOM, including connected/detached ownership and four
+independent native refusals with unchanged tree, commit generation and retained
+node identity. Full foreign, specialized-mode, broader Page, Windows/frontend,
+visual and browser-conformance acceptance remain separate; F05 stays partial.
 
 **Deliverables**
 
@@ -1100,9 +1106,11 @@ behavior are preserved.
 
 Exact component tree `b34efec2d608ef93c916603171c3a4493b8ce594` passed 12 new
 native checks (baseline three), 359 prior selected checks and four optimized
-native scenarios (baseline zero). These are historical component results; current
-combined-source and Page/Windows execution remain pending. Broader fragment, mode,
-serialization and browser qualification remain open. F07 stays partial.
+native scenarios (baseline zero). These are historical component results. The
+combined implementation subsequently passes 397 native HTML/parser-and-adapter
+checks and 20 directly affected real Page innerHTML checks in the original Linux
+Cargo crate, for 417 passes. This does not establish legacy-resource activation,
+Windows/frontend, complete serialization or browser qualification. F07 stays partial.
 
 **Fragment DOCTYPE increment:** supported checked HTML fragments now consume and
 ignore DOCTYPE tokens without adding a DocumentType node or changing the fragment
