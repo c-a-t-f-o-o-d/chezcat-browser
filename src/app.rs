@@ -7047,3 +7047,7 @@ mod app_textarea_name_tests;
 #[cfg(test)]
 #[path="app_textarea_disabled_tests.rs"]
 mod app_textarea_disabled_tests;
+
+#[cfg(test)]
+#[path="app_textarea_required_tests.rs"]
+mod app_textarea_required_tests;
