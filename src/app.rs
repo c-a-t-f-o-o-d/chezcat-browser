@@ -7035,3 +7035,7 @@ mod app_select_disabled_tests;
 #[cfg(test)]
 #[path="app_select_required_tests.rs"]
 mod app_select_required_tests;
+
+#[cfg(test)]
+#[path="app_select_name_tests.rs"]
+mod app_select_name_tests;
