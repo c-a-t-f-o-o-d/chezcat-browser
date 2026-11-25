@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn scoped_end_shared_ordinary_predicate_uses_exact_html_scope_boundaries() {
+    let mut doc = parse("<span></span>");
+    let node = first(&doc, "span");
+    for (name, expected) in [
+        ("applet", true), ("caption", true), ("html", true), ("table", true),
+        ("td", true), ("th", true), ("marquee", true), ("object", true),
+        ("select", true), ("template", true),
+        ("button", false), ("ul", false), ("ol", false), ("section", false),
+        ("li", false), ("dd", false), ("dt", false), ("h1", false),
+        ("div", false), ("p", false), ("dialog", false), ("span", false),
+    ] {
+        if let NodeKind::Element { tag, .. } = &mut doc.nodes[node].kind { *tag = name.to_owned(); }
+        assert_eq!(scope_boundary(&doc, node), expected, "{name}");
+    }
+}
+
+#[test]
+fn scoped_end_shared_ordinary_predicate_keeps_conservative_foreign_and_root_boundaries() {
+    let mut doc = parse("<span></span>");
+    let node = first(&doc, "span");
+    for namespace in [Namespace::None, Namespace::Html, Namespace::Svg, Namespace::UnknownForeign, Namespace::Other] {
+        doc.nodes[node].namespace = namespace;
+        assert_eq!(scope_boundary(&doc, node), namespace != Namespace::Html);
+    }
+    assert!(scope_boundary(&doc, 0));
+}
+
+#[test]
 fn fragment_formatting_stages_repaired_tree_in_preorder_and_preserves_nonce_flags() {
     let doc=parse_fragment("<b>before<div><script nonce=a nonce=b>0</script>inside</b>outside</div><script nonce=c>1</script>","div",true).unwrap();
     assert_eq!(kids(&doc, 0), ["b", "div", "script"]);
