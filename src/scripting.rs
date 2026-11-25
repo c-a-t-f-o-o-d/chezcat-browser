@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3141,6 +3141,7 @@ impl Bridge<'_> {
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
         if self.area_download_member(object,property){return true;}
+        if self.area_hreflang_member(object,property){return true;}
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
@@ -3310,6 +3311,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(target,property){return Some("coords");}
         if self.area_shape_member(target,property){return Some("shape");}
         if self.area_download_member(target,property){return Some("download");}
+        if self.area_hreflang_member(target,property){return Some("hreflang");}
         if self.area_target_member(target,property){return Some("target");}
         if self.area_rel_member(target,property){return Some("rel");}
         if self.area_ping_member(target,property){return Some("ping");}
@@ -3551,6 +3553,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return false;}
         if self.area_shape_member(object,property){return false;}
         if self.area_download_member(object,property){return false;}
+        if self.area_hreflang_member(object,property){return false;}
         if self.area_target_member(object,property){return false;}
         if self.area_rel_member(object,property){return false;}
         if self.area_ping_member(object,property){return false;}
@@ -3724,6 +3727,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return false;}
         if self.area_shape_member(object,property){return false;}
         if self.area_download_member(object,property){return false;}
+        if self.area_hreflang_member(object,property){return false;}
         if self.area_target_member(object,property){return false;}
         if self.area_rel_member(object,property){return false;}
         if self.area_ping_member(object,property){return false;}
@@ -3801,6 +3805,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
         if self.area_download_member(object,property){return true;}
+        if self.area_hreflang_member(object,property){return true;}
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
@@ -3893,6 +3898,7 @@ impl Host for Bridge<'_> {
         if method==script_area_coords::SET&&self.area_coords_receiver(object){return Some("coords");}
         if method==script_area_shape::SET&&self.area_shape_receiver(object){return Some("shape");}
         if method==script_area_download::SET&&self.area_download_receiver(object){return Some("download");}
+        if method==script_area_hreflang::SET&&self.area_hreflang_receiver(object){return Some("hreflang");}
         if method==script_area_target::SET&&self.area_target_receiver(object){return Some("target");}
         if method==script_area_rel::SET&&self.area_rel_receiver(object){return Some("rel");}
         if method==script_area_ping::SET&&self.area_ping_receiver(object){return Some("ping");}
@@ -4018,6 +4024,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
         if self.area_download_member(object,property){return true;}
+        if self.area_hreflang_member(object,property){return true;}
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
@@ -4309,6 +4316,7 @@ impl Host for Bridge<'_> {
         if script_area_coords::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_shape::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_download::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_area_hreflang::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_target::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_rel::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_ping::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4674,6 +4682,7 @@ impl Host for Bridge<'_> {
         if script_area_coords::operation(method){return self.validate_area_coords(object);}
         if script_area_shape::operation(method){return self.validate_area_shape(object);}
         if script_area_download::operation(method){return self.validate_area_download(object);}
+        if script_area_hreflang::operation(method){return self.validate_area_hreflang(object);}
         if script_area_target::operation(method){return self.validate_area_target(object);}
         if script_area_rel::operation(method){return self.validate_area_rel(object);}
         if script_area_ping::operation(method){return self.validate_area_ping(object);}
@@ -4943,6 +4952,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return self.validate_area_coords(object);}
         if self.area_shape_member(object,property){return self.validate_area_shape(object);}
         if self.area_download_member(object,property){return self.validate_area_download(object);}
+        if self.area_hreflang_member(object,property){return self.validate_area_hreflang(object);}
         if self.area_target_member(object,property){return self.validate_area_target(object);}
         if self.area_rel_member(object,property){return self.validate_area_rel(object);}
         if self.area_ping_member(object,property){return self.validate_area_ping(object);}
@@ -5223,6 +5233,7 @@ impl Host for Bridge<'_> {
         if script_area_coords::operation(method){return self.event_target_interface(object)&&self.area_coords_receiver(receiver);}
         if script_area_shape::operation(method){return self.event_target_interface(object)&&self.area_shape_receiver(receiver);}
         if script_area_download::operation(method){return self.event_target_interface(object)&&self.area_download_receiver(receiver);}
+        if script_area_hreflang::operation(method){return self.event_target_interface(object)&&self.area_hreflang_receiver(receiver);}
         if script_area_target::operation(method){return self.event_target_interface(object)&&self.area_target_receiver(receiver);}
         if script_area_rel::operation(method){return self.event_target_interface(object)&&self.area_rel_receiver(receiver);}
         if script_area_ping::operation(method){return self.event_target_interface(object)&&self.area_ping_receiver(receiver);}
@@ -6149,6 +6160,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return self.area_coords_get(object);}
         if self.area_shape_member(object,property){return self.area_shape_get(object);}
         if self.area_download_member(object,property){return self.area_download_get(object);}
+        if self.area_hreflang_member(object,property){return self.area_hreflang_get(object);}
         if self.area_target_member(object,property){return self.area_target_get(object);}
         if self.area_rel_member(object,property){return self.area_rel_get(object);}
         if self.area_ping_member(object,property){return self.area_ping_get(object);}
@@ -6622,6 +6634,7 @@ impl Host for Bridge<'_> {
         if self.area_coords_member(object,property){return self.area_coords_set(object,&value);}
         if self.area_shape_member(object,property){return self.area_shape_set(object,&value);}
         if self.area_download_member(object,property){return self.area_download_set(object,&value);}
+        if self.area_hreflang_member(object,property){return self.area_hreflang_set(object,&value);}
         if self.area_target_member(object,property){return self.area_target_set(object,&value);}
         if self.area_rel_member(object,property){return self.area_rel_set(object,&value);}
         if self.area_ping_member(object,property){return self.area_ping_set(object,&value);}
@@ -7072,6 +7085,7 @@ impl Host for Bridge<'_> {
         if method==script_area_coords::SET{return Err("Area coords setters require the native conversion transaction.".into());}
         if method==script_area_shape::SET{return Err("Area shape setters require the native conversion transaction.".into());}
         if method==script_area_download::SET{return Err("Area download setters require the native conversion transaction.".into());}
+        if method==script_area_hreflang::SET{return Err("Area hreflang setters require the native conversion transaction.".into());}
         if method==script_area_target::SET{return Err("Area target setters require the native conversion transaction.".into());}
         if method==script_area_rel::SET{return Err("Area rel setters require the native conversion transaction.".into());}
         if method==script_area_ping::SET{return Err("Area ping setters require the native conversion transaction.".into());}
@@ -7082,6 +7096,7 @@ impl Host for Bridge<'_> {
         if method==script_area_coords::GET{return self.area_coords_get(object);}
         if method==script_area_shape::GET{return self.area_shape_get(object);}
         if method==script_area_download::GET{return self.area_download_get(object);}
+        if method==script_area_hreflang::GET{return self.area_hreflang_get(object);}
         if method==script_area_target::GET{return self.area_target_get(object);}
         if method==script_area_rel::GET{return self.area_rel_get(object);}
         if method==script_area_ping::GET{return self.area_ping_get(object);}
@@ -10505,3 +10520,10 @@ mod area_target_tests;
 
 #[path="script_area_target.rs"]
 mod script_area_target;
+
+#[cfg(test)]
+#[path="script_area_hreflang_tests.rs"]
+mod area_hreflang_tests;
+
+#[path="script_area_hreflang.rs"]
+mod script_area_hreflang;
