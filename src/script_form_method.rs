@@ -13,7 +13,15 @@ impl Bridge<'_>{
  }
  pub(super) fn form_method_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_form_method(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
-  let value=self.element_attribute_string_get(object,"method")?;
+  self.element_form_method_get(object,"method",false)
+ }
+ pub(super) fn element_form_method_get(&mut self,object:u32,attribute:&str,missing_empty:bool)->Result<Value,String>{
+  if missing_empty{
+   let count=self.element_attribute_source(object).ok_or("Missing method attribute source.")?.len();self.state.work(count)?;let mut present=false;
+   for at in 0..count{let name=&self.element_attribute_source(object).unwrap()[at].name;let bytes=name.bytes();let matches=name.html_is(attribute);self.state.work(bytes.saturating_add(1))?;if matches{present=true;break;}}
+   script_text_content::deadline(self.state)?;if !present{return self.string("");}
+  }
+  let value=self.element_attribute_string_get(object,attribute)?;
   let mut word="get";
   for candidate in ["post","dialog"]{
    let equal=match &value{Value::String(s)=>{self.state.work(s.len().saturating_add(1))?;s.eq_ignore_ascii_case(candidate)},Value::StringUnits(u)=>{self.state.work(u.len().saturating_add(1))?;u.iter().copied().map(|u|if(0x41..=0x5a).contains(&u){u+0x20}else{u}).eq(candidate.encode_utf16())},_=>unreachable!()};

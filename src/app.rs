@@ -7139,3 +7139,11 @@ mod input_form_action_tests;
 #[cfg(test)]
 #[path="app_button_form_action_tests.rs"]
 mod button_form_action_tests;
+
+#[cfg(test)]
+#[path="app_submitter_form_method_input_tests.rs"]
+mod submitter_form_method_input_tests;
+
+#[cfg(test)]
+#[path="app_submitter_form_method_button_tests.rs"]
+mod submitter_form_method_button_tests;
