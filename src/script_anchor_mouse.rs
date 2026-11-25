@@ -57,7 +57,7 @@ impl Page {
         }
         self.notify_user_activation();
         let event=if input.button==0 {"click"} else {"auxclick"};
-        let (prevented,complete)=self.dispatch_composed_status(doc,forms,node_handle(target),event,true,true,true,Some(input),None);
+        let (prevented,complete)=self.dispatch_composed_status(doc,forms,node_handle(target),event,true,true,true,Some(input),None,None);
         Outcome {
             prevented:prevented || !complete || self.state.host_work==0 || self.state.copy_work==0,
             layout_changed:std::mem::take(&mut self.state.changed),

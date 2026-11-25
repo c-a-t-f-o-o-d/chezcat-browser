@@ -455,6 +455,7 @@ enum UiRecord {
     Wheel(UiData,Vec<WheelData>),
     Keyboard(UiData,KeyboardData),
     Focus(UiData,Option<u32>),
+    Submit(Option<u32>),
     Progress(crate::javascript::xhr_interface::Progress),
     Animation(AnimationData),
     Error(Vec<ErrorEventData>),
@@ -468,8 +469,8 @@ impl UiRecord {
             _=>return Err("Event UI family data is inconsistent.".into()),
         })
     }
-    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
-    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
+    fn ui(&self)->Option<&UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Submit(_)|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
+    fn ui_mut(&mut self)->Option<&mut UiData>{match self {Self::Ui(ui)|Self::Mouse(ui,_)|Self::Wheel(ui,_)|Self::Keyboard(ui,_)|Self::Focus(ui,_)=>Some(ui),Self::Base|Self::Submit(_)|Self::Progress(_)|Self::Animation(_)|Self::Error(_)=>None}}
     fn mouse(&self)->Option<&MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&data[0].mouse),_=>None}}
     fn mouse_mut(&mut self)->Option<&mut MouseData>{match self {Self::Mouse(_,mouse)=>Some(mouse),Self::Wheel(_,data)=>Some(&mut data[0].mouse),_=>None}}
     fn wheel(&self)->Option<&WheelData>{if let Self::Wheel(_,data)=self{data.first()}else{None}}
@@ -651,6 +652,38 @@ impl Bridge<'_> {
             composing:flag("isComposing"),key_code:integer("keyCode")? as u32,char_code:integer("charCode")? as u32,modifiers};
         self.construct_event_record(owner,args,fields,Some(ui),None,Some(keyboard),None)
     }
+    pub(super) fn submit_event_argument(&self,owner:u32,value:Option<&Value>)->Result<Option<u32>,(&'static str,String)>{
+        let Some(value)=value else{return Ok(None)};
+        if matches!(value,Value::Null|Value::Undefined){return Ok(None);}
+        let Value::Host(target)=value else{return Err(("TypeError","SubmitEvent submitter requires a genuine HTMLElement or null.".into()));};
+        let html=node_index(*target).is_some_and(|node|self.html_class_element(node))
+            ||self.inert_interface(*target).is_some_and(|name|name.starts_with("HTML")&&name.ends_with("Element"))
+            ||self.frame_concrete_html_interface(*target).is_some()||self.frame_node_interface(*target)==Some("HTMLElement");
+        if !html{return Err(("TypeError","SubmitEvent submitter requires a genuine HTMLElement or null.".into()));}
+        self.native_node_access(*target)?;
+        let target_owner=self.frame_instance_window(*target).unwrap_or(WINDOW);
+        if owner!=target_owner{self.frame_window_access(Some(owner),target_owner).map_err(|e|("SecurityError",e))?;}
+        Ok(Some(*target))
+    }
+    pub(super) fn construct_submit_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String>{
+        script_text_content::deadline(self.state)?;
+        let submitter=self.submit_event_argument(owner,fields.and_then(|f|f.iter().find(|(n,_)|*n=="submitter").map(|(_,v)|v))).map_err(|(_,e)|e)?;
+        let value=self.construct_base_event(owner,args,fields)?;
+        let Value::Host(handle)=value else{unreachable!()};let id=self.created_event_index(handle).unwrap();
+        self.state.created_events[id].data=UiRecord::Submit(submitter);Ok(value)
+    }
+    pub(super) fn submit_event_receiver(&self,object:u32)->bool{
+        self.created_event_index(object).is_some_and(|id|matches!(self.state.created_events[id].data,UiRecord::Submit(_)))
+            ||self.state.event.as_ref().is_some_and(|e|e.handle==object&&e.submitter.is_some())
+    }
+    pub(super) fn submit_event_value(&mut self,object:u32)->Result<Value,String>{
+        self.state.work(self.state.event_lookup_work(8))?;
+        let submitter=if let Some(id)=self.created_event_index(object){
+            let UiRecord::Submit(value)=self.state.created_events[id].data else{return Err("SubmitEvent receiver is invalid.".into())};value
+        }else{self.state.event.as_ref().filter(|e|e.handle==object).and_then(|e|e.submitter).ok_or("SubmitEvent has expired.")?};
+        if let Some(target)=submitter{self.native_node_access(target).map_err(|(_,e)|e)?;}
+        Ok(submitter.map_or(Value::Null,Value::Host))
+    }
     pub(super) fn construct_focus_event(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<Value,String> {
         let field=|key|fields.and_then(|fields|fields.iter().find(|(name,_)|*name==key).map(|(_,value)|value));
         let related=self.mouse_target_argument(owner,field("relatedTarget")).map_err(|(_,message)|message)?;
@@ -813,6 +846,7 @@ impl Bridge<'_> {
             || self.keyboard_receiver(object) && (keyboard_property(name)||name=="getModifierState")
             || self.custom_receiver(object) && matches!(name,"detail"|"initCustomEvent")
             || self.focus_receiver(object) && name=="relatedTarget"
+            || self.submit_event_receiver(object) && name=="submitter"
             || self.ui_receiver(object) && (ui_property(name) || matches!(name,"initUIEvent"|"which"|"sourceCapabilities"))
             || self.mouse_receiver(object) && (mouse_property(name) || matches!(name,"initMouseEvent"|"initUIEvent"|"which"|"x"|"y"|"offsetX"|"offsetY"|"movementX"|"movementY"|"pageX"|"pageY"|"layerX"|"layerY"|"getModifierState"|"sourceCapabilities"))
     }
@@ -887,7 +921,7 @@ impl Bridge<'_> {
     }
 
     pub(super) fn created_event_readonly(&self, object: u32, name: &str) -> bool {
-        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
+        !matches!(name,"cancelBubble"|"returnValue") && (self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || (self.focus_receiver(object)&&name=="relatedTarget"||self.submit_event_receiver(object)&&name=="submitter") || self.keyboard_receiver(object)&&keyboard_property(name) || self.created_event_index(object).is_some_and(|id| base_property(name)
             || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
             || self.custom_receiver(object) && name == "detail")
             || self.ui_receiver(object) && ui_property(name)
@@ -897,7 +931,7 @@ impl Bridge<'_> {
     pub(super) fn created_event_has(&mut self, object: u32, name: &str) -> Option<Result<bool, String>> {
         let id = self.created_event_index(object)?;
         Some(self.state.work(self.state.event_lookup_work(8)).map(|()| {
-            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || self.focus_receiver(object)&&name=="relatedTarget" || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
+            base_property(name) || self.progress_property(object,name) || self.animation_property(object,name) || self.error_event_property(object,name) || self.wheel_property(object,name) || (self.focus_receiver(object)&&name=="relatedTarget"||self.submit_event_receiver(object)&&name=="submitter") || self.keyboard_receiver(object)&&keyboard_property(name) || self.state.created_events[id].data.mouse().is_some() && mouse_property(name)
                 || self.custom_receiver(object) && name == "detail"
                 || self.state.created_events[id].data.ui().is_some() && ui_property(name)
                 || self.created_event_method(object, name).is_some()

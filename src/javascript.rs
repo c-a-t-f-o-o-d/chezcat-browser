@@ -186,6 +186,8 @@ mod generator_functions;
 mod host_objects;
 #[path = "event_interface.rs"]
 mod event_interface;
+#[path="submit_event_interface.rs"]
+mod submit_event_interface;
 #[path="xhr_interface.rs"]
 pub(crate) mod xhr_interface;
 #[path = "event_listener.rs"]

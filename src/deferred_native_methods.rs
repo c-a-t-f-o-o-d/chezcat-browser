@@ -7,7 +7,7 @@ use super::*;
 enum State { Pending, Ready(usize), Failed }
 
 #[derive(Clone, Copy)]
-enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize }, ParamConstructor { window:u32, prototype:usize, parent:usize }, DataListConstructor { window:u32, prototype:usize, parent:usize }, OptionConstructor { window:u32, prototype:usize, parent:usize }, OptGroupConstructor { window:u32, prototype:usize, parent:usize } }
+enum Definition { SubmitConstructor { window:u32, prototype:usize, parent:usize }, Native(Builtin), Host { window:u32, operation:&'static str, length:usize }, ParamConstructor { window:u32, prototype:usize, parent:usize }, DataListConstructor { window:u32, prototype:usize, parent:usize }, OptionConstructor { window:u32, prototype:usize, parent:usize }, OptGroupConstructor { window:u32, prototype:usize, parent:usize } }
 
 pub(super) struct NativeMethod {
     definition: Definition,
@@ -23,6 +23,20 @@ impl Runtime {
 
     pub(super) fn deferred_host_method(&mut self, owner:usize, window:u32, name:&'static str, operation:&'static str, length:usize)->Result<(),Fault>{
         self.defer_method(owner,name,Definition::Host{window,operation,length},true)
+    }
+
+    pub(super) fn defer_submit_event_constructor(&mut self,window:u32,prototype:usize,parent:usize)->Result<(),Fault>{
+        self.defer_method(prototype,"constructor",Definition::SubmitConstructor{window,prototype,parent},false)?;
+        self.reserve_deferred_global_orders(&["SubmitEvent"])
+    }
+    pub(super) fn ensure_submit_event_constructor(&mut self)->Result<(),Fault>{
+        if !self.deferred_global_orders.contains_key("SubmitEvent"){return Ok(());}
+        let(window,_)=self.browser_global.ok_or_else(||Fault::new("SubmitEvent requires a Window realm."))?;
+        let prototype=*self.native_constructor_prototypes.get(&(window,"SubmitEvent")).ok_or_else(||Fault::new("SubmitEvent prototype is unavailable."))?;
+        self.materialize_native_property(prototype,"constructor")?;
+        let value=self.objects[prototype].properties["constructor"].value.as_value()?.clone();
+        self.put_binding(self.global_environment,"SubmitEvent".into(),Some(value),Declaration::Var,false)?;
+        Ok(())
     }
 
     pub(super) fn defer_param_constructor(&mut self, window:u32, prototype:usize, parent:usize)->Result<(),Fault>{
@@ -142,6 +156,13 @@ impl Runtime {
                 let name = self.deferred_native_methods[index].name.clone();
                 let result = self.with_intrinsic_realm(realm, |runtime| match definition {
                     Definition::Native(builtin)=>runtime.native_function(builtin,&name),
+                    Definition::SubmitConstructor{window,prototype,parent}=>{
+                        let allocation=runtime.allocate_host_function_with_length(window,"SubmitEvent",1).map_err(Fault::new)?;
+                        if let Some(Function::Host{constructible,..})=runtime.functions.get_mut(allocation.id){*constructible=true;}
+                        runtime.objects[runtime.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent));
+                        runtime.store_property(runtime.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                        Ok(Value::Function(allocation.id))
+                    },
                     Definition::ParamConstructor{window,prototype,parent}=>{
                         let allocation=runtime.allocate_host_function_with_length(window,"HTMLParamElement",0).map_err(Fault::new)?;
                         if let Some(Function::Host{constructible,illegal_interface_constructor,..})=runtime.functions.get_mut(allocation.id){

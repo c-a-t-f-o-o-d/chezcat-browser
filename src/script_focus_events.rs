@@ -45,6 +45,7 @@ impl Page {
                 true,
                 None,
                 Some(related),
+                None,
             );
             if !complete {
                 break;
