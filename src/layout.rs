@@ -335,6 +335,12 @@ pub struct ImageControl {
 }
 
 #[derive(Clone, Debug)]
+pub struct ControlBackground {
+    pub image: css::BackgroundImage,
+    pub presentation: crate::paint::BackgroundPresentation,
+}
+
+#[derive(Clone, Debug)]
 pub struct ControlBox {
     pub node: usize,
     pub x: i32,
@@ -345,6 +351,9 @@ pub struct ControlBox {
     pub text_font: Option<FontSpec>,
     pub color: u32,
     pub background: Option<u32>,
+    /// One CSS image layer on native button/submit/reset controls. It paints
+    /// inside the control item, between its native face and foreground.
+    pub background_image: Option<ControlBackground>,
     /// Authored native button-family padding, in zoomed top/right/bottom/left pixels.
     /// Other native control consumers retain their existing geometry paths.
     pub padding: [i32; 4],
@@ -442,7 +451,16 @@ impl Layout {
             && hit.width > 0 && hit.height > 0 && hit.x < width && hit.x.saturating_add(hit.width) > 0
             && hit.y < scroll.saturating_add(height) && hit.y.saturating_add(hit.height) > scroll).count()
     }
-    pub(crate) fn background_sources(&self)->impl Iterator<Item=(usize,&css::BackgroundImage)>{self.items.iter().filter_map(|item|if let PaintItem::Background{node,image,..}=item{Some((*node,image))}else{None}).chain(self.unpainted_backgrounds.iter().map(|(node,image)|(*node,image)))}
+    pub(crate) fn background_sources(&self) -> impl Iterator<Item = (usize, &css::BackgroundImage)> {
+        self.items.iter().filter_map(|item| match item {
+            PaintItem::Background { node, image, .. } => Some((*node, image)),
+            PaintItem::Control(index) => {
+                let control = &self.controls[*index];
+                control.background_image.as_ref().map(|background| (control.node, &background.image))
+            }
+            _ => None,
+        }).chain(self.unpainted_backgrounds.iter().map(|(node, image)| (*node, image)))
+    }
     pub(crate) fn element_node_at(&self,x:i32,y:i32)->Option<usize>{
         self.hits.iter().rev().find(|h|ClipRect::new(h.x,h.y,h.width,h.height).contains(x,y)).and_then(|h|(h.node!=0).then_some(h.node))
     }
@@ -4486,6 +4504,14 @@ impl<'a> Engine<'a> {
             text_font: self.font_spec(style),
             color: style.color,
             background: style.background,
+            background_image: if button_padding {
+                style.background_image.as_ref().map(|image| ControlBackground {
+                    image: image.clone(),
+                    presentation: self.background_presentation(style),
+                })
+            } else {
+                None
+            },
             padding,
             image: None,
         });
@@ -4613,6 +4639,7 @@ impl<'a> Engine<'a> {
             text_font: self.font_spec(style),
             color: style.color,
             background: style.background,
+            background_image: None,
             padding: [0;4],
             image: Some(ImageControl {
                 x: border[3] + padding[3],
@@ -6504,3 +6531,7 @@ mod table_anonymous_guard_tests;
 #[cfg(test)]
 #[path = "layout_order_tests.rs"]
 mod order_tests;
+
+#[cfg(test)]
+#[path = "layout_button_background_tests.rs"]
+mod button_background_tests;

@@ -117,6 +117,7 @@ fn proportional_input_caret_scrolling_and_paint_use_the_same_positions() {
         "",
         true,
         None,
+        None,
     );
     assert_eq!(canvas.clip(), clip);
     for (index, pixel) in canvas.pixels.iter().enumerate() {

@@ -3910,6 +3910,7 @@ impl App {
                             self.document.attr(rect.node, "placeholder").unwrap_or(""),
                             self.focus == Focus::Control(rect.node),
                             self.images.get(&rect.node).map(|bitmap| bitmap.as_ref()),
+                            self.backgrounds.get(&rect.node).map(|bitmap| bitmap.as_ref()),
                         );
                     }
                 }
@@ -4359,7 +4360,12 @@ fn draw_control(
     placeholder: &str,
     focused: bool,
     bitmap: Option<&Bitmap>,
+    background_bitmap: Option<&Bitmap>,
 ) {
+    if matches!(control.kind, Kind::Button | Kind::Submit | Kind::Reset) {
+        crate::paint::draw_native_button(canvas, rect, y, control, focused, background_bitmap);
+        return;
+    }
     let (x, width, height, scale) = (rect.x, rect.width, rect.height, rect.scale);
     if control.kind == Kind::Image {
         if let (Some(image), Some(bitmap)) = (&rect.image, bitmap) {
