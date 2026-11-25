@@ -6915,3 +6915,7 @@ mod area_href_tests;
 #[cfg(test)]
 #[path="app_area_url_tests.rs"]
 mod area_url_tests;
+
+#[cfg(test)]
+#[path="app_hyperlink_stringifier_tests.rs"]
+mod hyperlink_stringifier_tests;
