@@ -7103,3 +7103,7 @@ mod form_name_tests;
 #[cfg(test)]
 #[path="app_form_no_validate_tests.rs"]
 mod form_no_validate_tests;
+
+#[cfg(test)]
+#[path="app_form_accept_charset_tests.rs"]
+mod form_accept_charset_tests;
