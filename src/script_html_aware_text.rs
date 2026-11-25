@@ -71,12 +71,7 @@ impl Bridge<'_> {
         let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve HTML-aware text units.")?;
         let backing=units.capacity().checked_mul(size_of::<u16>()).ok_or("HTML-aware text backing overflow.")?;
         if backing>available{return Err("HTML-aware text scratch storage allowance exhausted.".into());}
-        let mut space=false;let mut visited=0usize;
-        for unit in text.iter().flat_map(|&handle|self.character_data_source(handle).unwrap().code_units()){
-            if visited%1024==0{script_text_content::deadline(self.state)?;}visited+=1;
-            if matches!(unit,9|10|12|13|32){space=!units.is_empty();continue;}
-            if space{units.push(32);space=false;}units.push(unit);
-        }
+        normalize_html_units(self.state,&mut units,text.iter().flat_map(|&handle|self.character_data_source(handle).unwrap().code_units()))?;
         script_text_content::deadline(self.state)?;
         let (projection,raw)=DomString::projected_size(&units)?;
         let logical=if raw{units.len().checked_mul(2).ok_or("HTML-aware text result overflow.")?}else{projection};
@@ -86,4 +81,30 @@ impl Bridge<'_> {
             .min(DomString::storage_bound(self.state.limits.host.string_bytes)?);
         let result=DomString::from_units(&units,budget)?;script_text_content::deadline(self.state)?;Ok(result)
     }
+    pub(super) fn html_aware_text_value(&mut self,text:&DomString)->Result<DomString,String>{
+        self.state.work(text.logical_bytes().checked_mul(5).ok_or("HTML-aware proposed text work overflow.")?)?;
+        let count=text.utf16_len();let available=script_text_content::available(self.state,text.capacity())?;
+        let bytes=count.checked_mul(size_of::<u16>()).ok_or("HTML-aware proposed text backing overflow.")?;
+        if bytes>available{return Err("HTML-aware proposed text scratch allowance exhausted.".into());}
+        self.state.copies(bytes)?;let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve HTML-aware proposed text.")?;
+        let backing=units.capacity().checked_mul(size_of::<u16>()).ok_or("HTML-aware proposed text capacity overflow.")?;
+        if backing>available{return Err("HTML-aware proposed text scratch allowance exhausted.".into());}
+        normalize_html_units(self.state,&mut units,text.code_units())?;
+        let (projection,raw)=DomString::projected_size(&units)?;let logical=if raw{units.len().checked_mul(2).ok_or("HTML-aware proposed result overflow.")?}else{projection};
+        if logical>self.state.limits.host.string_bytes{return Err("HTML-aware proposed text exceeds host string allowance.".into());}
+        self.state.copies(projection.checked_add(if raw{logical}else{0}).ok_or("HTML-aware proposed result copy overflow.")?)?;
+        let budget=available.checked_sub(backing).ok_or("HTML-aware proposed result scratch allowance exhausted.")?.min(DomString::storage_bound(self.state.limits.host.string_bytes)?);
+        let result=DomString::from_units(&units,budget)?;script_text_content::deadline(self.state)?;Ok(result)
+    }
+
+}
+
+fn normalize_html_units(state:&State,units:&mut Vec<u16>,input:impl Iterator<Item=u16>)->Result<(),String>{
+    let mut space=false;let mut visited=0usize;
+    for unit in input{
+        if visited%1024==0{script_text_content::deadline(state)?;}visited+=1;
+        if matches!(unit,9|10|12|13|32){space=!units.is_empty();continue;}
+        if space{units.push(32);space=false;}units.push(unit);
+    }
+    script_text_content::deadline(state)
 }
