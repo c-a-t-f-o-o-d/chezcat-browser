@@ -32,6 +32,7 @@ pub(super) fn element(handle:u32)->Option<u32> {
     let base=match attribute(handle)? {"class"=>BASE,"for"=>OUTPUT_BASE,"rel"=>AREA_REL_BASE,_=>SANDBOX_BASE};
     let element=node_handle((handle-base)as usize);node_index(element).map(|_|element)
 }
+// Shared rel identity is keyed by the actual element, for both AREA and FORM.
 pub(super) fn area_rel_handle(element:u32)->u32 {
     if node_index(element).is_some(){AREA_REL_BASE+(element-NODE_BASE)}else{INERT_AREA_REL_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
 }
@@ -97,7 +98,7 @@ impl Bridge<'_> {
                 .is_some_and(|node| matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg))
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && match attribute(object){Some("sandbox")=>self.iframe_sandbox_receiver(element),Some("for")=>self.html_output_receiver(element),Some("rel")=>self.area_rel_receiver(element),Some("class")=>true,_=>false})
+        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && match attribute(object){Some("sandbox")=>self.iframe_sandbox_receiver(element),Some("for")=>self.html_output_receiver(element),Some("rel")=>self.area_rel_receiver(element)||self.form_rel_receiver(element),Some("class")=>true,_=>false})
     }
     pub(super) fn exact_class_token_receiver(&self,object:u32)->bool {
         self.class_list_receiver(object)&&matches!(attribute(object),Some("class"|"for"|"rel"))&&element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
@@ -219,7 +220,7 @@ impl Bridge<'_> {
             return Err("DOMTokenList property write is not implemented.".into());
         }
         if attribute=="for"{return self.output_for_value_set(node_handle(node),&value);}
-        if attribute=="rel"{return self.area_rel_set(node_handle(node),&value);}
+        if attribute=="rel"{let owner=node_handle(node);return if self.form_rel_receiver(owner){self.form_rel_set(owner,&value)}else{self.area_rel_set(owner,&value)};}
         if attribute=="class"&&self.html_class_element(node){return self.html_class_set(node,&value);}
         let value = self.text(&value)?;
         self.attribute(node, attribute, Some(value))

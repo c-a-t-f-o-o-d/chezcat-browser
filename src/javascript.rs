@@ -9312,7 +9312,7 @@ impl Runtime {
         if matches!(method,document_location_interface::GET|document_location_interface::SET) {
             return self.document_location_call(object,method,args,host);
         }
-        if matches!(method,"\0Element.set.classList"|"\0HTMLOutputElement.set.htmlFor"|"\0HTMLAreaElement.set.relList") {
+        if matches!(method,"\0Element.set.classList"|"\0HTMLOutputElement.set.htmlFor"|"\0HTMLAreaElement.set.relList"|"\0HTMLFormElement.set.relList") {
             let property=if method=="\0Element.set.classList"{"classList"}else if method=="\0HTMLOutputElement.set.htmlFor"{"htmlFor"}else{"relList"};
             // Web IDL PutForwards reads the receiver's current property before
             // forwarding the original value. Only the selected value setter

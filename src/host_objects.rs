@@ -656,6 +656,7 @@ impl Runtime {
             if name=="HTMLAreaElement"{for &(property,get,set) in super::area_url_interface::MEMBERS{self.define_host_attribute(prototype,window,property,get,set)?;}}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"referrerPolicy","\0HTMLAreaElement.get.referrerPolicy",Some("\0HTMLAreaElement.set.referrerPolicy"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"relList","\0HTMLAreaElement.get.relList",Some("\0HTMLAreaElement.set.relList"))?;}
+            if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"relList","\0HTMLFormElement.get.relList",Some("\0HTMLFormElement.set.relList"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"ping","\0HTMLAreaElement.get.ping",Some("\0HTMLAreaElement.set.ping"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
             if name == "HTMLParamElement" {self.define_host_attribute(prototype,window,"name","\0HTMLParamElement.get.name",Some("\0HTMLParamElement.set.name"))?;}
