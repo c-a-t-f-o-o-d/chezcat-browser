@@ -40,7 +40,7 @@ fn container_object_string_original_parsed_ancestors_real_interfaces_and_ordinar
         "<!doctype html><html id=html><head><title>Original container strings</title></head><body id=body>",
         "<main id=main><div id=container class=original><button id=button type=button>Original button</button>",
         "<ul id=list><li>Original item</li></ul></div></main>",
-        "<section id=unpromoted>Unpromoted interface</section><a id=anchor href='../destination?q=one#part'>Original link</a>",
+        "<section id=promoted>Ordinary section</section><table id=unpromoted><tr><td>Unpromoted interface</td></tr></table><a id=anchor href='../destination?q=one#part'>Original link</a>",
         "<form id=form><input id=neighbor name=keep value=original></form></body></html>"
     ));
     doc.scripting_enabled = true;
@@ -265,6 +265,13 @@ if (detached.toString() !== divTag
 
 var anchor = document.getElementById('anchor'),
     unpromoted = document.getElementById('unpromoted');
+if (unpromoted === null || unpromoted.nodeName !== 'TABLE') throw 'real unsupported table control';
+var promoted = document.getElementById('promoted');
+if (Object.getPrototypeOf(promoted) !== HTMLElement.prototype
+    || promoted[Symbol.toStringTag] !== 'HTMLElement'
+    || stringify.call(promoted) !== '[object HTMLElement]'
+    || promoted.toString() !== '[object HTMLElement]')
+    throw 'ordinary section interface already admitted';
 if (anchor.href !== 'https://container-string.test/destination?q=one#part'
     || anchor.getAttribute('href') !== '../destination?q=one#part'
     || location.toString() !== location.href

@@ -3110,6 +3110,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if property=="valueOf"&&(self.area_href_receiver(object)||self.native_anchor(object)){return true;}
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
         if matches!(property, "nodeValue" | "hasChildNodes") && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
         if matches!(property,"insertAdjacentText"|"insertAdjacentElement") && self.collection_interface_receiver(object)==Some(false) {
@@ -3528,6 +3529,7 @@ impl Host for Bridge<'_> {
         } else { self.owns_global_property(property) }
     }
     fn primitive_conversion(&self, object: u32) -> bool {
+        if self.area_href_receiver(object)||self.native_anchor(object){return true;}
         if self.validity_receiver(object){return true;}
         if self.form_receiver(object) && self.class_list_element_receiver(object) {return true;}
         self.range_owner(object).is_some() || object == LOCATION || self.class_list_receiver(object) || self.standalone_target_owner(object).is_some()
@@ -4349,6 +4351,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_rel::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_href::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_hyperlink_stringifier::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_url::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_area_referrer_policy::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_ping::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4719,6 +4722,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method){return self.validate_area_target(object);}
         if script_area_rel::operation(method){return self.validate_area_rel(object);}
         if script_area_href::operation(method){return self.validate_area_href(object);}
+        if script_hyperlink_stringifier::operation(method){return self.validate_hyperlink_stringifier(object,method);}
         if script_area_url::operation(method).is_some(){return self.validate_area_href(object);}
         if script_area_referrer_policy::operation(method){return self.validate_area_referrer_policy(object);}
         if script_area_ping::operation(method){return self.validate_area_ping(object);}
@@ -5278,6 +5282,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method){return self.event_target_interface(object)&&self.area_target_receiver(receiver);}
         if script_area_rel::operation(method){return self.event_target_interface(object)&&self.area_rel_receiver(receiver);}
         if script_area_href::operation(method){return self.event_target_interface(object)&&self.area_href_receiver(receiver);}
+        if script_hyperlink_stringifier::operation(method){return self.event_target_interface(object)&&self.hyperlink_stringifier_receiver(receiver,method);}
         if script_area_url::operation(method).is_some(){return self.event_target_interface(object)&&self.area_href_receiver(receiver);}
         if script_area_referrer_policy::operation(method){return self.event_target_interface(object)&&self.area_referrer_policy_receiver(receiver);}
         if script_area_ping::operation(method){return self.event_target_interface(object)&&self.area_ping_receiver(receiver);}
@@ -7157,6 +7162,7 @@ impl Host for Bridge<'_> {
         if method==script_area_target::GET{return self.area_target_get(object);}
         if method==script_area_rel::GET{return self.area_rel_get(object);}
         if method==script_area_href::GET{return self.area_href_get(object);}
+        if script_hyperlink_stringifier::operation(method){return self.hyperlink_stringify(object,method);}
         if let Some((name,false))=script_area_url::operation(method){return self.area_url_get(object,name);}
         if method==script_area_referrer_policy::GET{return self.area_referrer_policy_get(object);}
         if method==script_area_ping::GET{return self.area_ping_get(object);}
@@ -10615,3 +10621,10 @@ mod area_url_tests;
 
 #[path="script_area_url.rs"]
 mod script_area_url;
+
+#[cfg(test)]
+#[path="script_hyperlink_stringifier_tests.rs"]
+mod hyperlink_stringifier_tests;
+
+#[path="script_hyperlink_stringifier.rs"]
+mod script_hyperlink_stringifier;

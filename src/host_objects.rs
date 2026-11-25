@@ -620,6 +620,7 @@ impl Runtime {
                 Some((false, false, true)),
             )?;
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
+            if name=="HTMLAreaElement"{self.deferred_host_method(prototype,window,"toString","\0HTMLAreaElement.toString",0)?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"alt","\0HTMLAreaElement.get.alt",Some("\0HTMLAreaElement.set.alt"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"coords","\0HTMLAreaElement.get.coords",Some("\0HTMLAreaElement.set.coords"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"shape","\0HTMLAreaElement.get.shape",Some("\0HTMLAreaElement.set.shape"))?;}
@@ -681,6 +682,7 @@ impl Runtime {
             if name == "HTMLTitleElement" {
                 self.define_host_attribute(prototype,window,"text",super::TITLE_TEXT_GET,Some(super::TITLE_TEXT_SET))?;
             }
+            if name=="HTMLAnchorElement"{self.deferred_host_method(prototype,window,"toString","\0HTMLAnchorElement.toString",0)?;}
             if name=="HTMLAnchorElement" {
                 for &(property,get,set) in super::anchor_url_interface::MEMBERS {
                     self.define_host_attribute(prototype,window,property,get,set)?;
