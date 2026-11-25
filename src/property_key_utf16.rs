@@ -105,6 +105,14 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         Self::require_property_receiver(receiver)?;
         self.property_name_units(units)?;
+        if let Value::Host(handle)=receiver {
+            self.validate_native_access(*handle,host)?;
+            if let Some(value)=host.named_units_property(*handle,units).map_err(Fault::new)? {
+                if !matches!(value,Value::Undefined){return Ok(value);}
+                let prototype=self.native_instance_prototype(*handle,host)?;
+                return self.get_units_property_with_receiver(prototype,units,receiver,host);
+            }
+        }
         let Some(base) = self.units_lookup_base(receiver, host)? else {
             return Err(Fault::new("UTF-16 properties require an ordinary object, supported primitive or registered native expando store."));
         };

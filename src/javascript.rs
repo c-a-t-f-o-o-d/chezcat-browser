@@ -721,6 +721,8 @@ pub struct NativeAttributeChange {
 }
 
 pub trait Host {
+    /// Opt-in exact native named-property reads; None preserves unsupported receivers.
+    fn named_units_property(&mut self,_object:u32,_units:&[u16])->Result<Option<Value>,String>{Ok(None)}
     /// Opt-in, native console printer. The runtime may describe genuine Error
     /// identities without invoking author getters or coercions. No object arena
     /// access is granted to the host; unrelated native calls keep original args.

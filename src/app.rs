@@ -7171,3 +7171,11 @@ mod submitter_form_target_input_tests;
 #[cfg(test)]
 #[path="app_submitter_form_target_button_tests.rs"]
 mod submitter_form_target_button_tests;
+
+#[cfg(test)]
+#[path="app_control_names_input_tests.rs"]
+mod control_names_input_tests;
+
+#[cfg(test)]
+#[path="app_control_names_button_tests.rs"]
+mod control_names_button_tests;
