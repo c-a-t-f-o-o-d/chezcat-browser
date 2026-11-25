@@ -12,7 +12,7 @@ impl Bridge<'_>{
   self.native_node_access(object)?;if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child form action requires its lifecycle hooks.".into()));}Ok(())
  }
 
- fn form_action_usv(&mut self,value:&Value)->Result<String,String>{
+ pub(super) fn form_action_usv(&mut self,value:&Value)->Result<String,String>{
   let Value::StringUnits(units)=value else{return self.text(value)};
   self.state.work(units.len().checked_mul(2).ok_or("Form action scalar work overflow.")?)?;
   let(bytes,_)=DomString::projected_size(units)?;
@@ -22,7 +22,10 @@ impl Bridge<'_>{
  }
  pub(super) fn form_action_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_form_action(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
-  let value=self.element_attribute_string_get(object,"action")?;let raw=self.form_action_usv(&value)?;
+  self.element_action_url_get(object,"action")
+ }
+ pub(super) fn element_action_url_get(&mut self,object:u32,attribute:&str)->Result<Value,String>{
+  let value=self.element_attribute_string_get(object,attribute)?;let raw=self.form_action_usv(&value)?;
   if raw.is_empty(){return if self.inert_node_type(object).is_some(){self.inert_node_document_url(object)}else{self.location_property("href")};}
   let Value::String(base)=self.node_base_uri_get(object)? else{return Err("Form action requires a scalar document base URL.".into())};
   let cost=dom_compat::url_copy_cost(&raw,None)?.checked_add(base.len().checked_mul(20).ok_or("Form action URL accounting overflow.")?).ok_or("Form action URL accounting overflow.")?;
