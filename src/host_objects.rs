@@ -713,7 +713,9 @@ impl Runtime {
             if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLSelectElement.get.autocomplete",Some("\0HTMLSelectElement.set.autocomplete"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLInputElement.get.autocomplete",Some("\0HTMLInputElement.set.autocomplete"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"formAction","\0HTMLInputElement.get.formAction",Some("\0HTMLInputElement.set.formAction"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"formMethod","\0HTMLInputElement.get.formMethod",Some("\0HTMLInputElement.set.formMethod"))?;}
             if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"formAction","\0HTMLButtonElement.get.formAction",Some("\0HTMLButtonElement.set.formAction"))?;}
+            if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"formMethod","\0HTMLButtonElement.get.formMethod",Some("\0HTMLButtonElement.set.formMethod"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLFormElement.get.autocomplete",Some("\0HTMLFormElement.set.autocomplete"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"method","\0HTMLFormElement.get.method",Some("\0HTMLFormElement.set.method"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"action","\0HTMLFormElement.get.action",Some("\0HTMLFormElement.set.action"))?;}
