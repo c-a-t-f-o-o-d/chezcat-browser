@@ -6883,3 +6883,7 @@ mod area_download_tests;
 #[cfg(test)]
 #[path="app_area_rel_tests.rs"]
 mod area_rel_tests;
+
+#[cfg(test)]
+#[path="app_area_ping_tests.rs"]
+mod area_ping_tests;
