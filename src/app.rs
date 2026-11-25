@@ -6887,3 +6887,7 @@ mod area_rel_tests;
 #[cfg(test)]
 #[path="app_area_ping_tests.rs"]
 mod area_ping_tests;
+
+#[cfg(test)]
+#[path="app_area_rel_list_tests.rs"]
+mod area_rel_list_tests;

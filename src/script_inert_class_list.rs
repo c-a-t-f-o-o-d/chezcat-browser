@@ -27,7 +27,7 @@ impl Bridge<'_>{
  }
  fn inert_token_owner(&mut self,object:u32)->Result<u32,String>{
   let owner=script_class_list::element(object).filter(|&owner|self.inert_class_element_receiver(owner)).ok_or("Inert Element token list is unavailable.")?;
-  if !matches!(script_class_list::attribute(object),Some("class"|"for"))||!self.class_list_receiver(object){return Err("Inert Element token attribute is unavailable.".into());}
+  if !matches!(script_class_list::attribute(object),Some("class"|"for"|"rel"))||!self.class_list_receiver(object){return Err("Inert Element token attribute is unavailable.".into());}
   self.native_node_access(owner).map_err(|(_,message)|message)?;
   self.state.work(1)?;self.state.copies(size_of::<usize>())?;Ok(owner)
  }
@@ -39,7 +39,7 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn inert_class_list_set(&mut self,object:u32,property:&str,value:&Value)->Result<(),String>{
   let owner=self.inert_token_owner(object)?;
   if property!="value"{return Err("DOMTokenList property write is not implemented.".into());}
-  if script_class_list::attribute(object)==Some("for"){self.output_for_value_set(owner,value)}else{self.element_class_name_set(owner,value)}
+  match script_class_list::attribute(object){Some("for")=>self.output_for_value_set(owner,value),Some("rel")=>self.area_rel_set(owner,value),_=>self.element_class_name_set(owner,value)}
  }
  pub(in crate::scripting) fn inert_class_list_get(&mut self,object:u32,property:&str)->Result<Value,String>{
   if property=="value"{let owner=self.inert_token_owner(object)?;return self.element_attribute_string_get(owner,script_class_list::attribute(object).ok_or("Inert token attribute is unavailable.")?);}
@@ -52,6 +52,12 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn inert_class_list_call(&mut self,object:u32,method:&str,args:&[Value])->Result<Value,String>{
   let owner=self.inert_token_owner(object)?;
   self.class_list_validate(object,method,args).map_err(|(_,message)|message)?;
+  if method=="supports"{
+   let token=token_list_reads::argument(args.first().ok_or("supports requires a converted DOMString token.")?)?;
+   self.state.work(token.logical_bytes())?;
+   // Area relation processing is not implemented, so no processing token is advertised.
+   return Ok(Value::Bool(false));
+  }
   if method=="toString"{return self.element_attribute_string_get(owner,script_class_list::attribute(object).ok_or("Inert token attribute is unavailable.")?);}
   if method=="item"{let value=args.first().ok_or("item requires an index.")?.to_number();let index=if value.is_finite(){value.trunc().rem_euclid(4_294_967_296.0)as usize}else{0};return self.inert_token_read(object,token_list_reads::Read::Index(index,false));}
   if matches!(method,"contains"|"toggle"|"replace"){
