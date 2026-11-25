@@ -1184,7 +1184,7 @@ impl Bridge<'_> {
                 )
                 || name=="template"&&!self.movable_template_host(node)
                 || name == "style" && !(direct_style && self.created_html_style(node))
-                || matches!(name, "option" | "optgroup") && !owned_select
+                || (name=="option" || name=="optgroup" && self.doc.nodes[node].namespace!=crate::html::Namespace::Html) && !owned_select
                 || name == "noscript" && self.doc.scripting_enabled
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)

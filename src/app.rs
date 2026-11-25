@@ -6995,3 +6995,7 @@ mod optgroup_label_tests;
 #[cfg(test)]
 #[path="app_optgroup_detached_copy_tests.rs"]
 mod optgroup_detached_copy_tests;
+
+#[cfg(test)]
+#[path="app_optgroup_connection_tests.rs"]
+mod optgroup_connection_tests;
