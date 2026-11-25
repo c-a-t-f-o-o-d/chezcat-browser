@@ -7099,3 +7099,7 @@ mod form_autocomplete_tests;
 #[cfg(test)]
 #[path="app_form_name_tests.rs"]
 mod form_name_tests;
+
+#[cfg(test)]
+#[path="app_form_no_validate_tests.rs"]
+mod form_no_validate_tests;
