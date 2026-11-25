@@ -122,7 +122,7 @@ fn scope_boundary(doc: &Document, node: usize) -> bool {
         )
 }
 
-fn special_html(name: &str) -> bool {
+pub(super) fn special_html(name: &str) -> bool {
     matches!(
         name,
         "address"
