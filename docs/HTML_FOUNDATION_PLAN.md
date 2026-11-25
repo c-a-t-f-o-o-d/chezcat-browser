@@ -877,6 +877,27 @@ HTML checks pass with the frozen expected outcomes unchanged. This combined
 result covers the 242 prior controls, 18 definition/list checks and 13 heading
 checks; it does not add Page or Windows execution evidence.
 
+**Scoped list and heading end increment:** native LI ends use list-item scope,
+including UL/OL boundaries. DD/DT ends require the exact requested name in
+ordinary scope. Any H1-H6 end closes the nearest in-scope HTML heading regardless
+of rank. Targets precede barriers; synthetic roots are excluded. Recognized ends
+with missing or out-of-scope targets are ignored without a generic cross-boundary
+close. The existing ordinary-scope predicate is reused unchanged.
+
+Dispatch follows checked table/select restrictions and strict template SVG end
+validation. Existing foreign-current fallback is retained; broader foreign
+integration is not implied. The stack scan allocates no nodes and preserves
+children and active formatting identities under existing depth and node limits.
+
+All 24 frozen new parser checks pass, up from eight, plus two unchanged existing
+scope-predicate controls. All 273 prior native HTML checks remain passing, for
+299 total. Seven optimized native scenarios pass, up from one. Checks cover all
+36 heading-rank pairs, exact scopes and tree identities, token completion,
+formatting, capacity, cancellation and recovery. Frozen new expectations remain
+unchanged. Added connected/detached Page assertions are not executed by this
+native selection. Paragraph/BR synthesis, broader end rules and Windows/browser/
+corpus acceptance remain separate; F05 stays partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
