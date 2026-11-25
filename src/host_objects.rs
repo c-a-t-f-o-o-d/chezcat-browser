@@ -669,6 +669,7 @@ impl Runtime {
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"noShade","\0HTMLHRElement.get.noShade",Some("\0HTMLHRElement.set.noShade"))?;}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"reversed","\0HTMLOListElement.get.reversed",Some("\0HTMLOListElement.set.reversed"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"noHref","\0HTMLAreaElement.get.noHref",Some("\0HTMLAreaElement.set.noHref"))?;}
+            if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLOptionElement.get.disabled",Some("\0HTMLOptionElement.set.disabled"))?;}
             if name == "HTMLDListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDListElement.get.compact",Some("\0HTMLDListElement.set.compact"))?;}
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHRElement.get.align",Some("\0HTMLHRElement.set.align"))?;}

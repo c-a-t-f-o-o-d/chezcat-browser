@@ -6967,3 +6967,7 @@ mod datalist_connection_tests;
 #[cfg(test)]
 #[path="app_option_interface_tests.rs"]
 mod option_interface_tests;
+
+#[cfg(test)]
+#[path="app_option_disabled_tests.rs"]
+mod option_disabled_tests;
