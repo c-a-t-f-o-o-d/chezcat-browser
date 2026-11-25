@@ -643,6 +643,7 @@ impl Runtime {
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"label","\0HTMLOptionElement.get.label",Some("\0HTMLOptionElement.set.label"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"text","\0HTMLOptionElement.get.text",Some("\0HTMLOptionElement.set.text"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"value","\0HTMLOptionElement.get.value",Some("\0HTMLOptionElement.set.value"))?;}
+            if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"name","\0HTMLSelectElement.get.name",Some("\0HTMLSelectElement.set.name"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"coords","\0HTMLAreaElement.get.coords",Some("\0HTMLAreaElement.set.coords"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"shape","\0HTMLAreaElement.get.shape",Some("\0HTMLAreaElement.set.shape"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"download","\0HTMLAreaElement.get.download",Some("\0HTMLAreaElement.set.download"))?;}

@@ -2660,3 +2660,20 @@ impl Forms{
   if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no OPTION selection was changed.".into());}Ok(())
  }
 }
+
+/// Prepared native submission name; the exact DOMString stays in the DOM.
+pub(crate) struct SelectNamePlan{pub(crate) node:usize,pub(crate) name:String}
+impl SelectNamePlan{
+ pub(crate) fn bytes(&self)->usize{self.name.capacity()}
+ pub(crate) fn commit(self,forms:&mut Forms){forms.controls.get_mut(&self.node).unwrap().name=self.name;}
+}
+impl Forms{
+ pub(crate) fn check_select_name_payload(&self,node:usize,name:&str)->Result<(),String>{
+  let control=self.controls.get(&node).ok_or("Native SELECT name control is unavailable.")?;
+  if name.len()>MAX_QUERY{return Err("A native SELECT name is limited to 8192 bytes; no name was changed.".into());}
+  // A SELECT retains option and group payloads as well as its live/default value.
+  // Preserve the shared complete payload and replace only the submission name.
+  let bytes=self.text_payload(None)?.checked_sub(control.name.len()).and_then(|n|n.checked_add(name.len())).ok_or("Native SELECT name payload overflow.")?;
+  if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no SELECT name was changed.".into());}Ok(())
+ }
+}
