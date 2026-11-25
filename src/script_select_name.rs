@@ -20,13 +20,13 @@ impl Bridge<'_>{
   let value=self.dom_text(value)?;self.state.copies(4)?;let name=crate::html::AttributeName::unqualified(script_clone_node::copy_text("name")?);
   if self.inert_node_type(object)==Some(1){self.write_inert_dom_attribute_ns(object,name,Some(value))}else{let node=self.node(object)?;self.public_dom_attribute(node,name,Some(value),script_attr::InputPreparation::Pending)}
  }
- pub(super) fn prepare_select_name(&mut self,node:usize,name:&crate::html::AttributeName,value:Option<&DomString>)->Result<Option<forms::SelectNamePlan>,String>{
+ pub(super) fn prepare_select_name(&mut self,node:usize,name:&crate::html::AttributeName,value:Option<&DomString>)->Result<Option<forms::ControlNamePlan>,String>{
   if !script_attr::html_select_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),name){return Ok(None);}
   self.state.work(self.forms.controls.len().saturating_add(1))?;if !self.forms.controls.contains_key(&node){return Ok(None);}
   self.state.work(self.forms.default_scan_work())?;let text=value.map_or("",DomString::as_str);
-  self.forms.check_select_name_payload(node,text)?;self.state.copies(text.len())?;
+  self.forms.check_control_name_payload(node,text)?;self.state.copies(text.len())?;
   let available=self.state.retained_limit.saturating_sub(self.state.retained);if text.len()>available{return Err("Native SELECT name retained allowance exhausted.".into());}
   let name=script_clone_node::copy_text(text)?;if name.capacity()>available{return Err("Native SELECT name retained allowance exhausted.".into());}
-  script_text_content::deadline(self.state)?;Ok(Some(forms::SelectNamePlan{node,name}))
+  script_text_content::deadline(self.state)?;Ok(Some(forms::ControlNamePlan{node,name}))
  }
 }

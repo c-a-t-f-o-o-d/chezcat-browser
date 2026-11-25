@@ -7039,3 +7039,7 @@ mod app_select_required_tests;
 #[cfg(test)]
 #[path="app_select_name_tests.rs"]
 mod app_select_name_tests;
+
+#[cfg(test)]
+#[path="app_textarea_name_tests.rs"]
+mod app_textarea_name_tests;
