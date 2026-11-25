@@ -7187,3 +7187,7 @@ mod control_disabled_input_tests;
 #[cfg(test)]
 #[path="app_control_disabled_button_tests.rs"]
 mod control_disabled_button_tests;
+
+#[cfg(test)]
+#[path="app_input_constraint_flags_tests.rs"]
+mod input_constraint_flags_tests;
