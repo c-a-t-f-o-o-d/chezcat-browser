@@ -53,6 +53,14 @@ mod head_noscript_tests;
 mod named_reference_tests;
 
 #[cfg(test)]
+#[path = "html_button_start_tests.rs"]
+mod button_start_tests;
+
+#[cfg(test)]
+#[path = "html_fragment_legacy_void_tests.rs"]
+mod fragment_legacy_void_tests;
+
+#[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
 mod foundation_adapter;
 
@@ -709,6 +717,25 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
+        if tag.name == "button" && !uncertain_foreign_recovery {
+            let current = *stack.last().unwrap();
+            if current == 0 || document.nodes[current].namespace == Namespace::Html {
+                let previous_depth = stack.len();
+                // A new button closes an ordinary-scope button before active
+                // formatting is reconstructed for the incoming start token.
+                close_scoped_end(&mut stack, &document, "button");
+                if stack.len() < previous_depth && structure.is_some() {
+                    // Closing the old button can expose a table parent after
+                    // the original placement decision. Refresh that decision
+                    // before reconstruction consumes foster insertion state.
+                    foster = match tables.tag(&mut document, &mut stack, &tag, node_limit, &mut formatting)? {
+                        table_construction::Action::Consumed => continue,
+                        table_construction::Action::Foster => true,
+                        table_construction::Action::Normal => false,
+                    };
+                }
+            }
+        }
         let native_plaintext = tag.name == "plaintext" && !uncertain_foreign_recovery
             && svg.root.is_none() && matches!(document.nodes[*stack.last().unwrap()].namespace,
                 Namespace::None | Namespace::Html);
@@ -744,7 +771,12 @@ fn parse_internal(
             && !uncertain_foreign_recovery && svg.root.is_none()
             && matches!(document.nodes[parent].namespace, Namespace::None | Namespace::Html);
         let raw = html_raw || matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
-        let void = is_void(&tag.name) || structure.is_some() && matches!(tag.name.as_str(),"basefont"|"bgsound"|"frame");
+        // These legacy metadata starts immediately close in checked native HTML.
+        let fragment_legacy_void = checked && !uncertain_foreign_recovery
+            && matches!(tag.name.as_str(), "basefont" | "bgsound")
+            && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
+        let void = is_void(&tag.name) || fragment_legacy_void
+            || structure.is_some() && matches!(tag.name.as_str(),"basefont"|"bgsound"|"frame");
         let nesting_full = !raw && !void && !svg_empty && stack.len() == MAX_DEPTH;
         if document.nodes.len() == node_limit || nesting_full {
             if checked { return Err("HTML fragment node/depth limit reached.".into()); }
