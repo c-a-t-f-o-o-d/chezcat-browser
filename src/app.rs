@@ -6853,3 +6853,7 @@ mod mod_datetime_tests;
 #[cfg(test)]
 #[path="app_map_name_tests.rs"]
 mod map_name_tests;
+
+#[cfg(test)]
+#[path="app_map_areas_tests.rs"]
+mod map_areas_tests;
