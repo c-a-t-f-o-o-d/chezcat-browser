@@ -14,6 +14,13 @@ pub use radius::UniformBorder;
 #[path = "paint_opacity.rs"]
 mod opacity;
 pub(crate) use opacity::{OpacityGroup, OpacityPainter};
+#[path = "paint_button.rs"]
+mod button;
+pub(crate) use button::draw_native_button;
+
+#[cfg(test)]
+#[path = "paint_button_tests.rs"]
+mod button_tests;
 
 #[cfg(test)]
 #[path = "paint_resample_tests.rs"]

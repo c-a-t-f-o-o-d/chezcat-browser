@@ -40,7 +40,9 @@ impl Engine<'_> {
             .items
             .iter()
             .filter(|item| {
-                matches!(item, PaintItem::Background { .. })
+                (matches!(item, PaintItem::Background { .. })
+                    || matches!(item, PaintItem::Control(index)
+                        if self.layout.controls[*index].background_image.is_some()))
                     && !visible(&self.styles, self.paint_owner(item))
             })
             .count();
@@ -57,7 +59,7 @@ impl Engine<'_> {
         let styles = &self.styles;
         let layout = &mut self.layout;
         let runs = &layout.runs;
-        let controls = &layout.controls;
+        let controls = &mut layout.controls;
         let fixed = &mut layout.fixed_items;
         let layers = &mut layout.positioned_items;
         let clips = &mut layout.item_clips;
@@ -90,6 +92,11 @@ impl Engine<'_> {
                 );
                 if let PaintItem::Background { node, image, .. } = old {
                     resources.push((node, image));
+                }
+            } else if let PaintItem::Control(index) = item {
+                let control = &mut controls[*index];
+                if let Some(background) = control.background_image.take() {
+                    resources.push((control.node, background.image));
                 }
             }
             index += 1;
