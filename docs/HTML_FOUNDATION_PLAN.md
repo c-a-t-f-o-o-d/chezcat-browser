@@ -714,7 +714,8 @@ the remaining loaded and inert pair retained a literal in-body NUL Text node
 after a correctly parsed comment. The DATA character increment below resolves
 that pair without changing its expected output or place in the selection.
 
-Checked DOCTYPE/generic NUL and foreign CDATA boundaries remain. These are native
+At that checkpoint, checked DOCTYPE/generic NUL and foreign CDATA boundaries
+remained. The later F07 increment below removes the checked DOCTYPE refusal. These are native
 component results, not complete upstream cases with diagnostics or Windows App,
 browser, streaming or full-corpus acceptance. F04 and its tokenizer contract
 remain partial.
@@ -749,6 +750,34 @@ recovery, full insertion modes,
 diagnostics, streaming, whole-parser resource accounting and Windows App/browser/
 full-corpus qualification remain open. The frozen foundation inputs, selections
 and witnesses are unchanged; F04 and F05 remain partial.
+
+**Tag and attribute increment:** the shared scanner now retains complete tag
+names through the actual delimiter, folds ASCII case only, and replaces literal
+NUL in tag names, attribute names and all attribute-value states. An initial `=`
+belongs to the attribute name; quoted delimiters, slash, reconsume and EOF states
+retain their real token boundaries. Malformed resource-like names no longer
+alias native resource elements. Duplicate names compare after normalization,
+retain the first value and keep the duplicate evidence used by nonce checks.
+
+Checked STYLE end-tag recovery consumes its complete attribute tail without
+publishing those attributes. Strict TEXTAREA/SVG syntax and the generic checked
+fragment NUL guard remain separate. Scans, exact-size normalization and copies
+poll cancellation; token storage uses fallible reservation.
+
+All 23 frozen new native checks pass, up from eight, and all 180 existing HTML
+checks remain passing, with the obsolete STYLE refusal replaced by positive
+tree assertions. Seven separately selected optimized native parser scenarios
+pass, up from one; the raw-text vertical-tab delimiter scenario was already a
+passing guard. These are source-bound Linux component results. Structured
+diagnostics, streaming, whole-parser admission, Windows App/JavaScript execution
+and full browser/corpus qualification remain open. F04 and its tokenizer
+contract stay partial; frozen foundation inputs and selections are unchanged.
+
+The composed tag/declaration source passes all 214 selected native HTML checks.
+One additional native assertion group verifies eight formerly refused spellings
+and shares its exact assertions with the innerHTML fixture. That supplementary
+group is separate from the frozen new-test selections; the Page portion of the
+consumer fixture is not included in this component execution.
 
 **Deliverables**
 
@@ -849,6 +878,21 @@ invalid receiver, stale generation, hierarchy, late failure and recovery cases.
 Native data checks do not imply unchanged browser WPT has passed.
 
 ### F07 — Contextual fragments, markup APIs and serialization
+
+**Fragment DOCTYPE increment:** supported checked HTML fragments now consume and
+ignore DOCTYPE tokens without adding a DocumentType node or changing the fragment
+mode. The shared declaration reader retains malformed-token and EOF boundaries.
+Text, comment, select and supported template SVG ownership remain intact, while
+raw/RCDATA contexts keep declaration spelling as text. Full documents retain their
+separate initial DOCTYPE identity and mode behavior.
+
+All 11 frozen new native parser checks pass, up from three; the same 64 existing
+selected controls remain passing, for 75 affected checks. Four separately selected
+optimized native parser scenarios pass, up from one. These are source-bound Linux
+component results. Complete mode inheritance, unsupported contexts, markup/API
+execution, serialization, Windows App/browser/corpus acceptance and XML/XHTML
+remain separate. Checked generic NUL, unsupported structure and foreign-content
+refusals remain. F07 and its contextual-fragment contract stay partial.
 
 **Deliverables**
 
