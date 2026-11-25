@@ -29,9 +29,14 @@ pub use sizing_math::CalculatedLength;
 mod custom_properties;
 #[path="css_font_values.rs"]
 mod font_values;
+#[path="css_text_values.rs"]
+mod text_values;
 #[cfg(test)]
 #[path="css_font_value_budget_tests.rs"]
 mod font_value_budget_tests;
+#[cfg(test)]
+#[path="css_text_value_tests.rs"]
+mod text_value_tests;
 #[path="css_svg_geometry.rs"]
 mod svg_geometry;
 #[path="css_svg_paint.rs"]
@@ -1318,23 +1323,30 @@ fn compute_cascade(
                 } else { apply_opacity(&mut variable_budget); }
                 continue;
             }
-            if font_values::property(&declaration.name) {
+            let font_property = font_values::property(&declaration.name);
+            if font_property || text_values::property(&declaration.name) {
                 let mut resolve = |budget: &mut custom_properties::Budget| {
-                    font_values::apply(&mut style, &parent, declaration, &variables[index], budget,
-                        has_element_parent, &mut font_known, parent_font_known, root_font_known)
+                    if font_property {
+                        font_values::apply(&mut style, &parent, declaration, &variables[index], budget,
+                            has_element_parent, &mut font_known, parent_font_known, root_font_known)
+                    } else {
+                        text_values::apply(&mut style, &parent, declaration, &variables[index], budget, has_element_parent)
+                    }
                 };
+                let refusal = if font_property { "CSS font computation allowance reached." }
+                    else { "CSS text computation allowance reached." };
                 let accepted = if let Some(meter) = meter.as_deref_mut() {
                     meter.variables(&mut variable_budget, resolve)?
-                        .map_err(|()| "CSS font computation allowance reached.")?
+                        .map_err(|()| refusal)?
                 } else if let Some(meter) = transform_meter.as_deref_mut() {
                     meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
                     meter.variables(&mut variable_budget, resolve)?
-                        .map_err(|()| "CSS font computation allowance reached.")?
+                        .map_err(|()| refusal)?
                 } else {
                     match resolve(&mut variable_budget) {
                         Ok(accepted) => accepted,
                         // Bounded rendering may retain a fallback, but a
-                        // refused font cannot publish complete computed values.
+                        // refused value cannot publish complete computed values.
                         Err(()) => { complete = false; false },
                     }
                 };
@@ -3027,13 +3039,14 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
         if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
         let alignment = custom_properties::flex_alignment_property(name);
         let font = font_values::property(name);
-        if custom_properties::inset_property(name) || image_placement::property(name) || alignment || font {
+        let text = text_values::property(name);
+        if custom_properties::inset_property(name) || image_placement::property(name) || alignment || font || text {
             if let Some(meter) = meter.as_deref_mut() {
                 meter.source(name.len().saturating_add(decl.value.len()))?;
             }
         }
         let value = decl.value.to_ascii_lowercase();
-        let variable = if alignment || font { custom_properties::has_var(&decl.value) } else { value.contains("var(") };
+        let variable = if alignment || font || text { custom_properties::has_var(&decl.value) } else { value.contains("var(") };
         let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
         if name == "animation-timing-function" {
             if let Some(meter) = meter.as_deref_mut() { meter.work(easing_source_cost(value.len()).0)?; }
@@ -3073,6 +3086,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             s if image_placement::property(s) && !variable && !wide && !image_placement::valid(s, &value) => continue,
             s if alignment && !variable && !wide && !flex_alignment_value(s, &value) => continue,
             s if font && !variable && !wide && !font_values::valid(s, &decl.value) => continue,
+            s if text && !variable && !wide && !text_values::valid(s, &decl.value) => continue,
             "row-gap" | "column-gap" if !variable && !wide && value != "normal" && max_sizing_value(&value).is_none() => continue,
             s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
             s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
@@ -3104,7 +3118,7 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
         if names.is_empty(){continue;}
         let lower=decl.value.to_ascii_lowercase();
         let wide=matches!(lower.as_str(),"inherit"|"initial"|"unset"|"revert"|"revert-layer");
-        let variable=if custom_properties::flex_alignment_property(&decl.name) || font_values::property(&decl.name) {custom_properties::has_var(&decl.value)} else {lower.contains("var(")};
+        let variable=if custom_properties::flex_alignment_property(&decl.name) || font_values::property(&decl.name) || text_values::property(&decl.name) {custom_properties::has_var(&decl.value)} else {lower.contains("var(")};
         if !wide&&!variable {
             let valid=match decl.name.as_str(){
                 "display"=>display_value(&lower).is_some(),
@@ -3115,10 +3129,9 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
                 "flex-basis"=>sizing_value(&lower,Length::Auto).is_some(),
                 name if custom_properties::flex_alignment_property(name)=>flex_alignment_value(name,&lower),
                 name if font_values::property(name)=>font_values::valid(name,&decl.value),
+                name if text_values::property(name)=>text_values::valid(name,&decl.value),
                 "font-size"=>font_size_value(&lower,16.0,16.0).is_some(),
                 "line-height"=>line_height::literal(&lower,LineHeight::Factor(1.5)).is_some(),
-                "white-space"=>matches!(lower.as_str(),"normal"|"nowrap"|"pre"|"pre-wrap"|"break-spaces"),
-                "text-align"=>matches!(lower.as_str(),"left"|"start"|"center"|"right"|"end"),
                 name if image_placement::property(name)=>image_placement::valid(name,&lower),
                 _=>true,
             };
@@ -3687,33 +3700,12 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_eleme
                 style.underline = true;
             }
         }
-        "text-align" => {
-            let align = match value.as_str() {
-                "left" | "start" => Some(Align::Left),
-                "center" => Some(Align::Center),
-                "right" | "end" => Some(Align::Right),
-                "inherit" => Some(parent.align),
-                _ => None,
-            };
-            if let Some(align) = align {
-                style.align = align;
-                style.legacy_align = if value == "inherit" {
-                    parent.legacy_align
-                } else {
-                    None
-                };
-            }
+        "text-align" | "white-space" => {
+            text_values::literal(style, has_element_parent.then_some(parent), &declaration.name, &value);
         }
         "line-height" => {
             if let Some(value) = line_height::literal(&value,parent.line_height) {style.line_height=value;}
         }
-        "white-space" => match value.as_str() {
-            "normal" => style.white_space = WhiteSpace::Normal,
-            "nowrap" => style.white_space = WhiteSpace::NoWrap,
-            "pre" => style.white_space = WhiteSpace::Pre,
-            "pre-wrap" | "break-spaces" => style.white_space = WhiteSpace::PreWrap,
-            _ => {}
-        },
         "border-spacing" => {
             let values: Option<Vec<_>> = value
                 .split_ascii_whitespace()
