@@ -3137,6 +3137,7 @@ impl Bridge<'_> {
         if self.progress_numeric_member(object,property){return true;}
         if self.legend_form_member(object,property){return true;}
         if self.map_areas_member(object,property){return true;}
+        if self.datalist_options_member(object,property){return true;}
         if self.time_datetime_member(object,property){return true;}
         if self.area_alt_member(object,property){return true;}
         if self.area_coords_member(object,property){return true;}
@@ -3564,6 +3565,7 @@ impl Host for Bridge<'_> {
         if self.progress_numeric_member(object,property){return false;}
         if self.legend_form_member(object,property){return false;}
         if self.map_areas_member(object,property){return false;}
+        if self.datalist_options_member(object,property){return false;}
         if self.time_datetime_member(object,property){return false;}
         if self.area_alt_member(object,property){return false;}
         if self.area_coords_member(object,property){return false;}
@@ -3745,6 +3747,7 @@ impl Host for Bridge<'_> {
         if self.progress_numeric_member(object,property){return property=="position";}
         if self.legend_form_member(object,property){return true;}
         if self.map_areas_member(object,property){return true;}
+        if self.datalist_options_member(object,property){return true;}
         if self.time_datetime_member(object,property){return false;}
         if self.area_alt_member(object,property){return false;}
         if self.area_coords_member(object,property){return false;}
@@ -4362,6 +4365,7 @@ impl Host for Bridge<'_> {
         if script_progress_numeric::operation(method)&&self.event_target_interface(object){return Some(object);}
         if method==script_legend_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_map_areas::GET&&self.event_target_interface(object){return Some(object);}
+        if method==script_datalist_options::GET&&self.event_target_interface(object){return Some(object);}
         if script_time_datetime::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_alt::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_coords::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4736,6 +4740,7 @@ impl Host for Bridge<'_> {
         if script_progress_numeric::operation(method){return self.validate_progress_numeric(object);}
         if method==script_legend_form::GET{return self.validate_legend_form(object);}
         if method==script_map_areas::GET{return self.validate_map_areas(object);}
+        if method==script_datalist_options::GET{return self.validate_datalist_options(object);}
         if script_time_datetime::operation(method){return self.validate_time_datetime(object);}
         if script_area_alt::operation(method){return self.validate_area_alt(object);}
         if script_area_coords::operation(method){return self.validate_area_coords(object);}
@@ -5302,6 +5307,7 @@ impl Host for Bridge<'_> {
         if script_progress_numeric::operation(method){return self.event_target_interface(object)&&self.progress_numeric_receiver(receiver);}
         if method==script_legend_form::GET{return self.event_target_interface(object)&&self.legend_receiver(receiver);}
         if method==script_map_areas::GET{return self.event_target_interface(object)&&self.map_name_receiver(receiver);}
+        if method==script_datalist_options::GET{return self.event_target_interface(object)&&self.datalist_options_receiver(receiver);}
         if script_time_datetime::operation(method){return self.event_target_interface(object)&&self.time_datetime_receiver(receiver);}
         if script_area_alt::operation(method){return self.event_target_interface(object)&&self.area_alt_receiver(receiver);}
         if script_area_coords::operation(method){return self.event_target_interface(object)&&self.area_coords_receiver(receiver);}
@@ -6237,6 +6243,7 @@ impl Host for Bridge<'_> {
         if self.progress_numeric_member(object,property){return self.progress_numeric_get(object,match property{"value"=>script_progress_numeric::VALUE_GET,"max"=>script_progress_numeric::MAX_GET,_=>script_progress_numeric::POSITION_GET});}
         if self.legend_form_member(object,property){return self.legend_form_get(object);}
         if self.map_areas_member(object,property){return self.map_areas_get(object);}
+        if self.datalist_options_member(object,property){return self.datalist_options_get(object);}
         if self.time_datetime_member(object,property){return self.time_datetime_get(object);}
         if self.area_alt_member(object,property){return self.area_alt_get(object);}
         if self.area_coords_member(object,property){return self.area_coords_get(object);}
@@ -7272,6 +7279,7 @@ impl Host for Bridge<'_> {
         if script_progress_numeric::operation(method){return self.progress_numeric_get(object,method);}
         if method==script_legend_form::GET{return self.legend_form_get(object);}
         if method==script_map_areas::GET{return self.map_areas_get(object);}
+        if method==script_datalist_options::GET{return self.datalist_options_get(object);}
         if script_fieldset::operation(method){return self.fieldset_get(object,method);}
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
@@ -10714,3 +10722,10 @@ mod param_connection_tests;
 #[cfg(test)]
 #[path="script_datalist_interface_tests.rs"]
 mod datalist_interface_tests;
+
+#[cfg(test)]
+#[path="script_datalist_options_tests.rs"]
+mod datalist_options_tests;
+
+#[path="script_datalist_options.rs"]
+mod script_datalist_options;

@@ -607,20 +607,22 @@ impl Bridge<'_> {
             self.state.dom.collections.get(collection_handle_index(handle)?).map(|record| record.root));
         Some(root.and_then(|owner| self.frame_instance_window(owner)).unwrap_or(WINDOW))
     }
-    pub(super) fn create_map_areas_collection(&mut self,owner:u32)->Result<Value,String>{
+    pub(super) fn create_map_areas_collection(&mut self,owner:u32)->Result<Value,String>{self.create_html_descendant_collection(owner,"area")}
+    pub(super) fn create_datalist_options_collection(&mut self,owner:u32)->Result<Value,String>{self.create_html_descendant_collection(owner,"option")}
+    fn create_html_descendant_collection(&mut self,owner:u32,local:&str)->Result<Value,String>{
         const URI:&str="http://www.w3.org/1999/xhtml";
         // The existing live namespace filter already follows actual root identity.
         // Its paid registry scan gives SameObject without another owner registry.
-        self.state.work(self.state.dom.collections.len().saturating_mul(40).saturating_add(1))?;
+        self.state.work(self.state.dom.collections.len().saturating_mul(URI.len().saturating_add(local.len()).saturating_add(1)).saturating_add(1))?;
         if let Some(index)=self.state.dom.collections.iter().position(|record|record.root==owner&&matches!(&record.filter,Filter::Namespace(query)
-            if query.local.as_slice()==[97,114,101,97]&&query.namespace.as_deref().is_some_and(|units|units.iter().copied().eq(URI.encode_utf16())))){
+            if query.local.iter().copied().eq(local.encode_utf16())&&query.namespace.as_deref().is_some_and(|units|units.iter().copied().eq(URI.encode_utf16())))){
             return Ok(Value::Host(COLLECTION_BASE+index as u32));
         }
-        let bytes=URI.len()+4;
+        let bytes=URI.len()+local.len();
         self.state.work(bytes)?;
-        if URI.len()>self.state.limits.host.string_bytes||4>self.state.limits.host.string_bytes{return Err("Map areas filter exceeds the DOM string allowance.".into());}
+        if URI.len()>self.state.limits.host.string_bytes||local.len()>self.state.limits.host.string_bytes{return Err("HTML descendant filter exceeds the DOM string allowance.".into());}
         self.state.copies(bytes)?;
-        self.create_namespace_collection(owner,&[Value::String(URI.into()),Value::String("area".into())])
+        self.create_namespace_collection(owner,&[Value::String(URI.into()),Value::String(local.into())])
     }
     pub(super) fn create_children_collection(&mut self,owner:u32)->Result<Value,String>{
         // SameObject lookup needs no second owner registry or promotion update.
