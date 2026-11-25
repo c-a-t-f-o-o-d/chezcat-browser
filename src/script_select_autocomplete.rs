@@ -13,7 +13,7 @@ impl Bridge<'_>{
  }
  pub(super) fn select_autocomplete_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_select_autocomplete(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
-  self.autofill_get(object)
+  self.autofill_get(object,false)
  }
  pub(super) fn select_autocomplete_set(&mut self,object:u32,value:&Value)->Result<(),String>{
   self.validate_select_autocomplete(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
