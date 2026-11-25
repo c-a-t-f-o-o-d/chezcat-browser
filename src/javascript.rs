@@ -762,7 +762,11 @@ pub trait Host {
     fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
     fn finish_native_promise_effect(&mut self) {}
     fn begin_form_reset(&mut self,_object:u32)->Result<Option<usize>,String>{Err("Form reset is not authorized by this host.".into())}
+    fn prepare_form_reset(&mut self,_object:u32)->Result<(),String>{Err("Form reset is not authorized by this host.".into())}
+    fn next_form_reset_output(&mut self,_object:u32)->Result<Option<u32>,String>{Err("Form reset is not authorized by this host.".into())}
     fn complete_form_reset(&mut self,_object:u32)->Result<(),String>{Err("Form reset is not authorized by this host.".into())}
+    /// Unconditional pending-plan cleanup, including exhausted job allowances.
+    fn finish_form_reset(&mut self,_object:u32){}
     fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
     fn begin_abort_dispatch(&mut self, _controller: u32, _reason: Value) -> Result<usize, String> {
         Err("Abort dispatch is not authorized by this host.".into())
@@ -9479,7 +9483,20 @@ impl Runtime {
             // the method caller before the final authority and native preflight.
             host.native_operation_caller(self.native_access_caller
                 .unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
-            if accepted {host.complete_form_reset(object).map_err(Fault::new)?;}
+            if accepted {
+                let result=(||{
+                    host.prepare_form_reset(object).map_err(Fault::new)?;
+                    while let Some(output)=host.next_form_reset_output(object).map_err(Fault::new)? {
+                        self.step()?;
+                        self.reset_native_output_inner(output,host)?;
+                    }
+                    host.native_operation_caller(self.native_access_caller
+                        .unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+                    host.complete_form_reset(object).map_err(Fault::new)
+                })();
+                host.finish_form_reset(object);
+                result?;
+            }
             return Ok(Value::Undefined);
         }
         if host.synchronous_event_dispatch(object,method) {
