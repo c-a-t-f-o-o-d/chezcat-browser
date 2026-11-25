@@ -6931,3 +6931,7 @@ mod area_detached_copy_tests;
 #[cfg(test)]
 #[path="app_area_connection_tests.rs"]
 mod area_connection_tests;
+
+#[cfg(test)]
+#[path="app_param_name_tests.rs"]
+mod param_name_tests;

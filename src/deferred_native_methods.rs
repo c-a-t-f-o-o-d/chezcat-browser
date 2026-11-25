@@ -7,7 +7,7 @@ use super::*;
 enum State { Pending, Ready(usize), Failed }
 
 #[derive(Clone, Copy)]
-enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize } }
+enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize }, ParamConstructor { window:u32, prototype:usize, parent:usize } }
 
 pub(super) struct NativeMethod {
     definition: Definition,
@@ -23,6 +23,28 @@ impl Runtime {
 
     pub(super) fn deferred_host_method(&mut self, owner:usize, window:u32, name:&'static str, operation:&'static str, length:usize)->Result<(),Fault>{
         self.defer_method(owner,name,Definition::Host{window,operation,length},true)
+    }
+
+    pub(super) fn defer_param_constructor(&mut self, window:u32, prototype:usize, parent:usize)->Result<(),Fault>{
+        self.defer_method(prototype,"constructor",Definition::ParamConstructor{window,prototype,parent},false)?;
+        let StoredValue::DeferredNative(index)=self.objects[prototype].properties["constructor"].value else {unreachable!()};
+        self.deferred_param_constructor=Some(index);
+        self.reserve_deferred_global_orders(&["HTMLParamElement"])
+    }
+
+    pub(super) fn ensure_param_constructor(&mut self)->Result<(),Fault>{
+        let Some(index)=self.deferred_param_constructor else{return Ok(())};
+        let function=self.materialize_native_identity(index)?;
+        if let Err(error)=self.put_binding(self.global_environment,"HTMLParamElement".into(),Some(Value::Function(function)),Declaration::Var,false){
+            self.deferred_native_methods[index].state=State::Failed;
+            return Err(error);
+        }
+        self.deferred_param_constructor=None;
+        Ok(())
+    }
+
+    pub(super) fn deferred_param_constructor_edge(&self,index:usize)->Option<usize>{
+        match self.deferred_native_methods[index].state{State::Ready(function)=>Some(function),_=>None}
     }
 
     fn defer_method(&mut self, owner:usize, name:&str, definition:Definition, enumerable:bool)->Result<(),Fault>{
@@ -49,7 +71,13 @@ impl Runtime {
 
     pub(super) fn materialize_native_property(&mut self, owner: usize, name: &str) -> Result<(), Fault> {
         let Some(StoredValue::DeferredNative(index)) = self.object(owner)?.properties.get(name).map(|property| &property.value) else { return Ok(()); };
-        let index = *index;
+        let function = self.materialize_native_identity(*index)?;
+        // Preserve descriptor flags/order when realizing a conceptual data value.
+        self.objects[owner].properties.get_mut(name).unwrap().value = StoredValue::Value(Value::Function(function));
+        Ok(())
+    }
+
+    fn materialize_native_identity(&mut self,index:usize)->Result<usize,Fault>{
         let function = match self.deferred_native_methods[index].state {
             State::Ready(function) => function,
             State::Failed => return Err(Fault::new("Native method initialization is unavailable after an earlier bounded failure.")),
@@ -60,6 +88,16 @@ impl Runtime {
                 let name = self.deferred_native_methods[index].name.clone();
                 let result = self.with_intrinsic_realm(realm, |runtime| match definition {
                     Definition::Native(builtin)=>runtime.native_function(builtin,&name),
+                    Definition::ParamConstructor{window,prototype,parent}=>{
+                        let allocation=runtime.allocate_host_function_with_length(window,"HTMLParamElement",0).map_err(Fault::new)?;
+                        if let Some(Function::Host{constructible,illegal_interface_constructor,..})=runtime.functions.get_mut(allocation.id){
+                            *constructible=true;
+                            *illegal_interface_constructor=true;
+                        }
+                        runtime.objects[runtime.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent));
+                        runtime.store_property(runtime.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                        Ok(Value::Function(allocation.id))
+                    },
                     Definition::Host{window,operation,length}=>{
                         let method=runtime.allocate_host_function_with_length(window,operation,length).map_err(Fault::new)?;
                         if let Some(Function::Host{receiver_required,..})=runtime.functions.get_mut(method.id){*receiver_required=true;}
@@ -77,16 +115,60 @@ impl Runtime {
                 }
             }
         };
-        // Preserve current descriptor flags/order, including freeze before the
-        // first read. The conceptual data value is unchanged by realization.
-        self.objects[owner].properties.get_mut(name).unwrap().value = StoredValue::Value(Value::Function(function));
-        Ok(())
+        Ok(function)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn param_runtime()->(Runtime,usize){
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.define_global("window",Value::Host(77)).unwrap();
+        runtime.bind_browser_global(77).unwrap();
+        let prototype=runtime.new_object(None).unwrap();
+        let Value::Function(parent)=runtime.native_function(Builtin::IsNaN,"parent").unwrap() else{unreachable!()};
+        runtime.put_binding(runtime.global_environment,"paramPrototype".into(),Some(Value::Object(prototype)),Declaration::Var,false).unwrap();
+        let before=runtime.functions.len();
+        runtime.defer_param_constructor(77,prototype,parent).unwrap();
+        runtime.global_attributes.insert("HTMLParamElement".into(),(false,true,true));
+        assert_eq!(runtime.functions.len(),before);
+        (runtime,prototype)
+    }
+
+    #[test]
+    fn param_name_constructor_prototype_first_freeze_preserves_one_identity(){
+        let(mut runtime,prototype)=param_runtime();
+        runtime.execute("var freeze=Object.freeze,inspect=Object.getOwnPropertyDescriptor;freeze(paramPrototype);",&mut NoHost).unwrap();
+        let before=runtime.functions.len();
+        runtime.execute("var C=paramPrototype.constructor;if(C!==HTMLParamElement||C!==window.HTMLParamElement||C.prototype!==paramPrototype||C.name!=='HTMLParamElement'||C.length!==0)throw 'one identity';var d=inspect(paramPrototype,'constructor'),g=inspect(window,'HTMLParamElement'),p=inspect(C,'prototype');if(d.value!==C||d.get!==undefined||d.enumerable||d.writable||d.configurable||g.value!==C||g.get!==undefined||g.enumerable||!g.writable||!g.configurable||p.value!==paramPrototype||p.writable||p.configurable||p.enumerable)throw 'data flags';",&mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(),before+1);
+        assert!(matches!(runtime.own_property(prototype,"constructor").unwrap(),Value::Function(_)));
+    }
+
+    #[test]
+    fn param_name_constructor_global_first_override_delete_never_resurrect(){
+        for change in ["paramPrototype.constructor=17;","delete paramPrototype.constructor;"]{
+            let(mut runtime,_)=param_runtime();
+            runtime.execute(change,&mut NoHost).unwrap();
+            runtime.execute("var C=HTMLParamElement;if(C.prototype!==paramPrototype||paramPrototype.constructor===C)throw 'prototype mutation';window.HTMLParamElement=19;if(HTMLParamElement!==19)throw 'global override';delete window.HTMLParamElement;var names=Object.getOwnPropertyNames(window);if(typeof HTMLParamElement!=='undefined'||names.indexOf('HTMLParamElement')>=0||paramPrototype.constructor===C)throw 'deletion resurrected';",&mut NoHost).unwrap();
+        }
+        let(mut runtime,_)=param_runtime();
+        runtime.execute("var C=HTMLParamElement;if(paramPrototype.constructor!==C)throw 'global first';",&mut NoHost).unwrap();
+    }
+
+    #[test]
+    fn param_name_constructor_failure_is_bounded_across_both_observation_routes(){
+        let(mut runtime,prototype)=param_runtime();
+        while runtime.functions.len()<MAX_FUNCTIONS{runtime.native_function(Builtin::IsNaN,"fixture").unwrap();}
+        let before=(runtime.functions.len(),runtime.objects.len(),runtime.bindings);
+        assert!(runtime.ensure_param_constructor().unwrap_err().display().contains("Function limit reached"));
+        runtime.begin_job();
+        assert!(runtime.materialize_native_property(prototype,"constructor").unwrap_err().display().contains("earlier bounded failure"));
+        assert!(runtime.ensure_param_constructor().unwrap_err().display().contains("earlier bounded failure"));
+        assert_eq!((runtime.functions.len(),runtime.objects.len(),runtime.bindings),before);
+    }
+
     struct NoHost;
     impl Host for NoHost {
         fn allow_eval(&mut self) -> Result<bool, String> { Ok(true) }
