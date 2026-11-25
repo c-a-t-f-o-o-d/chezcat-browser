@@ -6971,3 +6971,7 @@ mod option_interface_tests;
 #[cfg(test)]
 #[path="app_option_disabled_tests.rs"]
 mod option_disabled_tests;
+
+#[cfg(test)]
+#[path="app_option_form_tests.rs"]
+mod option_form_tests;
