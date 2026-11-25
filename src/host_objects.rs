@@ -588,7 +588,7 @@ impl Runtime {
             let allocation = self.allocate_host_function_with_length(window, name, 0)
                 .map_err(Fault::new)?;
             if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
-                *constructible = true;
+                *constructible = name != "HTMLUnknownElement";
                 *illegal_interface_constructor = true;
             }
             // The legacy Image factory and HTMLImageElement have distinct
