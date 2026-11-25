@@ -658,6 +658,10 @@ fn parse_internal(
                     svg.root = None;
                 }
             }
+            if (parent == 0 || document.nodes[parent].namespace == Namespace::Html)
+                && close_scoped_end(&mut stack, &document, &tag.name) {
+                continue;
+            }
             let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
             if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
                 if index > 0 {
@@ -937,6 +941,37 @@ fn tag_space(byte: u8, _checked: bool) -> bool {
 
 fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<TagToken, String> {
     tag_tokens::read(input, start, checked, check)
+}
+
+fn close_scoped_end(stack: &mut Vec<usize>, document: &Document, incoming: &str) -> bool {
+    let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+    let any_heading = heading(incoming);
+    if !any_heading && !matches!(incoming, "li" | "dd" | "dt") {
+        return false;
+    }
+    // These end rules use ordinary scope, with UL/OL added only for LI.
+    // The context at index zero is not an element inserted by this parse.
+    for index in (1..stack.len()).rev() {
+        let node = stack[index];
+        let name = match &document.nodes[node].kind {
+            NodeKind::Element { tag, .. } => tag.as_str(),
+            _ => continue,
+        };
+        if document.nodes[node].namespace == Namespace::Html
+            && if any_heading { heading(name) } else { name == incoming } {
+            // Popping through the target also removes its implied end tags;
+            // existing nodes and active formatting entries retain identity.
+            stack.truncate(index);
+            return true;
+        }
+        if active_formatting::scope_boundary(document, node)
+            || incoming == "li" && matches!(name, "ul" | "ol") {
+            return true;
+        }
+    }
+    // A recognized end with no in-scope target is ignored, without falling
+    // through to generic name matching across an HTML scope boundary.
+    true
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
@@ -1532,6 +1567,10 @@ mod paragraph_closing_tests;
 #[cfg(test)]
 #[path = "html_heading_start_tests.rs"]
 mod heading_start_tests;
+
+#[cfg(test)]
+#[path = "html_scoped_end_tests.rs"]
+mod scoped_end_tests;
 
 #[path = "html_comments.rs"]
 mod comments;

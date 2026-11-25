@@ -105,7 +105,7 @@ pub(super) fn reconstructs_on_start(tag: &str) -> bool {
     )
 }
 
-fn scope_boundary(doc: &Document, node: usize) -> bool {
+pub(super) fn scope_boundary(doc: &Document, node: usize) -> bool {
     doc.nodes[node].namespace != Namespace::Html
         || matches!(
             element(doc, node).0,

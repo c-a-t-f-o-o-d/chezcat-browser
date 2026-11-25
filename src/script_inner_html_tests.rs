@@ -437,3 +437,32 @@ verify(document.createElement('div'));verify(document.getElementById('root'));
 "#);
     assert_eq!(outcome.errors, 0, "{}", page.report());
 }
+
+#[test]
+fn inner_html_scoped_ends_preserve_connected_and_detached_tree_ownership() {
+    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<ul><li>A<ul>B</li>C</ul>D';
+  var list=target.firstChild,item=list.firstChild,nested=item.childNodes[1];
+  if(target.innerHTML!=='<ul><li>A<ul>BC</ul>D</li></ul>'||nested.parentNode!==item||
+     item.parentNode!==list||nested.firstChild.data!=='BC'||item.lastChild.data!=='D'||
+     item.ownerDocument!==document||item.isConnected!==target.isConnected)throw Error('list scope ownership');
+  target.innerHTML='<dl><dd>A<section><dt>B</dd>C';
+  list=target.firstChild;item=list.firstChild;var section=item.lastChild,term=section.firstChild;
+  if(target.innerHTML!=='<dl><dd>A<section><dt>B</dt></section></dd>C</dl>'||
+     list.lastChild.data!=='C'||section.parentNode!==item||term.parentNode!==section||
+     term.ownerDocument!==document)throw Error('exact definition end ownership');
+  target.innerHTML='<h1>A<span><h4>B</h1>C';
+  var outer=target.firstChild,span=outer.lastChild,nearest=span.firstChild;
+  if(target.innerHTML!=='<h1>A<span><h4>B</h4>C</span></h1>'||
+     nearest.parentNode!==span||span.parentNode!==outer||span.lastChild.data!=='C'||
+     nearest.ownerDocument!==document)throw Error('nearest heading end ownership');
+  target.innerHTML='<h2><b>A</h6>B</b>C';
+  var first=target.firstChild.firstChild,copy=target.childNodes[1];
+  if(target.innerHTML!=='<h2><b>A</b></h2><b>B</b>C'||first===copy||
+     copy.parentNode!==target||copy.ownerDocument!==document)throw Error('end formatting reconstruction');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
