@@ -30,6 +30,8 @@ mod property_key_native_tests;
 pub(crate) mod character_data_interface;
 #[path="anchor_url_interface.rs"]
 pub(crate) mod anchor_url_interface;
+#[path="area_url_interface.rs"]
+pub(crate) mod area_url_interface;
 #[path="document_location_interface.rs"]
 pub(crate) mod document_location_interface;
 #[path="adjacent_interface.rs"]

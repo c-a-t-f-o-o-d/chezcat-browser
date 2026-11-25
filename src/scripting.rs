@@ -3146,6 +3146,7 @@ impl Bridge<'_> {
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_href_member(object,property){return true;}
+        if self.area_url_member(object,property){return true;}
         if self.area_referrer_policy_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
@@ -3319,6 +3320,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(target,property){return Some("target");}
         if self.area_rel_member(target,property){return Some("rel");}
         if self.area_href_member(target,property){return Some("href");}
+        if property!="origin"&&self.area_url_member(target,property){return Some("href");}
         if self.area_referrer_policy_member(target,property){return Some("referrerpolicy");}
         if self.area_ping_member(target,property){return Some("ping");}
         if self.map_name_member(target,property){return Some("name");}
@@ -3564,6 +3566,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return false;}
         if self.area_rel_member(object,property){return false;}
         if self.area_href_member(object,property){return false;}
+        if self.area_url_member(object,property){return false;}
         if self.area_referrer_policy_member(object,property){return false;}
         if self.area_ping_member(object,property){return false;}
         if self.map_name_member(object,property){return false;}
@@ -3741,6 +3744,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return false;}
         if self.area_rel_member(object,property){return false;}
         if self.area_href_member(object,property){return false;}
+        if self.area_url_member(object,property){return property=="origin";}
         if self.area_referrer_policy_member(object,property){return false;}
         if self.area_ping_member(object,property){return false;}
         if self.map_name_member(object,property){return false;}
@@ -3822,6 +3826,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_href_member(object,property){return true;}
+        if self.area_url_member(object,property){return property!="origin";}
         if self.area_referrer_policy_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
@@ -3918,6 +3923,7 @@ impl Host for Bridge<'_> {
         if method==script_area_target::SET&&self.area_target_receiver(object){return Some("target");}
         if method==script_area_rel::SET&&self.area_rel_receiver(object){return Some("rel");}
         if method==script_area_href::SET&&self.area_href_receiver(object){return Some("href");}
+        if let Some((name,true))=script_area_url::operation(method){return self.area_href_receiver(object).then_some(name);}
         if method==script_area_referrer_policy::SET&&self.area_referrer_policy_receiver(object){return Some("referrerPolicy");}
         if method==script_area_ping::SET&&self.area_ping_receiver(object){return Some("ping");}
         if method==script_map_name::SET&&self.map_name_receiver(object){return Some("name");}
@@ -4047,6 +4053,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return true;}
         if self.area_rel_member(object,property){return true;}
         if self.area_href_member(object,property){return true;}
+        if self.area_url_member(object,property){return property!="origin";}
         if self.area_referrer_policy_member(object,property){return true;}
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
@@ -4342,6 +4349,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_rel::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_href::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_area_url::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_area_referrer_policy::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_ping::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_map_name::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4711,6 +4719,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method){return self.validate_area_target(object);}
         if script_area_rel::operation(method){return self.validate_area_rel(object);}
         if script_area_href::operation(method){return self.validate_area_href(object);}
+        if script_area_url::operation(method).is_some(){return self.validate_area_href(object);}
         if script_area_referrer_policy::operation(method){return self.validate_area_referrer_policy(object);}
         if script_area_ping::operation(method){return self.validate_area_ping(object);}
         if script_map_name::operation(method){return self.validate_map_name(object);}
@@ -4984,6 +4993,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return self.validate_area_target(object);}
         if self.area_rel_member(object,property){return self.validate_area_rel(object);}
         if self.area_href_member(object,property){return self.validate_area_href(object);}
+        if self.area_url_member(object,property){return self.validate_area_href(object);}
         if self.area_referrer_policy_member(object,property){return self.validate_area_referrer_policy(object);}
         if self.area_ping_member(object,property){return self.validate_area_ping(object);}
         if self.map_name_member(object,property){return self.validate_map_name(object);}
@@ -5268,6 +5278,7 @@ impl Host for Bridge<'_> {
         if script_area_target::operation(method){return self.event_target_interface(object)&&self.area_target_receiver(receiver);}
         if script_area_rel::operation(method){return self.event_target_interface(object)&&self.area_rel_receiver(receiver);}
         if script_area_href::operation(method){return self.event_target_interface(object)&&self.area_href_receiver(receiver);}
+        if script_area_url::operation(method).is_some(){return self.event_target_interface(object)&&self.area_href_receiver(receiver);}
         if script_area_referrer_policy::operation(method){return self.event_target_interface(object)&&self.area_referrer_policy_receiver(receiver);}
         if script_area_ping::operation(method){return self.event_target_interface(object)&&self.area_ping_receiver(receiver);}
         if script_map_name::operation(method){return self.event_target_interface(object)&&self.map_name_receiver(receiver);}
@@ -6198,6 +6209,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return self.area_target_get(object);}
         if self.area_rel_member(object,property){return self.area_rel_get(object);}
         if self.area_href_member(object,property){return self.area_href_get(object);}
+        if self.area_url_member(object,property){return self.area_url_get(object,property);}
         if self.area_referrer_policy_member(object,property){return self.area_referrer_policy_get(object);}
         if self.area_ping_member(object,property){return self.area_ping_get(object);}
         if self.map_name_member(object,property){return self.map_name_get(object);}
@@ -6675,6 +6687,7 @@ impl Host for Bridge<'_> {
         if self.area_target_member(object,property){return self.area_target_set(object,&value);}
         if self.area_rel_member(object,property){return self.area_rel_set(object,&value);}
         if self.area_href_member(object,property){return self.area_href_set(object,&value);}
+        if self.area_url_member(object,property){return self.area_url_set(object,property,&value);}
         if self.area_referrer_policy_member(object,property){return self.area_referrer_policy_set(object,&value);}
         if self.area_ping_member(object,property){return self.area_ping_set(object,&value);}
         if self.map_name_member(object,property){return self.map_name_set(object,&value);}
@@ -7129,6 +7142,7 @@ impl Host for Bridge<'_> {
         if method==script_area_target::SET{return Err("Area target setters require the native conversion transaction.".into());}
         if method==script_area_rel::SET{return Err("Area rel setters require the native conversion transaction.".into());}
         if method==script_area_href::SET{return Err("Area href setters require the native conversion transaction.".into());}
+        if script_area_url::operation(method).is_some_and(|(_,setter)|setter){return Err("Area URL setters require the native conversion transaction.".into());}
         if method==script_area_referrer_policy::SET{return Err("Area referrerPolicy setters require the native conversion transaction.".into());}
         if method==script_area_ping::SET{return Err("Area ping setters require the native conversion transaction.".into());}
         if method==script_map_name::SET{return Err("Map name setters require the native conversion transaction.".into());}
@@ -7143,6 +7157,7 @@ impl Host for Bridge<'_> {
         if method==script_area_target::GET{return self.area_target_get(object);}
         if method==script_area_rel::GET{return self.area_rel_get(object);}
         if method==script_area_href::GET{return self.area_href_get(object);}
+        if let Some((name,false))=script_area_url::operation(method){return self.area_url_get(object,name);}
         if method==script_area_referrer_policy::GET{return self.area_referrer_policy_get(object);}
         if method==script_area_ping::GET{return self.area_ping_get(object);}
         if method==script_map_name::GET{return self.map_name_get(object);}
@@ -10593,3 +10608,10 @@ mod area_href_tests;
 
 #[path="script_area_href.rs"]
 mod script_area_href;
+
+#[cfg(test)]
+#[path="script_area_url_tests.rs"]
+mod area_url_tests;
+
+#[path="script_area_url.rs"]
+mod script_area_url;

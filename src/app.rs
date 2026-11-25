@@ -6911,3 +6911,7 @@ mod area_referrer_policy_tests;
 #[cfg(test)]
 #[path="app_area_href_tests.rs"]
 mod area_href_tests;
+
+#[cfg(test)]
+#[path="app_area_url_tests.rs"]
+mod area_url_tests;
