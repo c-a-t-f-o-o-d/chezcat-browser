@@ -641,6 +641,7 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"alt","\0HTMLAreaElement.get.alt",Some("\0HTMLAreaElement.set.alt"))?;}
             if name == "HTMLOptGroupElement" {self.define_host_attribute(prototype,window,"label","\0HTMLOptGroupElement.get.label",Some("\0HTMLOptGroupElement.set.label"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"label","\0HTMLOptionElement.get.label",Some("\0HTMLOptionElement.set.label"))?;}
+            if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"value","\0HTMLOptionElement.get.value",Some("\0HTMLOptionElement.set.value"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"coords","\0HTMLAreaElement.get.coords",Some("\0HTMLAreaElement.set.coords"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"shape","\0HTMLAreaElement.get.shape",Some("\0HTMLAreaElement.set.shape"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"download","\0HTMLAreaElement.get.download",Some("\0HTMLAreaElement.set.download"))?;}

@@ -185,6 +185,22 @@ pub struct SelectOption {
     placeholder: bool,
 }
 
+/// Fully prepared native OPTION value and selected editor replacement.
+pub(crate) struct OptionValuePlan {
+    pub(crate) select: usize, pub(crate) option: usize,
+    pub(crate) value: String, pub(crate) editor: Option<Editor>,
+}
+impl OptionValuePlan {
+    pub(crate) fn commit(self, forms: &mut Forms) {
+        let control = forms.controls.get_mut(&self.select).expect("Prepared SELECT option owner");
+        let state = control.select.as_mut().expect("Prepared SELECT state");
+        let option = &mut state.options[self.option];
+        option.placeholder = self.option == 0 && option.group.is_none() && self.value.is_empty();
+        option.value = self.value;
+        if let Some(editor) = self.editor { control.value = editor; }
+    }
+}
+
 #[derive(Debug)]
 pub enum SelectRow {
     Group { node: usize, label: String },
@@ -634,6 +650,17 @@ impl Forms {
             }
             work
         })
+    }
+
+    pub(crate) fn check_option_value_payload(&self, select: usize, option: usize, new: usize) -> Result<(), String> {
+        let control = &self.controls[&select]; let state = control.select.as_ref().unwrap();
+        let mut bytes = self.text_payload(None)?.checked_sub(state.options[option].value.len()).and_then(|n| n.checked_add(new)).ok_or("Native OPTION value payload overflow.")?;
+        if state.selected == Some(option) {
+            let old = control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>();
+            bytes = bytes.checked_sub(control.initial.len().max(old)).and_then(|n| n.checked_add(control.initial.len().max(new))).ok_or("Native selected OPTION payload overflow.")?;
+        }
+        if bytes > MAX_TOTAL_VALUE_BYTES { return Err("Combined form names, values and defaults exceed 128 KiB; no OPTION value was changed.".into()); }
+        Ok(())
     }
 
     pub(crate) fn check_select_label_payload(&self,old:usize,new:usize)->Result<(),String>{

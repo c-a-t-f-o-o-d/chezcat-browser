@@ -7015,3 +7015,7 @@ mod optgroup_content_tests;
 #[cfg(test)]
 #[path="app_option_label_tests.rs"]
 mod option_label_tests;
+
+#[cfg(test)]
+#[path="app_option_value_tests.rs"]
+mod option_value_tests;
