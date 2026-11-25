@@ -3903,7 +3903,7 @@ fn parsed_script_nonce_lookup_is_real_without_activating_inert_contents() {
 var scripts=document.getElementsByTagName('SCRIPT'),seed=document.querySelector('script[nonce]');
 if(scripts.length!==1||scripts[0]!==seed||seed!==document.getElementById('seed')||seed.nonce!=='YWJj'||seed.getAttribute('nonce')!=='YWJj'||!seed.isConnected)throw 'actual nonce';
 if(document.getElementsByTagName('HEAD')[0]!==document.head||document.head.getElementsByTagName('script')[0]!==seed||document.body.getElementsByTagName('script').length!==0)throw 'root scoping';
-if(seed.textContent!=='original_source_only()'||seed.text!=='original_source_only()'||document.head.textContent!==''||document.querySelectorAll('script').length!==1||document.getElementById('inert')!==null)throw 'inert source';
+if(seed.textContent!=='original_source_only()'||seed.text!=='original_source_only()'||document.head.textContent!=='original_source_only()'||document.querySelectorAll('script').length!==1||document.getElementById('inert')!==null)throw 'inert source';
 var added=document.createElement('script');added.nonce=seed.nonce;added.src='/nonce-script.js';document.head.appendChild(added);
 if(scripts.length!==2||scripts[1]!==added||added.nonce!==seed.nonce)throw 'live script nonce';
 document.title='nonce lookup passed';
