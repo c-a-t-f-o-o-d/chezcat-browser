@@ -905,11 +905,11 @@ impl Forms {
                 required: doc.attr(node, "required").is_some(),
                 checked,
                 dirty_checked: false,
-                max_length: doc
+                max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else{doc
                     .attr(node, "maxlength")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(MAX_VALUE_UNITS)
-                    .min(MAX_VALUE_UNITS),
+                    .min(MAX_VALUE_UNITS)},
                 tab_index: doc
                     .attr(node, "tabindex")
                     .and_then(parse_tab_index)
@@ -2681,3 +2681,6 @@ impl Forms{
 #[path="forms_textarea_defaults.rs"]
 mod textarea_defaults;
 pub(crate) use textarea_defaults::TextareaDefaultPlan;
+
+/// Reflected textarea limits share HTML prefixes, with an independent native cap.
+pub(crate) fn textarea_max_length(value:Option<&str>)->usize{value.and_then(crate::decimal_number::html_long).filter(|n|*n>=0).map_or(MAX_VALUE_UNITS,|n|n as usize).min(MAX_VALUE_UNITS)}
