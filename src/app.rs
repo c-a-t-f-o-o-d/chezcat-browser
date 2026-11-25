@@ -6947,3 +6947,7 @@ mod param_detached_copy_tests;
 #[cfg(test)]
 #[path="app_param_connection_tests.rs"]
 mod param_connection_tests;
+
+#[cfg(test)]
+#[path="app_datalist_interface_tests.rs"]
+mod datalist_interface_tests;

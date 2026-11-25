@@ -7,7 +7,7 @@ use super::*;
 enum State { Pending, Ready(usize), Failed }
 
 #[derive(Clone, Copy)]
-enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize }, ParamConstructor { window:u32, prototype:usize, parent:usize } }
+enum Definition { Native(Builtin), Host { window:u32, operation:&'static str, length:usize }, ParamConstructor { window:u32, prototype:usize, parent:usize }, DataListConstructor { window:u32, prototype:usize, parent:usize } }
 
 pub(super) struct NativeMethod {
     definition: Definition,
@@ -40,6 +40,24 @@ impl Runtime {
             return Err(error);
         }
         self.deferred_param_constructor=None;
+        Ok(())
+    }
+
+    pub(super) fn defer_datalist_constructor(&mut self, window:u32, prototype:usize, parent:usize)->Result<(),Fault>{
+        self.defer_method(prototype,"constructor",Definition::DataListConstructor{window,prototype,parent},false)?;
+        let StoredValue::DeferredNative(index)=self.objects[prototype].properties["constructor"].value else {unreachable!()};
+        self.deferred_datalist_constructor=Some(index);
+        self.reserve_deferred_global_orders(&["HTMLDataListElement"])
+    }
+
+    pub(super) fn ensure_datalist_constructor(&mut self)->Result<(),Fault>{
+        let Some(index)=self.deferred_datalist_constructor else{return Ok(())};
+        let function=self.materialize_native_identity(index)?;
+        if let Err(error)=self.put_binding(self.global_environment,"HTMLDataListElement".into(),Some(Value::Function(function)),Declaration::Var,false){
+            self.deferred_native_methods[index].state=State::Failed;
+            return Err(error);
+        }
+        self.deferred_datalist_constructor=None;
         Ok(())
     }
 
@@ -90,6 +108,16 @@ impl Runtime {
                     Definition::Native(builtin)=>runtime.native_function(builtin,&name),
                     Definition::ParamConstructor{window,prototype,parent}=>{
                         let allocation=runtime.allocate_host_function_with_length(window,"HTMLParamElement",0).map_err(Fault::new)?;
+                        if let Some(Function::Host{constructible,illegal_interface_constructor,..})=runtime.functions.get_mut(allocation.id){
+                            *constructible=true;
+                            *illegal_interface_constructor=true;
+                        }
+                        runtime.objects[runtime.function_properties[allocation.id]].prototype=Some(Ordinary::Function(parent));
+                        runtime.store_property(runtime.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+                        Ok(Value::Function(allocation.id))
+                    },
+                    Definition::DataListConstructor{window,prototype,parent}=>{
+                        let allocation=runtime.allocate_host_function_with_length(window,"HTMLDataListElement",0).map_err(Fault::new)?;
                         if let Some(Function::Host{constructible,illegal_interface_constructor,..})=runtime.functions.get_mut(allocation.id){
                             *constructible=true;
                             *illegal_interface_constructor=true;
@@ -166,6 +194,53 @@ mod tests {
         runtime.begin_job();
         assert!(runtime.materialize_native_property(prototype,"constructor").unwrap_err().display().contains("earlier bounded failure"));
         assert!(runtime.ensure_param_constructor().unwrap_err().display().contains("earlier bounded failure"));
+        assert_eq!((runtime.functions.len(),runtime.objects.len(),runtime.bindings),before);
+    }
+
+    fn datalist_runtime()->(Runtime,usize){
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.define_global("window",Value::Host(77)).unwrap();
+        runtime.bind_browser_global(77).unwrap();
+        let prototype=runtime.new_object(None).unwrap();
+        let Value::Function(parent)=runtime.native_function(Builtin::IsNaN,"parent").unwrap() else{unreachable!()};
+        runtime.put_binding(runtime.global_environment,"datalistPrototype".into(),Some(Value::Object(prototype)),Declaration::Var,false).unwrap();
+        let before=runtime.functions.len();
+        runtime.defer_datalist_constructor(77,prototype,parent).unwrap();
+        runtime.global_attributes.insert("HTMLDataListElement".into(),(false,true,true));
+        assert_eq!(runtime.functions.len(),before);
+        (runtime,prototype)
+    }
+
+    #[test]
+    fn datalist_interface_constructor_prototype_first_freeze_preserves_one_identity(){
+        let(mut runtime,prototype)=datalist_runtime();
+        runtime.execute("var freeze=Object.freeze,inspect=Object.getOwnPropertyDescriptor;freeze(datalistPrototype);",&mut NoHost).unwrap();
+        let before=runtime.functions.len();
+        runtime.execute("var C=datalistPrototype.constructor;if(C!==HTMLDataListElement||C!==window.HTMLDataListElement||C.prototype!==datalistPrototype||C.name!=='HTMLDataListElement'||C.length!==0)throw 'one identity';var d=inspect(datalistPrototype,'constructor'),g=inspect(window,'HTMLDataListElement'),p=inspect(C,'prototype');if(d.value!==C||d.get!==undefined||d.enumerable||d.writable||d.configurable||g.value!==C||g.get!==undefined||g.enumerable||!g.writable||!g.configurable||p.value!==datalistPrototype||p.writable||p.configurable||p.enumerable)throw 'data flags';",&mut NoHost).unwrap();
+        assert_eq!(runtime.functions.len(),before+1);
+        assert!(matches!(runtime.own_property(prototype,"constructor").unwrap(),Value::Function(_)));
+    }
+
+    #[test]
+    fn datalist_interface_constructor_global_first_override_delete_never_resurrect(){
+        for change in ["datalistPrototype.constructor=17;","delete datalistPrototype.constructor;"]{
+            let(mut runtime,_)=datalist_runtime();
+            runtime.execute(change,&mut NoHost).unwrap();
+            runtime.execute("var C=HTMLDataListElement;if(C.prototype!==datalistPrototype||datalistPrototype.constructor===C)throw 'prototype mutation';window.HTMLDataListElement=19;if(HTMLDataListElement!==19)throw 'global override';delete window.HTMLDataListElement;var names=Object.getOwnPropertyNames(window);if(typeof HTMLDataListElement!=='undefined'||names.indexOf('HTMLDataListElement')>=0||datalistPrototype.constructor===C)throw 'deletion resurrected';",&mut NoHost).unwrap();
+        }
+        let(mut runtime,_)=datalist_runtime();
+        runtime.execute("var C=HTMLDataListElement;if(datalistPrototype.constructor!==C)throw 'global first';",&mut NoHost).unwrap();
+    }
+
+    #[test]
+    fn datalist_interface_constructor_failure_is_bounded_across_both_observation_routes(){
+        let(mut runtime,prototype)=datalist_runtime();
+        while runtime.functions.len()<MAX_FUNCTIONS{runtime.native_function(Builtin::IsNaN,"fixture").unwrap();}
+        let before=(runtime.functions.len(),runtime.objects.len(),runtime.bindings);
+        assert!(runtime.ensure_datalist_constructor().unwrap_err().display().contains("Function limit reached"));
+        runtime.begin_job();
+        assert!(runtime.materialize_native_property(prototype,"constructor").unwrap_err().display().contains("earlier bounded failure"));
+        assert!(runtime.ensure_datalist_constructor().unwrap_err().display().contains("earlier bounded failure"));
         assert_eq!((runtime.functions.len(),runtime.objects.len(),runtime.bindings),before);
     }
 

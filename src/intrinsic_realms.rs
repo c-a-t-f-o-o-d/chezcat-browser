@@ -74,6 +74,7 @@ roots! {
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     deferred_global_orders: BTreeMap<&'static str, usize>,
     deferred_param_constructor: Option<usize>,
+    deferred_datalist_constructor: Option<usize>,
     host_globals: HashSet<String>,
     operation_globals: HashSet<&'static str>,
     arguments_thrower: Option<usize>,
@@ -128,6 +129,9 @@ impl Runtime {
                 if let Some(index)=roots.deferred_param_constructor {
                     if let Some(function)=self.deferred_param_constructor_edge(index){add(Edge::Function(function));}
                 }
+                if let Some(index)=roots.deferred_datalist_constructor {
+                    if let Some(function)=self.deferred_param_constructor_edge(index){add(Edge::Function(function));}
+                }
                 roots.binary_roots.reachability_edges(add);
                 roots.collection_roots.reachability_edges(add);
                 roots.async_function_roots.reachability_edges(add);
@@ -156,6 +160,7 @@ impl Runtime {
 
     pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
         if name=="HTMLParamElement" {self.ensure_param_constructor()?;}
+        if name=="HTMLDataListElement" {self.ensure_datalist_constructor()?;}
         if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
         let (bit, names) = if BINARY_GLOBALS.contains(&name) { (BINARY, BINARY_GLOBALS) }
             else if RESPONSE_GLOBALS.contains(&name) { (RESPONSE, RESPONSE_GLOBALS) }
