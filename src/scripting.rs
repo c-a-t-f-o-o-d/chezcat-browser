@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3143,6 +3143,7 @@ impl Bridge<'_> {
         if self.paragraph_align_member(object,property){return true;}
         if self.hr_align_member(object,property){return true;}
         if self.hr_color_member(object,property){return true;}
+        if self.font_face_member(object,property){return true;}
         if self.font_color_member(object,property){return true;}
         if self.br_clear_member(object,property){return true;}
         if self.hr_size_member(object,property){return true;}
@@ -3300,6 +3301,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(target,property){return Some("align");}
         if self.hr_align_member(target,property){return Some("align");}
         if self.hr_color_member(target,property){return Some("color");}
+        if self.font_face_member(target,property){return Some("face");}
         if self.font_color_member(target,property){return Some("color");}
         if self.br_clear_member(target,property){return Some("clear");}
         if self.hr_size_member(target,property){return Some("size");}
@@ -3528,6 +3530,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return false;}
         if self.hr_align_member(object,property){return false;}
         if self.hr_color_member(object,property){return false;}
+        if self.font_face_member(object,property){return false;}
         if self.font_color_member(object,property){return false;}
         if self.br_clear_member(object,property){return false;}
         if self.hr_size_member(object,property){return false;}
@@ -3688,6 +3691,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return false;}
         if self.hr_align_member(object,property){return false;}
         if self.hr_color_member(object,property){return false;}
+        if self.font_face_member(object,property){return false;}
         if self.font_color_member(object,property){return false;}
         if self.br_clear_member(object,property){return false;}
         if self.hr_size_member(object,property){return false;}
@@ -3754,6 +3758,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return true;}
         if self.hr_align_member(object,property){return true;}
         if self.hr_color_member(object,property){return true;}
+        if self.font_face_member(object,property){return true;}
         if self.font_color_member(object,property){return true;}
         if self.br_clear_member(object,property){return true;}
         if self.hr_size_member(object,property){return true;}
@@ -3835,6 +3840,7 @@ impl Host for Bridge<'_> {
         if method==script_paragraph_align::SET&&self.paragraph_align_receiver(object){return Some("align");}
         if method==script_hr_align::SET&&self.hr_align_receiver(object){return Some("align");}
         if method==script_hr_color::SET&&self.hr_color_receiver(object){return Some("color");}
+        if method==script_font_face::SET&&self.font_face_receiver(object){return Some("face");}
         if method==script_font_color::SET&&self.font_color_receiver(object){return Some("color");}
         if method==script_br_clear::SET&&self.br_clear_receiver(object){return Some("clear");}
         if method==script_hr_size::SET&&self.hr_size_receiver(object){return Some("size");}
@@ -3949,6 +3955,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return true;}
         if self.hr_align_member(object,property){return true;}
         if self.hr_color_member(object,property){return true;}
+        if self.font_face_member(object,property){return true;}
         if self.font_color_member(object,property){return true;}
         if self.br_clear_member(object,property){return true;}
         if self.hr_size_member(object,property){return true;}
@@ -4228,6 +4235,7 @@ impl Host for Bridge<'_> {
         if script_paragraph_align::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_hr_align::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_hr_color::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_font_face::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_font_color::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_br_clear::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_hr_size::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4580,6 +4588,7 @@ impl Host for Bridge<'_> {
         if script_paragraph_align::operation(method){return self.validate_paragraph_align(object);}
         if script_hr_align::operation(method){return self.validate_hr_align(object);}
         if script_hr_color::operation(method){return self.validate_hr_color(object);}
+        if script_font_face::operation(method){return self.validate_font_face(object);}
         if script_font_color::operation(method){return self.validate_font_color(object);}
         if script_br_clear::operation(method){return self.validate_br_clear(object);}
         if script_hr_size::operation(method){return self.validate_hr_size(object);}
@@ -4837,6 +4846,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return self.validate_paragraph_align(object);}
         if self.hr_align_member(object,property){return self.validate_hr_align(object);}
         if self.hr_color_member(object,property){return self.validate_hr_color(object);}
+        if self.font_face_member(object,property){return self.validate_font_face(object);}
         if self.font_color_member(object,property){return self.validate_font_color(object);}
         if self.br_clear_member(object,property){return self.validate_br_clear(object);}
         if self.hr_size_member(object,property){return self.validate_hr_size(object);}
@@ -5105,6 +5115,7 @@ impl Host for Bridge<'_> {
         if script_paragraph_align::operation(method){return self.event_target_interface(object)&&self.paragraph_align_receiver(receiver);}
         if script_hr_align::operation(method){return self.event_target_interface(object)&&self.hr_align_receiver(receiver);}
         if script_hr_color::operation(method){return self.event_target_interface(object)&&self.hr_color_receiver(receiver);}
+        if script_font_face::operation(method){return self.event_target_interface(object)&&self.font_face_receiver(receiver);}
         if script_font_color::operation(method){return self.event_target_interface(object)&&self.font_color_receiver(receiver);}
         if script_br_clear::operation(method){return self.event_target_interface(object)&&self.br_clear_receiver(receiver);}
         if script_hr_size::operation(method){return self.event_target_interface(object)&&self.hr_size_receiver(receiver);}
@@ -6018,6 +6029,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return self.paragraph_align_get(object);}
         if self.hr_align_member(object,property){return self.hr_align_get(object);}
         if self.hr_color_member(object,property){return self.hr_color_get(object);}
+        if self.font_face_member(object,property){return self.font_face_get(object);}
         if self.font_color_member(object,property){return self.font_color_get(object);}
         if self.br_clear_member(object,property){return self.br_clear_get(object);}
         if self.hr_size_member(object,property){return self.hr_size_get(object);}
@@ -6479,6 +6491,7 @@ impl Host for Bridge<'_> {
         if self.paragraph_align_member(object,property){return self.paragraph_align_set(object,&value);}
         if self.hr_align_member(object,property){return self.hr_align_set(object,&value);}
         if self.hr_color_member(object,property){return self.hr_color_set(object,&value);}
+        if self.font_face_member(object,property){return self.font_face_set(object,&value);}
         if self.font_color_member(object,property){return self.font_color_set(object,&value);}
         if self.br_clear_member(object,property){return self.br_clear_set(object,&value);}
         if self.hr_size_member(object,property){return self.hr_size_set(object,&value);}
@@ -6919,6 +6932,7 @@ impl Host for Bridge<'_> {
         if method==script_paragraph_align::SET{return Err("Paragraph align setters require the native conversion transaction.".into());}
         if method==script_hr_align::SET{return Err("HR align setters require the native conversion transaction.".into());}
         if method==script_hr_color::SET{return Err("HR color setters require the native conversion transaction.".into());}
+        if method==script_font_face::SET{return Err("Font face setters require the native conversion transaction.".into());}
         if method==script_font_color::SET{return Err("Font color setters require the native conversion transaction.".into());}
         if method==script_br_clear::SET{return Err("BR clear setters require the native conversion transaction.".into());}
         if method==script_hr_size::SET{return Err("HR size setters require the native conversion transaction.".into());}
@@ -6943,6 +6957,7 @@ impl Host for Bridge<'_> {
         if method==script_paragraph_align::GET{return self.paragraph_align_get(object);}
         if method==script_hr_align::GET{return self.hr_align_get(object);}
         if method==script_hr_color::GET{return self.hr_color_get(object);}
+        if method==script_font_face::GET{return self.font_face_get(object);}
         if method==script_font_color::GET{return self.font_color_get(object);}
         if method==script_br_clear::GET{return self.br_clear_get(object);}
         if method==script_hr_size::GET{return self.hr_size_get(object);}
@@ -10201,3 +10216,10 @@ mod font_color_tests;
 
 #[path="script_font_color.rs"]
 mod script_font_color;
+
+#[cfg(test)]
+#[path="script_font_face_tests.rs"]
+mod font_face_tests;
+
+#[path="script_font_face.rs"]
+mod script_font_face;

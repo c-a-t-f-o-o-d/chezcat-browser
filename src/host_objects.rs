@@ -638,6 +638,7 @@ impl Runtime {
             if name == "HTMLParagraphElement" {self.define_host_attribute(prototype,window,"align","\0HTMLParagraphElement.get.align",Some("\0HTMLParagraphElement.set.align"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"align","\0HTMLHRElement.get.align",Some("\0HTMLHRElement.set.align"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"color","\0HTMLHRElement.get.color",Some("\0HTMLHRElement.set.color"))?;}
+            if name == "HTMLFontElement" {self.define_host_attribute(prototype,window,"face","\0HTMLFontElement.get.face",Some("\0HTMLFontElement.set.face"))?;}
             if name == "HTMLFontElement" {self.define_host_attribute(prototype,window,"color","\0HTMLFontElement.get.color",Some("\0HTMLFontElement.set.color"))?;}
             if name == "HTMLBRElement" {self.define_host_attribute(prototype,window,"clear","\0HTMLBRElement.get.clear",Some("\0HTMLBRElement.set.clear"))?;}
             if name == "HTMLHRElement" {self.define_host_attribute(prototype,window,"size","\0HTMLHRElement.get.size",Some("\0HTMLHRElement.set.size"))?;}
