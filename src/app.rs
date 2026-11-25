@@ -2245,17 +2245,25 @@ impl App {
         self.submit_form_in_job(owner, submitter);
     }
     fn submit_form_in_job(&mut self, owner: usize, submitter: Option<usize>) {
-        if let Err(error) = self
-            .forms
-            .validate_submission(&self.document, owner, submitter)
-        {
-            self.error(error);
+        let validation=if let Some(page)=&mut self.scripting{
+            page.validate_native_submission(&mut self.document,&mut self.forms,owner,submitter)
+        }else{
+            self.forms.validation_snapshot(&self.document,owner,submitter,usize::MAX)
+                .map(|snapshot|(crate::scripting::Outcome::default(),!snapshot.nodes.is_empty(),snapshot.nodes.first().copied()))
+        };
+        let(outcome,invalid,unhandled)=match validation{Ok(value)=>value,Err(error)=>{self.apply_native_event_outcome(crate::scripting::Outcome{layout_changed:true,..Default::default()});self.error(error);return;}};
+        self.apply_native_event_outcome(outcome);
+        if invalid{
+            if let Some(node)=unhandled{
+                self.focus_control(node);
+                self.error(self.forms.required_message(node));
+            }
             return;
         }
         if self.script_event_with_submitter(owner, "submit", true, submitter) {
             return;
         }
-        match self.forms.submit_request(
+        match self.forms.validated_submit_request(
             &self.document,
             owner,
             submitter,
@@ -2798,22 +2806,16 @@ impl App {
         let outcome = if event=="submit"{
             page.dispatch_submit(&mut self.document,&mut self.forms,target,submitter)
         }else{page.dispatch(&mut self.document,&mut self.forms,target,event,cancelable)};
+        let prevented=outcome.prevented;
+        self.apply_native_event_outcome(outcome);
+        prevented
+    }
+    fn apply_native_event_outcome(&mut self,outcome:crate::scripting::Outcome){
+        self.inspector.invalidate();
         self.apply_history_replacement();
-        if outcome.layout_changed {
-            self.reflow();
-        }
-        self.apply_script_scroll();
-        self.apply_script_focus();
-        self.validate_control_focus();
-        self.sync_editors();
-        if outcome.errors > 0 {
-            self.status = format!(
-                "JavaScript subset: {} error(s). Ctrl+I shows details.",
-                outcome.errors
-            );
-            self.failed = false;
-        }
-        outcome.prevented
+        if outcome.layout_changed{self.reflow();}
+        self.apply_script_scroll();self.apply_script_focus();self.validate_control_focus();self.sync_editors();
+        if outcome.errors>0{self.status=format!("JavaScript subset: {} error(s). Ctrl+I shows details.",outcome.errors);self.failed=false;}
     }
     fn edited_control(&mut self, previous: Option<(usize, String)>) {
         if let Some((node, previous)) = previous {
@@ -7218,3 +7220,7 @@ mod form_reset_output_tests;
 #[cfg(test)]
 #[path="app_submit_event_tests.rs"]
 mod submit_event_tests;
+
+#[cfg(test)]
+#[path="app_invalid_event_tests.rs"]
+mod invalid_event_tests;
