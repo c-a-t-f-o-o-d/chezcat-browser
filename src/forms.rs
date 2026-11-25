@@ -905,11 +905,7 @@ impl Forms {
                 required: doc.attr(node, "required").is_some(),
                 checked,
                 dirty_checked: false,
-                max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else{doc
-                    .attr(node, "maxlength")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(MAX_VALUE_UNITS)
-                    .min(MAX_VALUE_UNITS)},
+                max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else if kind==Kind::Text{input_max_length(doc.attr(node,"maxlength"))}else{doc.attr(node,"maxlength").and_then(|value|value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS)},
                 tab_index: doc
                     .attr(node, "tabindex")
                     .and_then(parse_tab_index)
@@ -2692,3 +2688,6 @@ pub(crate) fn textarea_max_length(value:Option<&str>)->usize{value.and_then(crat
 
 #[path="forms_textarea_wrap.rs"]
 mod textarea_wrap;
+
+/// INPUT maxlength is an authored editing bound; absence imposes no length cap.
+pub(crate) fn input_max_length(value:Option<&str>)->usize{value.and_then(crate::decimal_number::html_long).filter(|n|*n>=0).map_or(usize::MAX,|n|n as usize)}

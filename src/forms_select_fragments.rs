@@ -93,7 +93,7 @@ pub(super) fn fragment_editor_control_with_value(doc: &Document, node: usize, ki
     Ok((Control { owner: None, group_root: node, kind, value, dirty_value,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked, dirty_checked: false,
-        max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else{doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS)},
+        max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else if kind==Kind::Text{input_max_length(doc.attr(node,"maxlength"))}else{doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS)},
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
         button_element: false, initial, initially_checked: checked, image_point: (0, 0) }, retained))
 }

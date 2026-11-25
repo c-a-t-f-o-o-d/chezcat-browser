@@ -1,8 +1,8 @@
-//! Native textarea copies remain private until the detached DOM plan commits.
+//! Native text-editor copies remain private until the detached DOM plan commits.
 use super::*;
 
 impl Forms {
-    pub(crate) fn prepare_textarea_clones(
+    pub(crate) fn prepare_text_editor_clones(
         &self,
         doc: &Document,
         sources: &[(usize, usize)],
@@ -25,17 +25,20 @@ impl Forms {
             let original = self
                 .controls
                 .get(&source)
-                .filter(|control| control.kind == Kind::TextArea)
-                .ok_or("Cloning requires an existing native HTML textarea.")?;
-            let child_text = textarea_content(doc, source)
-                .ok_or("Cloning this textarea child shape is not implemented.")?;
+                .filter(|control| matches!(control.kind,Kind::TextArea|Kind::Text))
+                .ok_or("Cloning requires an existing native HTML text editor.")?;
+            let input=original.kind==Kind::Text;
+            let child_text=if input {
+                if !fragment_text_input(doc,source)||doc.attr(source,"form").is_some()||!doc.nodes[source].children.is_empty(){return Err("Cloning requires an empty default/text INPUT without explicit form association.".into());}
+                doc.attr(source,"value").unwrap_or("")
+            }else{textarea_content(doc,source).ok_or("Cloning this textarea child shape is not implemented.")?};
             if destination < doc.nodes.len()
                 || self.controls.contains_key(&destination)
                 || plan.additions.contains_key(&destination)
             {
                 return Err("Textarea clone native identity is already owned.".into());
             }
-            let raw_default = if deep { child_text } else { "" };
+            let raw_default = if input || deep { child_text } else { "" };
             let name = doc.attr(source, "name").unwrap_or("");
             let caption = doc.attr(source, "value").unwrap_or("");
             let scan = raw_default
@@ -68,12 +71,10 @@ impl Forms {
                             bytes.saturating_add(ch.len_utf8()),
                         )
                     });
-            if units > MAX_VALUE_UNITS {
+            if !input && units > MAX_VALUE_UNITS {
                 return Err("Textarea clone live value exceeds the native editor limit.".into());
             }
-            let initial_bytes = normalized_chars(raw_default)
-                .map(char::len_utf8)
-                .sum::<usize>();
+            let initial_bytes = if input {raw_default.len()}else{normalized_chars(raw_default).map(char::len_utf8).sum::<usize>()};
             payload = payload
                 .checked_add(name.len())
                 .and_then(|bytes| bytes.checked_add(initial_bytes.max(live_bytes)))
@@ -113,7 +114,7 @@ impl Forms {
             initial
                 .try_reserve(initial_bytes)
                 .map_err(|_| "Textarea clone default reservation failed.")?;
-            initial.extend(normalized_chars(raw_default));
+            if input {initial.push_str(raw_default);}else{initial.extend(normalized_chars(raw_default));}
             let mut value = Editor::default();
             value
                 .chars
@@ -125,7 +126,7 @@ impl Forms {
             let (control, actual_retained) = select_fragments::fragment_editor_control_with_value(
                 doc,
                 source,
-                Kind::TextArea,
+                original.kind,
                 name,
                 initial,
                 value,
