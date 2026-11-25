@@ -6899,3 +6899,7 @@ mod area_target_tests;
 #[cfg(test)]
 #[path="app_area_hreflang_tests.rs"]
 mod area_hreflang_tests;
+
+#[cfg(test)]
+#[path="app_area_type_tests.rs"]
+mod area_type_tests;
