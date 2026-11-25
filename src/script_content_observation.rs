@@ -18,7 +18,7 @@ impl Bridge<'_> {
             self.state.rebuild(self.doc)?;
             return Ok(self.state.tree.title.map(node_handle));
         }
-        if property=="text" && self.title_receiver(object) { return Ok(Some(object)); }
+        if property=="text" && (self.title_receiver(object)||self.option_text_receiver(object)) { return Ok(Some(object)); }
         if self.output_value_member(object,property) {
             self.validate_output_value(object).map_err(|(_,message)|message)?;
             self.state.work(self.state.output_defaults.lookup_work())?;

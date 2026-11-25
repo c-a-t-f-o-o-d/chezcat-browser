@@ -2701,7 +2701,7 @@ impl Bridge<'_> {
     fn text_content_container(&self, node: usize) -> bool {
         text_container(tag(self.doc,node))
             || self.doc.nodes.get(node).is_some_and(|item| item.namespace==crate::html::Namespace::Html
-                && matches!(item.kind,NodeKind::Element{..}) && (matches!(tag(self.doc,node),"output"|"optgroup") || script_clone_node::ordinary_clone_element(tag(self.doc,node))))
+                && matches!(item.kind,NodeKind::Element{..}) && (matches!(tag(self.doc,node),"output"|"optgroup"|"option") || script_clone_node::ordinary_clone_element(tag(self.doc,node))))
     }
 
     fn set_text_content(&mut self, node: usize, text: DomString) -> Result<(), String> {
@@ -2729,6 +2729,9 @@ impl Bridge<'_> {
             self.state.rebuild(self.doc)?;
             self.mutation_ancestors(node)?;
         }
+        if self.doc.nodes[node].namespace == crate::html::Namespace::Html && tag(self.doc,node) == "option" { self.state.rebuild(self.doc)?; }
+        let option_content = self.prepare_option_content(node,&text)?;
+        let option_bytes = option_content.as_ref().map_or(0,|plan|plan.bytes);
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
@@ -2742,19 +2745,19 @@ impl Bridge<'_> {
         let mut descendants = Vec::new();
         let mut stack = Vec::new();
         for &child in &self.doc.nodes[node].children {
-            script_text_replacement::push(self.state,&mut stack,child,text.capacity())?;
+            script_text_replacement::push(self.state,&mut stack,child,text.capacity().checked_add(option_bytes).ok_or("OPTION content traversal overflow.")?)?;
         }
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
-                if (!self.text_content_container(child) || tag == "button")&&!self.movable_template_host(child) {
+                if (!self.text_content_container(child) || matches!(tag.as_str(),"button"|"option"))&&!self.movable_template_host(child) {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
-            let other=script_text_replacement::bytes(&[&stack],text.capacity())?;
+            let other=script_text_replacement::bytes(&[&stack],text.capacity().checked_add(option_bytes).ok_or("OPTION content traversal overflow.")?)?;
             script_text_replacement::push(self.state,&mut descendants,child,other)?;
             for &nested in &self.doc.nodes[child].children {
-                let other=script_text_replacement::bytes(&[&descendants],text.capacity())?;
+                let other=script_text_replacement::bytes(&[&descendants],text.capacity().checked_add(option_bytes).ok_or("OPTION content traversal overflow.")?)?;
                 script_text_replacement::push(self.state,&mut stack,nested,other)?;
             }
         }
@@ -2768,7 +2771,7 @@ impl Bridge<'_> {
             self.state.work(1)?;
             if tag(self.doc, index) == "button" {
                 self.state.work(self.doc.nodes.len())?;
-                let other=script_text_replacement::bytes(&[&descendants],text.capacity())?;
+                let other=script_text_replacement::bytes(&[&descendants],text.capacity().checked_add(option_bytes).ok_or("OPTION content traversal overflow.")?)?;
                 script_text_replacement::push(self.state,&mut captions,index,other)?;
             }
             current = self.state.tree.parents.get(index).copied().flatten();
@@ -2780,7 +2783,7 @@ impl Bridge<'_> {
         // Text, while the empty string creates no child at all.
         let detached_parent = self.state.detached_nodes.contains(&node);
         let text_bytes = if text.is_empty() { 0 } else { text.capacity() };
-        let scratch=script_text_replacement::bytes(&[&descendants,&captions],if text.is_empty(){text.capacity()}else{0})?;
+        let scratch=script_text_replacement::bytes(&[&descendants,&captions],if text.is_empty(){text.capacity()}else{0})?.checked_add(option_bytes).ok_or("OPTION content scratch overflow.")?;
         let count = usize::from(!text.is_empty());
         let minimum = self.main_node_minimum(count)?;
         let (child_growth, child_bytes) = if text.is_empty() { (None, 0) } else {
@@ -2797,6 +2800,7 @@ impl Bridge<'_> {
         let retained = text_bytes.checked_add(child_bytes).and_then(|bytes|bytes.checked_add(node_bytes)).ok_or("textContent retained storage overflow.")?;
         let work = text.len().checked_add(if text.is_empty(){0}else{size_of::<usize>()}).ok_or("textContent copy work overflow.")?;
         self.state.prepare_range_changes(1,descendants.len())?;
+        if option_bytes!=0 && self.state.retained.checked_add(retained).and_then(|n|n.checked_add(scratch)).is_none_or(|n|n>self.state.retained_limit){return Err("textContent combined scratch allowance exhausted.".into());}
         self.state.replace_storage(0, retained, work)?;
         self.state.ranges_remove(node,0,self.doc.nodes[node].children.len(),&descendants);
         self.commit_main_nodes(node_growth);
@@ -2819,6 +2823,7 @@ impl Bridge<'_> {
                 control.caption = forms::caption(self.doc, index, control.kind);
             }
         }
+        if let Some(plan) = option_content { plan.commit(self.forms); }
         self.state.dirty = true;
         self.state.dom_committed();
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
@@ -3154,6 +3159,7 @@ impl Bridge<'_> {
         if self.area_alt_member(object,property){return true;}
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
+        if self.option_text_member(object,property){return true;}
         if self.option_value_member(object,property){return true;}
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
@@ -3336,6 +3342,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(target,property){return Some("alt");}
         if self.optgroup_label_member(target,property){return Some("label");}
         if self.option_label_member(target,property){return Some("label");}
+        if self.option_text_member(target,property){return None;}
         if self.option_value_member(target,property){return Some("value");}
         if self.area_coords_member(target,property){return Some("coords");}
         if self.area_shape_member(target,property){return Some("shape");}
@@ -3594,6 +3601,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return false;}
         if self.optgroup_label_member(object,property){return false;}
         if self.option_label_member(object,property){return false;}
+        if self.option_text_member(object,property){return false;}
         if self.option_value_member(object,property){return false;}
         if self.area_coords_member(object,property){return false;}
         if self.area_shape_member(object,property){return false;}
@@ -3783,6 +3791,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return false;}
         if self.optgroup_label_member(object,property){return false;}
         if self.option_label_member(object,property){return false;}
+        if self.option_text_member(object,property){return false;}
         if self.option_value_member(object,property){return false;}
         if self.area_coords_member(object,property){return false;}
         if self.area_shape_member(object,property){return false;}
@@ -3873,6 +3882,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return true;}
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
+        if self.option_text_member(object,property){return true;}
         if self.option_value_member(object,property){return true;}
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
@@ -3978,6 +3988,7 @@ impl Host for Bridge<'_> {
         if method==script_area_alt::SET&&self.area_alt_receiver(object){return Some("alt");}
         if method==script_optgroup_label::SET&&self.optgroup_label_receiver(object){return Some("label");}
         if method==script_option_label::SET&&self.option_label_receiver(object){return Some("label");}
+        if method==script_option_text::SET&&self.option_text_receiver(object){return Some("text");}
         if method==script_option_value::SET&&self.option_value_receiver(object){return Some("value");}
         if method==script_area_coords::SET&&self.area_coords_receiver(object){return Some("coords");}
         if method==script_area_shape::SET&&self.area_shape_receiver(object){return Some("shape");}
@@ -4116,6 +4127,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return true;}
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
+        if self.option_text_member(object,property){return true;}
         if self.option_value_member(object,property){return true;}
         if self.area_coords_member(object,property){return true;}
         if self.area_shape_member(object,property){return true;}
@@ -4423,6 +4435,7 @@ impl Host for Bridge<'_> {
         if script_area_alt::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_optgroup_label::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_label::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_option_text::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_coords::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_area_shape::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4805,6 +4818,7 @@ impl Host for Bridge<'_> {
         if script_area_alt::operation(method){return self.validate_area_alt(object);}
         if script_optgroup_label::operation(method){return self.validate_optgroup_label(object);}
         if script_option_label::operation(method){return self.validate_option_label(object);}
+        if script_option_text::operation(method){return self.validate_option_text(object);}
         if script_option_value::operation(method){return self.validate_option_value(object);}
         if script_area_coords::operation(method){return self.validate_area_coords(object);}
         if script_area_shape::operation(method){return self.validate_area_shape(object);}
@@ -5088,6 +5102,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return self.validate_area_alt(object);}
         if self.optgroup_label_member(object,property){return self.validate_optgroup_label(object);}
         if self.option_label_member(object,property){return self.validate_option_label(object);}
+        if self.option_text_member(object,property){return self.validate_option_text(object);}
         if self.option_value_member(object,property){return self.validate_option_value(object);}
         if self.area_coords_member(object,property){return self.validate_area_coords(object);}
         if self.area_shape_member(object,property){return self.validate_area_shape(object);}
@@ -5384,6 +5399,7 @@ impl Host for Bridge<'_> {
         if script_area_alt::operation(method){return self.event_target_interface(object)&&self.area_alt_receiver(receiver);}
         if script_optgroup_label::operation(method){return self.event_target_interface(object)&&self.optgroup_label_receiver(receiver);}
         if script_option_label::operation(method){return self.event_target_interface(object)&&self.option_label_receiver(receiver);}
+        if script_option_text::operation(method){return self.event_target_interface(object)&&self.option_text_receiver(receiver);}
         if script_option_value::operation(method){return self.event_target_interface(object)&&self.option_value_receiver(receiver);}
         if script_area_coords::operation(method){return self.event_target_interface(object)&&self.area_coords_receiver(receiver);}
         if script_area_shape::operation(method){return self.event_target_interface(object)&&self.area_shape_receiver(receiver);}
@@ -6327,6 +6343,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return self.area_alt_get(object);}
         if self.optgroup_label_member(object,property){return self.optgroup_label_get(object);}
         if self.option_label_member(object,property){return self.option_label_get(object);}
+        if self.option_text_member(object,property){return self.option_text_get(object);}
         if self.option_value_member(object,property){return self.option_value_get(object);}
         if self.area_coords_member(object,property){return self.area_coords_get(object);}
         if self.area_shape_member(object,property){return self.area_shape_get(object);}
@@ -6813,6 +6830,7 @@ impl Host for Bridge<'_> {
         if self.area_alt_member(object,property){return self.area_alt_set(object,&value);}
         if self.optgroup_label_member(object,property){return self.optgroup_label_set(object,&value);}
         if self.option_label_member(object,property){return self.option_label_set(object,&value);}
+        if self.option_text_member(object,property){return self.option_text_set(object,&value);}
         if self.option_value_member(object,property){return self.option_value_set(object,&value);}
         if self.area_coords_member(object,property){return self.area_coords_set(object,&value);}
         if self.area_shape_member(object,property){return self.area_shape_set(object,&value);}
@@ -7276,6 +7294,7 @@ impl Host for Bridge<'_> {
         if method==script_area_alt::SET{return Err("Area alt setters require the native conversion transaction.".into());}
         if method==script_optgroup_label::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_option_label::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
+        if method==script_option_text::SET{return Err("Option text setters require the native conversion transaction.".into());}
         if method==script_option_value::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_area_coords::SET{return Err("Area coords setters require the native conversion transaction.".into());}
         if method==script_area_shape::SET{return Err("Area shape setters require the native conversion transaction.".into());}
@@ -7296,6 +7315,7 @@ impl Host for Bridge<'_> {
         if method==script_area_alt::GET{return self.area_alt_get(object);}
         if method==script_optgroup_label::GET{return self.optgroup_label_get(object);}
         if method==script_option_label::GET{return self.option_label_get(object);}
+        if method==script_option_text::GET{return self.option_text_get(object);}
         if method==script_option_value::GET{return self.option_value_get(object);}
         if method==script_area_coords::GET{return self.area_coords_get(object);}
         if method==script_area_shape::GET{return self.area_shape_get(object);}
@@ -10917,3 +10937,10 @@ mod option_value_tests;
 
 #[path="script_option_value.rs"]
 mod script_option_value;
+
+#[cfg(test)]
+#[path="script_option_text_tests.rs"]
+mod option_text_tests;
+
+#[path="script_option_text.rs"]
+mod script_option_text;

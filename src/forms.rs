@@ -201,6 +201,26 @@ impl OptionValuePlan {
     }
 }
 
+/// Prepared fallback changes for one real OPTION child replacement.
+pub(crate) struct OptionContentPlan {
+    pub(crate) select: usize, pub(crate) option: usize,
+    pub(crate) value: Option<String>, pub(crate) label: Option<String>,
+    pub(crate) caption: Option<String>, pub(crate) editor: Option<Editor>, pub(crate) bytes: usize,
+}
+impl OptionContentPlan {
+    pub(crate) fn commit(self, forms: &mut Forms) {
+        let control = forms.controls.get_mut(&self.select).expect("Prepared OPTION content owner");
+        let option = &mut control.select.as_mut().expect("Prepared SELECT state").options[self.option];
+        if let Some(value) = self.value {
+            option.placeholder = self.option == 0 && option.group.is_none() && value.is_empty();
+            option.value = value;
+        }
+        if let Some(label) = self.label { option.label = label; }
+        if let Some(caption) = self.caption { control.caption = caption; }
+        if let Some(editor) = self.editor { control.value = editor; }
+    }
+}
+
 #[derive(Debug)]
 pub enum SelectRow {
     Group { node: usize, label: String },
@@ -653,13 +673,20 @@ impl Forms {
     }
 
     pub(crate) fn check_option_value_payload(&self, select: usize, option: usize, new: usize) -> Result<(), String> {
+        self.check_option_content_payload(select,option,Some(new),None)
+    }
+    pub(crate) fn check_option_content_payload(&self, select: usize, option: usize, value: Option<usize>, label: Option<usize>) -> Result<(), String> {
         let control = &self.controls[&select]; let state = control.select.as_ref().unwrap();
-        let mut bytes = self.text_payload(None)?.checked_sub(state.options[option].value.len()).and_then(|n| n.checked_add(new)).ok_or("Native OPTION value payload overflow.")?;
-        if state.selected == Some(option) {
-            let old = control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>();
-            bytes = bytes.checked_sub(control.initial.len().max(old)).and_then(|n| n.checked_add(control.initial.len().max(new))).ok_or("Native selected OPTION payload overflow.")?;
+        let mut bytes = self.text_payload(None)?;
+        if let Some(new) = value {
+            bytes = bytes.checked_sub(state.options[option].value.len()).and_then(|n| n.checked_add(new)).ok_or("Native OPTION value payload overflow.")?;
+            if state.selected == Some(option) {
+                let old = control.value.chars.iter().map(|ch| ch.len_utf8()).sum::<usize>();
+                bytes = bytes.checked_sub(control.initial.len().max(old)).and_then(|n| n.checked_add(control.initial.len().max(new))).ok_or("Native selected OPTION payload overflow.")?;
+            }
         }
-        if bytes > MAX_TOTAL_VALUE_BYTES { return Err("Combined form names, values and defaults exceed 128 KiB; no OPTION value was changed.".into()); }
+        if let Some(new) = label { bytes = bytes.checked_sub(state.options[option].label.len()).and_then(|n|n.checked_add(new)).ok_or("Native OPTION label payload overflow.")?; }
+        if bytes > MAX_TOTAL_VALUE_BYTES { return Err("Combined form names, values and defaults exceed 128 KiB; no OPTION content or value was changed.".into()); }
         Ok(())
     }
 
