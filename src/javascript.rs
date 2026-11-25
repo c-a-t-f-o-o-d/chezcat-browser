@@ -510,6 +510,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("button", "HTMLButtonElement"),
     ("canvas", "HTMLCanvasElement"),
     ("data", "HTMLDataElement"),
+    ("datalist", "HTMLDataListElement"),
     ("div", "HTMLDivElement"),
     ("dl", "HTMLDListElement"),
     ("applet", "HTMLUnknownElement"),
@@ -4281,6 +4282,7 @@ pub struct Runtime {
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     deferred_global_orders: BTreeMap<&'static str, usize>,
     deferred_param_constructor: Option<usize>,
+    deferred_datalist_constructor: Option<usize>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
     operation_globals: HashSet<&'static str>,
@@ -4441,6 +4443,7 @@ impl Runtime {
             global_attributes: BTreeMap::new(),
             deferred_global_orders: BTreeMap::new(),
             deferred_param_constructor: None,
+            deferred_datalist_constructor: None,
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
             arguments_thrower: None,
