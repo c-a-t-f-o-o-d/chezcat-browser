@@ -15,10 +15,6 @@ impl Bridge<'_> {
         forms::textarea_content(self.doc, node).is_some()
             && self.forms.controls.get(&node).is_some_and(|control| control.kind == Kind::TextArea)
     }
-    pub(super) fn textarea_default_property(&self, object: u32, property: &str) -> bool {
-        property == "defaultValue" && self.attr_element_receiver(object)
-            && node_index(object).is_some_and(|node| self.owned_native_textarea(node))
-    }
     pub(super) fn owned_native_checkbox(&self,node:usize)->bool {
         forms::fragment_checkbox_input(self.doc, node)
             && self.forms.controls.get(&node).is_some_and(|control|control.kind==Kind::Checkbox)

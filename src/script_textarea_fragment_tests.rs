@@ -383,8 +383,6 @@ fn textarea_fragment_native_interiors_associations_and_contexts_remain_guarded()
     let before = Snapshot::capture(&doc, &forms, &page);
     for source in [
         "area.innerHTML='new default';",
-        "area.textContent='new default';",
-        "area.defaultValue='new default';",
         "area.firstChild.data='new default';",
         "area.firstChild.nodeValue='new default';",
         "area.firstChild.textContent='new default';",
@@ -499,4 +497,16 @@ fn textarea_fragment_control_value_and_publication_quotas_commit_no_prefix() {
         assert_eq!(Snapshot::capture(&doc, &forms, &page), before, "{mode}");
         no_effects(&mut page);
     }
+}
+
+#[test]
+fn textarea_fragment_checked_defaults_replace_children_preserving_dirty_editor_and_reset(){
+ let(mut doc,mut forms,mut page)=fixture();
+ eval(&mut doc,&mut forms,&mut page,"host.innerHTML='<textarea id=fresh name=q>default</textarea>';var area=document.getElementById('fresh');area.value='edited';var watch=new MutationObserver(function(){});watch.observe(area,{childList:true});");
+ let n=id(&doc,"fresh");let before=editor(&forms,n);let neighbor=editor(&forms,id(&doc,"neighbor"));
+ for property in ["textContent","defaultValue"]{
+  eval(&mut doc,&mut forms,&mut page,&format!(r#"var previous=area.firstChild;area.{property}='new\r\n😀';var records=watch.takeRecords();if(area.defaultValue!=='new\r\n😀'||area.textContent!=='new\r\n😀'||area.value!=='edited'||area.firstChild===previous||previous.parentNode!==null||records.length!==1||records[0].removedNodes[0]!==previous||records[0].addedNodes[0]!==area.firstChild)throw 'checked fragment default replacement';"#));
+  assert_eq!(editor(&forms,n),before);assert_eq!(editor(&forms,id(&doc,"neighbor")),neighbor);assert!(query(&doc,&forms,"a").contains("q=edited"));no_effects(&mut page);
+ }
+ forms.reset_in_document(&doc,forms.controls[&n].owner.unwrap()).unwrap();assert_eq!(forms.controls[&n].value.text(),"new\n😀");assert!(!forms.controls[&n].dirty_value);no_effects(&mut page);
 }

@@ -2677,3 +2677,7 @@ impl Forms{
   if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no form control name was changed.".into());}Ok(())
  }
 }
+
+#[path="forms_textarea_defaults.rs"]
+mod textarea_defaults;
+pub(crate) use textarea_defaults::TextareaDefaultPlan;
