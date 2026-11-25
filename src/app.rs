@@ -7023,3 +7023,7 @@ mod option_value_tests;
 #[cfg(test)]
 #[path="app_option_text_tests.rs"]
 mod option_text_tests;
+
+#[cfg(test)]
+#[path="app_option_default_selected_tests.rs"]
+mod app_option_default_selected_tests;

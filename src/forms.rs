@@ -182,6 +182,8 @@ pub struct SelectOption {
     pub value: String,
     pub disabled: bool,
     pub group: Option<usize>,
+    pub(crate) default_selected: bool,
+    pub(crate) dirty_selected: bool,
     placeholder: bool,
 }
 
@@ -350,6 +352,8 @@ fn select_state(doc: &Document, node: usize) -> (SelectState, bool, usize) {
                     value,
                     disabled,
                     group,
+                    default_selected: doc.attr(child,"selected").is_some(),
+                    dirty_selected: false,
                 });
                 state.rows.push(SelectRow::Option(index));
                 if doc.attr(child, "selected").is_some() {
@@ -946,6 +950,7 @@ impl Forms {
         {
             return Err("This option is not available.".into());
         }
+        control.select.as_mut().unwrap().options[index].dirty_selected=true;
         Ok(control.set_selection(Some(index)))
     }
 
@@ -961,6 +966,7 @@ impl Forms {
         let selected = usize::try_from(index)
             .ok()
             .filter(|&index| index < state.options.len());
+        if let Some(index)=selected{control.select.as_mut().unwrap().options[index].dirty_selected=true;}
         control.set_selection(selected);
         Ok(())
     }
@@ -1023,6 +1029,7 @@ impl Forms {
                 .options
                 .iter()
                 .position(|option| option.value == text);
+            if let Some(index)=selected{control.select.as_mut().unwrap().options[index].dirty_selected=true;}
             control.set_selection(selected);
             return Ok(());
         }
@@ -1126,7 +1133,8 @@ impl Forms {
     fn reset_values(&mut self, owner: usize) {
         for control in self.controls.values_mut() {
             if control.owner == Some(owner) {
-                if let Some(state) = &control.select {
+                if let Some(state) = &mut control.select {
+                    for option in &mut state.options {option.dirty_selected=false;}
                     let selected = state
                         .initially_selected
                         .or_else(|| state.options.iter().position(|option| !option.disabled));
@@ -2630,3 +2638,25 @@ mod visual_id_exact_tests;
 #[cfg(test)]
 #[path="forms_owner_id_exact_tests.rs"]
 mod owner_id_exact_tests;
+
+/// Prepared default selectedness and optional native selection replacement.
+pub(crate) struct OptionDefaultPlan {
+ pub(crate) select:usize,pub(crate) option:usize,pub(crate) present:bool,
+ pub(crate) replacement:Option<(Option<usize>,String,Editor)>,
+}
+impl OptionDefaultPlan{
+ pub(crate) fn bytes(&self)->usize{self.replacement.as_ref().map_or(0,|(_,caption,editor)|caption.capacity()+editor.chars.capacity()*std::mem::size_of::<char>())}
+ pub(crate) fn commit(self,forms:&mut Forms){
+  let control=forms.controls.get_mut(&self.select).unwrap();let state=control.select.as_mut().unwrap();
+  state.options[self.option].default_selected=self.present;
+  state.initially_selected=state.options.iter().rposition(|entry|entry.default_selected);
+  if let Some((selected,caption,editor))=self.replacement{state.selected=selected;control.caption=caption;control.value=editor;}
+ }
+}
+impl Forms{
+ pub(crate) fn check_select_selection_payload(&self,select:usize,selected:Option<usize>)->Result<(),String>{
+  let control=&self.controls[&select];let state=control.select.as_ref().unwrap();let old=control.value.chars.iter().map(|ch|ch.len_utf8()).sum::<usize>();let new=selected.map_or(0,|index|state.options[index].value.len());
+  let bytes=self.text_payload(None)?.checked_sub(control.initial.len().max(old)).and_then(|n|n.checked_add(control.initial.len().max(new))).ok_or("Native OPTION selection payload overflow.")?;
+  if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no OPTION selection was changed.".into());}Ok(())
+ }
+}
