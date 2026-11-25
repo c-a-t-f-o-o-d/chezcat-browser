@@ -7095,3 +7095,7 @@ mod input_autocomplete_tests;
 #[cfg(test)]
 #[path="app_form_autocomplete_tests.rs"]
 mod form_autocomplete_tests;
+
+#[cfg(test)]
+#[path="app_form_name_tests.rs"]
+mod form_name_tests;

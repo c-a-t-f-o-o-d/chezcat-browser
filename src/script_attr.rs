@@ -46,7 +46,7 @@ pub(super) fn index(handle: u32) -> Option<usize> {
 // exact IDs, common HTML metadata and ordinary names through native consumers.
 pub(super) fn passive_name_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html && name.html_is("name")
-        && !matches!(tag,"slot"|"meter"|"progress"|"data"|"q") && (matches!(tag,"output"|"fieldset")||script_clone_node::ordinary_clone_element(tag))
+        && !matches!(tag,"slot"|"meter"|"progress"|"data"|"q") && (matches!(tag,"output"|"fieldset"|"form")||script_clone_node::ordinary_clone_element(tag))
 }
 pub(super) fn html_label_or_output_for_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{
     namespace==crate::html::Namespace::Html && matches!(tag,"label"|"output") && name.html_is("for")

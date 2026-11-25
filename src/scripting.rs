@@ -3212,6 +3212,7 @@ impl Bridge<'_> {
         if self.ol_type_member(object,property){return true;}
         if self.input_autocomplete_member(object,property){return true;}
         if self.form_autocomplete_member(object,property){return true;}
+        if self.form_name_member(object,property){return true;}
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
@@ -3412,6 +3413,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(target,property){return Some("type");}
         if self.input_autocomplete_member(target,property){return Some("autocomplete");}
         if property=="autocomplete"&&self.form_autocomplete_receiver(target){return Some("autocomplete");}
+        if property=="name"&&self.form_name_receiver(target){return Some("name");}
         if self.select_autocomplete_member(target,property){return Some("autocomplete");}
         if self.textarea_autocomplete_member(target,property){return Some("autocomplete");}
         if self.textarea_wrap_member(target,property){return Some("wrap");}
@@ -3689,6 +3691,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return false;}
         if self.input_autocomplete_member(object,property){return false;}
         if self.form_autocomplete_member(object,property){return false;}
+        if self.form_name_member(object,property){return false;}
         if self.select_autocomplete_member(object,property){return false;}
         if self.textarea_autocomplete_member(object,property){return false;}
         if self.textarea_wrap_member(object,property){return false;}
@@ -3897,6 +3900,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return false;}
         if self.input_autocomplete_member(object,property){return false;}
         if self.form_autocomplete_member(object,property){return false;}
+        if self.form_name_member(object,property){return false;}
         if self.select_autocomplete_member(object,property){return false;}
         if self.textarea_autocomplete_member(object,property){return false;}
         if self.textarea_wrap_member(object,property){return false;}
@@ -4005,6 +4009,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return true;}
         if self.input_autocomplete_member(object,property){return true;}
         if property=="autocomplete"&&self.form_autocomplete_receiver(object){return true;}
+        if property=="name"&&self.form_name_receiver(object){return true;}
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
@@ -4128,6 +4133,7 @@ impl Host for Bridge<'_> {
         if method==script_ol_type::SET&&self.ol_type_receiver(object){return Some("type");}
         if method==script_input_autocomplete::SET&&self.input_autocomplete_receiver(object){return Some("autocomplete");}
         if method==script_form_autocomplete::SET&&self.form_autocomplete_receiver(object){return Some("autocomplete");}
+        if method==script_form_name::SET&&self.form_name_receiver(object){return Some("name");}
         if method==script_select_autocomplete::SET&&self.select_autocomplete_receiver(object){return Some("autocomplete");}
         if method==script_textarea_autocomplete::SET&&self.textarea_autocomplete_receiver(object){return Some("autocomplete");}
         if method==script_textarea_wrap::SET&&self.textarea_wrap_receiver(object){return Some("wrap");}
@@ -4287,6 +4293,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return true;}
         if self.input_autocomplete_member(object,property){return true;}
         if property=="autocomplete"&&self.form_autocomplete_receiver(object){return true;}
+        if property=="name"&&self.form_name_receiver(object){return true;}
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
@@ -4614,6 +4621,7 @@ impl Host for Bridge<'_> {
         if script_ol_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_input_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_form_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_form_name::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_select_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_wrap::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -5015,6 +5023,7 @@ impl Host for Bridge<'_> {
         if script_ol_type::operation(method){return self.validate_ol_type(object);}
         if script_input_autocomplete::operation(method){return self.validate_input_autocomplete(object);}
         if script_form_autocomplete::operation(method){return self.validate_form_autocomplete(object);}
+        if script_form_name::operation(method){return self.validate_form_name(object);}
         if script_select_autocomplete::operation(method){return self.validate_select_autocomplete(object);}
         if script_textarea_autocomplete::operation(method){return self.validate_textarea_autocomplete(object);}
         if script_textarea_wrap::operation(method){return self.validate_textarea_wrap(object);}
@@ -5315,6 +5324,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return self.validate_ol_type(object);}
         if self.input_autocomplete_member(object,property){return self.validate_input_autocomplete(object);}
         if property=="autocomplete"&&self.form_autocomplete_receiver(object){return self.validate_form_autocomplete(object);}
+        if property=="name"&&self.form_name_receiver(object){return self.validate_form_name(object);}
         if self.select_autocomplete_member(object,property){return self.validate_select_autocomplete(object);}
         if self.textarea_autocomplete_member(object,property){return self.validate_textarea_autocomplete(object);}
         if self.textarea_wrap_member(object,property){return self.validate_textarea_wrap(object);}
@@ -5633,6 +5643,7 @@ impl Host for Bridge<'_> {
         if script_ol_type::operation(method){return self.event_target_interface(object)&&self.ol_type_receiver(receiver);}
         if script_input_autocomplete::operation(method){return self.event_target_interface(object)&&self.input_autocomplete_receiver(receiver);}
         if script_form_autocomplete::operation(method){return self.event_target_interface(object)&&self.form_autocomplete_receiver(receiver);}
+        if script_form_name::operation(method){return self.event_target_interface(object)&&self.form_name_receiver(receiver);}
         if script_select_autocomplete::operation(method){return self.event_target_interface(object)&&self.select_autocomplete_receiver(receiver);}
         if script_textarea_autocomplete::operation(method){return self.event_target_interface(object)&&self.textarea_autocomplete_receiver(receiver);}
         if script_textarea_wrap::operation(method){return self.event_target_interface(object)&&self.textarea_wrap_receiver(receiver);}
@@ -6593,6 +6604,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return self.ol_type_get(object);}
         if self.input_autocomplete_member(object,property){return self.input_autocomplete_get(object);}
         if self.form_autocomplete_member(object,property){return self.form_autocomplete_get(object);}
+        if self.form_name_member(object,property){return self.form_name_get(object);}
         if self.select_autocomplete_member(object,property){return self.select_autocomplete_get(object);}
         if self.textarea_autocomplete_member(object,property){return self.textarea_autocomplete_get(object);}
         if self.textarea_wrap_member(object,property){return self.textarea_wrap_get(object);}
@@ -7093,6 +7105,7 @@ impl Host for Bridge<'_> {
         if self.ol_type_member(object,property){return self.ol_type_set(object,&value);}
         if self.input_autocomplete_member(object,property){return self.input_autocomplete_set(object,&value);}
         if property=="autocomplete"&&self.form_autocomplete_receiver(object){return self.form_autocomplete_set(object,&value);}
+        if property=="name"&&self.form_name_receiver(object){return self.form_name_set(object,&value);}
         if self.select_autocomplete_member(object,property){return self.select_autocomplete_set(object,&value);}
         if self.textarea_autocomplete_member(object,property){return self.textarea_autocomplete_set(object,&value);}
         if self.textarea_wrap_member(object,property){return self.textarea_wrap_set(object,&value);}
@@ -7599,6 +7612,7 @@ impl Host for Bridge<'_> {
         if method==script_ol_type::SET{return Err("OL type setters require the native conversion transaction.".into());}
         if method==script_input_autocomplete::SET{return Err("Input autocomplete setters require the native conversion transaction.".into());}
         if method==script_form_autocomplete::SET{return Err("Form autocomplete setters require the native conversion transaction.".into());}
+        if method==script_form_name::SET{return Err("Form name setters require the native conversion transaction.".into());}
         if method==script_select_autocomplete::SET{return Err("Select autocomplete setters require the native conversion transaction.".into());}
         if method==script_textarea_autocomplete::SET{return Err("Textarea autocomplete setters require the native conversion transaction.".into());}
         if method==script_textarea_wrap::SET{return Err("Textarea wrap setters require the native conversion transaction.".into());}
@@ -7642,6 +7656,7 @@ impl Host for Bridge<'_> {
         if method==script_ol_type::GET{return self.ol_type_get(object);}
         if method==script_input_autocomplete::GET{return self.input_autocomplete_get(object);}
         if method==script_form_autocomplete::GET{return self.form_autocomplete_get(object);}
+        if method==script_form_name::GET{return self.form_name_get(object);}
         if method==script_select_autocomplete::GET{return self.select_autocomplete_get(object);}
         if method==script_textarea_autocomplete::GET{return self.textarea_autocomplete_get(object);}
         if method==script_textarea_wrap::GET{return self.textarea_wrap_get(object);}
@@ -11360,3 +11375,10 @@ mod form_autocomplete_tests;
 
 #[path="script_form_autocomplete.rs"]
 mod script_form_autocomplete;
+
+#[cfg(test)]
+#[path="script_form_name_tests.rs"]
+mod form_name_tests;
+
+#[path="script_form_name.rs"]
+mod script_form_name;
