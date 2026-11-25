@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_select_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_dimensions_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))||script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_select_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_dimensions_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_wrap_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_textarea_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))||script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3210,6 +3210,7 @@ impl Bridge<'_> {
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
         if self.ol_type_member(object,property){return true;}
+        if self.textarea_wrap_member(object,property){return true;}
         if self.li_value_member(object,property){return true;}
         if self.pre_width_member(object,property){return true;}
         if self.textarea_dimensions_member(object,property){return true;}
@@ -3405,6 +3406,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(target,property){return Some("type");}
         if self.li_type_member(target,property){return Some("type");}
         if self.ol_type_member(target,property){return Some("type");}
+        if self.textarea_wrap_member(target,property){return Some("wrap");}
         if self.li_value_member(target,property){return Some("value");}
         if self.pre_width_member(target,property){return Some("width");}
         if self.textarea_dimensions_member(target,property){return Some(if property=="cols"{"cols"}else{"rows"});}
@@ -3677,6 +3679,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return false;}
         if self.li_type_member(object,property){return false;}
         if self.ol_type_member(object,property){return false;}
+        if self.textarea_wrap_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -3880,6 +3883,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return false;}
         if self.li_type_member(object,property){return false;}
         if self.ol_type_member(object,property){return false;}
+        if self.textarea_wrap_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -3983,6 +3987,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
         if self.ol_type_member(object,property){return true;}
+        if self.textarea_wrap_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4101,6 +4106,7 @@ impl Host for Bridge<'_> {
         if method==script_ul_type::SET&&self.ul_type_receiver(object){return Some("type");}
         if method==script_li_type::SET&&self.li_type_receiver(object){return Some("type");}
         if method==script_ol_type::SET&&self.ol_type_receiver(object){return Some("type");}
+        if method==script_textarea_wrap::SET&&self.textarea_wrap_receiver(object){return Some("wrap");}
         if method==script_li_value::SET&&self.li_value_receiver(object){return Some("value");}
         if method==script_pre_width::SET&&self.pre_width_receiver(object){return Some("width");}
         if let Some((property,true))=script_textarea_dimensions::operation(method){if self.textarea_dimensions_receiver(object){return Some(property);}}
@@ -4255,6 +4261,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return true;}
         if self.li_type_member(object,property){return true;}
         if self.ol_type_member(object,property){return true;}
+        if self.textarea_wrap_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4577,6 +4584,7 @@ impl Host for Bridge<'_> {
         if script_ul_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_li_type::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_ol_type::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_textarea_wrap::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_li_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_pre_width::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_dimensions::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -4973,6 +4981,7 @@ impl Host for Bridge<'_> {
         if script_ul_type::operation(method){return self.validate_ul_type(object);}
         if script_li_type::operation(method){return self.validate_li_type(object);}
         if script_ol_type::operation(method){return self.validate_ol_type(object);}
+        if script_textarea_wrap::operation(method){return self.validate_textarea_wrap(object);}
         if script_li_value::operation(method){return self.validate_li_value(object);}
         if script_pre_width::operation(method){return self.validate_pre_width(object);}
         if script_textarea_dimensions::operation(method).is_some(){return self.validate_textarea_dimensions(object);}
@@ -5268,6 +5277,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return self.validate_ul_type(object);}
         if self.li_type_member(object,property){return self.validate_li_type(object);}
         if self.ol_type_member(object,property){return self.validate_ol_type(object);}
+        if self.textarea_wrap_member(object,property){return self.validate_textarea_wrap(object);}
         if self.li_value_member(object,property){return self.validate_li_value(object);}
         if self.pre_width_member(object,property){return self.validate_pre_width(object);}
         if self.textarea_dimensions_member(object,property){return self.validate_textarea_dimensions(object);}
@@ -5581,6 +5591,7 @@ impl Host for Bridge<'_> {
         if script_ul_type::operation(method){return self.event_target_interface(object)&&self.ul_type_receiver(receiver);}
         if script_li_type::operation(method){return self.event_target_interface(object)&&self.li_type_receiver(receiver);}
         if script_ol_type::operation(method){return self.event_target_interface(object)&&self.ol_type_receiver(receiver);}
+        if script_textarea_wrap::operation(method){return self.event_target_interface(object)&&self.textarea_wrap_receiver(receiver);}
         if script_li_value::operation(method){return self.event_target_interface(object)&&self.li_value_receiver(receiver);}
         if script_pre_width::operation(method){return self.event_target_interface(object)&&self.pre_width_receiver(receiver);}
         if script_textarea_dimensions::operation(method).is_some(){return self.event_target_interface(object)&&self.textarea_dimensions_receiver(receiver);}
@@ -6536,6 +6547,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return self.ul_type_get(object);}
         if self.li_type_member(object,property){return self.li_type_get(object);}
         if self.ol_type_member(object,property){return self.ol_type_get(object);}
+        if self.textarea_wrap_member(object,property){return self.textarea_wrap_get(object);}
         if self.li_value_member(object,property){return self.li_value_get(object);}
         if self.pre_width_member(object,property){return self.pre_width_get(object);}
         if self.textarea_dimensions_member(object,property){return self.textarea_dimensions_get(object,property);}
@@ -7031,6 +7043,7 @@ impl Host for Bridge<'_> {
         if self.ul_type_member(object,property){return self.ul_type_set(object,&value);}
         if self.li_type_member(object,property){return self.li_type_set(object,&value);}
         if self.ol_type_member(object,property){return self.ol_type_set(object,&value);}
+        if self.textarea_wrap_member(object,property){return self.textarea_wrap_set(object,&value);}
         if self.li_value_member(object,property){return self.li_value_set(object,&value);}
         if self.pre_width_member(object,property){return self.pre_width_set(object,&value);}
         if self.textarea_dimensions_member(object,property){return self.textarea_dimensions_set(object,property,&value);}
@@ -7532,6 +7545,7 @@ impl Host for Bridge<'_> {
         if method==script_ul_type::SET{return Err("UL type setters require the native conversion transaction.".into());}
         if method==script_li_type::SET{return Err("LI type setters require the native conversion transaction.".into());}
         if method==script_ol_type::SET{return Err("OL type setters require the native conversion transaction.".into());}
+        if method==script_textarea_wrap::SET{return Err("Textarea wrap setters require the native conversion transaction.".into());}
         if method==script_li_value::SET{return Err("LI value setters require the native conversion transaction.".into());}
         if method==script_pre_width::SET{return Err("PRE width setters require the native conversion transaction.".into());}
         if matches!(script_textarea_dimensions::operation(method),Some((_,true))){return Err("Textarea dimension setters require the native conversion transaction.".into());}
@@ -7570,6 +7584,7 @@ impl Host for Bridge<'_> {
         if method==script_ul_type::GET{return self.ul_type_get(object);}
         if method==script_li_type::GET{return self.li_type_get(object);}
         if method==script_ol_type::GET{return self.ol_type_get(object);}
+        if method==script_textarea_wrap::GET{return self.textarea_wrap_get(object);}
         if method==script_li_value::GET{return self.li_value_get(object);}
         if method==script_pre_width::GET{return self.pre_width_get(object);}
         if let Some((property,false))=script_textarea_dimensions::operation(method){return self.textarea_dimensions_get(object,property);}
@@ -11248,3 +11263,10 @@ mod textarea_min_length_tests;
 
 #[path="script_textarea_min_length.rs"]
 mod script_textarea_min_length;
+
+#[cfg(test)]
+#[path="script_textarea_wrap_tests.rs"]
+mod textarea_wrap_tests;
+
+#[path="script_textarea_wrap.rs"]
+mod script_textarea_wrap;
