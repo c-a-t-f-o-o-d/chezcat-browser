@@ -7123,3 +7123,7 @@ mod form_rel_list_tests;
 #[cfg(test)]
 #[path="app_form_method_tests.rs"]
 mod form_method_tests;
+
+#[cfg(test)]
+#[path="app_form_enctype_tests.rs"]
+mod form_enctype_tests;

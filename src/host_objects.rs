@@ -714,6 +714,8 @@ impl Runtime {
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLInputElement.get.autocomplete",Some("\0HTMLInputElement.set.autocomplete"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLFormElement.get.autocomplete",Some("\0HTMLFormElement.set.autocomplete"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"method","\0HTMLFormElement.get.method",Some("\0HTMLFormElement.set.method"))?;}
+            if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"enctype","\0HTMLFormElement.get.enctype",Some("\0HTMLFormElement.set.enctype"))?;}
+            if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"encoding","\0HTMLFormElement.get.encoding",Some("\0HTMLFormElement.set.encoding"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"acceptCharset","\0HTMLFormElement.get.acceptCharset",Some("\0HTMLFormElement.set.acceptCharset"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"rel","\0HTMLFormElement.get.rel",Some("\0HTMLFormElement.set.rel"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"target","\0HTMLFormElement.get.target",Some("\0HTMLFormElement.set.target"))?;}
