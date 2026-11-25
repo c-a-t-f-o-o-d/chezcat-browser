@@ -321,10 +321,29 @@ fn fragment_comments_failed_later_admission_keeps_tree_native_editor_and_resourc
     let(mut doc,mut forms,mut page,outcome)=run("<html><body><input id=editor value=seed><div id=mount><span>old</span></div></body></html>","document.getElementById('editor').value='kept edit';");assert_eq!(outcome.errors,0);
     let mount=(0..doc.nodes.len()).find(|&node|doc.attr(node,"id")==Some("mount")).unwrap();let before=doc.nodes.len();let children=doc.nodes[mount].children.clone();let retained=page.state.retained;
     let mut bridge=Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state};
-    for markup in ["<!--prefix--><p onclick='bad()'>no</p>","<!--prefix--><iframe></iframe>","<!--prefix--><script><!--unsupported escaped data--></script>"]{
-        assert!(bridge.set_inner_html(mount,markup).is_err());assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.state.retained,retained);assert!(!bridge.state.images.has_changes());
+    for markup in ["<!--prefix--><p onclick='bad()'>no</p>","<!--prefix--><iframe></iframe>"]{
+        assert!(bridge.set_inner_html(mount,markup).is_err(), "{markup}");assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.state.retained,retained);assert!(!bridge.state.images.has_changes());
     }
     bridge.state.retained_limit=retained;assert!(bridge.set_inner_html(mount,"<!--needs real storage-->").is_err());assert_eq!(bridge.doc.nodes.len(),before);assert_eq!(bridge.doc.nodes[mount].children,children);assert_eq!(bridge.state.retained,retained);
+    drop(bridge);
+    // Escaped script data is supported by the shared parser. Fragment scripts
+    // remain inert even when their source and resource attributes later change.
+    let (doc, forms, page, outcome) = run("<html><body><input id=editor value=seed><div id=mount></div></body></html>", r#"
+var editor=document.getElementById('editor');editor.value='kept edit';
+var mount=document.getElementById('mount');
+mount.innerHTML='<!--prefix--><script><!--window.fragmentExecuted=true;--></script>';
+var comment=mount.firstChild,script=mount.lastChild;
+if(mount.childNodes.length!==2||comment.nodeType!==8||comment.data!=='prefix'||script.nodeName!=='SCRIPT'||script.childNodes.length!==1||script.firstChild.nodeType!==3||script.textContent!=='<!--window.fragmentExecuted=true;-->')throw 'real escaped script data';
+script.src='/never-fetch.js';script.text='window.fragmentExecuted=true;';
+document.body.appendChild(script);
+if(window.fragmentExecuted!==undefined||editor.value!=='kept edit')throw 'fragment script inertness and native editor';
+"#);
+    assert_eq!(outcome.errors,0,"{}",page.report());
+    assert_eq!(forms.controls.values().next().unwrap().value.text(),"kept edit");
+    let script=(0..doc.nodes.len()).find(|&node|tag(&doc,node)=="script").unwrap();
+    assert!(page.state.dom.fragment_scripts.contains(&script));
+    assert!(page.state.dynamic.pending.is_empty());
+    assert!(!page.state.images.has_changes());
 }
 
 #[test]
