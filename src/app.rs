@@ -6983,3 +6983,7 @@ mod option_index_tests;
 #[cfg(test)]
 #[path="app_optgroup_interface_tests.rs"]
 mod optgroup_interface_tests;
+
+#[cfg(test)]
+#[path="app_optgroup_disabled_tests.rs"]
+mod optgroup_disabled_tests;
