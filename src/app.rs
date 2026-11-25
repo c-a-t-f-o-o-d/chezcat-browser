@@ -6927,3 +6927,7 @@ mod area_no_href_tests;
 #[cfg(test)]
 #[path="app_area_detached_copy_tests.rs"]
 mod area_detached_copy_tests;
+
+#[cfg(test)]
+#[path="app_area_connection_tests.rs"]
+mod area_connection_tests;

@@ -10654,3 +10654,7 @@ mod script_area_no_href;
 #[cfg(test)]
 #[path="script_area_detached_copy_tests.rs"]
 mod area_detached_copy_tests;
+
+#[cfg(test)]
+#[path="script_area_connection_tests.rs"]
+mod area_connection_tests;
