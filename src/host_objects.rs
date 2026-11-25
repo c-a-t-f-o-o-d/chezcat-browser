@@ -331,7 +331,7 @@ impl Runtime {
                     for (name, operation, length) in readers.into_iter().chain(
                         NODE_MUTATION_METHODS.map(|(name, length)| (name, name, length)),
                     ) {
-                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"|"isEqualNode"|"compareDocumentPosition"|"isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"|"normalize"|"cloneNode"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
+                        if matches!(name,"contains"|"hasChildNodes"|"getRootNode"|"isSameNode"|"isEqualNode"|"compareDocumentPosition"|"isDefaultNamespace"|"lookupNamespaceURI"|"lookupPrefix"|"normalize"|"cloneNode"|"insertBefore"){self.deferred_host_method(prototype,window,name,operation,length)?;continue;}
                         let method = self.allocate_host_function_with_length(window, operation, length).map_err(Fault::new)?;
                         if let Some(Function::Host { receiver_required, .. }) = self.functions.get_mut(method.id) {
                             *receiver_required = true;
@@ -620,6 +620,7 @@ impl Runtime {
                 Some((false, false, true)),
             )?;
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
+            if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"alt","\0HTMLAreaElement.get.alt",Some("\0HTMLAreaElement.set.alt"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"areas","\0HTMLMapElement.get.areas",None)?;}
             if name == "HTMLModElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLModElement.get.dateTime",Some("\0HTMLModElement.set.dateTime"))?;}
