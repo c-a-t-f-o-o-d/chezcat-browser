@@ -670,6 +670,7 @@ impl Runtime {
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"type","\0HTMLOListElement.get.type",Some("\0HTMLOListElement.set.type"))?;}
             if name == "HTMLLIElement" {self.define_host_attribute(prototype,window,"value","\0HTMLLIElement.get.value",Some("\0HTMLLIElement.set.value"))?;}
             if name == "HTMLPreElement" {self.define_host_attribute(prototype,window,"width","\0HTMLPreElement.get.width",Some("\0HTMLPreElement.set.width"))?;}
+            if name == "HTMLTextAreaElement" {for (key,get,set) in [("cols","\0HTMLTextAreaElement.get.cols","\0HTMLTextAreaElement.set.cols"),("rows","\0HTMLTextAreaElement.get.rows","\0HTMLTextAreaElement.set.rows")]{self.define_host_attribute(prototype,window,key,get,Some(set))?;}}
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"start","\0HTMLOListElement.get.start",Some("\0HTMLOListElement.set.start"))?;}
             if name == "HTMLUListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLUListElement.get.compact",Some("\0HTMLUListElement.set.compact"))?;}
             if name == "HTMLDirectoryElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDirectoryElement.get.compact",Some("\0HTMLDirectoryElement.set.compact"))?;}
