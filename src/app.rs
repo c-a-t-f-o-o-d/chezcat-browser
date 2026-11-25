@@ -7115,3 +7115,7 @@ mod form_target_tests;
 #[cfg(test)]
 #[path="app_form_rel_tests.rs"]
 mod form_rel_tests;
+
+#[cfg(test)]
+#[path="app_form_rel_list_tests.rs"]
+mod form_rel_list_tests;

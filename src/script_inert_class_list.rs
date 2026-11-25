@@ -39,7 +39,7 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn inert_class_list_set(&mut self,object:u32,property:&str,value:&Value)->Result<(),String>{
   let owner=self.inert_token_owner(object)?;
   if property!="value"{return Err("DOMTokenList property write is not implemented.".into());}
-  match script_class_list::attribute(object){Some("for")=>self.output_for_value_set(owner,value),Some("rel")=>self.area_rel_set(owner,value),_=>self.element_class_name_set(owner,value)}
+  match script_class_list::attribute(object){Some("for")=>self.output_for_value_set(owner,value),Some("rel")=>if self.form_rel_receiver(owner){self.form_rel_set(owner,value)}else{self.area_rel_set(owner,value)},_=>self.element_class_name_set(owner,value)}
  }
  pub(in crate::scripting) fn inert_class_list_get(&mut self,object:u32,property:&str)->Result<Value,String>{
   if property=="value"{let owner=self.inert_token_owner(object)?;return self.element_attribute_string_get(owner,script_class_list::attribute(object).ok_or("Inert token attribute is unavailable.")?);}
@@ -55,7 +55,7 @@ impl Bridge<'_>{
   if method=="supports"{
    let token=token_list_reads::argument(args.first().ok_or("supports requires a converted DOMString token.")?)?;
    self.state.work(token.logical_bytes())?;
-   // Area relation processing is not implemented, so no processing token is advertised.
+   // Area/form relation processing is not implemented, so no processing token is advertised.
    return Ok(Value::Bool(false));
   }
   if method=="toString"{return self.element_attribute_string_get(owner,script_class_list::attribute(object).ok_or("Inert token attribute is unavailable.")?);}
