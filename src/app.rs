@@ -7083,3 +7083,7 @@ mod textarea_wrap_tests;
 #[cfg(test)]
 #[path="app_textarea_autocomplete_tests.rs"]
 mod textarea_autocomplete_tests;
+
+#[cfg(test)]
+#[path="app_select_autocomplete_tests.rs"]
+mod select_autocomplete_tests;
