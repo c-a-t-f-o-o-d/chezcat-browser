@@ -6,6 +6,154 @@ use super::*;
 #[path = "script_computed_transform.rs"]
 mod transform;
 
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn fixture() -> (Document, Forms, Page) {
+        let mut doc = crate::html::parse(
+            "<!doctype html><html><head><style>#parent{display:flex;order:9;--Rank:3}\
+             #tile{order:var(--Rank)}</style></head><body><div id=parent>\
+             <div id=tile></div><div id=other></div></div></body></html>"
+        );
+        doc.scripting_enabled = true;
+        let mut forms = Forms::new(&doc);
+        let mut page = Page::with_limits(crate::javascript::limits::BROWSER);
+        page.set_geometry(crate::script_geometry::Geometry::new(
+            640, 480, 1.0, &HashMap::new(), HashMap::new(), &crate::fonts::Book::empty(),
+        ));
+        assert_eq!(page.start(&mut doc, &mut forms, &[]).errors, 0);
+        (doc, forms, page)
+    }
+
+    fn run(doc: &mut Document, forms: &mut Forms, page: &mut Page, source: &str) {
+        let result = page.console_eval(doc, forms, source);
+        assert_eq!(result.errors, 0, "{source}\n{}", page.report());
+    }
+
+    #[test]
+    fn order_cssom_normalization_conversion_invalid_values_and_live_readback() {
+        let (mut doc, mut forms, mut page) = fixture();
+        run(&mut doc, &mut forms, &mut page, r#"
+var tile=document.getElementById('tile'),style=tile.style,computed=getComputedStyle(tile),calls=0;
+var observer=new MutationObserver(function(){});observer.observe(tile,{attributes:true,attributeOldValue:true});
+if(computed.order!=='3'||!('order' in style)||style.order!=='')throw 'initial order';
+style.order={toString:function(){calls++;return '-0007';}};
+if(calls!==1||style.order!=='-7'||computed.getPropertyValue('order')!=='-7'||observer.takeRecords().length!==1)
+    throw 'exact conversion';
+var original=tile.getAttribute('style');
+style.order='auto';style.order='3.5';style.order='1e2';style.setProperty('order','4px');
+if(tile.getAttribute('style')!==original||observer.takeRecords().length)throw 'invalid mutation';
+var failed=false;try{style.order=Symbol('invalid');}catch(error){failed=error instanceof TypeError;}
+if(!failed||tile.getAttribute('style')!==original||observer.takeRecords().length)throw 'symbol mutation';
+style.order=null;
+if(style.order!==''||computed.order!=='3'||observer.takeRecords().length!==1)throw 'null removal';
+style.cssText='order:+00000000005;order:auto';
+if(style.order!=='5'||computed.order!=='5'||style.cssText!=='order: 5;')throw 'whole declaration';
+style.order='var(--Rank)';
+if(style.order!=='var(--Rank)'||computed.order!=='3')throw 'custom property case';
+"#);
+        let huge = format!("-9{}", "0".repeat(80));
+        run(&mut doc, &mut forms, &mut page, &format!(
+            "style.order='{huge}';if(style.order!=='{huge}'||computed.order!=='{huge}')throw 'large integer';"
+        ));
+    }
+
+    #[test]
+    fn order_cssom_defaulting_variable_changes_priority_and_readonly_snapshot() {
+        let (mut doc, mut forms, mut page) = fixture();
+        run(&mut doc, &mut forms, &mut page, r#"
+var parent=document.getElementById('parent'),tile=document.getElementById('tile'),style=tile.style,computed=getComputedStyle(tile);
+if(getComputedStyle(document.getElementById('other')).order!=='0')throw 'order inherited';
+style.order='inherit';if(computed.order!=='9')throw 'explicit inheritance';
+style.order='revert-layer';if(computed.order!=='3')throw 'stylesheet rollback';
+parent.style.setProperty('--Rank','-4');if(computed.order!=='-4')throw 'live variable';
+style.order='var(--missing)';if(computed.order!=='0')throw 'invalid substituted winner';
+style.order='initial';if(computed.order!=='0')throw 'initial';
+style.setProperty('order','2','important');
+if(style.order!=='2'||computed.order!=='2')throw 'important write';
+style.setProperty('order','8','not-priority');if(computed.order!=='2')throw 'bad priority changed state';
+if(style.removeProperty('order')!=='2'||computed.order!=='-4')throw 'removal';
+"#);
+        let failed = page.console_eval(&mut doc, &mut forms, "computed.order='6';");
+        assert_eq!(failed.errors, 1);
+        run(&mut doc, &mut forms, &mut page, "if(computed.order!=='-4')throw 'readonly declaration changed';");
+    }
+
+    #[test]
+    fn order_cssom_storage_refusal_preserves_attribute_and_observation_then_recovers() {
+        let (mut doc, mut forms, mut page) = fixture();
+        run(&mut doc, &mut forms, &mut page,
+            "var tile=document.getElementById('tile'),before=tile.getAttribute('style');\
+             var observer=new MutationObserver(function(){});observer.observe(tile,{attributes:true,attributeOldValue:true});"
+        );
+        let limit = page.state.retained_limit;
+        page.state.retained_limit = page.state.retained;
+        let generation = page.state.dom_commits;
+        let failed = page.console_eval(&mut doc, &mut forms, "tile.style.order='-7';");
+        assert_eq!(failed.errors, 1);
+        assert_eq!(page.state.dom_commits, generation);
+        page.state.retained_limit = limit;
+        run(&mut doc, &mut forms, &mut page,
+            "if(tile.getAttribute('style')!==before||observer.takeRecords().length)throw 'refusal leaked';\
+             tile.style.order='-7';if(tile.style.order!=='-7'||getComputedStyle(tile).order!=='-7'||observer.takeRecords().length!==1)throw 'recovery';"
+        );
+    }
+
+    #[test]
+    fn order_cssom_comments_use_shared_token_boundaries_for_all_mutation_paths() {
+        let (mut doc, mut forms, mut page) = fixture();
+        run(&mut doc, &mut forms, &mut page, r#"
+var tile=document.getElementById('tile'),style=tile.style,computed=getComputedStyle(tile);
+style.order='/*var(--ignored)*/+002';
+if(style.order!=='2'||computed.order!=='2')throw 'commented direct integer';
+style.setProperty('order','/*;{}!@*/-003');
+if(style.order!=='-3'||computed.order!=='-3')throw 'commented setProperty integer';
+var before=tile.getAttribute('style');
+style.order='1/**/2';style.setProperty('order','+/**/2');style.order='in/**/herit';
+if(tile.getAttribute('style')!==before||computed.order!=='-3')throw 'comment joined separate tokens';
+style.cssText='order:/*leading*/+0006/*trailing*/';
+if(style.order!=='6'||computed.order!=='6'||style.cssText!=='order: 6;')throw 'commented whole block';
+style.order='/*lead*/var(--Rank, -1)/*tail*/';
+if(computed.order!=='3')throw 'commented variable';
+"#);
+    }
+
+    #[test]
+    fn order_cssom_parser_allowances_refuse_before_mutation_and_recover() {
+        let (mut doc, mut forms, mut page) = fixture();
+        let target = (0..doc.nodes.len()).find(|&node| doc.attr(node, "id") == Some("tile")).unwrap();
+        let source = "/*var(--ignored)*/var(--Rank,-7)";
+        let before = doc.attr(target, "style").map(str::to_owned);
+        let generation = page.state.dom_commits;
+        for (work, copies) in [(source.len() * 3, usize::MAX), (usize::MAX, source.len() * 3)] {
+            page.begin_job();
+            page.state.host_work = work;
+            page.state.copy_work = copies;
+            let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+            assert!(bridge.set_style(target, "order", source, "").is_err());
+            assert_eq!(bridge.doc.attr(target, "style"), before.as_deref());
+            assert_eq!(bridge.state.dom_commits, generation);
+        }
+        page.begin_job();
+        {
+            let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+            bridge.set_style(target, "order", source, "").unwrap();
+        }
+        let stored = doc.attr(target, "style").unwrap().to_owned();
+        for (work, copies) in [(stored.len() * 3, usize::MAX), (usize::MAX, stored.len() * 3)] {
+            page.begin_job();
+            page.state.host_work = work;
+            page.state.copy_work = copies;
+            let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
+            assert!(bridge.get_style(target, "order").is_err());
+            assert_eq!(bridge.doc.attr(target, "style"), Some(stored.as_str()));
+        }
+        run(&mut doc, &mut forms, &mut page,
+            "if(getComputedStyle(document.getElementById('tile')).order!=='3')throw 'parser allowance recovery';");
+    }
+}
+
 const BASE: u32 = 0x8400_0000;
 const END: u32 = 0x8500_0000;
 pub(super) fn index(handle: u32) -> Option<usize> {
@@ -175,6 +323,7 @@ enum ComputedProperty {
     Visibility,
     PointerEvents,
     ZIndex,
+    Order,
     FontSize,
     TouchAction,
     Opacity,
@@ -192,6 +341,7 @@ impl ComputedProperty {
             "visibility"=>Some(Self::Visibility),
             "pointerEvents"=>Some(Self::PointerEvents),
             "zIndex"=>Some(Self::ZIndex),
+            "order"=>Some(Self::Order),
             "fontSize" => Some(Self::FontSize),
             "touchAction" => Some(Self::TouchAction),
             "opacity" => Some(Self::Opacity),
@@ -204,7 +354,7 @@ impl ComputedProperty {
         }
     }
     fn css_name(name: &str) -> Option<Self> {
-        if name.eq_ignore_ascii_case("z-index"){Some(Self::ZIndex)}else if name.eq_ignore_ascii_case("visibility"){Some(Self::Visibility)}else if name.eq_ignore_ascii_case("pointer-events"){Some(Self::PointerEvents)}else if name.eq_ignore_ascii_case("display"){Some(Self::Display)}else if name.eq_ignore_ascii_case("color"){Some(Self::Color)}else if name.eq_ignore_ascii_case("font-size") {
+        if name.eq_ignore_ascii_case("order"){Some(Self::Order)}else if name.eq_ignore_ascii_case("z-index"){Some(Self::ZIndex)}else if name.eq_ignore_ascii_case("visibility"){Some(Self::Visibility)}else if name.eq_ignore_ascii_case("pointer-events"){Some(Self::PointerEvents)}else if name.eq_ignore_ascii_case("display"){Some(Self::Display)}else if name.eq_ignore_ascii_case("color"){Some(Self::Color)}else if name.eq_ignore_ascii_case("font-size") {
             Some(Self::FontSize)
         } else if name.eq_ignore_ascii_case("touch-action") {
             Some(Self::TouchAction)
@@ -442,10 +592,10 @@ impl Bridge<'_> {
             return self.computed_transform_value(node);
         }
         let geometry=self.state.geometry.as_mut().ok_or("Computed style requires the actual document renderer.")?;
-        let snapshot=if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex){geometry.presentation_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?}else{geometry.computed_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?};
-        if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex){
+        let snapshot=if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex|ComputedProperty::Order){geometry.presentation_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?}else{geometry.computed_snapshot(self.doc,self.forms,&mut self.state.host_work,&mut self.state.copy_work)?};
+        if matches!(property,ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex|ComputedProperty::Order){
             let Some(presentation)=snapshot.read_presentation(node).map_err(|_|"Computed presentation unavailable within CSS cascade limits.")?else{return Ok(Value::String(String::new()));};
-            let keyword=match property{ComputedProperty::Display=>Some(presentation.display),ComputedProperty::Visibility=>Some(if presentation.visible{"visible"}else{"hidden"}),ComputedProperty::PointerEvents=>Some(if presentation.pointer_events{"auto"}else{"none"}),ComputedProperty::ZIndex=>Some(presentation.z_index.as_ref().map_or("auto",|value|value.text())),_=>None};
+            let keyword=match property{ComputedProperty::Display=>Some(presentation.display),ComputedProperty::Visibility=>Some(if presentation.visible{"visible"}else{"hidden"}),ComputedProperty::PointerEvents=>Some(if presentation.pointer_events{"auto"}else{"none"}),ComputedProperty::ZIndex=>Some(presentation.z_index.as_ref().map_or("auto",|value|value.text())),ComputedProperty::Order=>Some(presentation.order.text()),_=>None};
             if let Some(text)=keyword{self.state.copies(text.len())?;let mut value=String::new();value.try_reserve_exact(text.len()).map_err(|_|"Computed display serialization reservation failed.")?;value.push_str(text);return Ok(Value::String(value));}
             self.state.work(64)?;let mut text=transform::NumberText::new();let color=presentation.color;
             std::fmt::write(&mut text,format_args!("rgb({}, {}, {})",(color>>16)&255,(color>>8)&255,color&255)).map_err(|_|"Computed color serialization overflow.")?;
@@ -474,7 +624,7 @@ impl Bridge<'_> {
             return Ok(Value::String(result));
         }
         let (first, second) = match property {
-            ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex=>unreachable!("presentation has dedicated native serialization"),
+            ComputedProperty::Display|ComputedProperty::Color|ComputedProperty::Visibility|ComputedProperty::PointerEvents|ComputedProperty::ZIndex|ComputedProperty::Order=>unreachable!("presentation has dedicated native serialization"),
             ComputedProperty::FontSize => unreachable!("font-size uses actual native pixel serialization"),
             ComputedProperty::TouchAction => {
                 let value=snapshot.read_touch_action(node).map_err(|_|"Computed touch-action unavailable within CSS cascade limits.")?;

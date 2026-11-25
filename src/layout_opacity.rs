@@ -148,7 +148,7 @@ impl Engine<'_> {
             }
             groups[node] = layer;
             if depth < MAX_DEPTH {
-                for &child in self.doc.nodes[node].children.iter().rev() {
+                for &child in self.visual_children(node).iter().rev() {
                     if child < count && !seen[child] && self.parents[child] == Some(node) {
                         seen[child] = true;
                         stack.push(Frame {

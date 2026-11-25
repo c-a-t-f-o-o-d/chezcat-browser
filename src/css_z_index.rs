@@ -7,6 +7,9 @@ pub(crate) struct Value {
     text: String,
 }
 impl Value {
+    pub(super) fn from_integer(source: &str) -> Option<Self> {
+        integer(source).map(|text| Self { text })
+    }
     pub(crate) fn text(&self) -> &str {
         &self.text
     }
@@ -57,7 +60,7 @@ fn parts(source: &str) -> Option<(bool, &str)> {
         if digits.is_empty() { "0" } else { digits },
     ))
 }
-fn integer(source: &str) -> Option<String> {
+pub(super) fn integer(source: &str) -> Option<String> {
     let (negative, digits) = parts(source)?;
     let bytes = digits.len().checked_add(usize::from(negative))?;
     if bytes > MAX_GROUPED_BOX_BYTES {
@@ -70,6 +73,11 @@ fn integer(source: &str) -> Option<String> {
     }
     text.push_str(digits);
     Some(text)
+}
+pub(super) fn valid_integer(source: &str) -> bool {
+    parts(source).is_some_and(|(negative, digits)| {
+        digits.len() + usize::from(negative) <= MAX_GROUPED_BOX_BYTES
+    })
 }
 pub(crate) fn valid(source: &str) -> bool {
     let value = source.trim_ascii();

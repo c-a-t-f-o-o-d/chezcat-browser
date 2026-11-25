@@ -498,13 +498,45 @@ impl Engine<'_> {
             group.complete = false;
             return group;
         }
+        let mut ordered = Vec::new();
+        if self.item_order.reorders(node) {
+            if !self.grid_budget.charge(children.len().saturating_mul(children.len().max(1).ilog2() as usize + 2),
+                children.len().saturating_mul(std::mem::size_of::<std::ops::Range<usize>>()))
+                || ordered.try_reserve_exact(children.len()).is_err() {
+                group.complete = false;
+                return group;
+            }
+            let mut cursor = 0;
+            while cursor < children.len() {
+                let start = cursor;
+                cursor += 1;
+                if matches!(self.doc.nodes[children[start]].kind, NodeKind::Text(_) | NodeKind::Cdata(_)) {
+                    while cursor < children.len() && matches!(self.doc.nodes[children[cursor]].kind,
+                        NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) | NodeKind::ProcessingInstruction { .. }) {
+                        cursor += 1;
+                    }
+                }
+                ordered.push(start..cursor);
+            }
+            ordered.sort_unstable_by_key(|range| self.item_order.visual_rank(children[range.start]));
+        }
         let (left, top) = (self.flow.left, self.flow.y);
         let gap = self
             .length(style.gap[0], height.unwrap_or(0), style)
             .unwrap_or(0)
             .max(0);
         let mut cursor = 0;
-        while cursor < children.len() {
+        let mut entry = 0;
+        loop {
+            let end = if ordered.is_empty() {
+                if cursor >= children.len() { break; }
+                children.len()
+            } else {
+                let Some(range) = ordered.get(entry) else { break; };
+                cursor = range.start;
+                entry += 1;
+                range.end
+            };
             if self.finished() || !self.grid_work(1) {
                 group.complete = false;
                 break;
@@ -534,7 +566,7 @@ impl Engine<'_> {
                 cursor += 1;
             } else {
                 let mut has_text = false;
-                while cursor < children.len() {
+                while cursor < end {
                     let child = children[cursor];
                     match &self.doc.nodes[child].kind {
                         NodeKind::Text(text) | NodeKind::Cdata(text) => {

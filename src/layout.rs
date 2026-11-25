@@ -33,6 +33,8 @@ pub(crate) use translate::VisualBorderRect;
 mod opacity;
 #[path = "layout_grid.rs"]
 mod grid;
+#[path = "layout_order.rs"]
+mod item_order;
 use grid::GridGroup;
 
 #[cfg(test)]
@@ -654,6 +656,7 @@ struct Engine<'a> {
     fonts: &'a Book,
     doc: &'a Document,
     styles: Vec<std::rc::Rc<Style>>,
+    item_order: item_order::ItemOrder,
     canvas_background:Option<usize>,
     image_sizes: &'a HashMap<usize, (usize, usize)>,
     zoom: f32,
@@ -934,6 +937,7 @@ fn build_viewport_with_fonts_inner(
     }
     // Recursive walks retain small shared handles rather than copying an entire
     // Style into every native stack frame. Used-style overrides remain distinct.
+    let item_order = item_order::ItemOrder::prepare(doc, &styles, &parents, budget.as_deref_mut())?;
     let mut shared_styles = Vec::new();
     shared_styles.try_reserve_exact(styles.len()).map_err(|_| "Layout style storage allocation failed".to_owned())?;
     shared_styles.extend(styles.into_iter().map(std::rc::Rc::new));
@@ -941,6 +945,7 @@ fn build_viewport_with_fonts_inner(
         fonts,
         doc,
         styles: shared_styles,
+        item_order,
         canvas_background:root_background.map(|(node,_)|node),
         image_sizes,
         zoom,
@@ -1088,7 +1093,7 @@ fn build_viewport_with_fonts_inner(
     engine.filter_visibility_paint(budget.as_deref_mut())?;
     engine.finish_opacity();
     engine.build_hits();
-    engine.restore_source_order();
+    engine.restore_source_order(budget.as_deref_mut())?;
     engine.finish_visibility_outputs(budget.as_deref_mut())?;
     let indices = |flags: &[bool]| {
         flags
@@ -1693,9 +1698,22 @@ impl<'a> Engine<'a> {
         atoms
     }
 
-    fn restore_source_order(&mut self) {
-        if self.pending.is_empty() {
-            return;
+    fn restore_source_order(&mut self, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
+        if self.pending.is_empty() && !self.item_order.active() {
+            return Ok(());
+        }
+        if self.item_order.active() {
+            let count = self.layout.runs.len().saturating_add(self.layout.controls.len())
+                .saturating_add(self.layout.anchors.len());
+            if let Some(meter) = budget {
+                meter.work(count.saturating_mul(count.max(1).ilog2() as usize + 2)
+                    .saturating_add(self.layout.items.len()))?;
+                meter.copies(count.saturating_mul(4 * std::mem::size_of::<usize>())
+                    .saturating_add(self.layout.runs.len().saturating_mul(std::mem::size_of::<TextRun>()))
+                    .saturating_add(self.layout.controls.len().saturating_mul(std::mem::size_of::<ControlBox>()))
+                    .saturating_add(self.layout.anchors.len().saturating_mul(std::mem::size_of::<(String, i32)>()))
+                    .saturating_mul(2))?;
+            }
         }
         // Deferred layout changes paint order but must not change reading,
         // find, clipboard, keyboard or duplicate-fragment lookup order.
@@ -1703,7 +1721,7 @@ impl<'a> Engine<'a> {
             .into_iter()
             .enumerate()
             .collect();
-        runs.sort_by_key(|(index, _)| (self.run_nodes[*index], *index));
+        runs.sort_by_key(|(index, _)| (self.item_order.source_rank(self.run_nodes[*index]), *index));
         let mut run_map = vec![0; runs.len()];
         let old_fixed = std::mem::take(&mut self.layout.fixed_runs);
         let old_clips = std::mem::take(&mut self.layout.run_clips);
@@ -1720,7 +1738,7 @@ impl<'a> Engine<'a> {
             .into_iter()
             .enumerate()
             .collect();
-        controls.sort_by_key(|(index, control)| (control.node, *index));
+        controls.sort_by_key(|(index, control)| (self.item_order.source_rank(control.node), *index));
         let mut control_map = vec![0; controls.len()];
         let old_fixed = std::mem::take(&mut self.layout.fixed_controls);
         for (new, (old, control)) in controls.into_iter().enumerate() {
@@ -1732,7 +1750,7 @@ impl<'a> Engine<'a> {
             .into_iter()
             .enumerate()
             .collect();
-        anchors.sort_by_key(|(index, _)| (self.anchor_nodes[*index], *index));
+        anchors.sort_by_key(|(index, _)| (self.item_order.source_rank(self.anchor_nodes[*index]), *index));
         let old_fixed = std::mem::take(&mut self.layout.fixed_anchors);
         for (old, anchor) in anchors {
             self.layout.fixed_anchors.push(old_fixed[old]);
@@ -1745,6 +1763,7 @@ impl<'a> Engine<'a> {
                 _ => {}
             }
         }
+        Ok(())
     }
 
     fn order_positioned_paint(&mut self, positioned_groups: usize, budget: Option<&mut css::CssBudget<'_>>) -> Result<(), String> {
@@ -3465,6 +3484,9 @@ impl<'a> Engine<'a> {
                 replaced,
                 anonymous,
             });
+        }
+        if self.item_order.reorders(node) {
+            group.items.sort_unstable_by_key(|item| self.item_order.visual_rank(item.nodes[0]));
         }
         let column_gap = self
             .length(style.gap[1], width, style)
@@ -6495,3 +6517,7 @@ mod visual_id_exact_tests;
 #[cfg(test)]
 #[path="layout_image_ratio_tests.rs"]
 mod image_ratio_tests;
+
+#[cfg(test)]
+#[path = "layout_order_tests.rs"]
+mod order_tests;
