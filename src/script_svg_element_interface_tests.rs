@@ -186,11 +186,8 @@ fn svg_element_ordinary_properties_keep_native_prototype_boundaries() {
     // interface prototype before measuring the refused native operations.
     run(&mut doc, &mut forms, &mut page, "if(Object.getPrototypeOf(P)!==Element.prototype||Object.setPrototypeOf(P,Element.prototype)!==P)throw 'ordinary prototype controls';");
     let overlays = handles.map(|handle| page.runtime.native_overlay_state_for_test(handle));
+    run(&mut doc,&mut forms,&mut page,"if(Object.getPrototypeOf(svg)!==P||Object.getPrototypeOf(group)!==P||Object.getPrototypeOf(shape)!==P)throw 'canonical SVGElement suffix';");
     for (source, expected) in [
-        (
-            "Object.getPrototypeOf(svg);",
-            "Native host prototype inspection is not implemented",
-        ),
         (
             "Object.setPrototypeOf(svg,P);",
             "Native host object prototypes cannot be changed",

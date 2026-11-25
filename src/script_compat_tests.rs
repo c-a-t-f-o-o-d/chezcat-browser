@@ -125,7 +125,10 @@ if(d[Symbol.toStringTag]!=='HTMLDivElement'||d.toString!==Object.prototype.toStr
 Object.defineProperty(d,Symbol.toStringTag,{value:'OwnAuthorTag',configurable:true});if(d[Symbol.toStringTag]!=='OwnAuthorTag')throw 'own symbol';delete d[Symbol.toStringTag];
 if(d[Symbol.toStringTag]!=='HTMLDivElement'||d.toString()!=='[object HTMLDivElement]')throw 'DIV own tag deletion restores concrete suffix';
 "#]);assert_eq!(outcome.errors,0,"{}",page.report());
-    for source in ["opaque[Symbol.toStringTag];","Object.getPrototypeOf(opaque);","opaque.constructor;"] {let out=page.console_eval(&mut doc,&mut forms,source);assert_eq!(out.errors,1,"{source}: {}",page.report());}
+    let out=page.console_eval(&mut doc,&mut forms,"if(opaque[Symbol.toStringTag]!=='HTMLElement'||Object.getPrototypeOf(opaque)!==HTMLElement.prototype||opaque.constructor!==HTMLElement||!(opaque instanceof HTMLElement))throw 'semantic SECTION suffix';var unsupported=document.createElementNS('urn:opaque-fixture','opaque');");
+    assert_eq!(out.errors,0,"{}",page.report());
+    let out=page.console_eval(&mut doc,&mut forms,"if(unsupported instanceof HTMLElement)throw 'foreign namespace acquired HTML brand';");
+    assert_eq!(out.errors,0,"{}",page.report());
 }
 
 fn shared_probe(source: &str) -> (Document,Forms,Page,Outcome) {

@@ -585,12 +585,6 @@ impl Runtime {
             // Several local names can share one canonical interface identity.
             self.work(at)?;
             if super::ORDINARY_HTML_SUBCLASSES[..at].iter().any(|&(_,prior)|prior==name){continue;}
-            let allocation = self.allocate_host_function_with_length(window, name, 0)
-                .map_err(Fault::new)?;
-            if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
-                *constructible = name != "HTMLUnknownElement";
-                *illegal_interface_constructor = true;
-            }
             // The legacy Image factory and HTMLImageElement have distinct
             // constructors but share the actual image-element prototype.
             let prototype = if name == "HTMLImageElement" {
@@ -604,17 +598,31 @@ impl Runtime {
                 self.new_object(None)?
             };
             self.objects[prototype].prototype = Some(Ordinary::Object(html_element));
-            self.objects[self.function_properties[allocation.id]].prototype =
-                Some(Ordinary::Function(parent_function));
-            let constructor = Value::Function(allocation.id);
-            self.store_property(
-                prototype, "constructor".into(), constructor.clone(),
-                Some((false, true, true)),
-            )?;
-            self.store_property(
-                self.function_properties[allocation.id], "prototype".into(),
-                Value::Object(prototype), Some((false, false, false)),
-            )?;
+            let constructor = if name=="HTMLParamElement" {
+                // The native prototype stays canonical before the constructor
+                // data value is first observed in its owning realm.
+                self.defer_param_constructor(window,prototype,parent_function)?;
+                None
+            } else {
+                let allocation = self.allocate_host_function_with_length(window, name, 0)
+                    .map_err(Fault::new)?;
+                if let Some(Function::Host { constructible, illegal_interface_constructor, .. }) = self.functions.get_mut(allocation.id) {
+                    *constructible = name != "HTMLUnknownElement";
+                    *illegal_interface_constructor = true;
+                }
+                self.objects[self.function_properties[allocation.id]].prototype =
+                    Some(Ordinary::Function(parent_function));
+                let constructor = Value::Function(allocation.id);
+                self.store_property(
+                    prototype, "constructor".into(), constructor.clone(),
+                    Some((false, true, true)),
+                )?;
+                self.store_property(
+                    self.function_properties[allocation.id], "prototype".into(),
+                    Value::Object(prototype), Some((false, false, false)),
+                )?;
+                Some(constructor)
+            };
             self.store_symbol_property(
                 prototype, tag_key, Value::String(name.into()),
                 Some((false, false, true)),
@@ -635,6 +643,7 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"relList","\0HTMLAreaElement.get.relList",Some("\0HTMLAreaElement.set.relList"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"ping","\0HTMLAreaElement.get.ping",Some("\0HTMLAreaElement.set.ping"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
+            if name == "HTMLParamElement" {self.define_host_attribute(prototype,window,"name","\0HTMLParamElement.get.name",Some("\0HTMLParamElement.set.name"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"areas","\0HTMLMapElement.get.areas",None)?;}
             if name == "HTMLModElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLModElement.get.dateTime",Some("\0HTMLModElement.set.dateTime"))?;}
             if name == "HTMLDataElement" {self.define_host_attribute(prototype,window,"value","\0HTMLDataElement.get.value",Some("\0HTMLDataElement.set.value"))?;}
@@ -759,10 +768,9 @@ impl Runtime {
             // Existing native constructor roots keep both prototype chains
             // alive across realm parking, deferred calls and collection.
             self.native_constructor_prototypes.insert((window, name), prototype);
-            self.put_binding(
-                self.global_environment, name.into(), Some(constructor),
-                super::Declaration::Var, false,
-            )?;
+            if let Some(constructor)=constructor {
+                self.put_binding(self.global_environment,name.into(),Some(constructor),super::Declaration::Var,false)?;
+            }
             self.global_attributes.insert(name.into(), (false, true, true));
         }
         Ok(())

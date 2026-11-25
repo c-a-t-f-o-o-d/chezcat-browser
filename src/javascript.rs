@@ -561,6 +561,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("time", "HTMLTimeElement"),
     ("area", "HTMLAreaElement"),
     ("map", "HTMLMapElement"),
+    ("param", "HTMLParamElement"),
     ("ins", "HTMLModElement"),
     ("del", "HTMLModElement"),
     ("title", "HTMLTitleElement"),
@@ -588,7 +589,7 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
         return Some(name);
     }
     // Known HTML interfaces with partial implementation keep their native routing.
-    if matches!(tag, "audio" | "base" | "caption" | "col" | "colgroup" | "datalist" | "details" | "dialog" | "embed" | "object" | "optgroup" | "option" | "picture" | "selectedcontent" | "source" | "style" | "table" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr" | "track" | "video" | "frame" | "frameset" | "marquee" | "param") {
+    if matches!(tag, "audio" | "base" | "caption" | "col" | "colgroup" | "datalist" | "details" | "dialog" | "embed" | "object" | "optgroup" | "option" | "picture" | "selectedcontent" | "source" | "style" | "table" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr" | "track" | "video" | "frame" | "frameset" | "marquee") {
         return None;
     }
     Some("HTMLUnknownElement")
@@ -4279,6 +4280,7 @@ pub struct Runtime {
     array_flat_workspace_bytes: usize,
     global_attributes: BTreeMap<String, (bool, bool, bool)>,
     deferred_global_orders: BTreeMap<&'static str, usize>,
+    deferred_param_constructor: Option<usize>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
     operation_globals: HashSet<&'static str>,
@@ -4438,6 +4440,7 @@ impl Runtime {
             array_flat_workspace_bytes: 0,
             global_attributes: BTreeMap::new(),
             deferred_global_orders: BTreeMap::new(),
+            deferred_param_constructor: None,
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
             arguments_thrower: None,
