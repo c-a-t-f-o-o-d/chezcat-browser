@@ -7027,3 +7027,7 @@ mod option_text_tests;
 #[cfg(test)]
 #[path="app_option_default_selected_tests.rs"]
 mod app_option_default_selected_tests;
+
+#[cfg(test)]
+#[path="app_select_disabled_tests.rs"]
+mod app_select_disabled_tests;
