@@ -2245,6 +2245,12 @@ impl App {
         self.submit_form_in_job(owner, submitter);
     }
     fn submit_form_in_job(&mut self, owner: usize, submitter: Option<usize>) {
+        let epoch=self.script_epoch;
+        let previous=self.scripting.as_mut().map(|page|page.set_native_submission(Some(owner)));
+        self.submit_form_in_job_guarded(owner,submitter);
+        if self.script_epoch==epoch{if let(Some(page),Some(previous))=(&mut self.scripting,previous){page.set_native_submission(previous);}}
+    }
+    fn submit_form_in_job_guarded(&mut self, owner: usize, submitter: Option<usize>) {
         let validation=if let Some(page)=&mut self.scripting{
             page.validate_native_submission(&mut self.document,&mut self.forms,owner,submitter)
         }else{
@@ -7228,3 +7234,7 @@ mod invalid_event_tests;
 #[cfg(test)]
 #[path="app_form_validation_tests.rs"]
 mod form_validation_tests;
+
+#[cfg(test)]
+#[path="app_form_request_tests.rs"]
+mod form_request_tests;

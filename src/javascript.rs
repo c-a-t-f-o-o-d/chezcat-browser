@@ -686,6 +686,7 @@ pub(crate) const HTML_FORM_SUBMIT: &str = "\0HTMLFormElement.submit";
 pub(crate) const HTML_FORM_RESET: &str = "\0HTMLFormElement.reset";
 pub(crate) const HTML_FORM_CHECK:&str="\0HTMLFormElement.checkValidity";
 pub(crate) const HTML_FORM_REPORT:&str="\0HTMLFormElement.reportValidity";
+pub(crate) const HTML_FORM_REQUEST:&str="\0HTMLFormElement.requestSubmit";
 pub(crate) const ELEMENT_INNER_HTML_SET: &str = "\0Element.set.innerHTML";
 pub(crate) const ELEMENT_STYLE_SET: &str = "\0HTMLElement.set.style";
 
@@ -765,6 +766,11 @@ pub trait Host {
     }
     fn peek_native_promise_effect(&self)->Option<(NativePromise,Option<(&'static str,&'static str)>)> {None}
     fn finish_native_promise_effect(&mut self) {}
+    fn begin_form_request(&mut self,_object:u32,_args:&[Value])->Result<Option<usize>,String>{Err("Form submission is not authorized by this host.".into())}
+    fn form_request_validation(&mut self,_token:usize)->Result<Option<usize>,(&'static str,String)>{Err(("Error","Form validation is unavailable.".into()))}
+    fn form_request_event(&mut self,_token:usize)->Result<usize,String>{Err("Form submission is unavailable.".into())}
+    fn complete_form_request(&mut self,_token:usize)->Result<(),String>{Err("Form submission is unavailable.".into())}
+    fn finish_form_request(&mut self,_token:usize){}
     fn begin_form_validation(&mut self,_object:u32,_report:bool)->Result<usize,String>{Err("Form validation is not authorized by this host.".into())}
     fn next_form_validation_event(&mut self,_token:usize)->Result<Option<usize>,String>{Err("Form validation is unavailable.".into())}
     fn form_validation_event_result(&mut self,_token:usize,_accepted:bool)->Result<(),String>{Err("Form validation is unavailable.".into())}
@@ -9286,6 +9292,20 @@ impl Runtime {
         result.map(|()| accepted)
     }
 
+    fn drive_form_validation(&mut self,token:usize,caller:Option<u32>,host:&mut dyn Host)->Result<bool,Fault>{
+        let result=(||{
+            loop{
+                self.step()?;host.native_operation_caller(caller);
+                let Some(event)=host.next_form_validation_event(token).map_err(Fault::new)? else{break;};
+                let accepted=self.dispatch_native_event(event,host)?;
+                host.native_operation_caller(caller);
+                host.form_validation_event_result(token,accepted).map_err(Fault::new)?;
+            }
+            host.complete_form_validation(token).map_err(Fault::new)
+        })();
+        host.finish_form_validation(token);result
+    }
+
     fn call_host(
         &mut self,
         object: u32,
@@ -9454,8 +9474,9 @@ impl Runtime {
             if matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild")&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if method==HTML_FORM_REQUEST&&kind=="NotFoundError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
+                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));
@@ -9490,18 +9511,29 @@ impl Runtime {
             let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
             host.native_operation_caller(caller);
             let token=host.begin_form_validation(object,method==HTML_FORM_REPORT).map_err(Fault::new)?;
+            return self.drive_form_validation(token,caller,host).map(Value::Bool);
+        }
+        if method==HTML_FORM_REQUEST{
+            let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+            host.native_operation_caller(caller);
+            let Some(token)=host.begin_form_request(object,args).map_err(Fault::new)?else{return Ok(Value::Undefined);};
             let result=(||{
-                loop{
-                    self.step()?;host.native_operation_caller(caller);
-                    let Some(event)=host.next_form_validation_event(token).map_err(Fault::new)? else{break;};
-                    let accepted=self.dispatch_native_event(event,host)?;
-                    host.native_operation_caller(caller);
-                    host.form_validation_event_result(token,accepted).map_err(Fault::new)?;
+                let validation=match host.form_request_validation(token){
+                    Ok(value)=>value,
+                    Err(("NotSupportedError",message))=>return Err(Fault::thrown(self.native_dom_exception("NotSupportedError",&message)?)),
+                    Err((_,message))=>return Err(Fault::new(message)),
+                };
+                if let Some(validation)=validation{
+                    if !self.drive_form_validation(validation,caller,host)?{return Ok(Value::Undefined);}
                 }
-                host.complete_form_validation(token).map_err(Fault::new)
+                host.native_operation_caller(caller);
+                let event=host.form_request_event(token).map_err(Fault::new)?;
+                let accepted=self.dispatch_native_event(event,host)?;
+                host.native_operation_caller(caller);
+                if accepted{host.complete_form_request(token).map_err(Fault::new)?;}
+                Ok(Value::Undefined)
             })();
-            host.finish_form_validation(token);
-            return result.map(Value::Bool);
+            host.finish_form_request(token);return result;
         }
         if method==HTML_FORM_RESET {
             let Some(token)=host.begin_form_reset(object).map_err(Fault::new)? else {return Ok(Value::Undefined)};

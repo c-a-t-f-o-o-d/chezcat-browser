@@ -1243,13 +1243,13 @@ impl Forms {
         current: &Location,
         base: &Location,
     ) -> Result<Submission, String> {
-        self.serialize_submission(doc, owner, submitter, current, base, true)
+        self.serialize_submission(doc, owner, submitter, current, base, true, false)
     }
 
     /// The native host has already completed interactive validation. Listener
     /// changes must not trigger a second validation pass during serialization.
     pub(crate) fn validated_submit_request(&self,doc:&Document,owner:usize,submitter:Option<usize>,current:&Location,base:&Location)->Result<Submission,String>{
-        self.serialize_submission(doc,owner,submitter,current,base,false)
+        self.serialize_submission(doc,owner,submitter,current,base,false,true)
     }
 
     /// HTMLFormElement.submit() bypasses interactive constraint validation and
@@ -1262,7 +1262,7 @@ impl Forms {
         current: &Location,
         base: &Location,
     ) -> Result<Submission, String> {
-        self.serialize_submission(doc, owner, None, current, base, false)
+        self.serialize_submission(doc, owner, None, current, base, false, false)
     }
 
     fn serialize_submission(
@@ -1273,6 +1273,7 @@ impl Forms {
         current: &Location,
         base: &Location,
         validate: bool,
+        allow_disabled_submitter:bool,
     ) -> Result<Submission, String> {
         if owner >= doc.nodes.len() || tag(doc, owner) != "form" {
             return Err("Submission requires an existing form.".into());
@@ -1286,7 +1287,7 @@ impl Forms {
             if !self.controls.get(&node).is_some_and(|c| {
                 c.owner == Some(owner)
                     && matches!(c.kind, Kind::Submit | Kind::Image)
-                    && !c.disabled
+                    && (allow_disabled_submitter||!c.disabled)
             }) {
                 return Err("The submit button is not available.".into());
             }

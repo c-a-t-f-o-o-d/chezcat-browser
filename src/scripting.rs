@@ -176,6 +176,8 @@ mod script_forms;
 mod script_form_reset;
 #[path="script_form_validation.rs"]
 mod script_form_validation;
+#[path="script_form_request.rs"]
+mod script_form_request;
 #[path = "script_resources.rs"]
 mod script_resources;
 #[path="script_xhr.rs"]
@@ -595,6 +597,8 @@ struct State {
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     form_reset_pending: Option<script_form_reset::PendingReset>,
     form_validations:Vec<script_form_validation::Pending>,
+    form_requests:Vec<script_form_request::Pending>,
+    native_submission:Option<usize>,
     validation_report:Option<Option<usize>>,
     #[cfg(test)]
     disable_event_factory: bool,
@@ -693,6 +697,8 @@ impl State {
             synthetic_dispatches: Vec::new(),
             form_reset_pending: None,
             form_validations:Vec::new(),
+            form_requests:Vec::new(),
+            native_submission:None,
             validation_report:None,
             #[cfg(test)]
             disable_event_factory: false,
@@ -3917,6 +3923,7 @@ impl Host for Bridge<'_> {
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
 
+        if self.form_request_member(object,property){return false;}
         if self.form_validation_member(object,property){return false;}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {return false;}
         if property=="submit" && self.form_submit_method(object).is_some() {return false;}
@@ -4849,7 +4856,7 @@ impl Host for Bridge<'_> {
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
-        if matches!(method,crate::javascript::HTML_FORM_SUBMIT|crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT) && self.event_target_interface(object) {return Some(object);}
+        if matches!(method,crate::javascript::HTML_FORM_SUBMIT|crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT|crate::javascript::HTML_FORM_REQUEST) && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
         if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
@@ -5253,6 +5260,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
 
+        if method==crate::javascript::HTML_FORM_REQUEST{return self.validate_form_request(object,args).map(|_|());}
         if matches!(method,crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT){return self.validate_form_validation(object);}
         if method==crate::javascript::HTML_FORM_RESET {return self.validate_form_reset(object);}
         if method==crate::javascript::HTML_FORM_SUBMIT && self.inert_interface(object)==Some("HTMLFormElement") {
@@ -5962,7 +5970,7 @@ impl Host for Bridge<'_> {
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return self.iframe_sandbox_receiver(receiver)||self.inert_interface(receiver)==Some("HTMLIFrameElement");}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
-        if matches!(method,crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT){return self.form_length_receiver(receiver);}
+        if matches!(method,crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT|crate::javascript::HTML_FORM_REQUEST){return self.form_length_receiver(receiver);}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
@@ -6369,6 +6377,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.form_request_member(object,property){self.state.work(1)?;return Ok(None);}
         if self.form_validation_member(object,property){self.state.work(1)?;return Ok(None);}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(None);}
         if script_inline_style::handle(object) {
@@ -6427,6 +6436,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.form_request_member(object,property){self.state.work(1)?;return Ok(true);}
         if self.form_validation_member(object,property){self.state.work(1)?;return Ok(true);}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(true);}
         if script_inline_style::handle(object) { return Ok(self.own_data(object, property)?.is_none()); }
@@ -6472,6 +6482,11 @@ impl Host for Bridge<'_> {
         }
         Err("Deleting this native host property is not implemented.".into())
     }
+    fn begin_form_request(&mut self,object:u32,args:&[Value])->Result<Option<usize>,String>{self.begin_native_form_request(object,args)}
+    fn form_request_validation(&mut self,token:usize)->Result<Option<usize>,(&'static str,String)>{self.native_form_request_validation(token)}
+    fn form_request_event(&mut self,token:usize)->Result<usize,String>{self.native_form_request_event(token)}
+    fn complete_form_request(&mut self,token:usize)->Result<(),String>{self.complete_native_form_request(token)}
+    fn finish_form_request(&mut self,token:usize){self.finish_native_form_request(token);}
     fn begin_form_validation(&mut self,object:u32,report:bool)->Result<usize,String>{self.begin_native_form_validation(object,report)}
     fn next_form_validation_event(&mut self,token:usize)->Result<Option<usize>,String>{self.next_native_form_validation_event(token)}
     fn form_validation_event_result(&mut self,token:usize,accepted:bool)->Result<(),String>{self.native_form_validation_event_result(token,accepted)}
@@ -12179,3 +12194,7 @@ mod invalid_event_tests;
 #[cfg(test)]
 #[path="script_form_validation_tests.rs"]
 mod form_validation_tests;
+
+#[cfg(test)]
+#[path="script_form_request_tests.rs"]
+mod form_request_tests;
