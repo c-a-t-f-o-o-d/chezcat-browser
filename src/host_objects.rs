@@ -715,6 +715,8 @@ impl Runtime {
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"minLength","\0HTMLTextAreaElement.get.minLength",Some("\0HTMLTextAreaElement.set.minLength"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"minLength","\0HTMLInputElement.get.minLength",Some("\0HTMLInputElement.set.minLength"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"wrap","\0HTMLTextAreaElement.get.wrap",Some("\0HTMLTextAreaElement.set.wrap"))?;}
+            if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"value","\0HTMLButtonElement.get.value",Some("\0HTMLButtonElement.set.value"))?;}
+            if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"type","\0HTMLButtonElement.get.type",Some("\0HTMLButtonElement.set.type"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"step","\0HTMLInputElement.get.step",Some("\0HTMLInputElement.set.step"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"max","\0HTMLInputElement.get.max",Some("\0HTMLInputElement.set.max"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"min","\0HTMLInputElement.get.min",Some("\0HTMLInputElement.set.min"))?;}
