@@ -625,6 +625,7 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"shape","\0HTMLAreaElement.get.shape",Some("\0HTMLAreaElement.set.shape"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"download","\0HTMLAreaElement.get.download",Some("\0HTMLAreaElement.set.download"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"rel","\0HTMLAreaElement.get.rel",Some("\0HTMLAreaElement.set.rel"))?;}
+            if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"relList","\0HTMLAreaElement.get.relList",Some("\0HTMLAreaElement.set.relList"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"ping","\0HTMLAreaElement.get.ping",Some("\0HTMLAreaElement.set.ping"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"areas","\0HTMLMapElement.get.areas",None)?;}

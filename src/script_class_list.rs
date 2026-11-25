@@ -14,17 +14,26 @@ const OUTPUT_BASE:u32=0xc300_0000;
 const OUTPUT_END:u32=OUTPUT_BASE+NODE_HANDLES;
 const INERT_OUTPUT_BASE:u32=0xc400_0000;
 const INERT_OUTPUT_END:u32=INERT_OUTPUT_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION);
+const AREA_REL_BASE:u32=0xc700_0000;
+const AREA_REL_END:u32=AREA_REL_BASE+NODE_HANDLES;
+const INERT_AREA_REL_BASE:u32=0xc800_0000;
+const INERT_AREA_REL_END:u32=INERT_AREA_REL_BASE+(script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION);
 pub(super) fn attribute(handle:u32)->Option<&'static str> {
     if (BASE..END).contains(&handle)||(INERT_BASE+1..INERT_END).contains(&handle){Some("class")}
     else if (SANDBOX_BASE..SANDBOX_END).contains(&handle){Some("sandbox")}
     else if (OUTPUT_BASE..OUTPUT_END).contains(&handle)||(INERT_OUTPUT_BASE+1..INERT_OUTPUT_END).contains(&handle){Some("for")}
+    else if (AREA_REL_BASE..AREA_REL_END).contains(&handle)||(INERT_AREA_REL_BASE+1..INERT_AREA_REL_END).contains(&handle){Some("rel")}
     else {None}
 }
 pub(super) fn element(handle:u32)->Option<u32> {
+    if (INERT_AREA_REL_BASE+1..INERT_AREA_REL_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_AREA_REL_BASE));}
     if (INERT_BASE+1..INERT_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_BASE));}
     if (INERT_OUTPUT_BASE+1..INERT_OUTPUT_END).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT_OUTPUT_BASE));}
-    let base=match attribute(handle)? {"class"=>BASE,"for"=>OUTPUT_BASE,_=>SANDBOX_BASE};
+    let base=match attribute(handle)? {"class"=>BASE,"for"=>OUTPUT_BASE,"rel"=>AREA_REL_BASE,_=>SANDBOX_BASE};
     let element=node_handle((handle-base)as usize);node_index(element).map(|_|element)
+}
+pub(super) fn area_rel_handle(element:u32)->u32 {
+    if node_index(element).is_some(){AREA_REL_BASE+(element-NODE_BASE)}else{INERT_AREA_REL_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
 }
 pub(super) fn output_for_handle(element:u32)->u32 {
     if node_index(element).is_some(){OUTPUT_BASE+(element-NODE_BASE)}else{INERT_OUTPUT_BASE+(element-script_inert_documents::MAIN_IMPLEMENTATION)}
@@ -37,7 +46,7 @@ fn whitespace(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\r' | '\n' | '\u{c}')
 }
 pub(super) fn supported_tokens(object:u32)->Option<&'static [&'static str]>{
-    (attribute(object)==Some("sandbox")).then_some(script_iframe_sandbox::SUPPORTED_TOKENS)
+    match attribute(object){Some("sandbox")=>Some(script_iframe_sandbox::SUPPORTED_TOKENS),Some("rel")=>Some(&[]),_=>None}
 }
 pub(super) fn operation(name: &str) -> Option<&'static str> {
     Some(match name {
@@ -88,10 +97,10 @@ impl Bridge<'_> {
                 .is_some_and(|node| matches!(self.doc.nodes[node].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg))
     }
     pub(super) fn class_list_receiver(&self, object: u32) -> bool {
-        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && match attribute(object){Some("sandbox")=>self.iframe_sandbox_receiver(element),Some("for")=>self.html_output_receiver(element),Some("class")=>true,_=>false})
+        element(object).is_some_and(|element| (self.class_list_element_receiver(element)||self.inert_class_element_receiver(element)) && match attribute(object){Some("sandbox")=>self.iframe_sandbox_receiver(element),Some("for")=>self.html_output_receiver(element),Some("rel")=>self.area_rel_receiver(element),Some("class")=>true,_=>false})
     }
     pub(super) fn exact_class_token_receiver(&self,object:u32)->bool {
-        self.class_list_receiver(object)&&matches!(attribute(object),Some("class"|"for"))&&element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
+        self.class_list_receiver(object)&&matches!(attribute(object),Some("class"|"for"|"rel"))&&element(object).is_some_and(|owner|self.inert_class_element_receiver(owner)||node_index(owner).is_some_and(|node|self.html_class_element(node)))
     }
     fn class_list_node(&mut self, object: u32) -> Result<usize, String> {
         let element = element(object).ok_or("Invalid class token list.")?;
@@ -210,6 +219,7 @@ impl Bridge<'_> {
             return Err("DOMTokenList property write is not implemented.".into());
         }
         if attribute=="for"{return self.output_for_value_set(node_handle(node),&value);}
+        if attribute=="rel"{return self.area_rel_set(node_handle(node),&value);}
         if attribute=="class"&&self.html_class_element(node){return self.html_class_set(node,&value);}
         let value = self.text(&value)?;
         self.attribute(node, attribute, Some(value))

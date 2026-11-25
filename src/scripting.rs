@@ -3182,6 +3182,7 @@ impl Bridge<'_> {
         if self.html_label_for_member(object,property){return true;}
         if self.element_class_list_member(object,property){return true;}
         if self.output_html_for_member(object,property){return true;}
+        if self.area_rel_list_member(object,property){return true;}
         if self.html_reflection_member(object,property){return true;}
         if self.xhr_index(object).is_some(){return self.xhr_member(object,property);}
 
@@ -3589,6 +3590,7 @@ impl Host for Bridge<'_> {
         if self.html_label_for_member(object,property){return false;}
         if self.element_class_list_member(object,property){return false;}
         if self.output_html_for_member(object,property){return false;}
+        if self.area_rel_list_member(object,property){return false;}
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
 
@@ -4341,6 +4343,7 @@ impl Host for Bridge<'_> {
         if script_label_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_list::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_html_for::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_area_rel_list::operation(method)&&self.event_target_interface(object){return Some(object);}
         if anchor_url_interface::operation(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if crate::javascript::child_remove_operation(method) && self.event_target_interface(object) {return Some(object);}
         if charset_operation(method).is_some() && self.event_target_interface(object) { return Some(object); }
@@ -4704,6 +4707,7 @@ impl Host for Bridge<'_> {
         if script_label_html_for::operation(method){return self.validate_html_label_for(object,method==script_label_html_for::SET);}
         if script_element_class_list::operation(method){return self.validate_element_class_list(object);}
         if script_output_html_for::operation(method){return self.validate_output_html_for(object);}
+        if script_area_rel_list::operation(method){return self.validate_area_rel_list(object);}
         if anchor_url_interface::operation(method).is_some() {return self.native_node_access(object);}
         if crate::javascript::child_remove_operation(method) {
             self.native_node_access(object)?;
@@ -5250,6 +5254,7 @@ impl Host for Bridge<'_> {
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_element_class_list::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_output_html_for::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if script_area_rel_list::operation(method){return self.event_target_interface(object)&&self.area_rel_receiver(receiver);}
         if anchor_url_interface::operation(method).is_some() {return self.event_target_interface(object)&&self.native_anchor(receiver);}
         if crate::javascript::child_remove_operation(method) {
             return self.event_target_interface(object) && match method {
@@ -6175,6 +6180,7 @@ impl Host for Bridge<'_> {
         if self.html_label_for_member(object,property){return self.html_label_for_get(object);}
         if self.element_class_list_member(object,property){return self.element_class_list_get(object);}
         if self.output_html_for_member(object,property){return self.output_html_for_get(object);}
+        if self.area_rel_list_member(object,property){return self.area_rel_list_get(object);}
         if self.html_reflection_member(object,property){return self.html_reflection_get(object,property);}
         if let Some(value)=self.xhr_get(object,property){return value;}
         if self.placeholder_member(object,property){return self.placeholder_get(object);}
@@ -7138,7 +7144,9 @@ impl Host for Bridge<'_> {
         if method==script_label_html_for::GET{return self.html_label_for_get(object);}
         if method==script_element_class_list::GET{return self.element_class_list_get(object);}
         if method==script_output_html_for::GET{return self.output_html_for_get(object);}
+        if method==script_area_rel_list::GET{return self.area_rel_list_get(object);}
         if method==script_output_html_for::SET{return Err("HTMLOutputElement.htmlFor setter requires the ordinary forwarding transaction.".into());}
+        if method==script_area_rel_list::SET{return Err("HTMLAreaElement.relList setter requires the ordinary forwarding transaction.".into());}
         if method==script_element_class_list::SET{return Err("Element.classList setter requires the ordinary forwarding transaction.".into());}
         if method==script_element_id::SET{return Err("Element.id setter requires the native conversion transaction.".into());}
         if method==script_element_class_name::SET{return Err("Element.className setter requires the native conversion transaction.".into());}
@@ -10468,3 +10476,10 @@ mod area_ping_tests;
 
 #[path="script_area_ping.rs"]
 mod script_area_ping;
+
+#[cfg(test)]
+#[path="script_area_rel_list_tests.rs"]
+mod area_rel_list_tests;
+
+#[path="script_area_rel_list.rs"]
+mod script_area_rel_list;
