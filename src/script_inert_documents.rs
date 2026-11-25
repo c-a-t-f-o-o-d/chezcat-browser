@@ -824,7 +824,7 @@ impl Bridge<'_> {
             return Err(("NotSupportedError", "Template append supports ordinary HTML elements.".into()));
         };
         if node.namespace != crate::html::Namespace::Html || !node.children.is_empty()
-            || !(matches!(tag.as_str(),"area"|"param"|"template") || script_clone_node::ordinary_clone_element(tag))
+            || !(matches!(tag.as_str(),"area"|"param"|"datalist"|"template") || script_clone_node::ordinary_clone_element(tag))
         {
             return Err(("NotSupportedError", "Template append supports ordinary HTML leaves and inert nested templates.".into()));
         }
@@ -1715,7 +1715,7 @@ impl Bridge<'_> {
             return self.append_inert_text(owner, None, text, 0).map(Value::Host);
         }
         if let Kind::Element(name) = &kind {
-            if matches!(name.as_str(),"area"|"param"|"style") || script_clone_node::ordinary_clone_element(name)
+            if matches!(name.as_str(),"area"|"param"|"datalist"|"style") || script_clone_node::ordinary_clone_element(name)
                 || crate::html::valid_custom_element_name(name) {
                 let Kind::Element(name) = kind else { unreachable!() };
                 return self.append_inert_source_leaf(owner,None,Node {
@@ -1986,7 +1986,7 @@ fn template_node_can_park(node: &Node) -> bool {
         NodeKind::Element { tag,attrs,.. } if node.namespace == crate::html::Namespace::Svg => attrs.iter().all(|attr|script_attr::materializable_value(attr,node.namespace,tag))&&crate::html::svg_dom_transfer(node),
         NodeKind::Element { tag, attrs, .. } => {
             node.namespace == crate::html::Namespace::Html
-                && (matches!(tag.as_str(),"area"|"param"|"style") || script_clone_node::ordinary_clone_element(tag)
+                && (matches!(tag.as_str(),"area"|"param"|"datalist"|"style") || script_clone_node::ordinary_clone_element(tag)
                     || crate::html::valid_custom_element_name(tag))
                 && !attrs.iter().any(|attr| !script_attr::materializable_value(attr,node.namespace,tag)||!attr.name.namespace.is_empty()
                     || script_element_properties::event_handler_content_attribute(tag,&attr.name)
