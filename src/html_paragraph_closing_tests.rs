@@ -212,9 +212,16 @@ fn paragraph_button_scope_keeps_uncertain_foreign_nodes_outside_this_html_slice(
 
 #[test]
 fn paragraph_block_slice_retains_definition_heading_and_other_checked_refusals() {
-    for source in ["<dt>A<dd>B", "<h1>A<h2>B", "<p>A<dt>B", "<p>A<dd>B"] {
-        assert!(parse_fragment(source, "div", true).unwrap_err().contains("implied definition/heading/block recovery"), "{source}");
+    for (source, expected) in [("<dt>A<dd>B", ["dt", "dd"]), ("<p>A<dt>B", ["p", "dt"]), ("<p>A<dd>B", ["p", "dd"])] {
+        let doc = parse_fragment(source, "div", true).unwrap();
+        assert_eq!(children(&doc, 0), expected, "{source}");
+        assert_eq!(children(&doc, doc.nodes[0].children[0]), ["#A"]);
+        assert_eq!(children(&doc, doc.nodes[0].children[1]), ["#B"]);
     }
+    let headings = parse_fragment("<h1>A<h2>B", "div", true).unwrap();
+    assert_eq!(children(&headings, 0), ["h1", "h2"]);
+    assert_eq!(children(&headings, headings.nodes[0].children[0]), ["#A"]);
+    assert_eq!(children(&headings, headings.nodes[0].children[1]), ["#B"]);
     for source in ["<p>A<listing>B", "<p>A<xmp>B</xmp>", "<p>A<svg></svg>", "<p>A<table><tr></tr></table>"] {
         assert!(parse_fragment(source, "div", true).is_err(), "{source}");
     }

@@ -175,8 +175,15 @@ root.innerHTML='<p><b>x<div>y';
 if(root.innerHTML!=='<p><b>x</b></p><div><b>y</b></div>')throw 'implied-close reconstruction';
 "#);
     assert_eq!(result.errors,0,"{}",page.report());
-    for source in ["<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","a\0b"] {
+    for source in ["<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
+    }
+    let headings = crate::html::parse_fragment("<h1>a<h2>b</h2>", "div", true).unwrap();
+    assert_eq!(headings.nodes[0].children, [1, 3]);
+    for (node, name, expected_text) in [(1, "h1", "a"), (3, "h2", "b")] {
+        assert!(matches!(&headings.nodes[node].kind, NodeKind::Element { tag, .. } if tag == name));
+        assert_eq!(headings.nodes[node].children, [node + 1]);
+        assert!(matches!(&headings.nodes[node + 1].kind, NodeKind::Text(text) if text == expected_text));
     }
     crate::html::fragment_token_guard_tests::assert_supported_fragment_token_recovery();
     let vt = crate::html::parse_fragment("<img src\u{b}='/not-a-source'>", "div", true).unwrap();
@@ -404,4 +411,29 @@ fn fragment_formatting_adopted_depth_refuses_before_publication_and_allows_recov
     assert_eq!(bridge.state.tree.parents[original[0]],Some(root));
     bridge.set_inner_html(root,"<i>ok</i>").unwrap();
     assert_ne!(bridge.doc.nodes[root].children,original);
+}
+
+#[test]
+fn inner_html_list_starts_preserve_connected_and_detached_parent_and_owner_links() {
+    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<dl><dt>A<div>B<dd>C';
+  var list=target.firstChild,old=list.firstChild,next=old.nextSibling,wrapper=old.lastChild;
+  if(target.innerHTML!=='<dl><dt>A<div>B</div></dt><dd>C</dd></dl>'||list.childNodes.length!==2||
+     old.parentNode!==list||next.parentNode!==list||wrapper.parentNode!==old||next.ownerDocument!==document||
+     wrapper.ownerDocument!==document||next.isConnected!==target.isConnected)throw Error('definition sibling ownership');
+  target.innerHTML='<dl><dt>A<section>B<dd>C';
+  list=target.firstChild;old=list.firstChild;wrapper=old.lastChild;next=wrapper.lastChild;
+  if(target.innerHTML!=='<dl><dt>A<section>B<dd>C</dd></section></dt></dl>'||list.childNodes.length!==1||
+     next.parentNode!==wrapper||next.ownerDocument!==document||wrapper.parentNode!==old)throw Error('definition special barrier');
+  target.innerHTML='<ul><li>A<section><p>B<li>C';
+  list=target.firstChild;old=list.firstChild;wrapper=old.lastChild;next=wrapper.lastChild;
+  if(target.innerHTML!=='<ul><li>A<section><p>B</p><li>C</li></section></li></ul>'||
+     list.childNodes.length!==1||next.parentNode!==wrapper||next.ownerDocument!==document)throw Error('list item special barrier');
+  target.innerHTML='<dl><dt><b>A<dd>B</b><dt>C';
+  if(target.innerHTML!=='<dl><dt><b>A</b></dt><dd><b>B</b></dd><dt>C</dt></dl>')throw Error('definition formatting');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
 }
