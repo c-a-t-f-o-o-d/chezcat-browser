@@ -14,7 +14,9 @@ impl Bridge<'_> {
         staged: &mut Vec<DetachedCopy>,
         payload: usize,
     ) -> Result<Option<forms::SelectFormPlan>, String> {
-        if !staged.iter().any(|copy|matches!(&copy.node.kind,NodeKind::Element{tag,..} if matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"))){return Ok(None);}
+        // An OPTGROUP has no private native control state. OPTION descendants
+        // still require the existing complete SELECT-context planner.
+        if !staged.iter().any(|copy|matches!(&copy.node.kind,NodeKind::Element{tag,..} if matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"button"))){return Ok(None);}
         let base = self.doc.nodes.len();
         let count = staged.len();
         self.state.rebuild(self.doc)?;

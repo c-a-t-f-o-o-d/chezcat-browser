@@ -10843,3 +10843,7 @@ mod optgroup_label_tests;
 
 #[path="script_optgroup_label.rs"]
 mod script_optgroup_label;
+
+#[cfg(test)]
+#[path="script_optgroup_detached_copy_tests.rs"]
+mod optgroup_detached_copy_tests;

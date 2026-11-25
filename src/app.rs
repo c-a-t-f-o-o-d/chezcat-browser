@@ -6991,3 +6991,7 @@ mod optgroup_disabled_tests;
 #[cfg(test)]
 #[path="app_optgroup_label_tests.rs"]
 mod optgroup_label_tests;
+
+#[cfg(test)]
+#[path="app_optgroup_detached_copy_tests.rs"]
+mod optgroup_detached_copy_tests;
