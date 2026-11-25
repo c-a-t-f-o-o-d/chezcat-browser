@@ -2942,6 +2942,19 @@ impl<'a> Engine<'a> {
                         intrinsic_style.max_width = None;
                     }
                     self.image_control_dimensions(node, &intrinsic_style, 0).0
+                } else if tag == "img" && self.image_sizes.contains_key(&node)
+                    && (style.width == Length::Auto || style.width.has_percentage())
+                    && !style.height.has_percentage()
+                    && self.length(style.height, 0, &style).is_some() {
+                    // A definite height transfers the decoded image's ratio to
+                    // its automatic width before flex or shrink-to-fit sizing.
+                    // Percentage widths have no containing block at this stage.
+                    let mut intrinsic_style = (*style).clone();
+                    intrinsic_style.width = Length::Auto;
+                    if intrinsic_style.max_width.is_some_and(Length::has_percentage) {
+                        intrinsic_style.max_width = None;
+                    }
+                    self.image_dimensions(node, &intrinsic_style, 0).0
                 } else {
                     self.doc
                         .attr(node, "width")
@@ -6478,3 +6491,7 @@ mod stacking;
 #[cfg(test)]
 #[path="layout_visual_id_exact_tests.rs"]
 mod visual_id_exact_tests;
+
+#[cfg(test)]
+#[path="layout_image_ratio_tests.rs"]
+mod image_ratio_tests;
