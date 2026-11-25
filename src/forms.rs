@@ -636,9 +636,9 @@ impl Forms {
         })
     }
 
-    pub(crate) fn check_group_label_payload(&self,old:usize,new:usize)->Result<(),String>{
-        let bytes=self.text_payload(None)?.checked_sub(old).and_then(|bytes|bytes.checked_add(new)).ok_or("Native group label payload overflow.")?;
-        if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no group label was changed.".into());}
+    pub(crate) fn check_select_label_payload(&self,old:usize,new:usize)->Result<(),String>{
+        let bytes=self.text_payload(None)?.checked_sub(old).and_then(|bytes|bytes.checked_add(new)).ok_or("Native SELECT label payload overflow.")?;
+        if bytes>MAX_TOTAL_VALUE_BYTES{return Err("Combined form names, values and defaults exceed 128 KiB; no SELECT label was changed.".into());}
         Ok(())
     }
 
