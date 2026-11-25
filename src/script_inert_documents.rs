@@ -214,6 +214,15 @@ impl Bridge<'_> {
             _ => None,
         }
     }
+    pub(super) fn inert_node_document_url(&mut self,object:u32)->Result<Value,String>{
+        let owner=self.state.inert_documents.node(object).ok_or("Missing inert document owner.")?.owner;
+        if owner==DOCUMENT{return self.location_property("href");}
+        let raw=match self.state.inert_documents.node(owner).map(|n|&n.kind){Some(Kind::Document(d))=>d.url.as_str(),_=>"about:blank"};
+        let length=raw.len();if length>self.state.limits.host.string_bytes{return Err("Inert document URL exceeds the host string allowance.".into());}
+        self.state.work(length)?;self.state.copies(length)?;
+        let raw=match self.state.inert_documents.node(owner).map(|n|&n.kind){Some(Kind::Document(d))=>d.url.as_str(),_=>"about:blank"};
+        Ok(Value::String(script_clone_node::copy_text(raw)?))
+    }
     pub(super) fn inert_node_base_uri(&mut self, object: u32) -> Result<Value, String> {
         let owner = self
             .state
