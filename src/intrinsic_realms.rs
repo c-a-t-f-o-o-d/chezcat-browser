@@ -167,6 +167,7 @@ impl Runtime {
     }
 
     pub(super) fn ensure_global_intrinsics(&mut self, name: &str) -> Result<(), Fault> {
+        if name=="SubmitEvent"{self.ensure_submit_event_constructor()?;}
         if name=="HTMLParamElement" {self.ensure_param_constructor()?;}
         if name=="HTMLDataListElement" {self.ensure_datalist_constructor()?;}
         if name=="HTMLOptionElement" {self.ensure_option_constructor()?;}

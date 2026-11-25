@@ -45,3 +45,9 @@ fn submit_event_saved_child_authority_refuses_after_origin_change(){
  assert!(p.runtime.execute("new C('denied');",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err().contains("Foreign Window access"));
  p.begin_job();let outcome=p.console_eval(&mut d,&mut f,"if(new SubmitEvent('fresh').submitter!==null)throw 'fresh main constructor';");assert_eq!(outcome.errors,0,"{}",p.report());
 }
+#[test]
+fn submit_event_deferred_constructor_preserves_window_descriptors_and_native_identity(){
+ let(mut d,mut f,mut p)=fixture("var calls=0;document.getElementById('owner').onsubmit=function(e){var C=e.constructor;if(typeof C!=='function'||C.name!=='SubmitEvent'||Object.getPrototypeOf(e)!==C.prototype||new C('synthetic').submitter!==null||C!==SubmitEvent)throw 'native constructor identity';calls++;e.preventDefault();};");
+ let owner=(0..d.nodes.len()).find(|&n|d.attr(n,"id")==Some("owner")).unwrap();p.begin_job();let outcome=p.dispatch_submit(&mut d,&mut f,owner,None);assert!(outcome.prevented);assert_eq!(outcome.errors,0,"{}",p.report());
+ let outcome=p.console_eval(&mut d,&mut f,"var descriptor=Object.getOwnPropertyDescriptor(window,'SubmitEvent'),C=SubmitEvent;if(calls!==1||descriptor.value!==C||descriptor.enumerable||!descriptor.writable||!descriptor.configurable||Object.getOwnPropertyNames(window).indexOf('SubmitEvent')<0)throw 'Window descriptor';delete window.SubmitEvent;if('SubmitEvent' in window)throw 'deleted constructor reappeared';window.SubmitEvent=17;if(window.SubmitEvent!==17||new C('saved').constructor!==C)throw 'override or saved identity';");assert_eq!(outcome.errors,0,"{}",p.report());
+}
