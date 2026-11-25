@@ -246,18 +246,19 @@ impl Bridge<'_> {
             if let NodeKind::Element { tag, href, attrs, .. } = &item.kind {
                 self.state.work(attrs.len())?;
                 let textarea = tag == "textarea" && self.owned_native_textarea(source);
+                let text_input = tag == "input" && self.native_text_input(source) && forms::fragment_text_input(self.doc,source) && item.children.is_empty() && self.doc.attr(source,"form").is_none();
                 let radio = tag == "input" && self.owned_native_radio(source);
                 let svg=item.namespace==crate::html::Namespace::Svg;
-                if !svg&&(item.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag) || tag == "meta" || textarea || radio || image || style)
+                if !svg&&(item.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag) || tag == "meta" || textarea || text_input || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_empty()
                         && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
                 }
-                if textarea || radio {
+                if textarea || text_input || radio {
                     if self.forms.controls.len().saturating_add(textareas.len()).saturating_add(radios.len()) >= forms::MAX_CONTROLS {
                         return Err("Native form control limit reached before native control cloning.".into());
                     }
-                    let controls=if textarea {&mut textareas} else {&mut radios};
+                    let controls=if textarea || text_input {&mut textareas} else {&mut radios};
                     controls.try_reserve(1).map_err(|_| "Native control clone plan reservation failed.")?;
                     controls.push((source, base + offset));
                 }
@@ -292,7 +293,7 @@ impl Bridge<'_> {
             .saturating_sub(bytes);
         let mut form_plan = if textareas.is_empty() { None } else {
             let state = &mut *self.state;
-            Some(self.forms.prepare_textarea_clones(self.doc, &textareas, deep, retained_limit, |work, copies| {
+            Some(self.forms.prepare_text_editor_clones(self.doc, &textareas, deep, retained_limit, |work, copies| {
                 state.work(work)?;
                 state.copies(copies)
             })?)

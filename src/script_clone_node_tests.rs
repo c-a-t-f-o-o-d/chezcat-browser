@@ -152,7 +152,7 @@ fn clone_node_fragment_text_and_comment_preserve_kind_owner_and_live_lists() {
 fn clone_node_protected_deep_descendants_fail_atomically_while_shallow_clone_succeeds() {
     let (mut doc, mut forms, mut page) = fixture(concat!(
         "<html><body><form id=f><div id=controls><span>first</span>",
-        "<input id=edit name=keep value=seed></div></form>",
+        "<input type=checkbox name=protected><input id=edit name=keep value=seed></div></form>",
         "<div id=resources><b>first</b><script type=application/json>{}</script></div></body></html>",
     ));
     eval(&mut doc, &mut forms, &mut page, r#"

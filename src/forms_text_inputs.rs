@@ -95,7 +95,7 @@ pub(super) fn text_control(doc: &Document, node: usize, name: &str, initial: &st
         name: copy_text(name)?, caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(),
         checked: doc.attr(node, "checked").is_some(), dirty_checked: false,
-        max_length: doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS),
+        max_length: input_max_length(doc.attr(node,"maxlength")),
         tab_index: doc.attr(node, "tabindex").and_then(parse_tab_index).unwrap_or(0), select: None,
         button_element: false, initial: copy_text(initial)?, initially_checked: doc.attr(node, "checked").is_some(), image_point: (0, 0) }, retained))
 }
