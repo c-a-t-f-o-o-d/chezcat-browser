@@ -6833,3 +6833,7 @@ mod pre_alias_tests;
 #[cfg(test)]
 #[path="app_unknown_interface_tests.rs"]
 mod unknown_interface_tests;
+
+#[cfg(test)]
+#[path="app_historical_html_tests.rs"]
+mod historical_html_tests;
