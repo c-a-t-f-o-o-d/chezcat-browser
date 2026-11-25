@@ -891,9 +891,20 @@ fn checked_select_tag(stack: &[usize], document: &Document, incoming: &str, clos
     let active = select.is_some() || matches!(context, "optgroup" | "option");
     let unsupported = || "HTML fragment nonconventional select recovery is not implemented.".to_owned();
     if !active {
-        return if (incoming == "select" && !closing) || !matches!(incoming, "select" | "option" | "optgroup") {
-            Ok(())
-        } else { Err(unsupported()) };
+        let group = stack.iter().any(|&node| name(node) == "optgroup");
+        let current = *stack.last().unwrap();
+        // Outside SELECT, a group start can close only the current group.
+        // Refuse intervening ancestors before the shared implied-end helper
+        // could pop them. Explicit balanced passive children remain ordinary.
+        return match (incoming, closing) {
+            ("optgroup", false) if !group || name(current) == "optgroup" => Ok(()),
+            ("optgroup", true) if current != 0 && name(current) == "optgroup" => Ok(()),
+            // A SELECT nested in an outside group needs its own scope recovery;
+            // do not expose an outer group to the conventional SELECT branch.
+            ("select", false) if !group => Ok(()),
+            ("select" | "option" | "optgroup", _) => Err(unsupported()),
+            _ => Ok(()),
+        };
     }
     // A conventional option fragment can contain character data only in this
     // slice. Rich option content remains explicitly unsupported.
@@ -1638,3 +1649,7 @@ mod bogus_comment_tests;
 #[cfg(test)]
 #[path = "html_comment_scan_tests.rs"]
 mod comment_scan_tests;
+
+#[cfg(test)]
+#[path="html_optgroup_fragment_tests.rs"]
+mod optgroup_fragment_tests;
