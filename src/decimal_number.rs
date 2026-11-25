@@ -64,3 +64,7 @@ mod tests{
   for(text,want)in[(" \t\n\r\u{c}+.5e2tail",Some(50.0)),("1.e2",Some(100.0)),("1e+tail",Some(1.0)),("1.25.9",Some(1.25)),("0x10",Some(0.0)),("-0",Some(0.0)),("1e-99999",Some(0.0)),("0e99999",Some(0.0)),("9007199254740993",Some(9007199254740992.0)),("4.9406564584124654e-324",Some(f64::from_bits(1))),("1e309",None),("-1e309",None),("Infinity",None),("NaN",None),("\u{a0}1",None),("\u{b}1",None),("\u{feff}1",None),(".",None),("+",None),("",None)]{let result=html_float(text);assert_eq!(result,want,"{text:?}");if result==Some(0.0){assert_eq!(result.unwrap().to_bits(),0,"{text:?}");}}
  }
 }
+
+/// Positive reflected unsigned dimensions use HTML integer prefixes and a 31-bit maximum.
+/// The scalar projection preserves ASCII prefixes of raw UTF-16 attributes.
+pub(crate) fn html_positive_with_fallback(text:&str,default:u32)->u32{html_long(text).filter(|value|*value>0).map_or(default,|value|value as u32)}

@@ -3003,19 +3003,7 @@ impl<'a> Engine<'a> {
                     let width = if matches!(kind, Kind::Checkbox | Kind::Radio) {
                         (GLYPH_HEIGHT + 4) * scale
                     } else if matches!(kind, Kind::Text | Kind::TextArea) {
-                        self.doc
-                            .attr(
-                                node,
-                                if kind == Kind::TextArea {
-                                    "cols"
-                                } else {
-                                    "size"
-                                },
-                            )
-                            .and_then(|s| s.parse::<i32>().ok())
-                            .filter(|n| *n > 0)
-                            .unwrap_or(20)
-                            .clamp(1, 200)
+                        (if kind==Kind::TextArea{crate::decimal_number::html_positive_with_fallback(self.doc.attr(node,"cols").unwrap_or(""),20) as i32}else{self.doc.attr(node,"size").and_then(|s|s.parse::<i32>().ok()).filter(|n|*n>0).unwrap_or(20)}).clamp(1,200)
                             * self.text_width("0", &style).max(1)
                             + 12
                     } else {
@@ -4412,20 +4400,7 @@ impl<'a> Engine<'a> {
         let default_width = if toggle {
             (GLYPH_HEIGHT + 4) * scale
         } else if matches!(kind, Kind::Text | Kind::TextArea) {
-            let cells = self
-                .doc
-                .attr(
-                    node,
-                    if kind == Kind::TextArea {
-                        "cols"
-                    } else {
-                        "size"
-                    },
-                )
-                .and_then(|s| s.parse::<i32>().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(20)
-                .clamp(1, 200);
+            let cells=(if kind==Kind::TextArea{crate::decimal_number::html_positive_with_fallback(self.doc.attr(node,"cols").unwrap_or(""),20) as i32}else{self.doc.attr(node,"size").and_then(|s|s.parse::<i32>().ok()).filter(|n|*n>0).unwrap_or(20)}).clamp(1,200);
             cells * self.text_width("0", style).max(1) + 12
         } else {
             self.text_width(
@@ -4454,13 +4429,7 @@ impl<'a> Engine<'a> {
         }
         let width = width.saturating_add(horizontal).clamp(0,MAX_WIDTH);
         let default_height = if kind == Kind::TextArea {
-            let rows = self
-                .doc
-                .attr(node, "rows")
-                .and_then(|value| value.parse::<i32>().ok())
-                .filter(|&value| value > 0)
-                .unwrap_or(2)
-                .clamp(1, 100);
+            let rows=(crate::decimal_number::html_positive_with_fallback(self.doc.attr(node,"rows").unwrap_or(""),2) as i32).clamp(1,100);
             let line = self
                 .font_spec(style)
                 .map_or((GLYPH_HEIGHT + 2) * scale, |font| font.height() + 2);
