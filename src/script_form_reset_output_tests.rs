@@ -56,3 +56,9 @@ fn form_reset_output_later_failure_keeps_prior_output_step_and_native_editors_un
  let strings=p.state.limits.host.string_bytes;p.state.limits.host.string_bytes=8;p.begin_job();let error=p.runtime.execute("form.reset();",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("OUTPUT default value"),"{error}");assert!(p.state.form_reset_pending.is_none());
  p.state.limits.host.string_bytes=strings;p.begin_job();run(&mut d,&mut f,&mut p,"var records=watch.takeRecords();if(first.value!=='First'||second.value!=='dirty second'||external.value!=='dirty external'||edit.value!=='dirty editor'||first.firstChild===old||old.parentNode!==null||records.length!==0)throw 'per-output failure boundary '+first.value+','+second.value+','+external.value+','+edit.value+','+records.length;form.reset();if(second.value!=='lengthy second default'||external.value!=='External'||edit.value!=='Seed'||watch.takeRecords().length!==3)throw 'later failure recovery';");
 }
+
+#[test]
+fn form_reset_output_native_reset_adapter_rechecks_nested_output_owner(){
+ let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,"var first=document.getElementById('first'),nested=document.createElement('output'),edit=document.getElementById('edit'),order=[];first.value='outer current';first.appendChild(nested);nested.defaultValue='nested default';nested.value='nested current';edit.value='dirty';var watch=new MutationObserver(function(records){for(var record of records)order.push(record.target.id);});watch.observe(document.body,{childList:true,subtree:true});");
+ let owner=(0..d.nodes.len()).find(|&n|d.attr(n,"id")==Some("owner")).unwrap();p.begin_job();reset_form(&mut d,&mut f,Some(&mut p),owner).unwrap();run(&mut d,&mut f,&mut p,"if(first.value!=='First'||nested.value!=='nested current'||nested.form!==null||edit.value!=='Seed'||order.join(',')!=='first,second,external')throw 'native current owner reset';");
+}

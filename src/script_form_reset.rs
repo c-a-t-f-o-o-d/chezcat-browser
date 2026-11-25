@@ -67,15 +67,12 @@ impl Bridge<'_>{
     pub(super) fn next_native_form_reset_output(&mut self,object:u32)->Result<Option<u32>,String>{
         loop{
             self.state.work(1)?;script_text_content::deadline(self.state)?;
-            self.state.rebuild(self.doc)?;
             let pending=self.state.form_reset_pending.as_mut().filter(|p|p.owner==object).ok_or("Native reset plan is unavailable.")?;
             let Some(&node)=pending.outputs.get(pending.next)else{return Ok(None)};
             pending.next+=1;
             let target=node_handle(node);
-            self.native_node_access(target).map_err(|(_,message)|message)?;
-            // An earlier OUTPUT reset can detach a nested OUTPUT. Recheck its
-            // actual association before applying the next element's algorithm.
-            if matches!(self.control_form_owner_get(target)?,Value::Host(owner)if owner==object){return Ok(Some(target));}
+            // Share the checked owner recheck with native reset activation.
+            if self.form_reset_output_owned(object,node)?{return Ok(Some(target));}
         }
     }
     pub(super) fn complete_native_form_reset(&mut self,object:u32)->Result<(),String>{

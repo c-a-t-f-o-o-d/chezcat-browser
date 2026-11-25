@@ -2,6 +2,12 @@
 //! https://html.spec.whatwg.org/multipage/form-elements.html#the-output-element
 use super::*;
 impl Bridge<'_>{
+ pub(super) fn form_reset_output_owned(&mut self,owner:u32,node:usize)->Result<bool,String>{
+  self.state.rebuild(self.doc)?;
+  let object=node_handle(node);
+  self.native_node_access(object).map_err(|(_,message)|message)?;
+  Ok(matches!(self.control_form_owner_get(object)?,Value::Host(form)if form==owner))
+ }
  pub(super) fn form_reset_outputs(&mut self,owner:usize)->Result<Vec<usize>,String>{
   self.state.rebuild(self.doc)?;
   if self.doc.nodes.get(owner).is_none_or(|node|node.namespace!=crate::html::Namespace::Html)||tag(self.doc,owner)!="form"{return Err("Reset requires a genuine HTML form.".into());}
@@ -37,7 +43,10 @@ pub(crate) fn reset_form(doc:&mut Document,forms:&mut Forms,page:Option<&mut Pag
   let scratch=script_text_replacement::bytes(&[&outputs],0)?;
   page.state.replace_storage(0,scratch,0)?;
   let result=(||{
-   for &node in &outputs{page.runtime.reset_native_output(node_handle(node),&mut Bridge{doc,forms,state:&mut page.state})?;}
+   for &node in &outputs{
+    let owned=Bridge{doc,forms,state:&mut page.state}.form_reset_output_owned(node_handle(owner),node)?;
+    if owned{page.runtime.reset_native_output(node_handle(node),&mut Bridge{doc,forms,state:&mut page.state})?;}
+   }
    forms.reset_in_document(doc,owner)
   })();
   page.state.retained-=scratch;
@@ -56,7 +65,10 @@ pub(crate) fn reset_form(doc:&mut Document,forms:&mut Forms,page:Option<&mut Pag
   let outputs=bridge.form_reset_outputs(owner)?;
   let scratch=script_text_replacement::bytes(&[&outputs],0)?;
   bridge.state.replace_storage(0,scratch,0)?;
-  for &node in &outputs{let object=node_handle(node);let value=bridge.output_value_get(object,"defaultValue")?;bridge.reset_output_value(object,value)?;}
+  for &node in &outputs{
+   if !bridge.form_reset_output_owned(node_handle(owner),node)?{continue;}
+   let object=node_handle(node);let value=bridge.output_value_get(object,"defaultValue")?;bridge.reset_output_value(object,value)?;
+  }
   bridge.forms.reset_in_document(bridge.doc,owner)?;
   Ok(Outcome{layout_changed:state.changed,..Outcome::default()})
  }
