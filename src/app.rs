@@ -6813,3 +6813,7 @@ mod menu_compact_tests;
 #[cfg(test)]
 #[path="app_dir_compact_tests.rs"]
 mod dir_compact_tests;
+
+#[cfg(test)]
+#[path="app_font_color_tests.rs"]
+mod font_color_tests;
