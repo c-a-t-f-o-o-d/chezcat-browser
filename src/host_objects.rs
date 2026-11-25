@@ -621,6 +621,7 @@ impl Runtime {
             )?;
             if name == "HTMLTimeElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLTimeElement.get.dateTime",Some("\0HTMLTimeElement.set.dateTime"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"alt","\0HTMLAreaElement.get.alt",Some("\0HTMLAreaElement.set.alt"))?;}
+            if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"coords","\0HTMLAreaElement.get.coords",Some("\0HTMLAreaElement.set.coords"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"areas","\0HTMLMapElement.get.areas",None)?;}
             if name == "HTMLModElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLModElement.get.dateTime",Some("\0HTMLModElement.set.dateTime"))?;}
