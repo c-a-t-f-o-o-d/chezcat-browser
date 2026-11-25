@@ -62,6 +62,8 @@ mod svg_namespace;
 mod doctype;
 #[path="html_document_structure.rs"]
 mod document_structure;
+#[path = "html_template_initial.rs"]
+mod template_initial;
 #[path="html_table_construction.rs"]
 mod table_construction;
 #[path="html_active_formatting.rs"]
@@ -413,6 +415,7 @@ fn parse_internal(
         return Ok(document);
     }
     let mut stack = vec![0];
+    let mut initial_templates = template_initial::InitialTemplates::new(context == Some("template"))?;
     let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new());
     let mut tables = table_construction::Tables::default();
     let mut formatting=active_formatting::Formatting::default();
@@ -577,6 +580,9 @@ fn parse_internal(
                 continue;
             }
         };
+        if !uncertain_foreign_recovery {
+            initial_templates.observe_original_start(&document, &stack, &tag);
+        }
         if initial {initial=false;}
         position = tag.end;
         let mut foster=false;
@@ -638,12 +644,9 @@ fn parse_internal(
                     return Err("HTML fragment implied definition/heading/block recovery is not implemented.".into());
                 }
             }
-            if tag.closing {
-                if tag.name == "br" || tag.name == "p" && !scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag, ..} if tag == "p")) { return Err("HTML fragment special end-tag recovery is not implemented.".into()); }
-
-            }
         }
 
+        let mut close_inserted_paragraph = false;
         if tag.closing {
             let parent=*stack.last().unwrap();
             if fail_on_capacity && (parent==0 || document.nodes[parent].namespace==Namespace::Html) && fragment_formatting(&tag.name) && formatting.end(&mut document,&mut stack,&tag.name,&mut tables,formatting_limits)? {continue;}
@@ -662,20 +665,47 @@ fn parse_internal(
                 && close_scoped_end(&mut stack, &document, &tag.name) {
                 continue;
             }
-            let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
-            if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
-                if index > 0 {
-                    if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
-                    if fail_on_capacity && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
-                    if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
-                        && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
-                    {
-                        uncertain_foreign_recovery = true;
-                    }
-                    stack.truncate(index);
+            if !uncertain_foreign_recovery
+                && (parent == 0 || document.nodes[parent].namespace == Namespace::Html)
+                && matches!(tag.name.as_str(), "p" | "br") {
+                if initial_templates.is_initial(&stack) { continue; }
+                if tag.name == "p" && close_paragraph_in_button_scope(&mut stack, &document) {
+                    continue;
                 }
+                // Recover through the ordinary insertion path after document,
+                // table and checked foreign-context dispatch. End-token
+                // attributes never belong to either recovered element.
+                close_inserted_paragraph = tag.name == "p";
+                tag.closing = false;
+                tag.self_closing = false;
+                tag.clean_syntax = true;
+                tag.duplicate_attributes = false;
+                tag.id = None;
+                tag.href = None;
+                tag.attrs.clear();
+                if structure.is_some() {
+                    match tables.tag(&mut document, &mut stack, &tag, node_limit, &mut formatting)? {
+                        table_construction::Action::Consumed => continue,
+                        table_construction::Action::Foster => foster = true,
+                        table_construction::Action::Normal => {}
+                    }
+                }
+            } else {
+                let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
+                if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
+                    if index > 0 {
+                        if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
+                        if fail_on_capacity && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
+                        if document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign
+                            && document.nodes[stack[index]].namespace != Namespace::UnknownForeign
+                        {
+                            uncertain_foreign_recovery = true;
+                        }
+                        stack.truncate(index);
+                    }
+                }
+                continue;
             }
-            continue;
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
@@ -804,6 +834,9 @@ fn parse_internal(
                 tables.opened(node,parent,slot,stack.len())?;
             }
             stack.push(node);
+            if tag.name == "template" && document.nodes[node].namespace == Namespace::Html {
+                initial_templates.opened(node, &stack)?;
+            }
             if checked && tag.name == "table" { fragment_table = Some(node); }
             // PLAINTEXT changes tokenization, not the tree insertion mode.
             // Its remaining character tokens still reconstruct formatting and
@@ -815,6 +848,7 @@ fn parse_internal(
                 svg.blocked_depth = Some(stack.len());
             }
             if checked && tag.name == "pre" { ignore_fragment_lf = Some(node); }
+            if close_inserted_paragraph { stack.pop(); }
         }
     }
 
@@ -946,7 +980,13 @@ fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn
 fn close_scoped_end(stack: &mut Vec<usize>, document: &Document, incoming: &str) -> bool {
     let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
     let any_heading = heading(incoming);
-    if !any_heading && !matches!(incoming, "li" | "dd" | "dt") {
+    // The ordinary in-body end group also uses exact-target ordinary scope.
+    // FORM and marker-clearing APPLET/MARQUEE/OBJECT ends stay separate.
+    if !any_heading && !matches!(incoming, "li" | "dd" | "dt"
+        | "address" | "article" | "aside" | "blockquote" | "button" | "center"
+        | "details" | "dialog" | "dir" | "div" | "dl" | "fieldset" | "figcaption"
+        | "figure" | "footer" | "header" | "hgroup" | "listing" | "main" | "menu"
+        | "nav" | "ol" | "pre" | "search" | "section" | "select" | "summary" | "ul") {
         return false;
     }
     // These end rules use ordinary scope, with UL/OL added only for LI.
@@ -1078,22 +1118,23 @@ fn close_prior_list_item(stack: &mut Vec<usize>, document: &Document, targets: &
 }
 
 // https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-button-scope
-fn close_paragraph_in_button_scope(stack: &mut Vec<usize>, document: &Document) {
+fn close_paragraph_in_button_scope(stack: &mut Vec<usize>, document: &Document) -> bool {
     for position in (1..stack.len()).rev() {
         let node = &document.nodes[stack[position]];
         // Foreign scope and integration points are outside this HTML slice;
         // stop conservatively before crossing a non-HTML node.
-        if node.namespace != Namespace::Html { return; }
-        let NodeKind::Element { tag, .. } = &node.kind else { return; };
+        if node.namespace != Namespace::Html { return false; }
+        let NodeKind::Element { tag, .. } = &node.kind else { return false; };
         if tag == "p" {
             stack.truncate(position);
-            return;
+            return true;
         }
         if matches!(tag.as_str(), "applet" | "caption" | "html" | "table" | "td" | "th"
             | "marquee" | "object" | "select" | "template" | "button") {
-            return;
+            return false;
         }
     }
+    false
 }
 
 fn close_in_scope(stack: &mut Vec<usize>, document: &Document, target: &str, barriers: &[&str]) {
@@ -1571,6 +1612,18 @@ mod heading_start_tests;
 #[cfg(test)]
 #[path = "html_scoped_end_tests.rs"]
 mod scoped_end_tests;
+
+#[cfg(test)]
+#[path = "html_stray_end_tests.rs"]
+mod stray_end_tests;
+
+#[cfg(test)]
+#[path = "html_block_end_tests.rs"]
+mod block_end_tests;
+
+#[cfg(test)]
+#[path = "html_block_end_table_metadata_tests.rs"]
+mod block_end_table_metadata_tests;
 
 #[path = "html_comments.rs"]
 mod comments;

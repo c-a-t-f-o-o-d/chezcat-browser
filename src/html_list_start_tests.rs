@@ -166,10 +166,14 @@ fn definition_start_cancellation_returns_no_prefix_and_fresh_parse_recovers() {
 
 #[test]
 fn definition_start_keeps_later_end_tag_and_unsupported_tree_refusals() {
-    for suffix in ["<table><tr><td>x</td></tr></table>", "<svg></svg>", "<select><input></select>", "</p>", "a</br>b"] {
+    for suffix in ["<table><tr><td>x</td></tr></table>", "<svg></svg>", "<select><input></select>"] {
         assert!(parse_fragment(&format!("<dl><dt>A<dd>B</dl>{suffix}"), "div", true).is_err(), "{suffix}");
         let fresh = parse_fragment("<dl><dt>A<dd>B", "div", true).unwrap();
         assert_eq!(fresh.nodes[element(&fresh, "dl")].children.len(), 2);
+    }
+    for (suffix, expected) in [("</p>", "<p></p>"), ("a</br>b", "a<br></br>b")] {
+        let document = parse_fragment(&format!("<dl><dt>A<dd>B</dl>{suffix}"), "div", true).unwrap();
+        assert_eq!(tree(&document, 0), format!("<div><dl><dt>A</dt><dd>B</dd></dl>{expected}</div>"));
     }
 }
 

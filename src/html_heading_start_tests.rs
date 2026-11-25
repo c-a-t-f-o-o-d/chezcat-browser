@@ -174,9 +174,15 @@ fn heading_starts_keep_rawtext_rcdata_and_other_checked_refusals() {
         assert_eq!(doc.nodes.len(), 2);
         assert_eq!(text(&doc), if matches!(context, "textarea" | "title") { "<h1>&<h2>" } else { source });
     }
-    for source in ["<p>A<listing>B", "<p>A<xmp>B</xmp>", "<h1>A</br>"] {
+    for source in ["<p>A<listing>B", "<p>A<xmp>B</xmp>"] {
         assert!(parse_fragment(source, "div", true).is_err(), "{source}");
     }
+    let recovered = parse_fragment("<h1>A</br>", "div", true).unwrap();
+    assert_eq!(children(&recovered, 0), ["h1"]);
+    let heading = recovered.nodes[0].children[0];
+    assert_eq!(children(&recovered, heading), ["#A", "br"]);
+    let recovered_br = recovered.nodes[heading].children[1];
+    assert!(recovered.nodes[recovered_br].children.is_empty());
     for source in ["<select><h1>A", "<h1>A<table><tr></tr></table>", "<h1>A<svg></svg>"] {
         assert!(parse_fragment(source, "div", true).is_err(), "{source}");
     }
