@@ -557,6 +557,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("template", "HTMLTemplateElement"),
     ("textarea", "HTMLTextAreaElement"),
     ("time", "HTMLTimeElement"),
+    ("map", "HTMLMapElement"),
     ("ins", "HTMLModElement"),
     ("del", "HTMLModElement"),
     ("title", "HTMLTitleElement"),
@@ -584,7 +585,7 @@ pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
         return Some(name);
     }
     // Known HTML interfaces with partial implementation keep their native routing.
-    if matches!(tag, "area" | "audio" | "base" | "caption" | "col" | "colgroup" | "datalist" | "details" | "dialog" | "embed" | "map" | "object" | "optgroup" | "option" | "picture" | "selectedcontent" | "source" | "style" | "table" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr" | "track" | "video" | "frame" | "frameset" | "marquee" | "param") {
+    if matches!(tag, "area" | "audio" | "base" | "caption" | "col" | "colgroup" | "datalist" | "details" | "dialog" | "embed" | "object" | "optgroup" | "option" | "picture" | "selectedcontent" | "source" | "style" | "table" | "tbody" | "td" | "tfoot" | "th" | "thead" | "tr" | "track" | "video" | "frame" | "frameset" | "marquee" | "param") {
         return None;
     }
     Some("HTMLUnknownElement")

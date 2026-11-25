@@ -6849,3 +6849,7 @@ mod unknown_fallback_tests;
 #[cfg(test)]
 #[path="app_mod_datetime_tests.rs"]
 mod mod_datetime_tests;
+
+#[cfg(test)]
+#[path="app_map_name_tests.rs"]
+mod map_name_tests;
