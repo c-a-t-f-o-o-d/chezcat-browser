@@ -6903,3 +6903,7 @@ mod area_hreflang_tests;
 #[cfg(test)]
 #[path="app_area_type_tests.rs"]
 mod area_type_tests;
+
+#[cfg(test)]
+#[path="app_area_referrer_policy_tests.rs"]
+mod area_referrer_policy_tests;
