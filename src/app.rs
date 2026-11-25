@@ -7063,3 +7063,7 @@ mod app_textarea_dimensions_tests;
 #[cfg(test)]
 #[path="app_textarea_text_length_tests.rs"]
 mod app_textarea_text_length_tests;
+
+#[cfg(test)]
+#[path="app_textarea_default_value_tests.rs"]
+mod textarea_default_value_tests;

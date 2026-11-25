@@ -19,6 +19,7 @@ impl Bridge<'_> {
             return Ok(self.state.tree.title.map(node_handle));
         }
         if property=="text" && (self.title_receiver(object)||self.option_text_receiver(object)) { return Ok(Some(object)); }
+        if self.textarea_default_value_member(object,property){self.validate_textarea_default_value(object).map_err(|(_,s)|s)?;return Ok(Some(object));}
         if self.output_value_member(object,property) {
             self.validate_output_value(object).map_err(|(_,message)|message)?;
             self.state.work(self.state.output_defaults.lookup_work())?;
@@ -45,7 +46,7 @@ impl Bridge<'_> {
                 && matches!(item.kind, NodeKind::Element { .. })
                 && !matches!(tag(self.doc, node), "script" | "style")
         } else {
-            self.text_content_container(node) || self.title_receiver(object)
+            self.text_content_container(node) || self.owned_native_textarea(node) || self.title_receiver(object)
                 || self.created_html_style(node) && self.state.detached_nodes.contains(&node)
                 || matches!(item.kind, NodeKind::DocumentFragment)
         };

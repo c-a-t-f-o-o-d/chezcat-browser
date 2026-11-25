@@ -2750,12 +2750,13 @@ impl Bridge<'_> {
             self.mutation_ancestors(node)?;
         }
         if self.doc.nodes[node].namespace == crate::html::Namespace::Html && tag(self.doc,node) == "option" { self.state.rebuild(self.doc)?; }
+        let textarea_default = self.prepare_textarea_default_content(node,&text)?;
         let option_content = self.prepare_option_content(node,&text)?;
-        let option_bytes = option_content.as_ref().map_or(0,|plan|plan.bytes);
+        let option_bytes = option_content.as_ref().map_or(0,|plan|plan.bytes).checked_add(textarea_default.as_ref().map_or(0,|plan|plan.bytes)).ok_or("Content native scratch overflow.")?;
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
-        if !self.text_content_container(node) && !self.title_receiver(node_handle(node)) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
+        if !self.text_content_container(node) && textarea_default.is_none() && !self.title_receiver(node_handle(node)) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
             return Err(
                 "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
@@ -2844,6 +2845,7 @@ impl Bridge<'_> {
             }
         }
         if let Some(plan) = option_content { plan.commit(self.forms); }
+        if let Some(plan) = textarea_default { plan.commit(self.forms); }
         self.state.dirty = true;
         self.state.dom_committed();
         if self.state.tree.active.get(node).copied().unwrap_or(false) {
@@ -3181,6 +3183,7 @@ impl Bridge<'_> {
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
         if self.option_text_member(object,property){return true;}
+        if self.textarea_default_value_member(object,property){return true;}
         if self.option_value_member(object,property){return true;}
         if self.select_name_member(object,property){return true;}
         if self.textarea_name_member(object,property){return true;}
@@ -3373,6 +3376,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(target,property){return Some("label");}
         if self.option_label_member(target,property){return Some("label");}
         if self.option_text_member(target,property){return None;}
+        if self.textarea_default_value_member(target,property){return None;}
         if self.option_value_member(target,property){return Some("value");}
         if self.select_name_member(target,property){return Some("name");}
         if self.textarea_name_member(target,property){return Some("name");}
@@ -3642,6 +3646,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return false;}
         if self.option_label_member(object,property){return false;}
         if self.option_text_member(object,property){return false;}
+        if self.textarea_default_value_member(object,property){return false;}
         if self.option_value_member(object,property){return false;}
         if self.select_name_member(object,property){return false;}
         if self.textarea_name_member(object,property){return false;}
@@ -3842,6 +3847,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return false;}
         if self.option_label_member(object,property){return false;}
         if self.option_text_member(object,property){return false;}
+        if self.textarea_default_value_member(object,property){return false;}
         if self.option_value_member(object,property){return false;}
         if self.select_name_member(object,property){return false;}
         if self.textarea_name_member(object,property){return false;}
@@ -3942,6 +3948,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
         if self.option_text_member(object,property){return true;}
+        if self.textarea_default_value_member(object,property){return self.validate_textarea_default_value(object).is_ok();}
         if self.option_value_member(object,property){return true;}
         if self.select_name_member(object,property){return true;}
         if self.textarea_name_member(object,property){return true;}
@@ -4057,6 +4064,7 @@ impl Host for Bridge<'_> {
         if method==script_optgroup_label::SET&&self.optgroup_label_receiver(object){return Some("label");}
         if method==script_option_label::SET&&self.option_label_receiver(object){return Some("label");}
         if method==script_option_text::SET&&self.option_text_receiver(object){return Some("text");}
+        if method==script_textarea_default_value::SET&&self.textarea_default_value_receiver(object){return Some("defaultValue");}
         if method==script_option_value::SET&&self.option_value_receiver(object){return Some("value");}
         if method==script_select_name::SET&&self.select_name_receiver(object){return Some("name");}
         if method==script_textarea_name::SET&&self.textarea_name_receiver(object){return Some("name");}
@@ -4206,6 +4214,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return true;}
         if self.option_label_member(object,property){return true;}
         if self.option_text_member(object,property){return true;}
+        if self.textarea_default_value_member(object,property){return true;}
         if self.option_value_member(object,property){return true;}
         if self.select_name_member(object,property){return true;}
         if self.textarea_name_member(object,property){return true;}
@@ -4524,6 +4533,7 @@ impl Host for Bridge<'_> {
         if script_optgroup_label::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_label::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_text::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_textarea_default_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_select_name::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_name::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4917,6 +4927,7 @@ impl Host for Bridge<'_> {
         if script_optgroup_label::operation(method){return self.validate_optgroup_label(object);}
         if script_option_label::operation(method){return self.validate_option_label(object);}
         if script_option_text::operation(method){return self.validate_option_text(object);}
+        if script_textarea_default_value::operation(method){return self.validate_textarea_default_value(object);}
         if script_option_value::operation(method){return self.validate_option_value(object);}
         if script_select_name::operation(method){return self.validate_select_name(object);}
         if script_textarea_name::operation(method){return self.validate_textarea_name(object);}
@@ -5210,6 +5221,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return self.validate_optgroup_label(object);}
         if self.option_label_member(object,property){return self.validate_option_label(object);}
         if self.option_text_member(object,property){return self.validate_option_text(object);}
+        if self.textarea_default_value_member(object,property){return self.validate_textarea_default_value(object);}
         if self.option_value_member(object,property){return self.validate_option_value(object);}
         if self.select_name_member(object,property){return self.validate_select_name(object);}
         if self.textarea_name_member(object,property){return self.validate_textarea_name(object);}
@@ -5517,6 +5529,7 @@ impl Host for Bridge<'_> {
         if script_optgroup_label::operation(method){return self.event_target_interface(object)&&self.optgroup_label_receiver(receiver);}
         if script_option_label::operation(method){return self.event_target_interface(object)&&self.option_label_receiver(receiver);}
         if script_option_text::operation(method){return self.event_target_interface(object)&&self.option_text_receiver(receiver);}
+        if script_textarea_default_value::operation(method){return self.event_target_interface(object)&&self.textarea_default_value_receiver(receiver);}
         if script_option_value::operation(method){return self.event_target_interface(object)&&self.option_value_receiver(receiver);}
         if script_select_name::operation(method){return self.event_target_interface(object)&&self.select_name_receiver(receiver);}
         if script_textarea_name::operation(method){return self.event_target_interface(object)&&self.textarea_name_receiver(receiver);}
@@ -6359,7 +6372,6 @@ impl Host for Bridge<'_> {
             ) || !matches!(self.named_document_property(property)?, Value::Undefined));
         }
         if self.hidden_input_property(object,property) { return Ok(true); }
-        if self.textarea_default_property(object, property) { return Ok(true); }
         if self.button_property(object,property) { return Ok(true); }
         if self.text_input_default_property(object,property) || self.button_type_property(object,property) { return Ok(true); }
         if let Some(has) = self.dom_has(object, property)? {
@@ -6471,6 +6483,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return self.optgroup_label_get(object);}
         if self.option_label_member(object,property){return self.option_label_get(object);}
         if self.option_text_member(object,property){return self.option_text_get(object);}
+        if self.textarea_default_value_member(object,property){return self.textarea_default_value_get(object);}
         if self.option_value_member(object,property){return self.option_value_get(object);}
         if self.select_name_member(object,property){return self.select_name_get(object);}
         if self.textarea_name_member(object,property){return self.textarea_name_get(object);}
@@ -6760,10 +6773,6 @@ impl Host for Bridge<'_> {
             };
         }
         if let Some(value) = self.hidden_input_get(object,property)? {return Ok(value);}
-        if self.textarea_default_property(object, property) {
-            let node = self.node(object)?;
-            return Ok(Self::dom_string_owned(self.text_content(node)?));
-        }
         if let Some(value) = self.button_get(object,property)? {return Ok(value);}
         if let Some(value) = self.text_input_metadata_get(object,property)? {return Ok(value);}
         if let Some(value) = self.dom_get(object, property)? {
@@ -6967,6 +6976,7 @@ impl Host for Bridge<'_> {
         if self.optgroup_label_member(object,property){return self.optgroup_label_set(object,&value);}
         if self.option_label_member(object,property){return self.option_label_set(object,&value);}
         if self.option_text_member(object,property){return self.option_text_set(object,&value);}
+        if self.textarea_default_value_member(object,property){return self.textarea_default_value_set(object,&value);}
         if self.option_value_member(object,property){return self.option_value_set(object,&value);}
         if self.select_name_member(object,property){return self.select_name_set(object,&value);}
         if self.textarea_name_member(object,property){return self.textarea_name_set(object,&value);}
@@ -7440,6 +7450,7 @@ impl Host for Bridge<'_> {
         if method==script_optgroup_label::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_option_label::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_option_text::SET{return Err("Option text setters require the native conversion transaction.".into());}
+        if method==script_textarea_default_value::SET{return Err("Textarea defaultValue setters require the native conversion transaction.".into());}
         if method==script_option_value::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_select_name::SET{return Err("OptGroup label setters require the native conversion transaction.".into());}
         if method==script_textarea_name::SET{return Err("Textarea name setters require the native conversion transaction.".into());}
@@ -7463,6 +7474,7 @@ impl Host for Bridge<'_> {
         if method==script_optgroup_label::GET{return self.optgroup_label_get(object);}
         if method==script_option_label::GET{return self.option_label_get(object);}
         if method==script_option_text::GET{return self.option_text_get(object);}
+        if method==script_textarea_default_value::GET{return self.textarea_default_value_get(object);}
         if method==script_option_value::GET{return self.option_value_get(object);}
         if method==script_select_name::GET{return self.select_name_get(object);}
         if method==script_textarea_name::GET{return self.textarea_name_get(object);}
@@ -11178,3 +11190,10 @@ mod textarea_text_length_tests;
 
 #[path="script_textarea_text_length.rs"]
 mod script_textarea_text_length;
+
+#[cfg(test)]
+#[path="script_textarea_default_value_tests.rs"]
+mod textarea_default_value_tests;
+
+#[path="script_textarea_default_value.rs"]
+mod script_textarea_default_value;
