@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -2515,6 +2515,9 @@ impl Bridge<'_> {
         let option_label = self.prepare_option_label(node,&name,value.as_ref())?;
         let option_value = self.prepare_option_value(node,&name,value.as_ref())?;
         let option_default = self.prepare_option_default_selected(node,&name,value.as_ref())?;
+        let select_required=script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name);
+        let select_required_present=value.is_some();
+        if select_required{self.state.work(self.forms.controls.len().saturating_add(1))?;}
         let media_source=name.html_is("src")&&self.media_element_receiver(node_handle(node));let media_change=media_source&&value.is_some();
         if media_change&&!self.media_source_prepared(){return Err("Media source change requires its reserved stable-state task.".into());}
         if self.doc.nodes[node].namespace==crate::html::Namespace::Html && tag(self.doc,node)=="video"
@@ -2610,6 +2613,7 @@ impl Bridge<'_> {
         if let Some(plan) = option_label { plan.commit(self.forms); }
         if let Some(plan) = option_value { plan.commit(self.forms); }
         if let Some(plan) = option_default { plan.commit(self.forms); }
+        if select_required{if let Some(control)=self.forms.controls.get_mut(&node){control.required=select_required_present;}}
         if tab_index {
             let value=self.doc.attr(node,"tabindex").and_then(forms::parse_tab_index).unwrap_or(0);
             if let Some(control)=self.forms.controls.get_mut(&node) {control.tab_index=value;}
@@ -3196,6 +3200,7 @@ impl Bridge<'_> {
         if self.area_no_href_member(object,property){return true;}
         if self.option_disabled_member(object,property){return true;}
         if self.select_disabled_member(object,property){return true;}
+        if self.select_required_member(object,property){return true;}
         if self.option_default_selected_member(object,property){return true;}
         if self.optgroup_disabled_member(object,property){return true;}
         if self.ol_reversed_member(object,property){return true;}
@@ -3381,6 +3386,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(target,property){return Some("nohref");}
         if self.option_disabled_member(target,property){return Some("disabled");}
         if self.select_disabled_member(target,property){return Some("disabled");}
+        if self.select_required_member(target,property){return Some("required");}
         if self.option_default_selected_member(target,property){return Some("selected");}
         if self.optgroup_disabled_member(target,property){return Some("disabled");}
         if self.ol_reversed_member(target,property){return Some("reversed");}
@@ -3642,6 +3648,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return false;}
         if self.option_disabled_member(object,property){return false;}
         if self.select_disabled_member(object,property){return false;}
+        if self.select_required_member(object,property){return false;}
         if self.option_default_selected_member(object,property){return false;}
         if self.optgroup_disabled_member(object,property){return false;}
         if self.ol_reversed_member(object,property){return false;}
@@ -3834,6 +3841,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return false;}
         if self.option_disabled_member(object,property){return false;}
         if self.select_disabled_member(object,property){return false;}
+        if self.select_required_member(object,property){return false;}
         if self.option_default_selected_member(object,property){return false;}
         if self.optgroup_disabled_member(object,property){return false;}
         if self.ol_reversed_member(object,property){return false;}
@@ -3927,6 +3935,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return false;}
         if self.option_disabled_member(object,property){return false;}
         if self.select_disabled_member(object,property){return false;}
+        if self.select_required_member(object,property){return false;}
         if self.option_default_selected_member(object,property){return false;}
         if self.optgroup_disabled_member(object,property){return false;}
         if self.ol_reversed_member(object,property){return false;}
@@ -4035,6 +4044,7 @@ impl Host for Bridge<'_> {
         if method==script_area_no_href::SET&&self.area_no_href_receiver(object){return Some("noHref");}
         if method==script_option_disabled::SET&&self.option_disabled_receiver(object){return Some("disabled");}
         if method==script_select_disabled::SET&&self.select_disabled_receiver(object){return Some("disabled");}
+        if method==script_select_required::SET&&self.select_required_receiver(object){return Some("required");}
         if method==script_option_default_selected::SET&&self.option_default_selected_receiver(object){return Some("defaultSelected");}
         if method==script_optgroup_disabled::SET&&self.optgroup_disabled_receiver(object){return Some("disabled");}
         if method==script_ol_reversed::SET&&self.ol_reversed_receiver(object){return Some("reversed");}
@@ -4176,6 +4186,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return false;}
         if self.option_disabled_member(object,property){return false;}
         if self.select_disabled_member(object,property){return false;}
+        if self.select_required_member(object,property){return false;}
         if self.option_default_selected_member(object,property){return false;}
         if self.optgroup_disabled_member(object,property){return false;}
         if self.ol_reversed_member(object,property){return false;}
@@ -4487,6 +4498,7 @@ impl Host for Bridge<'_> {
         if script_area_no_href::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_disabled::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_select_disabled::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_select_required::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_option_default_selected::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_optgroup_disabled::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_ol_reversed::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4872,6 +4884,7 @@ impl Host for Bridge<'_> {
         if script_area_no_href::operation(method){return self.validate_area_no_href(object);}
         if script_option_disabled::operation(method){return self.validate_option_disabled(object);}
         if script_select_disabled::operation(method){return self.validate_select_disabled(object);}
+        if script_select_required::operation(method){return self.validate_select_required(object);}
         if script_option_default_selected::operation(method){return self.validate_option_default_selected(object);}
         if script_optgroup_disabled::operation(method){return self.validate_optgroup_disabled(object);}
         if script_ol_reversed::operation(method){return self.validate_ol_reversed(object);}
@@ -5157,6 +5170,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return self.validate_area_no_href(object);}
         if self.option_disabled_member(object,property){return self.validate_option_disabled(object);}
         if self.select_disabled_member(object,property){return self.validate_select_disabled(object);}
+        if self.select_required_member(object,property){return self.validate_select_required(object);}
         if self.option_default_selected_member(object,property){return self.validate_option_default_selected(object);}
         if self.optgroup_disabled_member(object,property){return self.validate_optgroup_disabled(object);}
         if self.ol_reversed_member(object,property){return self.validate_ol_reversed(object);}
@@ -5457,6 +5471,7 @@ impl Host for Bridge<'_> {
         if script_area_no_href::operation(method){return self.event_target_interface(object)&&self.area_no_href_receiver(receiver);}
         if script_option_disabled::operation(method){return self.event_target_interface(object)&&self.option_disabled_receiver(receiver);}
         if script_select_disabled::operation(method){return self.event_target_interface(object)&&self.select_disabled_receiver(receiver);}
+        if script_select_required::operation(method){return self.event_target_interface(object)&&self.select_required_receiver(receiver);}
         if script_option_default_selected::operation(method){return self.event_target_interface(object)&&self.option_default_selected_receiver(receiver);}
         if script_optgroup_disabled::operation(method){return self.event_target_interface(object)&&self.optgroup_disabled_receiver(receiver);}
         if script_ol_reversed::operation(method){return self.event_target_interface(object)&&self.ol_reversed_receiver(receiver);}
@@ -6402,6 +6417,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return self.area_no_href_get(object);}
         if self.option_disabled_member(object,property){return self.option_disabled_get(object);}
         if self.select_disabled_member(object,property){return self.select_disabled_get(object);}
+        if self.select_required_member(object,property){return self.select_required_get(object);}
         if self.option_default_selected_member(object,property){return self.option_default_selected_get(object);}
         if self.optgroup_disabled_member(object,property){return self.optgroup_disabled_get(object);}
         if self.ol_reversed_member(object,property){return self.ol_reversed_get(object);}
@@ -6891,6 +6907,7 @@ impl Host for Bridge<'_> {
         if self.area_no_href_member(object,property){return self.area_no_href_set(object,&value);}
         if self.option_disabled_member(object,property){return self.option_disabled_set(object,&value);}
         if self.select_disabled_member(object,property){return self.select_disabled_set(object,&value);}
+        if self.select_required_member(object,property){return self.select_required_set(object,&value);}
         if self.option_default_selected_member(object,property){return self.option_default_selected_set(object,&value);}
         if self.optgroup_disabled_member(object,property){return self.optgroup_disabled_set(object,&value);}
         if self.ol_reversed_member(object,property){return self.ol_reversed_set(object,&value);}
@@ -7379,6 +7396,7 @@ impl Host for Bridge<'_> {
         if method==script_area_no_href::SET{return Err("Area noHref setters require the native conversion transaction.".into());}
         if method==script_option_disabled::SET{return Err("Option disabled setters require the native conversion transaction.".into());}
         if method==script_select_disabled::SET{return Err("Select disabled setters require the native conversion transaction.".into());}
+        if method==script_select_required::SET{return Err("Select required setters require the native conversion transaction.".into());}
         if method==script_option_default_selected::SET{return Err("Option defaultSelected setters require the native conversion transaction.".into());}
         if method==script_optgroup_disabled::SET{return Err("OptGroup disabled setters require the native conversion transaction.".into());}
         if method==script_ol_reversed::SET{return Err("OL reversed setters require the native conversion transaction.".into());}
@@ -7410,6 +7428,7 @@ impl Host for Bridge<'_> {
         if method==script_area_no_href::GET{return self.area_no_href_get(object);}
         if method==script_option_disabled::GET{return self.option_disabled_get(object);}
         if method==script_select_disabled::GET{return self.select_disabled_get(object);}
+        if method==script_select_required::GET{return self.select_required_get(object);}
         if method==script_option_default_selected::GET{return self.option_default_selected_get(object);}
         if method==script_optgroup_disabled::GET{return self.optgroup_disabled_get(object);}
         if method==script_ol_reversed::GET{return self.ol_reversed_get(object);}
@@ -10992,3 +11011,10 @@ mod select_disabled_tests;
 
 #[path="script_select_disabled.rs"]
 mod script_select_disabled;
+
+#[cfg(test)]
+#[path="script_select_required_tests.rs"]
+mod select_required_tests;
+
+#[path="script_select_required.rs"]
+mod script_select_required;
