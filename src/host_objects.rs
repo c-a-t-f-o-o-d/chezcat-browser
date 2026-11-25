@@ -606,6 +606,9 @@ impl Runtime {
             } else if name=="HTMLDataListElement" {
                 self.defer_datalist_constructor(window,prototype,parent_function)?;
                 None
+            } else if name=="HTMLOptionElement" {
+                self.defer_option_constructor(window,prototype,parent_function)?;
+                None
             } else {
                 let allocation = self.allocate_host_function_with_length(window, name, 0)
                     .map_err(Fault::new)?;

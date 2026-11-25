@@ -10737,3 +10737,7 @@ mod datalist_detached_copy_tests;
 #[cfg(test)]
 #[path="script_datalist_connection_tests.rs"]
 mod datalist_connection_tests;
+
+#[cfg(test)]
+#[path="script_option_interface_tests.rs"]
+mod option_interface_tests;

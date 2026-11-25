@@ -66,6 +66,7 @@ impl Runtime {
         for family in ["Uint8Array", "URL", "TextEncoder", "DOMRect", "ImageData"] { self.ensure_global_intrinsics(family)?; }
         self.ensure_param_constructor()?;
         self.ensure_datalist_constructor()?;
+        self.ensure_option_constructor()?;
         let environment = self.environment(self.global_environment);
         let raw_count = environment.bindings.len().checked_add(self.objects[properties].properties.len())
             .and_then(|n| n.checked_add(native.len())).ok_or_else(|| Fault::new("Window key accounting overflow."))?;
