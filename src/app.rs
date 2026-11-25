@@ -6837,3 +6837,7 @@ mod unknown_interface_tests;
 #[cfg(test)]
 #[path="app_historical_html_tests.rs"]
 mod historical_html_tests;
+
+#[cfg(test)]
+#[path="app_semantic_html_tests.rs"]
+mod semantic_html_tests;

@@ -69,7 +69,7 @@ impl Bridge<'_> {
             return Some(name);
         }
         let node = node_index(object)?;
-        if !self.class_list_element_receiver(object) {
+        if !self.class_list_element_receiver(object) || !self.html_class_element(node) {
             return None;
         }
         crate::javascript::ordinary_html_interface(tag(self.doc, node))
