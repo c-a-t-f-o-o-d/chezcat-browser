@@ -677,6 +677,7 @@ impl Runtime {
             if name == "HTMLOListElement" {self.define_host_attribute(prototype,window,"reversed","\0HTMLOListElement.get.reversed",Some("\0HTMLOListElement.set.reversed"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"noHref","\0HTMLAreaElement.get.noHref",Some("\0HTMLAreaElement.set.noHref"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLOptionElement.get.disabled",Some("\0HTMLOptionElement.set.disabled"))?;}
+            if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLSelectElement.get.disabled",Some("\0HTMLSelectElement.set.disabled"))?;}
             if name == "HTMLOptionElement" {self.define_host_attribute(prototype,window,"defaultSelected","\0HTMLOptionElement.get.defaultSelected",Some("\0HTMLOptionElement.set.defaultSelected"))?;}
             if name == "HTMLOptGroupElement" {self.define_host_attribute(prototype,window,"disabled","\0HTMLOptGroupElement.get.disabled",Some("\0HTMLOptGroupElement.set.disabled"))?;}
             if name == "HTMLDListElement" {self.define_host_attribute(prototype,window,"compact","\0HTMLDListElement.get.compact",Some("\0HTMLDListElement.set.compact"))?;}
