@@ -10702,3 +10702,7 @@ mod param_metadata_tests;
 
 #[path="script_param_metadata.rs"]
 mod script_param_metadata;
+
+#[cfg(test)]
+#[path="script_param_detached_copy_tests.rs"]
+mod param_detached_copy_tests;
