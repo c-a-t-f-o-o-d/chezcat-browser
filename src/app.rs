@@ -7059,3 +7059,7 @@ mod app_textarea_read_only_tests;
 #[cfg(test)]
 #[path="app_textarea_dimensions_tests.rs"]
 mod app_textarea_dimensions_tests;
+
+#[cfg(test)]
+#[path="app_textarea_text_length_tests.rs"]
+mod app_textarea_text_length_tests;
