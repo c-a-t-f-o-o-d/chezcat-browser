@@ -7079,3 +7079,7 @@ mod textarea_min_length_tests;
 #[cfg(test)]
 #[path="app_textarea_wrap_tests.rs"]
 mod textarea_wrap_tests;
+
+#[cfg(test)]
+#[path="app_textarea_autocomplete_tests.rs"]
+mod textarea_autocomplete_tests;
