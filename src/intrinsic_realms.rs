@@ -76,6 +76,7 @@ roots! {
     deferred_param_constructor: Option<usize>,
     deferred_datalist_constructor: Option<usize>,
     deferred_option_constructor: Option<usize>,
+    deferred_optgroup_constructor: Option<usize>,
     host_globals: HashSet<String>,
     operation_globals: HashSet<&'static str>,
     arguments_thrower: Option<usize>,
@@ -136,6 +137,9 @@ impl Runtime {
                 if let Some(index)=roots.deferred_option_constructor {
                     if let Some(function)=self.deferred_param_constructor_edge(index){add(Edge::Function(function));}
                 }
+                if let Some(index)=roots.deferred_optgroup_constructor {
+                    if let Some(function)=self.deferred_param_constructor_edge(index){add(Edge::Function(function));}
+                }
                 roots.binary_roots.reachability_edges(add);
                 roots.collection_roots.reachability_edges(add);
                 roots.async_function_roots.reachability_edges(add);
@@ -166,6 +170,7 @@ impl Runtime {
         if name=="HTMLParamElement" {self.ensure_param_constructor()?;}
         if name=="HTMLDataListElement" {self.ensure_datalist_constructor()?;}
         if name=="HTMLOptionElement" {self.ensure_option_constructor()?;}
+        if name=="HTMLOptGroupElement" {self.ensure_optgroup_constructor()?;}
         if self.deferred_intrinsics == 0 && self.failed_intrinsics == 0 { return Ok(()); }
         let (bit, names) = if BINARY_GLOBALS.contains(&name) { (BINARY, BINARY_GLOBALS) }
             else if RESPONSE_GLOBALS.contains(&name) { (RESPONSE, RESPONSE_GLOBALS) }

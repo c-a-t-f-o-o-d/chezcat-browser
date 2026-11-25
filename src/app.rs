@@ -6979,3 +6979,7 @@ mod option_form_tests;
 #[cfg(test)]
 #[path="app_option_index_tests.rs"]
 mod option_index_tests;
+
+#[cfg(test)]
+#[path="app_optgroup_interface_tests.rs"]
+mod optgroup_interface_tests;

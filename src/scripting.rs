@@ -10793,3 +10793,7 @@ mod option_index_tests;
 
 #[path="script_option_index.rs"]
 mod script_option_index;
+
+#[cfg(test)]
+#[path="script_optgroup_interface_tests.rs"]
+mod optgroup_interface_tests;

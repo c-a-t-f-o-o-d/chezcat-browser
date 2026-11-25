@@ -512,6 +512,7 @@ pub(crate) const ORDINARY_HTML_SUBCLASSES: &[(&str, &str)] = &[
     ("data", "HTMLDataElement"),
     ("datalist", "HTMLDataListElement"),
     ("option", "HTMLOptionElement"),
+    ("optgroup", "HTMLOptGroupElement"),
     ("div", "HTMLDivElement"),
     ("dl", "HTMLDListElement"),
     ("applet", "HTMLUnknownElement"),
@@ -4285,6 +4286,7 @@ pub struct Runtime {
     deferred_param_constructor: Option<usize>,
     deferred_datalist_constructor: Option<usize>,
     deferred_option_constructor: Option<usize>,
+    deferred_optgroup_constructor: Option<usize>,
     host_globals: HashSet<String>,
     // Names explicitly exposed as ordinary properties by the embedding host.
     operation_globals: HashSet<&'static str>,
@@ -4447,6 +4449,7 @@ impl Runtime {
             deferred_param_constructor: None,
             deferred_datalist_constructor: None,
             deferred_option_constructor: None,
+            deferred_optgroup_constructor: None,
             host_globals: HashSet::new(),
             operation_globals: HashSet::new(),
             arguments_thrower: None,
