@@ -525,3 +525,57 @@ var detached=document.createElement('div'),connected=document.getElementById('ro
         }
     }
 }
+
+#[test]
+fn inner_html_generic_end_barriers_preserve_connected_and_detached_owner_links() {
+    let (mut doc, mut forms, mut page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<span>A<section>B</span>C</section>D</span>E';
+  var span=target.firstChild,section=span.childNodes[1];
+  if(target.innerHTML!=='<span>A<section>BC</section>D</span>E'||
+     target.childNodes.length!==2||section.parentNode!==span||section.firstChild.data!=='BC'||
+     span.lastChild.data!=='D'||target.lastChild.data!=='E'||section.ownerDocument!==document||
+     section.isConnected!==target.isConnected)throw Error('generic barrier ownership');
+  target.innerHTML='<label>A<dialog>B</label>C';
+  var label=target.firstChild,dialog=label.lastChild;
+  if(target.innerHTML!=='<label>A<dialog>B</dialog></label>C'||dialog.parentNode!==label||
+     target.lastChild.data!=='C'||dialog.ownerDocument!==document)throw Error('generic non-special traversal');
+  target.innerHTML='<ruby><rt>A<section>B</rt>C</section>D</rt>E</ruby>F';
+  var ruby=target.firstChild,rt=ruby.firstChild;
+  if(target.innerHTML!=='<ruby><rt>A<section>BC</section>D</rt>E</ruby>F'||
+     rt.childNodes[1].parentNode!==rt||rt.childNodes[1].firstChild.data!=='BC'||
+     ruby.lastChild.data!=='E'||target.lastChild.data!=='F'||rt.ownerDocument!==document)throw Error('generic ruby target');
+  target.innerHTML='<span><b data-note=kept>A<section>B</span>C</section>D</span>E';
+  var first=target.firstChild.firstChild,copy=target.childNodes[1];
+  if(target.innerHTML!=='<span><b data-note="kept">A<section>BC</section>D</b></span><b data-note="kept">E</b>'||
+     first===copy||copy.parentNode!==target||copy.getAttribute('data-note')!=='kept'||
+     copy.ownerDocument!==document)throw Error('generic formatting identity');
+}
+var detached=document.createElement('div'),connected=document.getElementById('root');
+verify(detached);verify(connected);
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+    // Unsupported fragment recovery returns a native error. Check each
+    // refusal independently so both target identities remain observable.
+    for target in ["detached", "connected"] {
+        page.begin_job();
+        page.runtime.execute(&format!("var checked={target},retained=checked.firstChild,before=checked.innerHTML;"),
+            &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
+        for (markup, expected) in [
+            ("<select><option><span>A</span></option></select>", "HTML fragment nonconventional select recovery is not implemented."),
+            ("<span>A<section>B</span>C</section>D<table><tr></tr></table>", "HTML fragment tables require ordinary flow, supported non-element content and an immediately matching end tag."),
+        ] {
+            page.begin_job();
+            let tree=format!("{:?}",doc.nodes);
+            let commits=page.state.dom_commits;
+            let error=page.runtime.execute(&format!("checked.innerHTML='{markup}';"),
+                &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert_eq!(format!("{:?}",doc.nodes),tree);
+            assert_eq!(page.state.dom_commits,commits);
+            page.begin_job();
+            page.runtime.execute("if(checked.firstChild!==retained||checked.innerHTML!==before)throw 'fragment refusal must preserve actual nodes';",
+                &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
+        }
+    }
+}

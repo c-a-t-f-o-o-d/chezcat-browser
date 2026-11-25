@@ -1008,6 +1008,44 @@ selection. Checked listing/select restrictions, enabled-noscript behavior and
 broader form/marker/template/foreign/mode/Windows/browser requirements remain
 separate; F05 stays partial.
 
+**Button-start increment:** a native HTML button start closes an earlier button
+in ordinary scope before existing active-formatting reconstruction and insertion.
+The shared scope helper is reused unchanged. If an actual stack pop exposes a
+table context, existing table placement is refreshed before reconstruction;
+the table module and its modes are unchanged.
+
+All 16 frozen new native checks pass, up from one, with all 343 prior HTML checks
+passing, for 359 total. All six optimized native scenarios pass after reproducing
+missing behavior in the baseline. Exact sibling/text/attribute trees, scope and
+paragraph boundaries, formatting identities, table placement, template/root and
+foreign guards, capacities and cancellation/recovery are measured. No existing
+assertion or resource policy changes. Unsupported button fragment contexts and
+Bridge button-control admission remain unchanged. These are native parser
+results; Page, Windows, JavaScript, network, visual and native control lifecycle
+are not established. Broader insertion-mode and foreign requirements remain
+separate; F05 stays partial.
+
+**Generic end-tag increment:** supported native ordinary end tags now search
+backward for an exact target and stop at an intervening special HTML element.
+The target is checked before the special category, and synthetic roots and
+conservative foreign boundaries are retained. The bounded lookup allocates no
+nodes. Existing application and cleanup, strict checked gates, formatting and
+scoped ends, specialized form/template/marker and document/table paths, and
+foreign or uncertain fallback retain their separate handling.
+
+All 21 frozen new native checks pass, up from seven; all 359 prior HTML checks
+remain passing, for 380 total. All eight optimized native scenarios pass, up
+from three. Original native expectations are unchanged. Exact retained trees and
+following text, native option/ruby/noscript cases, formatting identity, table
+placement, foreign/root guards, capacities and cancellation/recovery are
+measured. Subsequent combined-source validation passes 397 native HTML/parser-
+and-adapter checks and all 20 directly affected innerHTML tests in the original
+Linux Cargo crate, for 417 passes. The latter execute the real Page, Bridge,
+JavaScript runtime and native DOM, including connected/detached ownership and four
+independent native refusals with unchanged tree, commit generation and retained
+node identity. Full foreign, specialized-mode, broader Page, Windows/frontend,
+visual and browser-conformance acceptance remain separate; F05 stays partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
@@ -1063,6 +1101,20 @@ invalid receiver, stale generation, hierarchy, late failure and recovery cases.
 Native data checks do not imply unchanged browser WPT has passed.
 
 ### F07 — Contextual fragments, markup APIs and serialization
+
+**Legacy metadata void increment:** supported checked native HTML fragments
+immediately close BASEFONT and BGSOUND starts. Following text and elements remain
+siblings. Fragment roots, attributes, node/depth/cancellation rules, strict context
+and foreign-content refusal, the shared void-element helper and full-document
+behavior are preserved.
+
+Exact component tree `b34efec2d608ef93c916603171c3a4493b8ce594` passed 12 new
+native checks (baseline three), 359 prior selected checks and four optimized
+native scenarios (baseline zero). These are historical component results. The
+combined implementation subsequently passes 397 native HTML/parser-and-adapter
+checks and 20 directly affected real Page innerHTML checks in the original Linux
+Cargo crate, for 417 passes. This does not establish legacy-resource activation,
+Windows/frontend, complete serialization or browser qualification. F07 stays partial.
 
 **Fragment DOCTYPE increment:** supported checked HTML fragments now consume and
 ignore DOCTYPE tokens without adding a DocumentType node or changing the fragment
