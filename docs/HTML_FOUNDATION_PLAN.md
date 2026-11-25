@@ -844,6 +844,41 @@ F05 stays partial. Composed with the table-leaf increment and existing
 tag/declaration source, all 242 selected native HTML checks pass with unchanged
 expected outcomes.
 
+**Definition and list-item start increment:** `dd`/`dt` starts scan backward for
+an open definition item; `li` starts scan for an open list item. The matching
+target is checked before special-element barriers, with `address`, `div` and `p`
+as exceptions. The existing 83-name special category is unchanged. Paragraph
+closure follows this scan; fragment roots, template and conservative foreign
+boundaries, original children and formatting identities remain intact.
+
+All 13 frozen DD/DT checks pass, up from one, and five separately counted LI
+checks pass, up from two. All 242 existing HTML controls remain passing, for
+260 native checks total. Six separately selected optimized native parser
+scenarios pass, up from one. Old definition refusals have exact positive native
+sibling/text assertions. Added connected/detached innerHTML assertions are not
+executed by this native selection and are not counted as Page evidence.
+Heading starts, explicit scoped end handling, full foreign/mode behavior and
+Windows/browser/corpus acceptance remain separate. F05 stays partial.
+
+**Heading-start increment:** after paragraph closure, a new `h1`–`h6` pops
+exactly one current native HTML heading before insertion. A heading behind
+another current node remains open, and the synthetic fragment root is retained.
+
+All 13 frozen new native cases pass, up from one; all 242 existing HTML controls
+remain passing on the component source. The cases cover all 36 rank combinations,
+current-node boundaries, paragraph ordering, formatting, template/root and native
+namespace guards, token completion, capacity, cancellation and resource metadata.
+All six separately selected optimized native scenarios pass, after all six
+reproduced missing behavior in the baseline. Two obsolete heading-refusal
+assertions now verify positive sibling/name/text results; the Page-contained
+assertion is not included in native execution. General heading end recovery and
+full foreign/mode/Windows/browser acceptance remain open. F05 stays partial.
+
+With definition/list starts and heading starts composed, all 273 selected native
+HTML checks pass with the frozen expected outcomes unchanged. This combined
+result covers the 242 prior controls, 18 definition/list checks and 13 heading
+checks; it does not add Page or Windows execution evidence.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,

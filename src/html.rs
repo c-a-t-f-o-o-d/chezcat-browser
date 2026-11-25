@@ -634,8 +634,7 @@ fn parse_internal(
                 }
             }
             if !tag.closing {
-                let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
-                if scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "dt" | "dd" | "listing")))) {
+                if scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if open == "p" && tag.name == "listing")) {
                     return Err("HTML fragment implied definition/heading/block recovery is not implemented.".into());
                 }
             }
@@ -941,6 +940,11 @@ fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
+    match incoming {
+        "dt" | "dd" => close_prior_list_item(stack, document, &["dt", "dd"]),
+        "li" => close_prior_list_item(stack, document, &["li"]),
+        _ => {}
+    }
     if matches!(
         incoming,
         "address"
@@ -949,6 +953,8 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
             | "dialog"
             | "dir"
             | "dl"
+            | "dt"
+            | "dd"
             | "fieldset"
             | "figcaption"
             | "figure"
@@ -982,8 +988,15 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     ) {
         close_paragraph_in_button_scope(stack, document);
     }
-    if incoming == "li" {
-        close_in_scope(stack, document, "li", &["ul", "ol", "html"]);
+    // A heading start examines only the current node after paragraph closure.
+    // Older headings behind any other current node remain open.
+    let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+    if heading(incoming) && stack.len() > 1 {
+        let current = &document.nodes[*stack.last().unwrap()];
+        if current.namespace == Namespace::Html
+            && matches!(&current.kind, NodeKind::Element { tag, .. } if heading(tag)) {
+            stack.pop();
+        }
     }
     if matches!(incoming, "option" | "optgroup") {
         close_in_scope(
@@ -1006,6 +1019,25 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     if matches!(incoming, "thead" | "tbody" | "tfoot") {
         for tag in ["thead", "tbody", "tfoot"] {
             close_in_scope(stack, document, tag, &["table", "html"]);
+        }
+    }
+}
+
+// List starts look for their own matching item before testing special nodes.
+// Truncation changes only the open stack; native children and formatting
+// entries remain available for the normal insertion/reconstruction paths.
+fn close_prior_list_item(stack: &mut Vec<usize>, document: &Document, targets: &[&str]) {
+    for position in (1..stack.len()).rev() {
+        let node = &document.nodes[stack[position]];
+        // Preserve the conservative boundary of this native HTML subset.
+        if node.namespace != Namespace::Html { return; }
+        let NodeKind::Element { tag, .. } = &node.kind else { return; };
+        if targets.contains(&tag.as_str()) {
+            stack.truncate(position);
+            return;
+        }
+        if active_formatting::special_html(tag) && !matches!(tag.as_str(), "address" | "div" | "p") {
+            return;
         }
     }
 }
@@ -1490,8 +1522,16 @@ mod fragment_doctype_tests;
 mod fragment_table_leaf_tests;
 
 #[cfg(test)]
+#[path = "html_list_start_tests.rs"]
+mod list_start_tests;
+
+#[cfg(test)]
 #[path = "html_paragraph_closing_tests.rs"]
 mod paragraph_closing_tests;
+
+#[cfg(test)]
+#[path = "html_heading_start_tests.rs"]
+mod heading_start_tests;
 
 #[path = "html_comments.rs"]
 mod comments;
