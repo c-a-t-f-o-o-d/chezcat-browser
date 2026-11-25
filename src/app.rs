@@ -6871,3 +6871,7 @@ mod area_alt_tests;
 #[cfg(test)]
 #[path="app_area_coords_tests.rs"]
 mod area_coords_tests;
+
+#[cfg(test)]
+#[path="app_area_shape_tests.rs"]
+mod area_shape_tests;
