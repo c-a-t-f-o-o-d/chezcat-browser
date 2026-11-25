@@ -1,8 +1,9 @@
 //! Ordinary imports publish once with the actual destination document owner.
 use super::*;
 fn failure(message:&str)->(&'static str,String){("NotSupportedError",message.into())}
-// LEGEND has no private control payload; the destination parent determines form.
-fn needs_clone_hooks(tag:&str)->bool{matches!(tag,"script"|"link"|"img"|"iframe"|"frame"|"object"|"embed"|"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"form"|"fieldset"|"audio"|"video"|"source"|"canvas")}
+// LEGEND and OPTGROUP have no private native control payload.
+// OPTION descendants retain their independent cloning/lifecycle admission.
+fn needs_clone_hooks(tag:&str)->bool{matches!(tag,"script"|"link"|"img"|"iframe"|"frame"|"object"|"embed"|"input"|"textarea"|"select"|"option"|"button"|"form"|"fieldset"|"audio"|"video"|"source"|"canvas")}
 impl Bridge<'_>{
  fn import_children_count(&self,source:u32)->Option<usize>{if self.template_receiver(source)&&!self.inert_clone_receiver(source)&&self.template_source(source).is_some_and(|(_,initial)|initial.is_some()){return Some(0);}self.inert_children(source).map(<[u32]>::len).or_else(||node_index(source).filter(|&n|self.dom_accessible(n)).map(|n|self.doc.nodes[n].children.len()))}
  fn append_import_children(&self,source:u32,mut push:impl FnMut(u32)){if self.template_receiver(source)&&!self.inert_clone_receiver(source)&&self.template_source(source).is_some_and(|(_,initial)|initial.is_some()){return;}if let Some(children)=self.inert_children(source){for &child in children{push(child);}}else if let Some(index)=node_index(source){for &child in &self.doc.nodes[index].children{push(node_handle(child));}}}
