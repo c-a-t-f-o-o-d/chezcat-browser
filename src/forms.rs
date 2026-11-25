@@ -650,6 +650,10 @@ fn set_form_value(editor: &mut Editor, text: &str, kind: Kind) {
     editor.offset = 0;
 }
 
+#[path="forms_reset.rs"]
+mod forms_reset;
+pub(crate) use forms_reset::ResetPlan;
+
 pub struct Forms {
     pub controls: BTreeMap<usize, Control>,
     /// Bounds must not silently change the values sent to a server.
