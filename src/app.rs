@@ -6923,3 +6923,7 @@ mod hyperlink_stringifier_tests;
 #[cfg(test)]
 #[path="app_area_no_href_tests.rs"]
 mod area_no_href_tests;
+
+#[cfg(test)]
+#[path="app_area_detached_copy_tests.rs"]
+mod area_detached_copy_tests;

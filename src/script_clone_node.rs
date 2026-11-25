@@ -17,8 +17,9 @@ pub(super) fn ordinary_clone_element(name:&str)->bool{
         ||["q","data","progress","meter","nav","main","section","article","aside","header","footer","address","figure","figcaption","dir","menu","ol","ul","dl","table","caption","col","colgroup","thead","tbody","tfoot","tr","td","th","hr","time","slot"].iter().any(|tag|tag.eq_ignore_ascii_case(name))
 }
 
-// LEGEND copies have no private control payload; connection keeps its separate guards.
-fn cloneable_html_element(name:&str)->bool{name=="legend"||ordinary_clone_element(name)}
+// AREA and LEGEND detached copies have no private control payload.
+// Connection and adoption retain their separate lifecycle admission.
+fn cloneable_html_element(name:&str)->bool{matches!(name,"area"|"legend")||ordinary_clone_element(name)}
 
 pub(super) fn copy_text(text:&str)->Result<String,String>{
     let mut copied=String::new();copied.try_reserve_exact(text.len()).map_err(|_|"Cannot reserve copied DOM text.")?;

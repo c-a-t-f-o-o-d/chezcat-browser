@@ -10650,3 +10650,7 @@ mod area_no_href_tests;
 
 #[path="script_area_no_href.rs"]
 mod script_area_no_href;
+
+#[cfg(test)]
+#[path="script_area_detached_copy_tests.rs"]
+mod area_detached_copy_tests;
