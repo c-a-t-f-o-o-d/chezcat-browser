@@ -2972,10 +2972,12 @@ impl Bridge<'_> {
         let Some((_, raw)) = script_inline_style::winner(style, name, self.state)? else {
             return self.string("");
         };
+        if name == "order" { script_inline_style::order_source(raw, self.state)?; }
         let clean;
         let raw = if raw.contains("/*") { clean = crate::css::without_comments(raw); &clean } else { raw };
         let specified = crate::css::declaration_priority(raw).0;
         let value = if name=="z-index"{self.state.work(specified.len().saturating_mul(2))?;self.state.copies(specified.len().saturating_mul(2))?;crate::css::z_index::specified(specified).ok_or("Invalid selected z-index declaration.")?}
+        else if name=="order"{crate::css::order::specified(specified).ok_or("Invalid selected order declaration.")?}
         else if matches!(name,"visibility"|"pointer-events"){
             self.state.work(specified.len().saturating_mul(2))?;self.state.copies(specified.len().saturating_mul(2))?;
             crate::css::specified_interaction_value(name,specified).ok_or("Invalid selected interaction declaration.")?
@@ -2999,6 +3001,15 @@ impl Bridge<'_> {
         value: &str,
         priority: &str,
     ) -> Result<(), String> {
+        let normalized_order;
+        let value = if name == "order" && !value.is_empty() {
+            if !priority.is_empty() && !priority.eq_ignore_ascii_case("important") { return Ok(()); }
+            normalized_order = match script_inline_style::normalize_order(value, self.state)? {
+                Some(value) => value,
+                None => return Ok(()),
+            };
+            normalized_order.as_str()
+        } else { value };
         validate_css_value(name, value, self.state.limits.host.string_bytes)?;
 
         if matches!(name, "color" | "background-color") && !value.is_empty() && !crate::css::inline_color_value(value) {
@@ -3806,7 +3817,7 @@ impl Host for Bridge<'_> {
         if object == DOCUMENT && property == "textContent" {return true;}
         if self.content_editable_attribute(object,property) {return true;}
         if property == "value" && self.input_accessor_member(object, property) {return true;}
-        if matches!(property, "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
+        if matches!(property, "order" | "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object) {return true;}
         if self.button_string_property(object,property) {return true;}
         if self.fragment_receiver(object) && matches!(property,"nodeValue"|"textContent") {return true;}
         if self.doctype_receiver(object)&&matches!(property,"nodeValue"|"textContent"){return true;}
@@ -4385,7 +4396,7 @@ impl Host for Bridge<'_> {
         if self.textarea_value_member(object,property) {return true;}
         property == "innerHTML" && self.template_receiver(object)
             || property == "value" && self.input_accessor_member(object, property)
-            || matches!(property, "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
+            || matches!(property, "order" | "zIndex" | "z-index" | "visibility" | "pointerEvents" | "pointer-events" | "cssText" | "touchAction" | "touch-action" | "transform" | "opacity" | "animationTimingFunction" | "animation-timing-function") && (STYLE_BASE..DATASET_BASE).contains(&object)
             || property == "value" && self.hidden_input_property(object,property)
             || property == "value" && self.text_input_default_property(object,property)
             || property == "innerHTML" && (self.attr_element_receiver(object) || self.template_receiver(object))

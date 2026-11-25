@@ -124,6 +124,7 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
         if !same_name(key, name) {
             continue;
         }
+        if name == "order" { order_source(raw, state)?; }
         let clean;
         let value = if raw.contains("/*") {
             clean = crate::css::without_comments(raw);
@@ -147,6 +148,7 @@ pub(super) fn winner<'a>(style: &'a str, name: &str, state: &mut State) -> Resul
             if !crate::css::inline_easing_value(specified) { continue; }
         }
         if name=="z-index"{state.work(specified.len())?;if !crate::css::z_index::valid(specified){continue;}}
+        if name=="order"&&!crate::css::order::valid(specified){continue;}
         if matches!(name,"visibility"|"pointer-events"){
             state.work(specified.len())?;state.copies(specified.len())?;
             if !crate::css::inline_interaction_value(name,specified){continue;}
@@ -236,6 +238,20 @@ pub(super) fn replace(
 
 #[derive(Clone, Copy)]
 pub(super) enum EasingText { Specified, Cssom }
+
+pub(super) fn order_source(value: &str, state: &mut State) -> Result<(), String> {
+    let (work, copies) = crate::css::order::source_cost(value.len());
+    state.work(work)?;
+    state.copies(copies)
+}
+
+pub(super) fn normalize_order(value: &str, state: &mut State) -> Result<Option<String>, String> {
+    if value.len() > state.limits.host.string_bytes {
+        return Err("Inline CSS exceeds the string limit.".into());
+    }
+    order_source(value, state)?;
+    Ok(crate::css::order::specified(value))
+}
 
 pub(super) fn normalize_easing(value: &str, state: &mut State, kind: EasingText) -> Result<Option<String>, String> {
     let (work, copies) = crate::css::easing_source_cost(value.len());

@@ -31,6 +31,7 @@ impl Bridge<'_> {
                     }
                 }
             } else if name=="z-index"{let Some(value)=crate::css::z_index::specified(&raw)else{continue;};value
+            } else if name=="order"{let Some(value)=script_inline_style::normalize_order(&raw,self.state)?else{continue;};value
             } else if matches!(name.as_str(),"visibility"|"pointer-events"){
                 let Some(value)=crate::css::specified_interaction_value(&name,&raw)else{continue;};value
             } else if name == "opacity" {

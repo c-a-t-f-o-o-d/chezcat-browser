@@ -428,6 +428,7 @@ pub struct Style {
     pub visible:bool,
     pub pointer_events:bool,
     pub(crate) z_index:Option<std::rc::Rc<z_index::Value>>,
+    pub(crate) order: order::Value,
     /// Physical offsets: top, right, bottom, left.
     pub inset: [Length; 4],
     pub color: u32,
@@ -503,6 +504,7 @@ impl Default for Style {
             transform: Transform::None,
             overflow: Overflow::default(),
             visible:true,pointer_events:true,z_index:None,
+            order: order::Value::default(),
             inset: [Length::Auto; 4],
             color: INITIAL_COLOR,
             svg_paint:None,svg_paint_known:true,
@@ -1266,6 +1268,7 @@ fn compute_cascade(
         let mut sheet_background_clip = Some(BackgroundClip::BorderBox);
         let mut sheet_line_height = parent.line_height;
         let mut sheet_z_index=None;
+        let mut sheet_order=order::Value::default();
         let mut sheet_interaction=[parent.visible,parent.pointer_events];
         let mut sheet_grid_alignment = (style.justify_items, style.justify_self);
         let parent_font_known=parents[index].and_then(|parent|font_sizes.get(&parent)).is_none_or(Option::is_some);
@@ -1321,6 +1324,23 @@ fn compute_cascade(
                     meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
                     meter.variables(&mut variable_budget,apply_opacity)?;
                 } else { apply_opacity(&mut variable_budget); }
+                continue;
+            }
+            if declaration.name == "order" {
+                let mut resolve = |budget: &mut custom_properties::Budget| {
+                    order::apply(&mut style, &parent, declaration, priority.1,
+                        &mut sheet_order, &variables[index], budget)
+                };
+                if let Some(meter) = meter.as_deref_mut() {
+                    meter.variables(&mut variable_budget, resolve)?
+                        .map_err(|()| "CSS order computation allowance reached.")?;
+                } else if let Some(meter) = transform_meter.as_deref_mut() {
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget, resolve)?
+                        .map_err(|()| "CSS order computation allowance reached.")?;
+                } else if resolve(&mut variable_budget).is_err() {
+                    complete = false;
+                }
                 continue;
             }
             let font_property = font_values::property(&declaration.name);
@@ -1514,7 +1534,7 @@ fn compute_cascade(
         presentation.try_reserve_exact(computed.len()).map_err(|_|"Computed presentation snapshot reservation failed.")?;
         let extra=presentation.capacity().checked_sub(computed.len()).and_then(|n|n.checked_mul(std::mem::size_of::<computed_style::ComputedPresentation>())).ok_or("Computed presentation extra backing overflow.")?;
         if extra!=0{if let Some(meter)=meter.as_deref_mut(){meter.copies(extra)?;}}
-        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events,z_index:style.z_index.clone()}));
+        presentation.extend(computed.iter().map(|style|computed_style::ComputedPresentation{display:computed_style::style_display(style),color:style.color,visible:style.visible,pointer_events:style.pointer_events,z_index:style.z_index.clone(),order:style.order.clone()}));
     }
     Ok(CascadeOutput { has_hover:prepared.has_hover,styles: computed, computed_properties: ComputedProperties::new(variables, eligible, complete, overflows, positions, transforms, has_transform_geometry, canvas_foregrounds, opacities, touch_actions, font_sizes, presentation, svg_geometry), stylesheet_cache:prepared.cache })
 }
@@ -3040,7 +3060,13 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
         let alignment = custom_properties::flex_alignment_property(name);
         let font = font_values::property(name);
         let text = text_values::property(name);
-        if custom_properties::inset_property(name) || image_placement::property(name) || alignment || font || text {
+        if name == "order" {
+            if let Some(meter) = meter.as_deref_mut() {
+                let (work, copies) = self::order::source_cost(name.len().saturating_add(decl.value.len()));
+                meter.work(work)?;
+                meter.copies(copies)?;
+            }
+        } else if custom_properties::inset_property(name) || image_placement::property(name) || alignment || font || text {
             if let Some(meter) = meter.as_deref_mut() {
                 meter.source(name.len().saturating_add(decl.value.len()))?;
             }
@@ -3076,6 +3102,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
                 return Err(format!("Indexed inline CSS does not support the full {name} shorthand expansion."));
             }
             "z-index" if !z_index::valid(&decl.value)=>continue,
+            "order" if !order::valid(&decl.value)=>continue,
             "visibility"|"pointer-events" if !interaction_style::valid(name,&decl.value)=>continue,
             "color" | "background-color" if !inline_color_value(&value) => continue,
             "animation-timing-function" if !inline_easing_value(&value) => continue,
@@ -5328,6 +5355,13 @@ mod interaction_style;
 
 #[path="css_z_index.rs"]
 pub(crate) mod z_index;
+
+#[path = "css_order.rs"]
+pub(crate) mod order;
+
+#[cfg(test)]
+#[path = "css_order_tests.rs"]
+mod order_tests;
 
 #[cfg(test)]
 #[path="css_svg_geometry_tests.rs"]
