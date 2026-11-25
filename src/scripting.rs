@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3152,6 +3152,7 @@ impl Bridge<'_> {
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
         if self.param_name_member(object,property){return true;}
+        if self.param_metadata_member(object,property){return true;}
         if self.mod_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
@@ -3328,6 +3329,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(target,property){return Some("ping");}
         if self.map_name_member(target,property){return Some("name");}
         if self.param_name_member(target,property){return Some("name");}
+        if self.param_metadata_member(target,property){return crate::javascript::param_metadata_interface::attribute(property);}
         if self.mod_datetime_member(target,property){return Some("datetime");}
         if self.data_value_member(target,property){return Some("value");}
         if self.heading_align_member(target,property){return Some("align");}
@@ -3577,6 +3579,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return false;}
         if self.map_name_member(object,property){return false;}
         if self.param_name_member(object,property){return false;}
+        if self.param_metadata_member(object,property){return false;}
         if self.mod_datetime_member(object,property){return false;}
         if self.data_value_member(object,property){return false;}
         if self.heading_align_member(object,property){return false;}
@@ -3757,6 +3760,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return false;}
         if self.map_name_member(object,property){return false;}
         if self.param_name_member(object,property){return false;}
+        if self.param_metadata_member(object,property){return false;}
         if self.mod_datetime_member(object,property){return false;}
         if self.data_value_member(object,property){return false;}
         if self.heading_align_member(object,property){return false;}
@@ -3841,6 +3845,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
         if self.param_name_member(object,property){return true;}
+        if self.param_metadata_member(object,property){return true;}
         if self.mod_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
@@ -3940,6 +3945,7 @@ impl Host for Bridge<'_> {
         if method==script_area_ping::SET&&self.area_ping_receiver(object){return Some("ping");}
         if method==script_map_name::SET&&self.map_name_receiver(object){return Some("name");}
         if method==script_param_name::SET&&self.param_name_receiver(object){return Some("name");}
+        if let Some((property,true))=crate::javascript::param_metadata_interface::operation(method){if self.param_name_receiver(object){return Some(property);}}
         if method==script_mod_datetime::SET&&self.mod_datetime_receiver(object){return Some("dateTime");}
         if method==script_data_value::SET&&self.data_value_receiver(object){return Some("value");}
         if method==script_heading_align::SET&&self.heading_align_receiver(object){return Some("align");}
@@ -4072,6 +4078,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return true;}
         if self.map_name_member(object,property){return true;}
         if self.param_name_member(object,property){return true;}
+        if self.param_metadata_member(object,property){return true;}
         if self.mod_datetime_member(object,property){return true;}
         if self.data_value_member(object,property){return true;}
         if self.heading_align_member(object,property){return true;}
@@ -4371,6 +4378,7 @@ impl Host for Bridge<'_> {
         if script_area_ping::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_map_name::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_param_name::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_param_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_mod_datetime::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_data_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_heading_align::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4744,6 +4752,7 @@ impl Host for Bridge<'_> {
         if script_area_ping::operation(method){return self.validate_area_ping(object);}
         if script_map_name::operation(method){return self.validate_map_name(object);}
         if script_param_name::operation(method){return self.validate_param_name(object);}
+        if script_param_metadata::operation(method){return self.validate_param_name(object);}
         if script_mod_datetime::operation(method){return self.validate_mod_datetime(object);}
         if script_data_value::operation(method){return self.validate_data_value(object);}
         if script_heading_align::operation(method){return self.validate_heading_align(object);}
@@ -5020,6 +5029,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return self.validate_area_ping(object);}
         if self.map_name_member(object,property){return self.validate_map_name(object);}
         if self.param_name_member(object,property){return self.validate_param_name(object);}
+        if self.param_metadata_member(object,property){return self.validate_param_name(object);}
         if self.mod_datetime_member(object,property){return self.validate_mod_datetime(object);}
         if self.data_value_member(object,property){return self.validate_data_value(object);}
         if self.heading_align_member(object,property){return self.validate_heading_align(object);}
@@ -5308,6 +5318,7 @@ impl Host for Bridge<'_> {
         if script_area_ping::operation(method){return self.event_target_interface(object)&&self.area_ping_receiver(receiver);}
         if script_map_name::operation(method){return self.event_target_interface(object)&&self.map_name_receiver(receiver);}
         if script_param_name::operation(method){return self.event_target_interface(object)&&self.param_name_receiver(receiver);}
+        if script_param_metadata::operation(method){return self.event_target_interface(object)&&self.param_name_receiver(receiver);}
         if script_mod_datetime::operation(method){return self.event_target_interface(object)&&self.mod_datetime_receiver(receiver);}
         if script_data_value::operation(method){return self.event_target_interface(object)&&self.data_value_receiver(receiver);}
         if script_heading_align::operation(method){return self.event_target_interface(object)&&self.heading_align_receiver(receiver);}
@@ -6241,6 +6252,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return self.area_ping_get(object);}
         if self.map_name_member(object,property){return self.map_name_get(object);}
         if self.param_name_member(object,property){return self.param_name_get(object);}
+        if self.param_metadata_member(object,property){return self.param_metadata_get(object,property);}
         if self.mod_datetime_member(object,property){return self.mod_datetime_get(object);}
         if self.data_value_member(object,property){return self.data_value_get(object);}
         if self.heading_align_member(object,property){return self.heading_align_get(object);}
@@ -6721,6 +6733,7 @@ impl Host for Bridge<'_> {
         if self.area_ping_member(object,property){return self.area_ping_set(object,&value);}
         if self.map_name_member(object,property){return self.map_name_set(object,&value);}
         if self.param_name_member(object,property){return self.param_name_set(object,&value);}
+        if self.param_metadata_member(object,property){return self.param_metadata_set(object,property,&value);}
         if self.mod_datetime_member(object,property){return self.mod_datetime_set(object,&value);}
         if self.data_value_member(object,property){return self.data_value_set(object,&value);}
         if self.heading_align_member(object,property){return self.heading_align_set(object,&value);}
@@ -7178,6 +7191,7 @@ impl Host for Bridge<'_> {
         if method==script_area_ping::SET{return Err("Area ping setters require the native conversion transaction.".into());}
         if method==script_map_name::SET{return Err("Map name setters require the native conversion transaction.".into());}
         if method==script_param_name::SET{return Err("Param name setters require the native conversion transaction.".into());}
+        if matches!(crate::javascript::param_metadata_interface::operation(method),Some((_,true))){return Err("Param metadata setters require the native conversion transaction.".into());}
         if method==script_mod_datetime::SET{return Err("Mod datetime setters require the native conversion transaction.".into());}
         if method==script_time_datetime::GET{return self.time_datetime_get(object);}
         if method==script_area_alt::GET{return self.area_alt_get(object);}
@@ -7195,6 +7209,7 @@ impl Host for Bridge<'_> {
         if method==script_area_ping::GET{return self.area_ping_get(object);}
         if method==script_map_name::GET{return self.map_name_get(object);}
         if method==script_param_name::GET{return self.param_name_get(object);}
+        if let Some((property,false))=crate::javascript::param_metadata_interface::operation(method){return self.param_metadata_get(object,property);}
         if method==script_mod_datetime::GET{return self.mod_datetime_get(object);}
         if method==script_data_value::SET{return Err("Data value setters require the native conversion transaction.".into());}
         if method==script_heading_align::SET{return Err("Heading align setters require the native conversion transaction.".into());}
@@ -10680,3 +10695,10 @@ mod param_name_tests;
 
 #[path="script_param_name.rs"]
 mod script_param_name;
+
+#[cfg(test)]
+#[path="script_param_metadata_tests.rs"]
+mod param_metadata_tests;
+
+#[path="script_param_metadata.rs"]
+mod script_param_metadata;

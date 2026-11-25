@@ -8,7 +8,7 @@ impl Bridge<'_>{
  pub(super) fn param_name_receiver(&self,object:u32)->bool{self.concrete_html_interface(object).or_else(||self.inert_interface(object))==Some("HTMLParamElement")}
  pub(super) fn param_name_member(&self,object:u32,property:&str)->bool{property=="name"&&self.param_name_receiver(object)}
  pub(super) fn validate_param_name(&self,object:u32)->Result<(),(&'static str,String)>{
-  if !self.param_name_receiver(object){return Err(("TypeError","Param name metadata requires a genuine HTML param element.".into()));}
+  if !self.param_name_receiver(object){return Err(("TypeError","Param metadata requires a genuine HTML param element.".into()));}
   self.native_node_access(object)?;if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child param metadata requires its lifecycle hooks.".into()));}Ok(())
  }
  pub(super) fn param_name_get(&mut self,object:u32)->Result<Value,String>{

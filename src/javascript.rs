@@ -14418,3 +14418,6 @@ mod string_trim;
 
 #[path="output_reset_interface.rs"]
 mod output_reset_interface;
+
+#[path="param_metadata_interface.rs"]
+pub(crate) mod param_metadata_interface;
