@@ -172,6 +172,8 @@ mod page_navigation;
 pub use page_navigation::Navigation;
 #[path = "script_forms.rs"]
 mod script_forms;
+#[path="script_form_reset.rs"]
+mod script_form_reset;
 #[path = "script_resources.rs"]
 mod script_resources;
 #[path="script_xhr.rs"]
@@ -3849,6 +3851,7 @@ impl Host for Bridge<'_> {
         if self.html_reflection_member(object,property){return false;}
         if self.xhr_index(object).is_some(){return false;}
 
+        if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {return false;}
         if property=="submit" && self.form_submit_method(object).is_some() {return false;}
         if self.range_owner(object).is_some() {return false;}
         if self.inert_interface(object).is_some() { return self.inert_owns_property(object, property); }
@@ -4779,7 +4782,7 @@ impl Host for Bridge<'_> {
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
-        if method==crate::javascript::HTML_FORM_SUBMIT && self.event_target_interface(object) {return Some(object);}
+        if matches!(method,crate::javascript::HTML_FORM_SUBMIT|crate::javascript::HTML_FORM_RESET) && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
         if self.event_target_interface(object)&&script_named_map::operation(method).is_some(){return Some(object);}
         if object==WINDOW && matches!(method,"matchMedia"|MEDIA_QUERY_MATCHES|MEDIA_QUERY_MEDIA) {return Some(WINDOW);}
@@ -5182,6 +5185,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
 
+        if method==crate::javascript::HTML_FORM_RESET {return self.validate_form_reset(object);}
         if method==crate::javascript::HTML_FORM_SUBMIT && self.inert_interface(object)==Some("HTMLFormElement") {
             return Err(("NotSupportedError","Inert form submission has no native form backend.".into()));
         }
@@ -5888,6 +5892,7 @@ impl Host for Bridge<'_> {
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return self.iframe_sandbox_receiver(receiver)||self.inert_interface(receiver)==Some("HTMLIFrameElement");}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
+        if method==crate::javascript::HTML_FORM_RESET {return self.form_length_receiver(receiver);}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
@@ -6293,6 +6298,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(None);}
         if script_inline_style::handle(object) {
             let node = self.style_node(object)?;
             return match collection_index(property) { Some(index) => self.inline_index(node, index), None => Ok(None) };
@@ -6349,6 +6355,7 @@ impl Host for Bridge<'_> {
     }
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(true);}
         if script_inline_style::handle(object) { return Ok(self.own_data(object, property)?.is_none()); }
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(true);}
         if self.node_list_iteration_member(object,property) {self.state.work(1)?;return Ok(true);}
@@ -6392,6 +6399,8 @@ impl Host for Bridge<'_> {
         }
         Err("Deleting this native host property is not implemented.".into())
     }
+    fn begin_form_reset(&mut self,object:u32)->Result<Option<usize>,String>{self.begin_native_form_reset(object)}
+    fn complete_form_reset(&mut self,object:u32)->Result<(),String>{self.complete_native_form_reset(object)}
     fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
     fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<usize, String> {
         self.commit_abort_dispatch(controller, reason)
@@ -12064,3 +12073,7 @@ mod script_button_type;
 
 #[path="script_button_value.rs"]
 mod script_button_value;
+
+#[cfg(test)]
+#[path="script_form_reset_tests.rs"]
+mod form_reset_tests;

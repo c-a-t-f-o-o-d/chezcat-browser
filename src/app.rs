@@ -7207,3 +7207,7 @@ mod input_constraint_metadata_tests;
 #[cfg(test)]
 #[path="app_button_type_value_tests.rs"]
 mod button_type_value_tests;
+
+#[cfg(test)]
+#[path="app_form_reset_tests.rs"]
+mod form_reset_tests;

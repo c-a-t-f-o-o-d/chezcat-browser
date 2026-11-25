@@ -11,6 +11,7 @@ pub(super) struct Dispatch {
     snapshot: Vec<usize>,
     listener: usize,
     property: bool,
+    pub(super) reset_form: Option<usize>,
 }
 
 impl Dispatch {
@@ -430,7 +431,7 @@ impl Bridge<'_> {
         visits.extend(path.iter().skip(1).rev().map(|&target|(target,true,1)));
         visits.extend([(object,true,2),(object,false,2)]);
         if bubbles{visits.extend(path.iter().skip(1).map(|&target|(target,false,3)));}
-        let frame=Dispatch {path,event:id,name,visits,visit:0,snapshot:Vec::new(),listener:0,property:false};
+        let frame=Dispatch {path,event:id,name,visits,visit:0,snapshot:Vec::new(),listener:0,property:false,reset_form:None};
         let payload=frame.storage_bytes();
         let available=self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("DOM retained dispatch payload allowance exhausted.")?;
         let before=self.state.synthetic_dispatches.capacity();
