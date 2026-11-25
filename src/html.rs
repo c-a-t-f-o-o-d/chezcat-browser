@@ -61,6 +61,14 @@ mod button_start_tests;
 mod fragment_legacy_void_tests;
 
 #[cfg(test)]
+#[path = "html_pre_listing_tests.rs"]
+mod pre_listing_tests;
+
+#[cfg(test)]
+#[path = "html_xmp_start_tests.rs"]
+mod xmp_start_tests;
+
+#[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
 mod foundation_adapter;
 
@@ -434,7 +442,7 @@ fn parse_internal(
     // later elements cannot safely be classified from this subset's stack.
     let mut uncertain_foreign_recovery = false;
     let mut svg = svg_namespace::Island::default();
-    let mut ignore_fragment_lf = None;
+    let mut ignore_initial_lf = None;
     let mut fragment_table = None;
     let mut tokens = 0u8;
 
@@ -452,8 +460,11 @@ fn parse_internal(
                 svg.root = None;
             }
             if let Some(start)=&mut structure {
-                let text=if plaintext {html_raw_text(&input[position..end],loaded.map(|tree| tree.check_cancel))?}
+                let mut text=if plaintext {html_raw_text(&input[position..end],loaded.map(|tree| tree.check_cancel))?}
                     else {named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?};
+                // The next decoded token is checked before DATA NUL filtering,
+                // table text buffering or active formatting can consume it.
+                if ignore_initial_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
                 if initial && text.bytes().any(|b|!matches!(b,9|10|12|13|32)){initial=false;}
                 let check=loaded.unwrap().check_cancel;
                 let html_data=!uncertain_foreign_recovery && start.supports_data_nulls(&document,&stack);
@@ -478,7 +489,7 @@ fn parse_internal(
                         if chunk.iter().any(|&byte| !tag_space(byte, true)) { return Err(fragment_table_error()); }
                     }
                 }
-                if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
+                if ignore_initial_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
                 if !text.is_empty() && fragment_table.is_none(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
                 append_text_value(&mut document, *stack.last().unwrap(), text, node_limit)?
             } else if plaintext {
@@ -493,7 +504,7 @@ fn parse_internal(
             continue;
         }
         if rest.starts_with("</>") { position += 3; continue; }
-        ignore_fragment_lf = None;
+        ignore_initial_lf = None;
 
         let comment = rest.strip_prefix("<!--");
         let doctype_open = rest.get(..9).is_some_and(|prefix| prefix.eq_ignore_ascii_case("<!doctype"));
@@ -729,17 +740,27 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
-        if tag.name == "button" && !uncertain_foreign_recovery {
+        let native_paragraph_start = structure.is_some() && !uncertain_foreign_recovery
+            && matches!(tag.name.as_str(), "pre" | "listing" | "xmp")
+            && matches!(document.nodes[*stack.last().unwrap()].namespace, Namespace::None | Namespace::Html);
+        // XMP closes a paragraph before reconstructing formatting, while only
+        // PRE/LISTING consume an immediately following LF token.
+        let native_preformatted = native_paragraph_start && matches!(tag.name.as_str(), "pre" | "listing");
+        if tag.name == "button" && !uncertain_foreign_recovery || native_paragraph_start {
             let current = *stack.last().unwrap();
             if current == 0 || document.nodes[current].namespace == Namespace::Html {
                 let previous_depth = stack.len();
-                // A new button closes an ordinary-scope button before active
-                // formatting is reconstructed for the incoming start token.
-                close_scoped_end(&mut stack, &document, "button");
+                // These native starts close their target before insertion or
+                // any active formatting reconstruction for the incoming token.
+                if native_paragraph_start {
+                    close_paragraph_in_button_scope(&mut stack, &document);
+                } else {
+                    close_scoped_end(&mut stack, &document, "button");
+                }
                 if stack.len() < previous_depth && structure.is_some() {
-                    // Closing the old button can expose a table parent after
-                    // the original placement decision. Refresh that decision
-                    // before reconstruction consumes foster insertion state.
+                    // Closure can expose a table parent after the original
+                    // placement decision. Refresh before insertion or active
+                    // formatting consumes foster insertion state.
                     foster = match tables.tag(&mut document, &mut stack, &tag, node_limit, &mut formatting)? {
                         table_construction::Action::Consumed => continue,
                         table_construction::Action::Foster => true,
@@ -751,7 +772,9 @@ fn parse_internal(
         let native_plaintext = tag.name == "plaintext" && !uncertain_foreign_recovery
             && svg.root.is_none() && matches!(document.nodes[*stack.last().unwrap()].namespace,
                 Namespace::None | Namespace::Html);
-        if tag.name != "plaintext" || native_plaintext { close_implied(&mut stack, &document, &tag.name); }
+        if !native_paragraph_start && (tag.name != "plaintext" || native_plaintext) {
+            close_implied(&mut stack, &document, &tag.name);
+        }
         if fail_on_capacity && !was_foreign && structural_parent.is_none() && active_formatting::reconstructs_on_start(&tag.name) {
             if tag.name=="a"{formatting.end(&mut document,&mut stack,&tag.name,&mut tables,formatting_limits)?;}
             let table_foster=foster;
@@ -891,7 +914,10 @@ fn parse_internal(
                 svg.blocked_depth.is_none() && !svg_namespace::flow_context(&tag.name) {
                 svg.blocked_depth = Some(stack.len());
             }
-            if checked && tag.name == "pre" { ignore_fragment_lf = Some(node); }
+            if checked && tag.name == "pre"
+                || native_preformatted && document.nodes[node].namespace == Namespace::Html {
+                ignore_initial_lf = Some(node);
+            }
             if close_inserted_paragraph { stack.pop(); }
         }
     }
