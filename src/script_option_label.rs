@@ -29,12 +29,9 @@ impl Bridge<'_>{
   self.state.work(self.forms.default_scan_work())?;
   let state=self.forms.controls[&select].select.as_ref().unwrap();
   self.forms.check_select_label_payload(state.options[option].label.len(),text.len())?;
-  let mut longest=option;let mut width=0usize;
-  for (index,entry) in state.options.iter().enumerate(){
-   let candidate=if index==option{text}else{entry.label.as_str()};
-   self.state.work(candidate.len())?;let count=candidate.chars().count();if count>=width{longest=index;width=count;}
-  }
-  let caption=if longest==option{text}else{state.options[longest].label.as_str()};
+  // The control paints its currently selected option, independent of the
+  // longest-label sizing helper. An unselected label must not replace it.
+  let caption=state.selected.and_then(|selected|state.options.get(selected).map(|entry|if selected==option{text}else{entry.label.as_str()})).unwrap_or("");
   let copies=text.len().checked_add(caption.len()).ok_or("SELECT option label copy overflow.")?;
   self.state.copies(copies)?;
   let scratch=fallback.as_ref().map_or(0,DomString::capacity);
