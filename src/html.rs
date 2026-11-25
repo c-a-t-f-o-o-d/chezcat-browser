@@ -53,6 +53,14 @@ mod head_noscript_tests;
 mod named_reference_tests;
 
 #[cfg(test)]
+#[path = "html_button_start_tests.rs"]
+mod button_start_tests;
+
+#[cfg(test)]
+#[path = "html_fragment_legacy_void_tests.rs"]
+mod fragment_legacy_void_tests;
+
+#[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
 mod foundation_adapter;
 
@@ -692,7 +700,19 @@ fn parse_internal(
                 }
             } else {
                 let floor=if template_svg {stack.iter().rposition(|&node|matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0)}else{0};
-                if let Some(index) = stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index) {
+                // Native generic ends stop at a special element before their
+                // target. Keep specialized and foreign fallback routes intact.
+                let index = if !uncertain_foreign_recovery
+                    && (parent == 0 || document.nodes[parent].namespace == Namespace::Html)
+                    && !fragment_formatting(&tag.name)
+                    && !matches!(tag.name.as_str(), "form" | "template" | "applet" | "marquee" | "object"
+                        | "html" | "head" | "body" | "frameset" | "frame" | "table" | "caption"
+                        | "col" | "colgroup" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th") {
+                    find_generic_end(&stack, &document, &tag.name, floor)
+                } else {
+                    stack.iter().enumerate().rfind(|(index,node)| *index>floor && matches!(&document.nodes[**node].kind,NodeKind::Element{tag:name,..} if name==&tag.name)).map(|(index,_)|index)
+                };
+                if let Some(index) = index {
                     if index > 0 {
                         if structure.is_some() && tables.blocks_end(&document,&stack,index) {continue;}
                         if fail_on_capacity && document.nodes[stack[index]].namespace==Namespace::Html && matches!(tag.name.as_str(),"template"|"object"|"applet"|"marquee") {formatting.clear_to_marker();}
@@ -709,6 +729,25 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
+        if tag.name == "button" && !uncertain_foreign_recovery {
+            let current = *stack.last().unwrap();
+            if current == 0 || document.nodes[current].namespace == Namespace::Html {
+                let previous_depth = stack.len();
+                // A new button closes an ordinary-scope button before active
+                // formatting is reconstructed for the incoming start token.
+                close_scoped_end(&mut stack, &document, "button");
+                if stack.len() < previous_depth && structure.is_some() {
+                    // Closing the old button can expose a table parent after
+                    // the original placement decision. Refresh that decision
+                    // before reconstruction consumes foster insertion state.
+                    foster = match tables.tag(&mut document, &mut stack, &tag, node_limit, &mut formatting)? {
+                        table_construction::Action::Consumed => continue,
+                        table_construction::Action::Foster => true,
+                        table_construction::Action::Normal => false,
+                    };
+                }
+            }
+        }
         let native_plaintext = tag.name == "plaintext" && !uncertain_foreign_recovery
             && svg.root.is_none() && matches!(document.nodes[*stack.last().unwrap()].namespace,
                 Namespace::None | Namespace::Html);
@@ -744,7 +783,12 @@ fn parse_internal(
             && !uncertain_foreign_recovery && svg.root.is_none()
             && matches!(document.nodes[parent].namespace, Namespace::None | Namespace::Html);
         let raw = html_raw || matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
-        let void = is_void(&tag.name) || structure.is_some() && matches!(tag.name.as_str(),"basefont"|"bgsound"|"frame");
+        // These legacy metadata starts immediately close in checked native HTML.
+        let fragment_legacy_void = checked && !uncertain_foreign_recovery
+            && matches!(tag.name.as_str(), "basefont" | "bgsound")
+            && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
+        let void = is_void(&tag.name) || fragment_legacy_void
+            || structure.is_some() && matches!(tag.name.as_str(),"basefont"|"bgsound"|"frame");
         let nesting_full = !raw && !void && !svg_empty && stack.len() == MAX_DEPTH;
         if document.nodes.len() == node_limit || nesting_full {
             if checked { return Err("HTML fragment node/depth limit reached.".into()); }
@@ -986,6 +1030,18 @@ fn tag_space(byte: u8, _checked: bool) -> bool {
 
 fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<TagToken, String> {
     tag_tokens::read(input, start, checked, check)
+}
+
+fn find_generic_end(stack: &[usize], document: &Document, incoming: &str, floor: usize) -> Option<usize> {
+    for index in (floor + 1..stack.len()).rev() {
+        let node = &document.nodes[stack[index]];
+        // Preserve the conservative foreign boundary of this native subset.
+        if node.namespace != Namespace::Html { return None; }
+        let NodeKind::Element { tag, .. } = &node.kind else { return None; };
+        if tag == incoming { return Some(index); }
+        if active_formatting::special_html(tag) { return None; }
+    }
+    None
 }
 
 fn close_scoped_end(stack: &mut Vec<usize>, document: &Document, incoming: &str) -> bool {
@@ -1635,6 +1691,10 @@ mod block_end_tests;
 #[cfg(test)]
 #[path = "html_block_end_table_metadata_tests.rs"]
 mod block_end_table_metadata_tests;
+
+#[cfg(test)]
+#[path = "html_generic_end_tests.rs"]
+mod generic_end_tests;
 
 #[path = "html_comments.rs"]
 mod comments;
