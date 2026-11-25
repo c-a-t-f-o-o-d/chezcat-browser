@@ -74,7 +74,7 @@ pub(super) fn html_ul_type_attribute(namespace:crate::html::Namespace,tag:&str,n
 pub(super) fn html_li_type_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="li"&&name.html_is("type")}
 pub(super) fn html_ol_type_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="ol"&&name.html_is("type")}
 pub(super) fn html_li_value_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="li"&&name.html_is("value")}
-pub(super) fn html_pre_width_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="pre"&&name.html_is("width")}
+pub(super) fn html_pre_width_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&matches!(tag,"pre"|"listing"|"xmp")&&name.html_is("width")}
 pub(super) fn html_ol_start_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="ol"&&name.html_is("start")}
 pub(super) fn html_heading_align_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&matches!(tag,"h1"|"h2"|"h3"|"h4"|"h5"|"h6")&&name.html_is("align")}
 pub(super) fn html_data_value_attribute(namespace:crate::html::Namespace,tag:&str,name:&AttributeName)->bool{namespace==crate::html::Namespace::Html&&tag=="data"&&name.html_is("value")}

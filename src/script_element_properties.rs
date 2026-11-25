@@ -59,7 +59,7 @@ fn specific(tag: &str) -> &'static str {
         "p"|"div"|"h1"|"h2"|"h3"|"h4"|"h5"|"h6" => "align",
         "br" => "clear",
         "hr" => "align color noShade size width",
-        "pre" => "width",
+        "pre"|"listing"|"xmp" => "width",
         _=>"",
     }
 }

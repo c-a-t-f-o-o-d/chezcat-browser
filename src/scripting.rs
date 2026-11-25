@@ -7488,7 +7488,7 @@ fn handler_event(property: &str) -> Option<&str> {
         _ => None,
     }
 }
-const TEXT_CONTAINERS:&[&str]=&["div","span","font","p","a","b","strong","i","em","u","s","small","mark","sub","sup","code","pre","kbd","samp","var","label","button","h1","h2","h3","h4","h5","h6","li","dt","dd","legend","blockquote","br","wbr"];
+const TEXT_CONTAINERS:&[&str]=&["div","span","font","p","a","b","strong","i","em","u","s","small","mark","sub","sup","code","pre","listing","xmp","kbd","samp","var","label","button","h1","h2","h3","h4","h5","h6","li","dt","dd","legend","blockquote","br","wbr"];
 fn text_container(tag:&str)->bool{TEXT_CONTAINERS.contains(&tag)}
 
 fn node_bytes(node: &Node) -> usize {
@@ -10245,3 +10245,7 @@ mod font_size_tests;
 
 #[path="script_font_size.rs"]
 mod script_font_size;
+
+#[cfg(test)]
+#[path="script_pre_alias_tests.rs"]
+mod pre_alias_tests;
