@@ -752,6 +752,8 @@ impl Runtime {
                 self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
                 self.deferred_host_method(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;
                 self.deferred_host_method(prototype,window,"reset",super::HTML_FORM_RESET,0)?;
+                self.deferred_host_method(prototype,window,"checkValidity",super::HTML_FORM_CHECK,0)?;
+                self.deferred_host_method(prototype,window,"reportValidity",super::HTML_FORM_REPORT,0)?;
             }
             if name == "HTMLTemplateElement" {
                 self.define_readonly_node_getter(prototype, window, "content", HTML_TEMPLATE_CONTENT_GET)?;

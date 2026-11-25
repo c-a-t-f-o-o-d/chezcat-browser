@@ -7224,3 +7224,7 @@ mod submit_event_tests;
 #[cfg(test)]
 #[path="app_invalid_event_tests.rs"]
 mod invalid_event_tests;
+
+#[cfg(test)]
+#[path="app_form_validation_tests.rs"]
+mod form_validation_tests;
