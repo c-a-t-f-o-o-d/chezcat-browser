@@ -575,7 +575,7 @@ pub(crate) const CONTROL_LABEL_GETTERS:&[(&str,&str)]=&[
 /// Exact ordinary interfaces for supported HTML nodes, including elements
 /// whose immediate interface is HTMLElement itself.
 pub(crate) fn ordinary_html_interface(tag: &str) -> Option<&'static str> {
-    if matches!(tag, "main" | "acronym" | "basefont" | "big" | "center" | "nobr" | "noembed" | "noframes" | "plaintext" | "rb" | "rtc" | "strike" | "tt") || crate::custom_element_name::valid(tag) {
+    if matches!(tag, "main" | "abbr" | "address" | "article" | "aside" | "b" | "bdi" | "bdo" | "cite" | "code" | "dd" | "dfn" | "dt" | "em" | "figcaption" | "figure" | "footer" | "header" | "hgroup" | "i" | "kbd" | "mark" | "nav" | "noscript" | "rp" | "rt" | "ruby" | "s" | "samp" | "search" | "section" | "small" | "strong" | "sub" | "summary" | "sup" | "u" | "var" | "wbr" | "acronym" | "basefont" | "big" | "center" | "nobr" | "noembed" | "noframes" | "plaintext" | "rb" | "rtc" | "strike" | "tt") || crate::custom_element_name::valid(tag) {
         return Some("HTMLElement");
     }
     ORDINARY_HTML_SUBCLASSES.iter().find(|(local, _)| *local == tag).map(|&(_, name)| name)

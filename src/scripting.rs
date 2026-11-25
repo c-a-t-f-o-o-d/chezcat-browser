@@ -3364,6 +3364,7 @@ impl Host for Bridge<'_> {
             || self.canvas_context_receiver(object) || self.class_list_receiver(object)
             || self.video_interface_receiver(object) || self.fragment_receiver(object)
             || self.node_list_receiver(object) || self.collection_receiver(object) || self.named_map_receiver(object) || self.concrete_html_interface(object).is_some()
+            || self.style_interface_receiver(object, true)
             || self.slottable(object) == Some(Slottable::Text)
             || self.comment_receiver(object)
             || self.processing_instruction_receiver(object) || self.doctype_receiver(object)
@@ -10257,3 +10258,7 @@ mod unknown_interface_tests;
 #[cfg(test)]
 #[path="script_historical_html_tests.rs"]
 mod historical_html_tests;
+
+#[cfg(test)]
+#[path="script_semantic_html_tests.rs"]
+mod semantic_html_tests;
