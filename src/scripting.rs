@@ -3173,6 +3173,7 @@ impl Bridge<'_> {
         if self.legend_form_member(object,property){return true;}
         if self.option_form_member(object,property){return true;}
         if self.option_index_member(object,property){return true;}
+        if self.textarea_text_length_member(object,property){return true;}
         if self.map_areas_member(object,property){return true;}
         if self.datalist_options_member(object,property){return true;}
         if self.time_datetime_member(object,property){return true;}
@@ -3633,6 +3634,7 @@ impl Host for Bridge<'_> {
         if self.legend_form_member(object,property){return false;}
         if self.option_form_member(object,property){return false;}
         if self.option_index_member(object,property){return false;}
+        if self.textarea_text_length_member(object,property){return false;}
         if self.map_areas_member(object,property){return false;}
         if self.datalist_options_member(object,property){return false;}
         if self.time_datetime_member(object,property){return false;}
@@ -3832,6 +3834,7 @@ impl Host for Bridge<'_> {
         if self.legend_form_member(object,property){return true;}
         if self.option_form_member(object,property){return true;}
         if self.option_index_member(object,property){return true;}
+        if self.textarea_text_length_member(object,property){return true;}
         if self.map_areas_member(object,property){return true;}
         if self.datalist_options_member(object,property){return true;}
         if self.time_datetime_member(object,property){return false;}
@@ -4513,6 +4516,7 @@ impl Host for Bridge<'_> {
         if method==script_legend_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_option_form::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_option_index::GET&&self.event_target_interface(object){return Some(object);}
+        if method==script_textarea_text_length::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_map_areas::GET&&self.event_target_interface(object){return Some(object);}
         if method==script_datalist_options::GET&&self.event_target_interface(object){return Some(object);}
         if script_time_datetime::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -4905,6 +4909,7 @@ impl Host for Bridge<'_> {
         if method==script_legend_form::GET{return self.validate_legend_form(object);}
         if method==script_option_form::GET{return self.validate_option_form(object);}
         if method==script_option_index::GET{return self.validate_option_index(object);}
+        if method==script_textarea_text_length::GET{return self.validate_textarea_text_length(object);}
         if method==script_map_areas::GET{return self.validate_map_areas(object);}
         if method==script_datalist_options::GET{return self.validate_datalist_options(object);}
         if script_time_datetime::operation(method){return self.validate_time_datetime(object);}
@@ -5504,6 +5509,7 @@ impl Host for Bridge<'_> {
         if method==script_legend_form::GET{return self.event_target_interface(object)&&self.legend_receiver(receiver);}
         if method==script_option_form::GET{return self.event_target_interface(object)&&self.option_disabled_receiver(receiver);}
         if method==script_option_index::GET{return self.event_target_interface(object)&&self.option_disabled_receiver(receiver);}
+        if method==script_textarea_text_length::GET{return self.event_target_interface(object)&&self.textarea_text_length_receiver(receiver);}
         if method==script_map_areas::GET{return self.event_target_interface(object)&&self.map_name_receiver(receiver);}
         if method==script_datalist_options::GET{return self.event_target_interface(object)&&self.datalist_options_receiver(receiver);}
         if script_time_datetime::operation(method){return self.event_target_interface(object)&&self.time_datetime_receiver(receiver);}
@@ -6457,6 +6463,7 @@ impl Host for Bridge<'_> {
         if self.legend_form_member(object,property){return self.legend_form_get(object);}
         if self.option_form_member(object,property){return self.option_form_get(object);}
         if self.option_index_member(object,property){return self.option_index_get(object);}
+        if self.textarea_text_length_member(object,property){return self.textarea_text_length_get(object);}
         if self.map_areas_member(object,property){return self.map_areas_get(object);}
         if self.datalist_options_member(object,property){return self.datalist_options_get(object);}
         if self.time_datetime_member(object,property){return self.time_datetime_get(object);}
@@ -7555,6 +7562,7 @@ impl Host for Bridge<'_> {
         if method==script_legend_form::GET{return self.legend_form_get(object);}
         if method==script_option_form::GET{return self.option_form_get(object);}
         if method==script_option_index::GET{return self.option_index_get(object);}
+        if method==script_textarea_text_length::GET{return self.textarea_text_length_get(object);}
         if method==script_map_areas::GET{return self.map_areas_get(object);}
         if method==script_datalist_options::GET{return self.datalist_options_get(object);}
         if script_fieldset::operation(method){return self.fieldset_get(object,method);}
@@ -11163,3 +11171,10 @@ mod textarea_dimensions_tests;
 
 #[path="script_textarea_dimensions.rs"]
 mod script_textarea_dimensions;
+
+#[cfg(test)]
+#[path="script_textarea_text_length_tests.rs"]
+mod textarea_text_length_tests;
+
+#[path="script_textarea_text_length.rs"]
+mod script_textarea_text_length;
