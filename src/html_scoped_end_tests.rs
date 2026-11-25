@@ -291,10 +291,14 @@ fn scoped_end_keeps_text_contexts_later_refusals_and_document_mode() {
         assert_eq!(doc.nodes.len(), 2);
         assert_eq!(contents(&doc, 0), if matches!(context, "title" | "textarea") { "</li></dd></dt></h6>&" } else { source });
     }
-    for suffix in ["</p>", "</br>", "<table><tr></tr></table>", "<svg></svg>", "<select><input></select>", "\0"] {
+    for suffix in ["<table><tr></tr></table>", "<svg></svg>", "<select><input></select>", "\0"] {
         assert!(parse_fragment(&format!("<h2>A</h1>B{suffix}"), "div", true).is_err(), "{suffix:?}");
         let fresh = parse_fragment("<h2>A</h1>B", "div", true).unwrap();
         assert_eq!(contents(&fresh, 0), "<h2>A</h2>B");
+    }
+    for (suffix, expected) in [("</p>", "<p></p>"), ("</br>", "<br></br>")] {
+        let doc = parse_fragment(&format!("<h2>A</h1>B{suffix}"), "div", true).unwrap();
+        assert_eq!(contents(&doc, 0), format!("<h2>A</h2>B{expected}"));
     }
     let (doc, doctype) = parse_inert_html("<!doctype html><div><h2>A</h1>B</div>", 20, &|| Ok(())).unwrap();
     assert_eq!(doc.mode, DocumentMode::NoQuirks);
