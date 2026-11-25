@@ -2,11 +2,25 @@
 //! https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#autofill-processing-model
 use super::*;
 impl Bridge<'_>{
- pub(super) fn autofill_get(&mut self,object:u32)->Result<Value,String>{
+ // Only the exact type attribute in the Hidden state changes the IDL mantle.
+ // This scan borrows actual native/inert records and never copies type text.
+ pub(super) fn autofill_anchor(&mut self,object:u32)->Result<bool,String>{
+  let count=self.element_attribute_source(object).ok_or("Input attribute source is unavailable.")?.len();self.state.work(count.saturating_add(1))?;
+  for at in 0..count{
+   let bytes=self.element_attribute_source(object).unwrap()[at].name.bytes();self.state.work(bytes.saturating_add(1))?;
+   if self.element_attribute_source(object).unwrap()[at].name.html_is("type"){
+    let bytes=self.element_attribute_source(object).unwrap()[at].value.logical_bytes();self.state.work(bytes)?;
+    return Ok(self.element_attribute_source(object).unwrap()[at].value.scalar().is_ok_and(|value|value.eq_ignore_ascii_case("hidden")));
+   }
+  }
+  Ok(false)
+ }
+
+ pub(super) fn autofill_get(&mut self,object:u32,anchor:bool)->Result<Value,String>{
   let source=self.element_attribute_string_get(object,"autocomplete")?;
   let view=match &source{Value::String(s)=>crate::dom_string::DomStringRef::Scalar(s),Value::StringUnits(u)=>crate::dom_string::DomStringRef::Raw(u),_=>unreachable!()};
   self.state.work(view.logical_bytes().saturating_mul(64).saturating_add(1))?;
-  let plan=Autofill::parse(view);let bytes=plan.bytes()?;
+  let plan=Autofill::parse(view,anchor);let bytes=plan.bytes()?;
   if bytes>self.state.limits.host.string_bytes{return Err("Autocomplete exceeds the host string allowance.".into());}
   self.state.copies(bytes)?;script_text_content::deadline(self.state)?;
   let value=plan.value()?;script_text_content::deadline(self.state)?;Ok(value)
@@ -20,14 +34,14 @@ fn lower(unit:u16)->u16{if (0x41..=0x5a).contains(&unit){unit+0x20}else{unit}}
 fn is(token:DomStringRef<'_>,word:&str)->bool{token.code_units().map(lower).eq(word.bytes().map(u16::from))}
 fn one_of(token:DomStringRef<'_>,words:&str)->bool{words.split(' ').any(|word|is(token,word))}
 impl<'a> Autofill<'a>{
- fn parse(source:DomStringRef<'a>)->Self{
+ fn parse(source:DomStringRef<'a>,anchor:bool)->Self{
   let mut result=Self{tokens:[None;5],len:0,raw:matches!(source,DomStringRef::Raw(_))};
   for token in ascii_whitespace_tokens(source){if result.len==5{return Self{len:0,..result};}result.tokens[result.len]=Some(token);result.len+=1;}
   if result.len==0{return result;}
   let at=|n:usize|result.tokens[n].unwrap();let mut end=result.len;
   if is(at(end-1),"webauthn"){end-=1;if end==0{return result;}}
   let field=at(end-1);end-=1;
-  if one_of(field,"on off"){if result.len!=1{result.len=0;}return result;}
+  if one_of(field,"on off"){if result.len!=1||anchor{result.len=0;}return result;}
   let contact=one_of(field,"tel tel-country-code tel-national tel-area-code tel-local tel-local-prefix tel-local-suffix tel-extension email impp");
   if !contact&&!one_of(field,"name honorific-prefix given-name additional-name family-name honorific-suffix nickname organization-title username new-password current-password one-time-code organization street-address address-line1 address-line2 address-line3 address-level4 address-level3 address-level2 address-level1 country country-name postal-code cc-name cc-given-name cc-additional-name cc-family-name cc-number cc-exp cc-exp-month cc-exp-year cc-csc cc-type transaction-currency transaction-amount language bday bday-day bday-month bday-year sex url photo"){result.len=0;return result;}
   if contact&&end>0&&one_of(at(end-1),"home work mobile fax pager"){end-=1;}

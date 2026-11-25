@@ -13,7 +13,7 @@ impl Bridge<'_>{
  }
  pub(super) fn textarea_autocomplete_get(&mut self,object:u32)->Result<Value,String>{
   self.validate_textarea_autocomplete(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
-  self.autofill_get(object)
+  self.autofill_get(object,false)
  }
  pub(super) fn textarea_autocomplete_set(&mut self,object:u32,value:&Value)->Result<(),String>{
   self.validate_textarea_autocomplete(object).map_err(|(_,message)|message)?;self.state.work(1)?;script_text_content::deadline(self.state)?;
