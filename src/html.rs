@@ -69,6 +69,10 @@ mod pre_listing_tests;
 mod xmp_start_tests;
 
 #[cfg(test)]
+#[path = "html_ruby_start_tests.rs"]
+mod ruby_start_tests;
+
+#[cfg(test)]
 #[path = "html_foundation_adapter_tests.rs"]
 mod foundation_adapter;
 
@@ -740,6 +744,9 @@ fn parse_internal(
         }
 
         let was_foreign = document.nodes[*stack.last().unwrap()].namespace == Namespace::UnknownForeign;
+        if fail_on_capacity && !uncertain_foreign_recovery {
+            close_ruby_annotation_start(&mut stack, &document, &tag.name);
+        }
         let native_paragraph_start = structure.is_some() && !uncertain_foreign_recovery
             && matches!(tag.name.as_str(), "pre" | "listing" | "xmp")
             && matches!(document.nodes[*stack.last().unwrap()].namespace, Namespace::None | Namespace::Html);
@@ -1105,6 +1112,36 @@ fn close_scoped_end(stack: &mut Vec<usize>, document: &Document, incoming: &str)
     // A recognized end with no in-scope target is ignored, without falling
     // through to generic name matching across an HTML scope boundary.
     true
+}
+
+fn close_ruby_annotation_start(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
+    let except_rtc = match incoming {
+        "rb" | "rtc" => false,
+        "rp" | "rt" => true,
+        _ => return,
+    };
+    // Only an actual HTML RUBY in ordinary scope enables implied ends.
+    // The synthetic fragment context at index zero is never a target.
+    let mut ruby_in_scope = false;
+    for &node in stack.iter().skip(1).rev() {
+        if document.nodes[node].namespace == Namespace::Html
+            && matches!(&document.nodes[node].kind, NodeKind::Element { tag, .. } if tag == "ruby") {
+            ruby_in_scope = true;
+            break;
+        }
+        if active_formatting::scope_boundary(document, node) { return; }
+    }
+    if !ruby_in_scope { return; }
+    // Generate implied ends from the current node only. A nonmember stops
+    // recovery even when another annotation remains open below it.
+    while stack.len() > 1 {
+        let node = &document.nodes[*stack.last().unwrap()];
+        if node.namespace != Namespace::Html { break; }
+        let NodeKind::Element { tag, .. } = &node.kind else { break; };
+        if !matches!(tag.as_str(), "dd" | "dt" | "li" | "optgroup" | "option" | "p" | "rb" | "rp" | "rt" | "rtc")
+            || except_rtc && tag == "rtc" { break; }
+        stack.pop();
+    }
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {

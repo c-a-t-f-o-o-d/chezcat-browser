@@ -579,3 +579,33 @@ verify(detached);verify(connected);
         }
     }
 }
+
+#[test]
+fn inner_html_ruby_annotation_starts_preserve_connected_and_detached_owner_links() {
+    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<ruby><rb>A<rt>B<rp>C</ruby>';
+  var ruby=target.firstChild,base=ruby.firstChild,annotation=base.nextSibling,fallback=annotation.nextSibling;
+  if(target.innerHTML!=='<ruby><rb>A</rb><rt>B</rt><rp>C</rp></ruby>'||ruby.childNodes.length!==3||
+     base.parentNode!==ruby||annotation.parentNode!==ruby||fallback.parentNode!==ruby||
+     annotation.ownerDocument!==document||annotation.isConnected!==target.isConnected||
+     base.firstChild.data!=='A'||annotation.firstChild.data!=='B'||fallback.firstChild.data!=='C')throw Error('ruby annotation sibling ownership');
+  target.innerHTML='<ruby><rtc><rt>A<rp>B<rtc>C';
+  var next=target.firstChild,firstGroup=next.firstChild,secondGroup=firstGroup.nextSibling;
+  if(target.innerHTML!=='<ruby><rtc><rt>A</rt><rp>B</rp></rtc><rtc>C</rtc></ruby>'||
+     firstGroup.childNodes.length!==2||secondGroup.parentNode!==next||secondGroup.ownerDocument!==document||
+     ruby.parentNode!==null||ruby.isConnected||base.parentNode!==ruby||base.ownerDocument!==document)throw Error('ruby rtc ownership and retained old identities');
+  target.innerHTML='<ruby><rt>A<span>B<rt>C</ruby>';
+  ruby=target.firstChild;annotation=ruby.firstChild;var wrapper=annotation.lastChild,child=wrapper.lastChild;
+  if(target.innerHTML!=='<ruby><rt>A<span>B<rt>C</rt></span></rt></ruby>'||
+     child.parentNode!==wrapper||wrapper.parentNode!==annotation||child.ownerDocument!==document)throw Error('ruby current node barrier');
+  target.innerHTML='<ruby><b><p>A<rt></rt>C';
+  ruby=target.firstChild;var bold=ruby.firstChild,paragraph=bold.firstChild,empty=paragraph.nextSibling;
+  if(target.innerHTML!=='<ruby><b><p>A</p><rt></rt>C</b></ruby>'||
+     bold.childNodes.length!==3||empty.firstChild!==null||empty.parentNode!==bold||
+     bold.lastChild.data!=='C'||empty.ownerDocument!==document)throw Error('ruby formatting identity');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
