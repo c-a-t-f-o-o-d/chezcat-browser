@@ -26,7 +26,7 @@ impl Bridge<'_>{
   let text=value.map_or("",DomString::as_str);let end=text.char_indices().nth(256).map_or(text.len(),|(offset,_)|offset);let text=&text[..end];
   self.state.work(self.forms.default_scan_work())?;
   let forms::SelectRow::Group{label:old,..}=&self.forms.controls[&select].select.as_ref().unwrap().rows[row] else{unreachable!()};
-  self.forms.check_group_label_payload(old.len(),text.len())?;
+  self.forms.check_select_label_payload(old.len(),text.len())?;
   self.state.copies(text.len())?;
   if self.state.retained.checked_add(text.len()).is_none_or(|bytes|bytes>self.state.retained_limit){return Err("SELECT group label retained allowance exhausted.".into());}
   // Existing native rows use their finite Forms payload bound. Do not debit
