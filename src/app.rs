@@ -6821,3 +6821,7 @@ mod font_color_tests;
 #[cfg(test)]
 #[path="app_font_face_tests.rs"]
 mod font_face_tests;
+
+#[cfg(test)]
+#[path="app_font_size_tests.rs"]
+mod font_size_tests;
