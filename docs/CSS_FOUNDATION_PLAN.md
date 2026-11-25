@@ -45,6 +45,45 @@ group must expand into exact clauses and assertions before its implementation
 baseline. `CSS-F01` family IDs belong to this register; HTML `F01` remains a
 different package. `P-*` and `LA*` identify inspected source observations.
 
+## Recorded implementation progress
+
+The register contains **13 merged preparatory increments across 12 work packages**,
+through [PR #671](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/671), merged at
+[`99117d8e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/99117d8ea322c7f9e9e225113d7674040ea9dd36).
+All **33 packages and 110 requirement groups remain open for complete acceptance**.
+A delivered increment implements part of a larger contract; it does not close
+every feature or required evidence lane in its package.
+
+| Increment | Delivered behavior | Merged PR | Recorded native passes |
+| --- | --- | --- | ---: |
+| C01-S01 | Selector comment boundaries | [#619](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/619) | 243 |
+| C04-S01 | Margin and padding defaulting | [#622](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/622) | 46 |
+| C04-S02 | Border defaulting and inheritance | [#628](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/628) | 75 |
+| C04-S03 | Inset values and computed inheritance | [#632](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/632) | 115 |
+| C04-S04 | Image/background placement and computed positions | [#642](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/642) | 136 |
+| C03-S01 | Forgiving `:is()` and `:where()` groups | [#649](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/649) | 148 |
+| C04-S05 | Flex alignment variables and defaulting | [#654](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/654) | 128 |
+| C04-S06 | Font longhand/shorthand custom values | [#660](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/660) | 142 |
+| C04-S07 | Text alignment and whitespace custom values | [#663](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/663) | 162 |
+| C06-S01 | Image intrinsic width from definite height | [#664](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/664) | 64 |
+| C13-S01 | CSS `order` in flex and the supported grid layout | [#667](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/667) | 690 |
+| C12-S01 | Anonymous rows for direct CSS table cells | [#668](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/668) | 709 |
+| C11-S01 | Native button CSS background images | [#671](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/671) | 52 |
+
+The **2,710 recorded native passes** are the sum of these separately selected,
+source-bound executions. They include regression cases repeated across increments;
+they are not 2,710 unique tests, a new run of current main or a conformance
+percentage. Each selection contributes once; targeted repeats and integration
+reruns are excluded. Production scenarios remain a separate evidence lane.
+The register preserves original failed fixture results alongside separately
+corrected passing executions. This reconciliation adds no new runtime result.
+
+The five detailed implementation sections below retain their original scope.
+The later increments are summarized after them and recorded individually in the
+coverage register. The source audit and dispatch inventories remain tied to their
+historical revision; the recorded increments supersede its named gaps only within
+their stated finite contracts.
+
 ## Standards baseline and ownership
 
 The requested [CSS Snapshot 2025](https://www.w3.org/TR/2025/NOTE-css-2025-20250918/)
@@ -120,13 +159,14 @@ These findings correct several misleading shortcuts:
 - `touch-action` computation does not establish touch/pen gesture arbitration.
 - Current `matchMedia().matches` is a genuine live main-document read through the finite media grammar. Native change delivery and full preference/device behavior remain open.
 
-The inspected routing inventory has **107 distinct render/computed dispatch
-names**, including SVG bridges; inline CSSOM advertises **69 standard names**;
-computed-style dispatch explicitly handles **13 standard names** plus custom
-properties. These overlapping sets are preserved in the register. They are not
-counts of completely implemented properties. In particular, inline `order` and
-`vertical-align` have no corresponding general layout consumer, while easing is
-specified metadata.
+At the audited revision, the routing inventory contained **107 distinct
+render/computed dispatch names**, including SVG bridges; inline CSSOM advertised
+**69 standard names**; computed-style dispatch explicitly handled **13 standard
+names** plus custom properties. These overlapping historical sets are preserved
+in the register and are not counts of completely implemented properties. At that
+revision, inline `order` and `vertical-align` had no corresponding general layout
+consumer. C13-S01 subsequently added the finite `order` consumers recorded here;
+broader vertical alignment and the CSS animation timeline remain open.
 
 Two source-derived cases should become frozen regressions in the first syntax
 and property batches: comment stripping turns `a/**/.x` into `a .x`, and literal
@@ -357,6 +397,60 @@ new rendering algorithms, rollback keywords and general CSSOM remain outside
 this finite increment. Windows frontend, real HTTP loading, XHTML presentation
 and unchanged browser WPT were not executed. No complete C00/C04/C05/C11
 requirement or package is closed.
+
+## Later preparatory increments
+
+**C03-S01** connects forgiving `:is()` and `:where()` groups to the shared
+stylesheet/query matcher, with maximum-argument versus zero specificity,
+strict outer/negated lists, live topology/state and bounded admission. Native
+layout, background pixels and link hits follow the selected rules. Relative
+selectors, `:has()`, `:scope`, namespaces/escapes and complete invalidation remain
+open.
+
+**C04-S05, C04-S06 and C04-S07** extend the existing custom-property/defaulting
+paths through flex alignment, represented font longhand/shorthand components,
+and text alignment/whitespace. They preserve inherited computed values, invalid
+winner handling, cached-source updates and ordinary/transform work refusal.
+Original native geometry/font/pixel/hit cases cover those consumers. These
+increments retain their finite keyword/grammar representations and do not add
+complete CSSOM, writing modes, font shaping or general origin/layer behavior.
+The C04-S07 production record remains nine original passes and one failed
+initial-value oracle, plus a separate corrected passing execution; its 162 native
+passes are unaffected.
+
+**C06-S01** transfers known natural image proportions from definite height into
+automatic intrinsic width, including clipped flex link cards. It preserves
+explicit sizes and unknown/indefinite controls. General replaced-element sizing,
+authored `aspect-ratio`, border-box height transfer and fractional tiny-image
+rounding remain open.
+
+**C13-S01** preserves admitted signed integer `order` values and applies stable
+visual ordering to flex items and the existing implicit grid. Geometry, paint,
+opacity/translation contexts and hit regions agree while DOM/text/control order
+remains unchanged. Inline and computed readback share the value representation.
+Full grid placement, flex baseline/minimum algorithms and integer math functions
+remain open; actual Page/CSSOM evidence is separate from the 690-case native
+selection.
+
+**C12-S01** collects consecutive direct table cells into anonymous formatting
+rows without adding DOM nodes. Shared column sizing and intrinsic/final geometry
+preserve image proportions, cell clips, link bounds and explicit rows. Six
+production scenarios check geometry and hits; five also check raster pixels.
+Unsupported structures retain their prior fallback. General anonymous cells and
+table parents, spans, collapsed borders and complete table sizing remain open.
+
+**C11-S01** retains one CSS background image on native button, submit and reset
+controls and discovers it through the existing guarded resource lifecycle.
+The shared native painter draws the face, image, border/focus and caption in order
+with existing size/position/repeat sampling, clipping and opacity ownership.
+The recorded caption-compositing and hidden-display fixture corrections changed
+their oracles rather than product behavior. Rich button children, authored native
+borders/radii, image-layer clipping, other control families and multiple layers
+remain open.
+
+These records retain their own source, selection and component scope. They do not
+establish a current Windows App run, live navigation, XHTML rendering or unchanged
+browser WPT acceptance, and none closes a complete package or requirement group.
 
 ## Architecture and invariants
 
