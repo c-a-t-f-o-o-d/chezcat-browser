@@ -7135,3 +7135,7 @@ mod form_action_tests;
 #[cfg(test)]
 #[path="app_input_form_action_tests.rs"]
 mod input_form_action_tests;
+
+#[cfg(test)]
+#[path="app_button_form_action_tests.rs"]
+mod button_form_action_tests;
