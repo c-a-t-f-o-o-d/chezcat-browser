@@ -424,6 +424,7 @@ fn parse_internal(
     let mut uncertain_foreign_recovery = false;
     let mut svg = svg_namespace::Island::default();
     let mut ignore_fragment_lf = None;
+    let mut fragment_table = None;
     let mut tokens = 0u8;
 
     while position < input.len() {
@@ -460,8 +461,14 @@ fn parse_internal(
 
             let appended = if checked {
                 let mut text = named_references::decode(&input[position..end], false, loaded.map(|tree| tree.check_cancel))?;
+                if fragment_table.is_some() {
+                    for chunk in text.as_bytes().chunks(RAW_TEXT_CHECK_BYTES) {
+                        if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
+                        if chunk.iter().any(|&byte| !tag_space(byte, true)) { return Err(fragment_table_error()); }
+                    }
+                }
                 if ignore_fragment_lf.take() == Some(parent) && text.starts_with('\n') { text.remove(0); }
-                if !text.is_empty(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
+                if !text.is_empty() && fragment_table.is_none(){formatting.reconstruct(&mut document,&mut stack,node_limit,None)?;}
                 append_text_value(&mut document, *stack.last().unwrap(), text, node_limit)?
             } else if plaintext {
                 append_text_value(&mut document, parent,
@@ -547,6 +554,7 @@ fn parse_internal(
             TagToken::Incomplete => break,
             TagToken::Unsupported(error) => return Err(error.into()),
             TagToken::NotATag => {
+                if fragment_table.is_some() { return Err(fragment_table_error()); }
                 if template_svg && svg.root.is_some() {
                     return Err("Template SVG contains a malformed tag.".into());
                 }
@@ -591,7 +599,6 @@ fn parse_internal(
             parent
         }else{None};
 
-        let empty_table = checked && tag.name == "table";
         let starts_template_svg = template_svg && tag.name == "svg" && !tag.closing;
         let inside_template_svg = template_svg && svg.root.is_some();
         if checked {
@@ -600,15 +607,22 @@ fn parse_internal(
             let scope_start = stack.iter().rposition(|&node| matches!(&document.nodes[node].kind,NodeKind::Element{tag,..} if tag=="template")).unwrap_or(0);
             let scope = &stack[scope_start..];
             checked_select_tag(scope, &document, &tag.name, tag.closing)?;
+            if let Some(table) = fragment_table {
+                if *stack.last().unwrap() != table || tag.name != "table" || !tag.closing
+                    || !tag.clean_syntax || tag.self_closing || !tag.attrs.is_empty() {
+                    return Err(fragment_table_error());
+                }
+                fragment_table = None;
+            } else if tag.name == "table" {
+                checked_fragment_table_start(&tag, &stack, &document)?;
+            }
             if template_svg && tag.name=="template" && svg.root.is_none() && tag.closing {
                 if scope_start>0 {stack.truncate(scope_start);formatting.clear_to_marker();}continue;
             }
             if tag.name == "textarea" && (tag.closing || tag.self_closing || !tag.clean_syntax) {
                 return Err("HTML fragment TEXTAREA requires an ordinary start tag and a matching end tag.".into());
             }
-            if empty_table {
-                position = checked_empty_table_end(input, &tag, &stack, &document)?;
-            } else if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
+            if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
                 || tag.name == "template" && (!template_svg || svg.root.is_some())
                 || tag.name == "svg" && !(starts_template_svg || inside_template_svg)
                 || tag.name == "noscript" && scripting {
@@ -621,7 +635,7 @@ fn parse_internal(
             }
             if !tag.closing {
                 let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
-                if scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "address" | "aside" | "details" | "dialog" | "dl" | "dt" | "dd" | "figcaption" | "figure" | "hgroup" | "listing" | "menu" | "nav" | "search" | "summary")))) {
+                if scope.iter().skip(1).any(|&node| matches!(&document.nodes[node].kind, NodeKind::Element {tag: open, ..} if (matches!(tag.name.as_str(), "dt" | "dd") && matches!(open.as_str(), "dt" | "dd")) || (heading(&tag.name) && heading(open)) || (open == "p" && matches!(tag.name.as_str(), "dt" | "dd" | "listing")))) {
                     return Err("HTML fragment implied definition/heading/block recovery is not implemented.".into());
                 }
             }
@@ -781,12 +795,13 @@ fn parse_internal(
                 svg_namespace::publish(&mut document.nodes[node..]);
                 svg.root = None;
             }
-        } else if !void && !empty_table {
+        } else if !void {
             // A trailing slash does not close a non-void HTML element.
             if structure.is_some() && tag.name=="table" && document.nodes[node].namespace==Namespace::Html {
                 tables.opened(node,parent,slot,stack.len())?;
             }
             stack.push(node);
+            if checked && tag.name == "table" { fragment_table = Some(node); }
             // PLAINTEXT changes tokenization, not the tree insertion mode.
             // Its remaining character tokens still reconstruct formatting and
             // follow the existing table/ordinary character insertion paths.
@@ -800,6 +815,7 @@ fn parse_internal(
         }
     }
 
+    if fragment_table.is_some() { return Err(fragment_table_error()); }
     if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
     formatting.topology.finish(&mut document,checked,formatting_limits.check_cancel)?;
     if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
@@ -808,21 +824,19 @@ fn parse_internal(
     Ok(document)
 }
 
-// An immediately closed table has no table-mode children to insert. Consume
-// its real end token once, leaving both surrounding text runs in their parent.
-fn checked_empty_table_end(input: &str, open: &Tag, stack: &[usize], document: &Document) -> Result<usize, String> {
+fn fragment_table_error() -> String {
+    "HTML fragment tables require ordinary flow, supported non-element content and an immediately matching end tag.".into()
+}
+
+// Keep the finite table path in ordinary flow. The main token loop retains
+// its real whitespace and markup leaves, and requires a clean explicit close.
+fn checked_fragment_table_start(open: &Tag, stack: &[usize], document: &Document) -> Result<(), String> {
     let flow = stack.iter().all(|&node| matches!(&document.nodes[node].kind,
         NodeKind::Element { tag, .. } if matches!(tag.as_str(),
             "body" | "main" | "div" | "section" | "article" | "header" | "footer" | "aside" | "nav" |
             "blockquote" | "figure" | "figcaption" | "ul" | "ol" | "li" | "dl" | "dt" | "dd")));
-    if flow && open.clean_syntax && !open.closing && !open.self_closing && input[open.end..].starts_with("</") {
-        if let TagToken::Complete(end) = read_tag_mode(input, open.end, true, None)? {
-            if end.name == "table" && end.clean_syntax && !end.self_closing && end.attrs.is_empty() {
-                return Ok(end.end);
-            }
-        }
-    }
-    Err("HTML fragment tables require ordinary flow and an immediately matching empty-table end tag.".into())
+    if flow && open.clean_syntax && !open.closing && !open.self_closing { Ok(()) }
+    else { Err(fragment_table_error()) }
 }
 
 // This finite conventional select slice follows the current in-body select,
@@ -929,7 +943,22 @@ fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     if matches!(
         incoming,
-        "p" | "div"
+        "address"
+            | "aside"
+            | "details"
+            | "dialog"
+            | "dir"
+            | "dl"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "hgroup"
+            | "menu"
+            | "nav"
+            | "search"
+            | "summary"
+            | "p"
+            | "div"
             | "center"
             | "table"
             | "h1"
@@ -951,12 +980,7 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
             | "plaintext"
             | "hr"
     ) {
-        close_in_scope(
-            stack,
-            document,
-            "p",
-            &["html", "table", "td", "th", "button"],
-        );
+        close_paragraph_in_button_scope(stack, document);
     }
     if incoming == "li" {
         close_in_scope(stack, document, "li", &["ul", "ol", "html"]);
@@ -982,6 +1006,25 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     if matches!(incoming, "thead" | "tbody" | "tfoot") {
         for tag in ["thead", "tbody", "tfoot"] {
             close_in_scope(stack, document, tag, &["table", "html"]);
+        }
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/parsing.html#has-an-element-in-button-scope
+fn close_paragraph_in_button_scope(stack: &mut Vec<usize>, document: &Document) {
+    for position in (1..stack.len()).rev() {
+        let node = &document.nodes[stack[position]];
+        // Foreign scope and integration points are outside this HTML slice;
+        // stop conservatively before crossing a non-HTML node.
+        if node.namespace != Namespace::Html { return; }
+        let NodeKind::Element { tag, .. } = &node.kind else { return; };
+        if tag == "p" {
+            stack.truncate(position);
+            return;
+        }
+        if matches!(tag.as_str(), "applet" | "caption" | "html" | "table" | "td" | "th"
+            | "marquee" | "object" | "select" | "template" | "button") {
+            return;
         }
     }
 }
@@ -1441,6 +1484,14 @@ mod select_fragment_tests;
 #[cfg(test)]
 #[path = "html_fragment_doctype_tests.rs"]
 mod fragment_doctype_tests;
+
+#[cfg(test)]
+#[path = "html_fragment_table_leaf_tests.rs"]
+mod fragment_table_leaf_tests;
+
+#[cfg(test)]
+#[path = "html_paragraph_closing_tests.rs"]
+mod paragraph_closing_tests;
 
 #[path = "html_comments.rs"]
 mod comments;

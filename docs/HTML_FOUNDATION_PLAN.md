@@ -823,6 +823,25 @@ noscript tokenization, checked-fragment expansion, complete template/foreign
 insertion modes, tokenizer diagnostics and Windows App/browser/full-corpus
 acceptance remain separate. F05 and mode M05 remain partial.
 
+**Paragraph block-start increment:** the fourteen previously missing ordinary
+block names now close an in-scope HTML paragraph before insertion: `address`,
+`aside`, `details`, `dialog`, `dir`, `dl`, `fieldset`, `figcaption`, `figure`,
+`hgroup`, `menu`, `nav`, `search` and `summary`. The paragraph lookup uses native
+HTML button-scope boundaries, checks the target before an older boundary and
+preserves synthetic fragment roots. Unknown foreign integration is handled
+conservatively. Active formatting reconstructs with distinct node identities
+after the paragraph closes.
+
+All 13 frozen new native checks pass, up from three, with all 180 existing HTML
+controls remaining passing. Six separately selected optimized native parser
+scenarios pass, up from one. The checks cover actual trees and attributes, scope,
+formatting, capacity refusal, cancellation and recovery. Page/Windows/JavaScript
+execution, full foreign/mode/browser acceptance, definition-list and heading
+recovery, form/xmp/listing behavior and table quirks-mode rules remain separate.
+F05 stays partial. Composed with the table-leaf increment and existing
+tag/declaration source, all 242 selected native HTML checks pass with unchanged
+expected outcomes.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
@@ -893,6 +912,22 @@ component results. Complete mode inheritance, unsupported contexts, markup/API
 execution, serialization, Windows App/browser/corpus acceptance and XML/XHTML
 remain separate. Checked generic NUL, unsupported structure and foreign-content
 refusals remain. F07 and its contextual-fragment contract stay partial.
+
+**Table leaf increment:** supported ordinary-flow fragments retain real table
+children for decoded ASCII whitespace, comments and processing instructions.
+Ignored DOCTYPE and empty end tokens allocate no node or split adjacent Text.
+The shared token loop preserves source order and requires a clean explicit table
+close. Active formatting stays out of table whitespace and resumes for later
+ordinary text. Node/depth admission and bounded classification cancellation remain
+part of this path.
+
+All 14 frozen new native checks pass, up from four; all 191 existing HTML checks
+on the component source remain passing, for 205 total. Five separately selected
+optimized native parser scenarios pass, up from one. Connected/detached innerHTML
+ownership assertions are added, but their Page execution is not part of these
+measurements. Element children, non-whitespace and foster parenting, implicit
+endings, nested/table-context construction and broader namespace/mode/API/browser
+qualification remain open. F07 stays partial.
 
 **Deliverables**
 
