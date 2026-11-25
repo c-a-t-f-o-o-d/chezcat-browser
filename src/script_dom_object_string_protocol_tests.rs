@@ -148,12 +148,15 @@ fn autonomous_element_identity_preserves_namespace_owner_and_native_guards() {
     for name in ["reserved", "foreign", "hidden"] {
         let handle = node_handle(id(&doc, name));
         let bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-        assert_eq!(bridge.concrete_html_interface(handle), None, "{name}");
+        assert_eq!(bridge.concrete_html_interface(handle), (name == "reserved").then_some("HTMLUnknownElement"), "{name}");
         assert_eq!(bridge.element_expando_receiver(handle), name == "reserved", "{name}");
     }
     run(&mut doc, &mut forms, &mut page, r#"
 var notice=document.getElementById('custom'), C=HTMLElement, proto=C.prototype;
 var reserved=document.getElementById('reserved');
+if(!(reserved instanceof HTMLUnknownElement)||Object.getPrototypeOf(reserved)!==HTMLUnknownElement.prototype)throw 'reserved name keeps its real unknown interface';
+var invalidCustom=document.createElementNS('http://www.w3.org/1999/xhtml','notice-Line');
+if(invalidCustom.localName!=='notice-Line'||invalidCustom.ownerDocument!==document||!(invalidCustom instanceof HTMLUnknownElement)||Object.getPrototypeOf(invalidCustom)!==HTMLUnknownElement.prototype)throw 'mixed-case local name is unknown rather than a valid custom name';
 if (reserved.entry !== undefined) throw 'ordinary missing key on a reserved HTML tag';
 reserved.entry = 4;
 if (reserved.entry !== 4 || !Object.hasOwn(reserved,'entry')) throw 'ordinary own key on a reserved HTML tag';
@@ -177,7 +180,7 @@ if(read(notice)!==C||w.HTMLElement===C||notice instanceof w.HTMLElement||
     throw 'genuine owner prototype';
 "#);
     for source in [
-        "Object.getPrototypeOf(document.createElementNS('http://www.w3.org/1999/xhtml','notice-Line'));",
+        "Object.getPrototypeOf(document.getElementById('opaque'));",
         "Object.setPrototypeOf(notice,{});",
 
     ] {
