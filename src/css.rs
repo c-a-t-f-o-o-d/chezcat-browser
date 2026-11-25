@@ -80,6 +80,9 @@ mod selector_comment_boundary_tests;
 #[cfg(test)]
 #[path="css_selector_group_tests.rs"]
 mod selector_group_tests;
+#[cfg(test)]
+#[path="css_flex_alignment_tests.rs"]
+mod flex_alignment_tests;
 #[path="css_translate.rs"]
 mod translate;
 #[path="css_easing.rs"]
@@ -1332,7 +1335,14 @@ fn compute_cascade(
                     custom_properties::apply_box_with_parent(&mut style,&parent,declaration,&variables[index],budget,has_element_parent)
                 }
             };
-            let applied = if let Some(meter) = meter.as_deref_mut() { meter.variables(&mut variable_budget, apply_box)? } else { apply_box(&mut variable_budget) };
+            let applied = if let Some(meter) = meter.as_deref_mut() {
+                meter.variables(&mut variable_budget, apply_box)?
+            } else if custom_properties::flex_alignment_property(&declaration.name) {
+                if let Some(meter) = transform_meter.as_deref_mut() {
+                    meter.source(declaration.name.len().saturating_add(declaration.value.len()))?;
+                    meter.variables(&mut variable_budget, apply_box)?
+                } else { apply_box(&mut variable_budget) }
+            } else { apply_box(&mut variable_budget) };
             if !applied {
                 apply(&mut style, &parent, declaration, has_element_parent);
             }
@@ -2988,13 +2998,14 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
     for decl in declarations {
         let name = decl.name.as_str();
         if !name.starts_with("--") && supported.binary_search(&name).is_err() { continue; }
-        if custom_properties::inset_property(name) || image_placement::property(name) {
+        let alignment = custom_properties::flex_alignment_property(name);
+        if custom_properties::inset_property(name) || image_placement::property(name) || alignment {
             if let Some(meter) = meter.as_deref_mut() {
                 meter.source(name.len().saturating_add(decl.value.len()))?;
             }
         }
         let value = decl.value.to_ascii_lowercase();
-        let variable = value.contains("var(");
+        let variable = if alignment { custom_properties::has_var(&decl.value) } else { value.contains("var(") };
         let wide = matches!(value.as_str(), "inherit" | "initial" | "unset" | "revert" | "revert-layer");
         if name == "animation-timing-function" {
             if let Some(meter) = meter.as_deref_mut() { meter.work(easing_source_cost(value.len()).0)?; }
@@ -3032,6 +3043,7 @@ pub(crate) fn inline_declaration_names(source: &str, supported: &[&str], mut met
             "max-width" | "max-height" if !variable && !wide && max_sizing_value(&value).is_none() => continue,
             "top" | "right" | "bottom" | "left" if !variable && !wide && inset_length(&value).is_none() => continue,
             s if image_placement::property(s) && !variable && !wide && !image_placement::valid(s, &value) => continue,
+            s if alignment && !variable && !wide && !flex_alignment_value(s, &value) => continue,
             "row-gap" | "column-gap" if !variable && !wide && value != "normal" && max_sizing_value(&value).is_none() => continue,
             s if s.starts_with("margin-") && !variable && !wide && box_spacing::length(&value, true).is_none() => continue,
             s if s.starts_with("padding-") && !variable && !wide && box_spacing::length(&value, false).is_none() => continue,
@@ -3063,7 +3075,7 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
         if names.is_empty(){continue;}
         let lower=decl.value.to_ascii_lowercase();
         let wide=matches!(lower.as_str(),"inherit"|"initial"|"unset"|"revert"|"revert-layer");
-        let variable=lower.contains("var(");
+        let variable=if custom_properties::flex_alignment_property(&decl.name) {custom_properties::has_var(&decl.value)} else {lower.contains("var(")};
         if !wide&&!variable {
             let valid=match decl.name.as_str(){
                 "display"=>display_value(&lower).is_some(),
@@ -3072,9 +3084,7 @@ pub(crate) fn inline_text_declarations(source:&str,supported:&[&str],meter:&mut 
                 "flex-wrap"=>matches!(lower.as_str(),"nowrap"|"wrap"),
                 "flex-grow"|"flex-shrink"=>flex_factor(&lower).is_some(),
                 "flex-basis"=>sizing_value(&lower,Length::Auto).is_some(),
-                "justify-content"=>flex_pack(&lower).is_some(),
-                "align-items"=>flex_align(&lower).is_some(),
-                "align-self"=>lower=="auto"||flex_align(&lower).is_some(),
+                name if custom_properties::flex_alignment_property(name)=>flex_alignment_value(name,&lower),
                 "font-family"=>font_families(&decl.value).is_some(),
                 "font-size"=>font_size_value(&lower,16.0,16.0).is_some(),
                 "font-weight"=>font_weight(&lower,400).is_some(),
@@ -3364,6 +3374,15 @@ fn flex_align(value: &str) -> Option<FlexAlign> {
     }
 }
 
+fn flex_alignment_value(name: &str, value: &str) -> bool {
+    match name {
+        "justify-content" | "align-content" => flex_pack(value).is_some(),
+        "align-items" => flex_align(value).is_some(),
+        "align-self" => value == "auto" || flex_align(value).is_some(),
+        _ => false,
+    }
+}
+
 fn flex_shorthand(value: &str) -> Option<(f32, f32, Length)> {
     match value {
         "none" => return Some((0.0, 0.0, Length::Auto)),
@@ -3510,9 +3529,10 @@ fn apply(style: &mut Style, parent: &Style, declaration: &Declaration, has_eleme
     }
     let border = custom_properties::border_property(&declaration.name);
     let inset = custom_properties::inset_property(&declaration.name);
+    let alignment = custom_properties::flex_alignment_property(&declaration.name);
     if (custom_properties::layout_property(&declaration.name) || box_spacing::property(&declaration.name) || border || inset)
         && matches!(value.as_str(), "inherit" | "initial" | "unset") {
-        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit" && (!(border || inset) || has_element_parent));
+        custom_properties::reset_box(style,parent,&declaration.name,value=="inherit" && (!(border || inset || alignment) || has_element_parent));
         return;
     }
     match declaration.name.as_str() {

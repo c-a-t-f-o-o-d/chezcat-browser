@@ -292,7 +292,10 @@ fn expand(text:&str,depth:usize,budget:&mut Budget,lookup:&mut impl FnMut(&str,&
     }} Ok(Some(output))
 }
 
-pub(super) fn layout_property(name:&str)->bool{matches!(name,"width"|"height"|"min-width"|"min-height"|"max-width"|"max-height"|"display"|"box-sizing"|"flex-grow"|"flex-shrink"|"flex-basis"|"flex"|"flex-direction"|"flex-wrap"|"flex-flow"|"gap"|"row-gap"|"column-gap")}
+pub(super) fn flex_alignment_property(name:&str)->bool {
+    matches!(name,"justify-content"|"align-content"|"align-items"|"align-self")
+}
+pub(super) fn layout_property(name:&str)->bool{flex_alignment_property(name)||matches!(name,"width"|"height"|"min-width"|"min-height"|"max-width"|"max-height"|"display"|"box-sizing"|"flex-grow"|"flex-shrink"|"flex-basis"|"flex"|"flex-direction"|"flex-wrap"|"flex-flow"|"gap"|"row-gap"|"column-gap")}
 pub(super) fn inset_property(name:&str)->bool {
     matches!(name,"inset"|"top"|"right"|"bottom"|"left")
 }
@@ -313,6 +316,7 @@ fn border_value(value:&str)->bool {
 }
 fn valid_box(name:&str,value:&str)->bool {
     if image_placement::property(name) {return image_placement::valid(name,value);}
+    if flex_alignment_property(name) {return flex_alignment_value(name,value);}
     if inset_property(name) {
         return if name=="inset" {inset_values(value).is_some()} else {inset_length(value).is_some()};
     }
@@ -357,6 +361,8 @@ pub(super) fn reset_box(style:&mut Style,parent:&Style,name:&str,inherit:bool) {
         "display"=>{style.display=source.display;style.display_alias=source.display_alias;return;},"box-sizing"=>{style.border_box=source.border_box;return;},
         "flex-grow"=>{style.flex_grow=source.flex_grow;return;},"flex-shrink"=>{style.flex_shrink=source.flex_shrink;return;},"flex-basis"=>{style.flex_basis=length(source.flex_basis);return;},"flex"=>{style.flex_grow=source.flex_grow;style.flex_shrink=source.flex_shrink;style.flex_basis=length(source.flex_basis);return;},
         "flex-direction"=>{style.flex_direction=source.flex_direction;return;},"flex-wrap"=>{style.flex_wrap=source.flex_wrap;return;},"flex-flow"=>{style.flex_direction=source.flex_direction;style.flex_wrap=source.flex_wrap;return;},
+        "justify-content"=>{style.justify_content=source.justify_content;return;},"align-content"=>{style.align_content=source.align_content;return;},
+        "align-items"=>{style.align_items=source.align_items;return;},"align-self"=>{style.align_self=source.align_self;return;},
         "gap"=>{style.gap=source.gap.map(length);return;},"row-gap"=>{style.gap[0]=length(source.gap[0]);return;},"column-gap"=>{style.gap[1]=length(source.gap[1]);return;},_=>{},
     }
     if name=="color" {style.color=source.color;return;}
@@ -454,7 +460,7 @@ pub(super) fn apply_box_with_parent(style:&mut Style,parent:&Style,declaration:&
             return true;
         }
         let inherit=(value=="inherit" || (inherited && value=="unset"))
-            && (!(border_property(&declaration.name) || inset_property(&declaration.name) || image_placement::property(&declaration.name)) || has_element_parent);
+            && (!(border_property(&declaration.name) || inset_property(&declaration.name) || image_placement::property(&declaration.name) || flex_alignment_property(&declaration.name)) || has_element_parent);
         reset_box(style,parent,&declaration.name,inherit);
     } else if valid_box(&declaration.name,&value) {
         apply(style,parent,&Declaration {name:declaration.name.clone(),value,important:declaration.important,stylesheet:declaration.stylesheet},has_element_parent);
