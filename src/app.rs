@@ -7155,3 +7155,11 @@ mod submitter_form_enctype_input_tests;
 #[cfg(test)]
 #[path="app_submitter_form_enctype_button_tests.rs"]
 mod submitter_form_enctype_button_tests;
+
+#[cfg(test)]
+#[path="app_submitter_form_no_validate_input_tests.rs"]
+mod submitter_form_no_validate_input_tests;
+
+#[cfg(test)]
+#[path="app_submitter_form_no_validate_button_tests.rs"]
+mod submitter_form_no_validate_button_tests;
