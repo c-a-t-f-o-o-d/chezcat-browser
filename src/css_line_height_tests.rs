@@ -213,8 +213,8 @@ fn line_height_variable_font_shorthand_and_sheet_rollback_share_one_order() {
     }
     assert_eq!(
         at(&doc, &computed, "whole").font_size,
-        12.0,
-        "Whole variable font shorthand remains outside this slice"
+        24.0,
+        "Variable font shorthand supplies the size before the later line-height override"
     );
 }
 
