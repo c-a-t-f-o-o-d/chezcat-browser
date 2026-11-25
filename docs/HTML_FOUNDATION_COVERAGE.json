@@ -1202,7 +1202,7 @@
         ],
         "scope": "These are native tree-output comparisons. Parse-error diagnostics, testcase scripting and browser integrations retain their separate requirements."
       },
-      "current_source_scope": "Loaded and inert full HTML document entry paths now insert native html, head, and body or frameset records from the token stream. Metadata after head, duplicate root/body attributes, comment placement and EOF have original checks. Other insertion-mode branches, table/formatting recovery, scripting-enabled noscript and tokenizer/foreign integrations remain open. Supported DATA character recovery now applies structural transitions before ignoring literal NUL, retains table whitespace classification and avoids formatting reconstruction for ignored tokens. Scripting-disabled head-noscript now has explicit token reprocessing, allowed metadata/leaves, ignored-tag handling, root-attribute merging and EOF recovery. Scripting-enabled and nested-template noscript, foreign/uncertain recovery and broader mode integration remain separate.",
+      "current_source_scope": "Loaded and inert full HTML document entry paths now insert native html, head, and body or frameset records from the token stream. Metadata after head, duplicate root/body attributes, comment placement and EOF have original checks. Other insertion-mode branches, table/formatting recovery, scripting-enabled noscript and tokenizer/foreign integrations remain open. Supported DATA character recovery now applies structural transitions before ignoring literal NUL, retains table whitespace classification and avoids formatting reconstruction for ignored tokens. Scripting-disabled head-noscript now has explicit token reprocessing, allowed metadata/leaves, ignored-tag handling, root-attribute merging and EOF recovery. Scripting-enabled and nested-template noscript, foreign/uncertain recovery and broader mode integration remain separate. Paragraph closure now covers the fourteen previously missing ordinary block-start names and uses the verified native HTML button-scope barriers, preserving fragment roots and conservatively stopping at foreign nodes. Definition-list, heading-specific and broader foreign/mode recovery remain separate.",
       "source_anchors": [
         "src/html.rs",
         "src/html_document_structure.rs",
@@ -1213,7 +1213,8 @@
         "src/html_data_characters.rs",
         "src/html_data_character_tests.rs",
         "src/html_data_character_scan_tests.rs",
-        "src/html_head_noscript_tests.rs"
+        "src/html_head_noscript_tests.rs",
+        "src/html_paragraph_closing_tests.rs"
       ],
       "contracts": [
         {
@@ -1240,7 +1241,8 @@
           "requirement": "Implied roots/end tags; tables/foster parenting",
           "status": "partial",
           "verification": [
-            "Column-group character handling retains original leading whitespace before reprocessing NUL in table rules. Pending table text ignores NUL before nonspace classification, preserves earlier buffered characters across ignored runs and retains ordinary foster placement for genuine non-whitespace data. Original table/section/row/cell/caption and resource checks pass; complete table recovery remains open."
+            "Column-group character handling retains original leading whitespace before reprocessing NUL in table rules. Pending table text ignores NUL before nonspace classification, preserves earlier buffered characters across ignored runs and retains ordinary foster placement for genuine non-whitespace data. Original table/section/row/cell/caption and resource checks pass; complete table recovery remains open.",
+            "Paragraph block-start increment: address, aside, details, dialog, dir, dl, fieldset, figcaption, figure, hgroup, menu, nav, search and summary now close an in-scope HTML p before insertion. The paragraph-only button-scope lookup checks the target before HTML applet/caption/html/table/td/th/marquee/object/select/template/button boundaries, preserves the synthetic fragment root and stops conservatively at foreign nodes. Existing active formatting reconstructs with distinct identities after closure. All 13 frozen new native checks pass, up from three; all 180 existing HTML controls remain passing. Six separately selected optimized native parser scenarios pass, up from one. Exact tree/attribute identity, capacity refusal, cancellation and recovery are measured. These are source-bound Linux component results, not Page/Windows/JavaScript or full foreign/mode/browser acceptance. Definition-list and heading recovery, form/xmp/listing behavior and table quirks-mode rules remain separate; F05 stays partial. Composed with the table-leaf increment and existing tag/declaration source, all 242 selected native HTML checks pass with unchanged expected outcomes."
           ],
           "dependency_details": []
         },
@@ -1347,7 +1349,8 @@
         "src/script_inert_content.rs",
         "src/script_template_imports.rs",
         "src/html.rs",
-        "src/html_fragment_doctype_tests.rs"
+        "src/html_fragment_doctype_tests.rs",
+        "src/html_fragment_table_leaf_tests.rs"
       ],
       "contracts": [
         {
@@ -1355,7 +1358,8 @@
           "requirement": "Full-document DOMParser/document parse entries versus contextual fragments, with actual mode/scripting/namespace state",
           "status": "partial",
           "verification": [
-            "Checked-fragment DOCTYPE increment: supported contextual fragments consume and ignore DOCTYPE tokens through the existing shared bounded declaration reader, without allocating a DocumentType node or changing the fragment mode. Malformed declarations retain their normal consumed boundary; ordinary sibling text, comments, select ownership and supported template SVG namespaces remain intact. Raw/RCDATA fragment contexts retain literal declaration text. Full-document DOCTYPE identity and mode handling are unchanged. Eleven frozen new native parser checks pass, up from three, and all 64 existing selected controls remain passing (75 affected checks total). Four separately selected optimized native parser scenarios pass, up from one. Source-bound Linux component evidence covers admission/refusal and shared scanner cancellation; it does not establish Windows App or JavaScript execution, complete mode inheritance, all contexts, serialization, browser/corpus acceptance or XML/XHTML support. Existing checked generic NUL, unsupported structure and foreign-content boundaries remain; F07 and this contract stay partial."
+            "Checked-fragment DOCTYPE increment: supported contextual fragments consume and ignore DOCTYPE tokens through the existing shared bounded declaration reader, without allocating a DocumentType node or changing the fragment mode. Malformed declarations retain their normal consumed boundary; ordinary sibling text, comments, select ownership and supported template SVG namespaces remain intact. Raw/RCDATA fragment contexts retain literal declaration text. Full-document DOCTYPE identity and mode handling are unchanged. Eleven frozen new native parser checks pass, up from three, and all 64 existing selected controls remain passing (75 affected checks total). Four separately selected optimized native parser scenarios pass, up from one. Source-bound Linux component evidence covers admission/refusal and shared scanner cancellation; it does not establish Windows App or JavaScript execution, complete mode inheritance, all contexts, serialization, browser/corpus acceptance or XML/XHTML support. Existing checked generic NUL, unsupported structure and foreign-content boundaries remain; F07 and this contract stay partial.",
+            "Table-leaf increment: supported ordinary-flow fragments retain actual table children for decoded ASCII whitespace, comments and processing instructions. Ignored DOCTYPE and empty end tokens allocate no node and do not split adjacent Text. The normal shared token loop retains source order and native identity, requires a clean explicit table close, preserves node/depth bounds and polls cancellation during the new whitespace classification pass. Active formatting is not reconstructed inside table whitespace, and resumes for following ordinary text. All 14 frozen new native checks pass, up from four; all 191 existing HTML checks on this component source remain passing (205 total). Five separately selected optimized native parser scenarios pass, up from one. Added connected/detached innerHTML ownership assertions remain unexecuted by the native component selection and are not counted as Page evidence. Element children, non-whitespace/foster parenting, implicit endings, nested/table-context parsing and broader namespace/mode/API/browser acceptance remain open; F07 stays partial."
           ],
           "dependency_details": []
         },

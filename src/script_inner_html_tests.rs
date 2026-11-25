@@ -204,6 +204,19 @@ function verify(root) {
   if(root.firstChild.nodeType!==3||root.firstChild.textContent!=='  '||table.namespaceURI!=='http://www.w3.org/1999/xhtml'||
      table.childNodes.length!==0||table.nextSibling.textContent!==' after'||table.getAttribute('data-label')!=='a&b'||
      table.isConnected!==root.isConnected||root.innerHTML!=='  <table id="grid" data-label="a&amp;b"></table> after')throw Error('table round trip');
+  root.innerHTML='before<table id="leaves">\r\n &#9;<!--marker &amp; <img src=/unrequested>-->&#13;</table>after';
+  table=root.firstChild.nextSibling;
+  var leading=table.firstChild,marker=leading.nextSibling,trailing=marker.nextSibling;
+  if(root.childNodes.length!==3||root.firstChild.textContent!=='before'||table.nextSibling.textContent!=='after'||
+     table.nodeName!=='TABLE'||table.childNodes.length!==3||leading.nodeType!==3||leading.textContent!=='\n \t'||
+     marker.nodeType!==8||marker.data!=='marker &amp; <img src=/unrequested>'||trailing.nodeType!==3||trailing.textContent!=='\r'||
+     trailing.nextSibling!==null||leading.parentNode!==table||marker.parentNode!==table||trailing.parentNode!==table||
+     leading.ownerDocument!==document||marker.ownerDocument!==document||trailing.ownerDocument!==document||
+     table.isConnected!==root.isConnected)throw Error('table leaf ownership');
+  root.innerHTML='<table><!--one--><!--two--></table><table>&#32;</table>';
+  table=root.firstChild;
+  if(root.childNodes.length!==2||table.childNodes.length!==2||table.firstChild.data!=='one'||table.lastChild.data!=='two'||
+     table.nextSibling.childNodes.length!==1||table.nextSibling.firstChild.textContent!==' ')throw Error('table leaf replacement');
 }
 verify(document.createElement('div'));verify(document.getElementById('root'));
 if(editor!==document.getElementById('editor')||editor.ownerDocument!==document||editor.form!==owner||
@@ -219,8 +232,8 @@ fn inner_html_empty_table_requires_explicit_balanced_tokens_in_flow() {
     for source in [
         "<table>", "<table", "<table id='unfinished", "</table>", "<table/>", "<table/></table>",
         "<table></tabl", "<table></table", "<table></table x>", "<table></table/>", "<table></table/ >",
-        "<table / ></table>", "<table>\n</table>", "<table>&#32;</table>", "<table>x</table>",
-        "<table><!--text--></table>", "<table><b>text</b></table>", "<table><tr><td>x</td></tr></table>",
+        "<table / ></table>", "<table>x</table>",
+        "<table><b>text</b></table>", "<table><tr><td>x</td></tr></table>",
         "<table><table></table></table>", "<table></div></table>", "<p><table></table></p>",
         "<div><b><table></table></b></div>", "<select><table></table></select>",
         "<div><table></table></table></div>",
