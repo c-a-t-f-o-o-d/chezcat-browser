@@ -712,6 +712,7 @@ impl Runtime {
             if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLSelectElement.get.autocomplete",Some("\0HTMLSelectElement.set.autocomplete"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLInputElement.get.autocomplete",Some("\0HTMLInputElement.set.autocomplete"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLFormElement.get.autocomplete",Some("\0HTMLFormElement.set.autocomplete"))?;}
+            if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"acceptCharset","\0HTMLFormElement.get.acceptCharset",Some("\0HTMLFormElement.set.acceptCharset"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"noValidate","\0HTMLFormElement.get.noValidate",Some("\0HTMLFormElement.set.noValidate"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"name","\0HTMLFormElement.get.name",Some("\0HTMLFormElement.set.name"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"defaultValue","\0HTMLTextAreaElement.get.defaultValue",Some("\0HTMLTextAreaElement.set.defaultValue"))?;}
