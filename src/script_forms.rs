@@ -1,7 +1,7 @@
 //! HTMLFormElement.submit() snapshots supported form data before yielding to
 //! App's existing navigation queue. No script-controlled request starts here.
-//! requestSubmit is deliberately not exposed: its synchronous submit-event
-//! dispatch needs a separate reentrant event path.
+//! requestSubmit shares this serializer and queue after synchronous validation
+//! and trusted submit-event delivery in the current caller job.
 use super::*;
 
 impl Bridge<'_> {
@@ -36,6 +36,10 @@ impl Bridge<'_> {
         if tag(self.doc, form) != "form" {
             return Err("submit() requires a form receiver.".into());
         }
+        self.queue_form_submission(form,None,false)
+    }
+
+    pub(super) fn queue_form_submission(&mut self,form:usize,submitter:Option<usize>,validated:bool)->Result<Value,String>{
         if !self.state.dom.connected.get(form).copied().unwrap_or(false) {
             return Ok(Value::Undefined); // A detached form cannot navigate.
         }
@@ -64,9 +68,9 @@ impl Bridge<'_> {
         // byte. Charge its bounded work and the maximum CSP snapshot together.
         self.state
             .copies(copy_work.saturating_mul(3).saturating_add(64 * 1024))?;
-        let submission = self
-            .forms
-            .script_submit_request(self.doc, form, &current, &base)?;
+        let submission=if validated{
+            self.forms.validated_submit_request(self.doc,form,submitter,&current,&base)?
+        }else{self.forms.script_submit_request(self.doc,form,&current,&base)?};
         if submission
             .location
             .url
