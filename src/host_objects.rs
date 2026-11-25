@@ -628,6 +628,7 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"hreflang","\0HTMLAreaElement.get.hreflang",Some("\0HTMLAreaElement.set.hreflang"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"target","\0HTMLAreaElement.get.target",Some("\0HTMLAreaElement.set.target"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"rel","\0HTMLAreaElement.get.rel",Some("\0HTMLAreaElement.set.rel"))?;}
+            if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"href","\0HTMLAreaElement.get.href",Some("\0HTMLAreaElement.set.href"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"referrerPolicy","\0HTMLAreaElement.get.referrerPolicy",Some("\0HTMLAreaElement.set.referrerPolicy"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"relList","\0HTMLAreaElement.get.relList",Some("\0HTMLAreaElement.set.relList"))?;}
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"ping","\0HTMLAreaElement.get.ping",Some("\0HTMLAreaElement.set.ping"))?;}
