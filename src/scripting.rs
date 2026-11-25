@@ -10733,3 +10733,7 @@ mod script_datalist_options;
 #[cfg(test)]
 #[path="script_datalist_detached_copy_tests.rs"]
 mod datalist_detached_copy_tests;
+
+#[cfg(test)]
+#[path="script_datalist_connection_tests.rs"]
+mod datalist_connection_tests;

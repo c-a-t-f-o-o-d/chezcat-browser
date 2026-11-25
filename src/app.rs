@@ -6959,3 +6959,7 @@ mod datalist_options_tests;
 #[cfg(test)]
 #[path="app_datalist_detached_copy_tests.rs"]
 mod datalist_detached_copy_tests;
+
+#[cfg(test)]
+#[path="app_datalist_connection_tests.rs"]
+mod datalist_connection_tests;
