@@ -68,7 +68,7 @@ impl Engine<'_> {
                 next += 1;
                 groups[node] = next;
             }
-            for &child in self.doc.nodes[node].children.iter().rev() {
+            for &child in self.visual_children(node).iter().rev() {
                 if child < count && self.parents[child] == Some(node) && groups[child] == usize::MAX {
                     groups[child] = groups[node];
                     stack.push(child);
@@ -207,7 +207,7 @@ impl Engine<'_> {
             }
             context[node] = ctx;
             auto[node] = layer;
-            for &child in self.doc.nodes[node].children.iter().rev() {
+            for &child in self.visual_children(node).iter().rev() {
                 if child < n && self.parents[child] == Some(node) && !seen[child] {
                     push(&mut stack, (child, ctx, layer))?;
                 }
