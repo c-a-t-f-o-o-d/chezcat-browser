@@ -1068,6 +1068,25 @@ foreign/uncertain boundaries remain. These native Linux parser results do not
 establish Page, Windows frontend, browser or XML/XHTML qualification. F05 stays
 partial.
 
+**Ruby annotation-start increment:** with an HTML RUBY in ordinary scope, native
+RB/RTC starts close successive current implied-end nodes;
+RP/RT use the same exact category except RTC. A current nonmember stops closure,
+even with an older open annotation. Without a scoped RUBY, insertion continues
+without these implied ends. The scoped RUBY itself remains open, so this
+recovery cannot expose a table for insertion. Existing formatting rules and
+checked context/select/table/foreign admission remain authoritative.
+
+All 19 frozen original cases pass, up from five: 18 native parser cases and one
+actual Page/Bridge consumer covering connected and detached innerHTML. All 175
+affected controls pass, including 20 existing innerHTML cases, for 194 candidate
+passes in the original Cargo crate. Original expected outcomes are unchanged.
+The checks cover ordinary scope, the RTC exception, current-node barriers,
+formatting identity, retained old subtrees, table/cell/caption ownership, exact
+node/depth admission, cancellation and fresh recovery. Flat and uncertain foreign
+behavior remains unchanged. These source-bound Linux results do not establish
+ruby layout, broader insertion modes, Windows frontend, browser or XML/XHTML
+qualification; F05 stays partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
