@@ -175,9 +175,10 @@ root.innerHTML='<p><b>x<div>y';
 if(root.innerHTML!=='<p><b>x</b></p><div><b>y</b></div>')throw 'implied-close reconstruction';
 "#);
     assert_eq!(result.errors,0,"{}",page.report());
-    for source in ["<!bogus>","<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","<script><!--<script></script><img src=x></script>","<img! src=x>","<imgé src=x>","<img =src=x>","<img\u{b}src=x>","</>","</!>","a\0b"] {
+    for source in ["<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","<dl><dt>a<dd>b</dl>","<h1>a<h2>b</h2>","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
     }
+    crate::html::fragment_token_guard_tests::assert_supported_fragment_token_recovery();
     let vt = crate::html::parse_fragment("<img src\u{b}='/not-a-source'>", "div", true).unwrap();
     assert_eq!(vt.attr(1, "src"), None);
     assert_eq!(vt.attr(1, "src\u{b}"), Some("/not-a-source"));

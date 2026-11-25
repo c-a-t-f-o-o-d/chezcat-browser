@@ -17,6 +17,8 @@ mod named_references;
 mod script_data;
 #[path = "html_data_characters.rs"]
 mod data_characters;
+#[path = "html_tag_tokens.rs"]
+mod tag_tokens;
 
 #[cfg(test)]
 #[path = "html_script_data_tests.rs"]
@@ -25,6 +27,14 @@ mod script_data_tests;
 #[cfg(test)]
 #[path = "html_script_end_tag_tests.rs"]
 mod script_end_tag_tests;
+
+#[cfg(test)]
+#[path = "html_tag_token_tests.rs"]
+mod tag_token_tests;
+
+#[cfg(test)]
+#[path = "html_fragment_token_guard_tests.rs"]
+pub(crate) mod fragment_token_guard_tests;
 
 #[cfg(test)]
 #[path = "html_text_state_boundary_tests.rs"]
@@ -504,7 +514,7 @@ fn parse_internal(
             position+=consumed;continue;
         }
         if doctype_open {
-            if checked { return Err("HTML fragment declaration/comment tokens are not implemented.".into()); }
+            // Fragments consume the token but never enter the initial document branch.
             tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;
             let token=doctype::read(&rest[9..],loaded.map(|loaded|loaded.check_cancel))?;
             if initial {
@@ -908,145 +918,12 @@ enum TagToken {
     Unsupported(&'static str),
 }
 
-fn tag_space(byte: u8, checked: bool) -> bool {
-    if checked { matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c') } else { byte.is_ascii_whitespace() }
+fn tag_space(byte: u8, _checked: bool) -> bool {
+    tag_tokens::space(byte)
 }
 
 fn read_tag_mode(input: &str, start: usize, checked: bool, check: Option<&dyn Fn() -> Result<(), String>>) -> Result<TagToken, String> {
-    let bytes = input.as_bytes();
-    let mut position = start + 1;
-    let closing = bytes.get(position) == Some(&b'/');
-    if closing {
-        position += 1;
-    }
-    if !bytes.get(position).is_some_and(u8::is_ascii_alphabetic) {
-        return Ok(TagToken::NotATag);
-    }
-    let name_start = position;
-    while position < bytes.len()
-        && (bytes[position].is_ascii_alphanumeric()
-            || matches!(bytes[position], b'-' | b'_' | b':'))
-    {
-        position += 1;
-    }
-    let name = input[name_start..position].to_ascii_lowercase();
-    // Closing text-token attributes are parsed then discarded by the caller.
-    let text_end = closing && matches!(name.as_str(),
-        "script" | "style" | "title" | "textarea" | "iframe" | "xmp" | "noembed" | "noframes");
-    // Only explicitly supported SVG elements and these checked fragments use
-    // strict token evidence. Other elements retain the normal tokenizer rules.
-    let checked_native_fragment = checked && matches!(name.as_str(), "table" | "textarea");
-    let mut clean_syntax = (svg_namespace::shape_element(&name) || checked_native_fragment)
-        && bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
-    let mut self_closing = false;
-    if checked && bytes.get(position).is_some_and(|byte| !tag_space(*byte, true) && !matches!(*byte, b'/' | b'>')) { return Ok(TagToken::Unsupported("HTML fragment tag-name tokenization is not implemented for this boundary.")); }
-    let mut attrs: Vec<(String, String)> = Vec::new();
-    let mut seen = HashSet::new();
-    let mut duplicate_attributes = false;
-
-    while position < bytes.len() {
-        while position < bytes.len() && tag_space(bytes[position], checked) {
-            position += 1;
-        }
-        if position == bytes.len() {
-            break;
-        }
-        if bytes[position] == b'>' {
-            return Ok(TagToken::Complete(Tag {
-                name,
-                id: attrs
-                    .iter()
-                    .find(|(name, _)| name == "id")
-                    .map(|(_, value)| value.clone()),
-                href: attrs
-                    .iter()
-                    .find(|(name, _)| name == "href")
-                    .map(|(_, value)| value.clone()),
-                attrs,
-                closing,
-                self_closing,
-                clean_syntax: clean_syntax && !duplicate_attributes && !input[start..position].contains(['\0', '\x0b']),
-                end: position + 1,
-                duplicate_attributes,
-            }));
-        }
-        if bytes[position] == b'/' {
-            self_closing = bytes.get(position + 1) == Some(&b'>');
-            clean_syntax &= self_closing;
-            position += 1;
-            continue;
-        }
-
-        let attribute_start = position;
-        // Before-attribute-name '=' starts an attribute whose name begins with
-        // '='. Preserve it so a second '=' enters a real quoted/unquoted value.
-        if text_end && !checked && bytes[position] == b'=' { position += 1; }
-        while position < bytes.len()
-            && !tag_space(bytes[position], checked)
-            && !matches!(bytes[position], b'=' | b'/' | b'>')
-        {
-            position += 1;
-        }
-        if position == attribute_start {
-            if checked { return Ok(TagToken::Unsupported("HTML fragment attribute-name recovery is not implemented.")); }
-            // A stray '=' must still advance the parser.
-            clean_syntax = false;
-            position += 1;
-            continue;
-        }
-        let attribute = &input[attribute_start..position];
-        if checked_native_fragment && attribute.contains(['"', '\'', '<']) {
-            clean_syntax = false;
-        }
-        while position < bytes.len() && tag_space(bytes[position], checked) {
-            position += 1;
-        }
-
-        let mut value = "";
-        if bytes.get(position) == Some(&b'=') {
-            position += 1;
-            while position < bytes.len() && tag_space(bytes[position], checked) {
-                position += 1;
-            }
-            if matches!(bytes.get(position), Some(b'\'' | b'"')) {
-                let quote = bytes[position];
-                position += 1;
-                let value_start = position;
-                while position < bytes.len() && bytes[position] != quote {
-                    position += 1;
-                }
-                value = &input[value_start..position];
-                if position < bytes.len() {
-                    position += 1;
-                    clean_syntax &= bytes.get(position).is_some_and(|b| tag_space(*b, true) || matches!(b, b'/' | b'>'));
-                }
-            } else {
-                let value_start = position;
-                while position < bytes.len()
-                    && !tag_space(bytes[position], checked)
-                    && bytes[position] != b'>'
-                {
-                    position += 1;
-                }
-                value = &input[value_start..position];
-                clean_syntax = clean_syntax && !value.is_empty() && !value.contains(['"', '\'', '<', '=', '`']);
-            }
-        }
-
-        // Hashing avoids quadratic scans when a tag contains many attributes.
-        let attribute = attribute.to_ascii_lowercase();
-        if seen.insert(attribute.clone()) {
-            attrs.push((attribute, named_references::decode(value, true, check)?));
-        } else {
-            duplicate_attributes = true;
-        }
-    }
-
-    Ok(if checked_native_fragment {
-        TagToken::Unsupported(if name == "table" { "Incomplete HTML fragment table tag." } else { "Incomplete HTML fragment TEXTAREA tag." })
-    } else {
-        TagToken::Incomplete
-    })
+    tag_tokens::read(input, start, checked, check)
 }
 
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
@@ -1560,6 +1437,10 @@ mod tests {
 #[cfg(test)]
 #[path = "html_select_fragment_tests.rs"]
 mod select_fragment_tests;
+
+#[cfg(test)]
+#[path = "html_fragment_doctype_tests.rs"]
+mod fragment_doctype_tests;
 
 #[path = "html_comments.rs"]
 mod comments;

@@ -70,7 +70,13 @@ fn rawtext_and_rcdata_end_tokens_use_exact_delimiters_and_eof_rules() {
         assert_eq!(text(&doc, element(&doc, "p")), "tail");
     }
     for context in ["div", "template"] {
-        assert!(parse_fragment("<style>A</style =foo>", context, false).is_err());
+        let doc = parse_fragment("<style>A</style =foo><p>tail</p>", context, false).unwrap();
+        let style = element(&doc, "style");
+        let paragraph = element(&doc, "p");
+        assert_eq!(doc.nodes[0].children, [style, paragraph]);
+        assert_eq!(text(&doc, style), "A");
+        assert_eq!(text(&doc, paragraph), "tail");
+        assert!(matches!(&doc.nodes[style].kind, NodeKind::Element { attrs, .. } if attrs.is_empty()));
         assert!(parse_fragment("<textarea>A</textarea x=y>", context, false).is_err());
     }
 }

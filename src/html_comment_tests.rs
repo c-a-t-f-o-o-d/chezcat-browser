@@ -42,7 +42,9 @@ fn fragment_comments_raw_contexts_remain_text_and_real_node_limits_still_refuse(
     assert!(parse_fragment(&"<!---->".repeat(MAX_NODES),"div",true).unwrap_err().contains("node limit"));
     let pi=parse_fragment("<?pi?>","div",true).unwrap();
     assert!(matches!(&pi.nodes[pi.nodes[0].children[0]].kind,NodeKind::ProcessingInstruction{target,data} if target=="pi" && data.is_empty()));
-    assert!(parse_fragment("<!DOCTYPE html>","div",true).is_err());
+    let declaration=parse_fragment("<!DOCTYPE html>","div",true).unwrap();
+    assert_eq!(declaration.nodes.len(),1);assert!(declaration.nodes[0].children.is_empty());
+    assert_eq!(declaration.mode,DocumentMode::NoQuirks);
     for (markup,data) in [("<![CDATA[unsupported]]>","[CDATA[unsupported]]"),("<!unimplemented>","unimplemented")] {
         let doc=parse_fragment(markup,"div",true).unwrap();
         assert_eq!(comments(&doc),[data]);assert_eq!(doc.nodes.len(),2);
