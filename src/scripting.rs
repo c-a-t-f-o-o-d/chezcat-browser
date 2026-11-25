@@ -2499,7 +2499,7 @@ impl Bridge<'_> {
     fn attribute_dom_named_prepared(&mut self,node:usize,name:crate::html::AttributeName,value:Option<DomString>,input:script_attr::InputPreparation)->Result<(),String>{
         let meta = self.meta_content_attribute(node, &name);
         if meta { self.check_meta_change(node, &name, value.as_ref())?; }
-        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_select_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_textarea_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_dimensions_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_textarea_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||((script_attr::html_textarea_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_wrap_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_select_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_input_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_input_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_input_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||(script_attr::html_button_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_button_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))||(((script_attr::html_form_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||((script_attr::html_form_accept_charset_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_form_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||((script_attr::html_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))||((script_attr::html_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))))))))) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((((script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_textarea_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))||script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
+        if value.as_ref().is_some_and(|v|v.raw_units().is_some()) && !self.html_id_attribute(node,&name) && !self.html_passive_name_attribute(node,&name) && !meta && !self.resource_charset_attribute(node,&name) && !self.html_class_attribute(node,&name) && !self.html_text_reflection_attribute(node,&name) && !script_attr::html_aria_attribute(self.doc.nodes[node].namespace,&name) && !script_attr::html_label_or_output_for_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_output_form_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_time_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_alt_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_optgroup_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_label_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_option_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_select_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_textarea_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))) && !script_attr::html_area_coords_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_shape_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_download_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_hreflang_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_referrer_policy_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_area_ping_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_map_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_param_name_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_param_metadata_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_mod_datetime_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_data_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_heading_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_type_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_li_value_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_pre_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_textarea_dimensions_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_textarea_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_max_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||((script_attr::html_textarea_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_min_length_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(((((script_attr::html_textarea_wrap_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_step_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_max_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_min_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_pattern_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_select_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_input_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_input_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_input_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||(script_attr::html_button_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(script_attr::html_button_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))||(((script_attr::html_form_autocomplete_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_form_method_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_form_action_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_form_enctype_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||((script_attr::html_form_accept_charset_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_form_rel_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||((script_attr::html_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_form_target_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))||((script_attr::html_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_form_no_validate_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))))))))))) && !script_attr::html_ol_start_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ul_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_dir_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_menu_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_no_shade_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_ol_reversed_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !(script_attr::html_area_no_href_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||(((script_attr::html_option_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((((script_attr::html_select_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_button_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_input_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||((script_attr::html_textarea_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||(script_attr::html_textarea_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)||script_attr::html_input_read_only_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))))||script_attr::html_select_required_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name)))||script_attr::html_option_default_selected_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))||script_attr::html_optgroup_disabled_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name))) && !script_attr::html_dl_compact_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_paragraph_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_face_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_font_color_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_br_clear_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_size_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_hr_width_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_legend_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_div_align_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_meter_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !script_attr::html_progress_number_attribute(self.doc.nodes[node].namespace,tag(self.doc,node),&name) && !name.namespace_uri().is_some_and(|uri|uri=="http://www.w3.org/2000/xmlns/") && !name.qualified.starts_with("data-"){return Err("Unpaired attribute DOMString integration currently requires supported HTML ID or passive metadata.".into());}
         // HTML style sheet media is a live reference to the element's media
         // attribute. Type and nonce are checked when updating the style block
         // on connection; changing either attribute alone does not update it.
@@ -3238,6 +3238,10 @@ impl Bridge<'_> {
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
+        if self.input_step_member(object,property){return true;}
+        if self.input_max_member(object,property){return true;}
+        if self.input_min_member(object,property){return true;}
+        if self.input_pattern_member(object,property){return true;}
         if self.li_value_member(object,property){return true;}
         if self.pre_width_member(object,property){return true;}
         if self.textarea_dimensions_member(object,property){return true;}
@@ -3473,6 +3477,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(target,property){return Some("autocomplete");}
         if self.textarea_autocomplete_member(target,property){return Some("autocomplete");}
         if self.textarea_wrap_member(target,property){return Some("wrap");}
+        if self.input_step_member(target,property){return Some("step");}
+        if self.input_max_member(target,property){return Some("max");}
+        if self.input_min_member(target,property){return Some("min");}
+        if self.input_pattern_member(target,property){return Some("pattern");}
         if self.li_value_member(target,property){return Some("value");}
         if self.pre_width_member(target,property){return Some("width");}
         if self.textarea_dimensions_member(target,property){return Some(if property=="cols"{"cols"}else{"rows"});}
@@ -3776,6 +3784,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return false;}
         if self.textarea_autocomplete_member(object,property){return false;}
         if self.textarea_wrap_member(object,property){return false;}
+        if self.input_step_member(object,property){return false;}
+        if self.input_max_member(object,property){return false;}
+        if self.input_min_member(object,property){return false;}
+        if self.input_pattern_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4012,6 +4024,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return false;}
         if self.textarea_autocomplete_member(object,property){return false;}
         if self.textarea_wrap_member(object,property){return false;}
+        if self.input_step_member(object,property){return false;}
+        if self.input_max_member(object,property){return false;}
+        if self.input_min_member(object,property){return false;}
+        if self.input_pattern_member(object,property){return false;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4146,6 +4162,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
+        if self.input_step_member(object,property){return true;}
+        if self.input_max_member(object,property){return true;}
+        if self.input_min_member(object,property){return true;}
+        if self.input_pattern_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4296,6 +4316,10 @@ impl Host for Bridge<'_> {
         if method==script_select_autocomplete::SET&&self.select_autocomplete_receiver(object){return Some("autocomplete");}
         if method==script_textarea_autocomplete::SET&&self.textarea_autocomplete_receiver(object){return Some("autocomplete");}
         if method==script_textarea_wrap::SET&&self.textarea_wrap_receiver(object){return Some("wrap");}
+        if method==script_input_step::SET&&self.input_step_receiver(object){return Some("step");}
+        if method==script_input_max::SET&&self.input_max_receiver(object){return Some("max");}
+        if method==script_input_min::SET&&self.input_min_receiver(object){return Some("min");}
+        if method==script_input_pattern::SET&&self.input_pattern_receiver(object){return Some("pattern");}
         if method==script_li_value::SET&&self.li_value_receiver(object){return Some("value");}
         if method==script_pre_width::SET&&self.pre_width_receiver(object){return Some("width");}
         if let Some((property,true))=script_textarea_dimensions::operation(method){if self.textarea_dimensions_receiver(object){return Some(property);}}
@@ -4483,6 +4507,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return true;}
         if self.textarea_autocomplete_member(object,property){return true;}
         if self.textarea_wrap_member(object,property){return true;}
+        if self.input_step_member(object,property){return true;}
+        if self.input_max_member(object,property){return true;}
+        if self.input_min_member(object,property){return true;}
+        if self.input_pattern_member(object,property){return true;}
         if self.li_value_member(object,property){return false;}
         if self.pre_width_member(object,property){return false;}
         if self.textarea_dimensions_member(object,property){return false;}
@@ -4836,6 +4864,10 @@ impl Host for Bridge<'_> {
         if script_select_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_autocomplete::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_wrap::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_input_step::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_input_max::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_input_min::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_input_pattern::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_li_value::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_pre_width::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_textarea_dimensions::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -5264,6 +5296,10 @@ impl Host for Bridge<'_> {
         if script_select_autocomplete::operation(method){return self.validate_select_autocomplete(object);}
         if script_textarea_autocomplete::operation(method){return self.validate_textarea_autocomplete(object);}
         if script_textarea_wrap::operation(method){return self.validate_textarea_wrap(object);}
+        if script_input_step::operation(method){return self.validate_input_step(object);}
+        if script_input_max::operation(method){return self.validate_input_max(object);}
+        if script_input_min::operation(method){return self.validate_input_min(object);}
+        if script_input_pattern::operation(method){return self.validate_input_pattern(object);}
         if script_li_value::operation(method){return self.validate_li_value(object);}
         if script_pre_width::operation(method){return self.validate_pre_width(object);}
         if script_textarea_dimensions::operation(method).is_some(){return self.validate_textarea_dimensions(object);}
@@ -5591,6 +5627,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return self.validate_select_autocomplete(object);}
         if self.textarea_autocomplete_member(object,property){return self.validate_textarea_autocomplete(object);}
         if self.textarea_wrap_member(object,property){return self.validate_textarea_wrap(object);}
+        if self.input_step_member(object,property){return self.validate_input_step(object);}
+        if self.input_max_member(object,property){return self.validate_input_max(object);}
+        if self.input_min_member(object,property){return self.validate_input_min(object);}
+        if self.input_pattern_member(object,property){return self.validate_input_pattern(object);}
         if self.li_value_member(object,property){return self.validate_li_value(object);}
         if self.pre_width_member(object,property){return self.validate_pre_width(object);}
         if self.textarea_dimensions_member(object,property){return self.validate_textarea_dimensions(object);}
@@ -5937,6 +5977,10 @@ impl Host for Bridge<'_> {
         if script_select_autocomplete::operation(method){return self.event_target_interface(object)&&self.select_autocomplete_receiver(receiver);}
         if script_textarea_autocomplete::operation(method){return self.event_target_interface(object)&&self.textarea_autocomplete_receiver(receiver);}
         if script_textarea_wrap::operation(method){return self.event_target_interface(object)&&self.textarea_wrap_receiver(receiver);}
+        if script_input_step::operation(method){return self.event_target_interface(object)&&self.input_step_receiver(receiver);}
+        if script_input_max::operation(method){return self.event_target_interface(object)&&self.input_max_receiver(receiver);}
+        if script_input_min::operation(method){return self.event_target_interface(object)&&self.input_min_receiver(receiver);}
+        if script_input_pattern::operation(method){return self.event_target_interface(object)&&self.input_pattern_receiver(receiver);}
         if script_li_value::operation(method){return self.event_target_interface(object)&&self.li_value_receiver(receiver);}
         if script_pre_width::operation(method){return self.event_target_interface(object)&&self.pre_width_receiver(receiver);}
         if script_textarea_dimensions::operation(method).is_some(){return self.event_target_interface(object)&&self.textarea_dimensions_receiver(receiver);}
@@ -6924,6 +6968,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return self.select_autocomplete_get(object);}
         if self.textarea_autocomplete_member(object,property){return self.textarea_autocomplete_get(object);}
         if self.textarea_wrap_member(object,property){return self.textarea_wrap_get(object);}
+        if self.input_step_member(object,property){return self.input_step_get(object);}
+        if self.input_max_member(object,property){return self.input_max_get(object);}
+        if self.input_min_member(object,property){return self.input_min_get(object);}
+        if self.input_pattern_member(object,property){return self.input_pattern_get(object);}
         if self.li_value_member(object,property){return self.li_value_get(object);}
         if self.pre_width_member(object,property){return self.pre_width_get(object);}
         if self.textarea_dimensions_member(object,property){return self.textarea_dimensions_get(object,property);}
@@ -7451,6 +7499,10 @@ impl Host for Bridge<'_> {
         if self.select_autocomplete_member(object,property){return self.select_autocomplete_set(object,&value);}
         if self.textarea_autocomplete_member(object,property){return self.textarea_autocomplete_set(object,&value);}
         if self.textarea_wrap_member(object,property){return self.textarea_wrap_set(object,&value);}
+        if self.input_step_member(object,property){return self.input_step_set(object,&value);}
+        if self.input_max_member(object,property){return self.input_max_set(object,&value);}
+        if self.input_min_member(object,property){return self.input_min_set(object,&value);}
+        if self.input_pattern_member(object,property){return self.input_pattern_set(object,&value);}
         if self.li_value_member(object,property){return self.li_value_set(object,&value);}
         if self.pre_width_member(object,property){return self.pre_width_set(object,&value);}
         if self.textarea_dimensions_member(object,property){return self.textarea_dimensions_set(object,property,&value);}
@@ -7983,6 +8035,10 @@ impl Host for Bridge<'_> {
         if method==script_select_autocomplete::SET{return Err("Select autocomplete setters require the native conversion transaction.".into());}
         if method==script_textarea_autocomplete::SET{return Err("Textarea autocomplete setters require the native conversion transaction.".into());}
         if method==script_textarea_wrap::SET{return Err("Textarea wrap setters require the native conversion transaction.".into());}
+        if method==script_input_step::SET{return Err("Input step setters require the native conversion transaction.".into());}
+        if method==script_input_max::SET{return Err("Input max setters require the native conversion transaction.".into());}
+        if method==script_input_min::SET{return Err("Input min setters require the native conversion transaction.".into());}
+        if method==script_input_pattern::SET{return Err("Input pattern setters require the native conversion transaction.".into());}
         if method==script_li_value::SET{return Err("LI value setters require the native conversion transaction.".into());}
         if method==script_pre_width::SET{return Err("PRE width setters require the native conversion transaction.".into());}
         if matches!(script_textarea_dimensions::operation(method),Some((_,true))){return Err("Textarea dimension setters require the native conversion transaction.".into());}
@@ -8052,6 +8108,10 @@ impl Host for Bridge<'_> {
         if method==script_select_autocomplete::GET{return self.select_autocomplete_get(object);}
         if method==script_textarea_autocomplete::GET{return self.textarea_autocomplete_get(object);}
         if method==script_textarea_wrap::GET{return self.textarea_wrap_get(object);}
+        if method==script_input_step::GET{return self.input_step_get(object);}
+        if method==script_input_max::GET{return self.input_max_get(object);}
+        if method==script_input_min::GET{return self.input_min_get(object);}
+        if method==script_input_pattern::GET{return self.input_pattern_get(object);}
         if method==script_li_value::GET{return self.li_value_get(object);}
         if method==script_pre_width::GET{return self.pre_width_get(object);}
         if let Some((property,false))=script_textarea_dimensions::operation(method){return self.textarea_dimensions_get(object,property);}
@@ -11948,3 +12008,19 @@ mod script_input_max_length;
 
 #[path="script_input_min_length.rs"]
 mod script_input_min_length;
+
+#[cfg(test)]
+#[path="script_input_constraint_metadata_tests.rs"]
+mod input_constraint_metadata_tests;
+
+#[path="script_input_pattern.rs"]
+mod script_input_pattern;
+
+#[path="script_input_min.rs"]
+mod script_input_min;
+
+#[path="script_input_max.rs"]
+mod script_input_max;
+
+#[path="script_input_step.rs"]
+mod script_input_step;

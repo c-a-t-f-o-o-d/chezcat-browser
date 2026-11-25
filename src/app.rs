@@ -7199,3 +7199,7 @@ mod input_max_length_tests;
 #[cfg(test)]
 #[path="app_input_min_length_tests.rs"]
 mod input_min_length_tests;
+
+#[cfg(test)]
+#[path="app_input_constraint_metadata_tests.rs"]
+mod input_constraint_metadata_tests;
