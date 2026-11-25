@@ -10262,3 +10262,7 @@ mod historical_html_tests;
 #[cfg(test)]
 #[path="script_semantic_html_tests.rs"]
 mod semantic_html_tests;
+
+#[cfg(test)]
+#[path="script_unknown_fallback_tests.rs"]
+mod unknown_fallback_tests;
