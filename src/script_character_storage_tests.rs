@@ -101,6 +101,8 @@ fn character_storage_clone_compacts_source_and_content_moves_real_capacity() {
     let parent = doc.nodes.iter().position(|node| matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "p")).unwrap();
     let source = doc.nodes[parent].children[0];
     doc.nodes[source].kind = NodeKind::Text(wide("x", 128).into());
+    // Exact initial node backing makes later minimum-growth witnesses deterministic.
+    doc.nodes = doc.nodes.into_boxed_slice().into_vec();
     let (mut doc, mut forms, mut page) = start(doc);
     let before = page.state.retained;
     let clone_cost=1+Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(1).unwrap();
@@ -110,11 +112,23 @@ fn character_storage_clone_compacts_source_and_content_moves_real_capacity() {
     assert_eq!(page.state.retained, before + clone_cost);
     let text_cost=64+Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.main_node_minimum(1).unwrap();
     page.state.retained_limit = before + clone_cost + text_cost;
+    let snapshot=format!("{:?}",doc.nodes);
+    let retained=page.state.retained;
+    let e=Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("new",64).into()).unwrap_err();
+    assert!(e.contains("storage allowance"),"{e}");
+    assert_eq!(format!("{:?}",doc.nodes),snapshot);
+    assert_eq!(page.state.retained,retained);
+    // Two four-slot traversal vectors coexist with the input. Scratch is not retained.
+    let scratch=64+8*size_of::<usize>();
+    page.state.retained_limit = before + clone_cost + text_cost + 4*size_of::<usize>();
+    page.begin_job();
     Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("new", 64).into()).unwrap();
     assert_eq!(page.state.retained, before + clone_cost + text_cost);
     assert_eq!(doc.nodes[source].kind.character_data(), Some("x"));
     assert!(page.state.detached_nodes.contains(&source));
     let count = doc.nodes.len();
+    page.state.retained_limit = page.state.retained + scratch;
+    page.begin_job();
     Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state }.set_text_content(parent, wide("", 64).into()).unwrap();
     assert_eq!(doc.nodes.len(), count);
     assert_eq!(page.state.retained, before + clone_cost + text_cost);
