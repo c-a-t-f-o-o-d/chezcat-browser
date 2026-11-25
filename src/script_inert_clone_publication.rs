@@ -35,7 +35,7 @@ impl Bridge<'_> {
                     raw.is_some_and(template_node_can_park)
                 },
                 Kind::Text(_) => true,
-                Kind::Element(tag) => matches!(tag.as_str(),"area"|"param"|"datalist"|"style") || script_clone_node::ordinary_clone_element(tag),
+                Kind::Element(tag) => matches!(tag.as_str(),"area"|"param"|"datalist"|"optgroup"|"style") || script_clone_node::ordinary_clone_element(tag),
                 _ => false,
             };
             let handle = if reserve_slots && safe && parked < slots {
