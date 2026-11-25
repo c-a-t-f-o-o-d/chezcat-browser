@@ -175,9 +175,21 @@ root.innerHTML='<p><b>x<div>y';
 if(root.innerHTML!=='<p><b>x</b></p><div><b>y</b></div>')throw 'implied-close reconstruction';
 "#);
     assert_eq!(result.errors,0,"{}",page.report());
-    for source in ["<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a</br>b","</p>","a\0b"] {
+    for source in ["<xmp><img src=x></xmp>","<plaintext><img src=x>","<picture><img src=x></picture>","<b><table><tr><td>held","a\0b"] {
         assert!(crate::html::parse_fragment(source, "div", true).is_err(), "{source}");
     }
+    let recovered_p = crate::html::parse_fragment("</p>", "div", true).unwrap();
+    assert_eq!(recovered_p.nodes[0].children, [1]);
+    assert!(matches!(&recovered_p.nodes[1].kind, NodeKind::Element { tag, attrs, id: None, href: None, .. }
+        if tag == "p" && attrs.is_empty()));
+    assert!(recovered_p.nodes[1].children.is_empty());
+    let recovered_br = crate::html::parse_fragment("a</br>b", "div", true).unwrap();
+    assert_eq!(recovered_br.nodes[0].children, [1, 2, 3]);
+    assert!(matches!(&recovered_br.nodes[1].kind, NodeKind::Text(text) if text == "a"));
+    assert!(matches!(&recovered_br.nodes[2].kind, NodeKind::Element { tag, attrs, id: None, href: None, .. }
+        if tag == "br" && attrs.is_empty()));
+    assert!(recovered_br.nodes[2].children.is_empty());
+    assert!(matches!(&recovered_br.nodes[3].kind, NodeKind::Text(text) if text == "b"));
     let headings = crate::html::parse_fragment("<h1>a<h2>b</h2>", "div", true).unwrap();
     assert_eq!(headings.nodes[0].children, [1, 3]);
     for (node, name, expected_text) in [(1, "h1", "a"), (3, "h2", "b")] {
@@ -461,6 +473,42 @@ function verify(target) {
   var first=target.firstChild.firstChild,copy=target.childNodes[1];
   if(target.innerHTML!=='<h2><b>A</b></h2><b>B</b>C'||first===copy||
      copy.parentNode!==target||copy.ownerDocument!==document)throw Error('end formatting reconstruction');
+}
+verify(document.createElement('div'));verify(document.getElementById('root'));
+"#);
+    assert_eq!(outcome.errors, 0, "{}", page.report());
+}
+
+#[test]
+fn inner_html_ordinary_end_scope_preserves_connected_and_detached_owner_links() {
+    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+function verify(target) {
+  target.innerHTML='<section>A<marquee>B</section>C</marquee>D';
+  var section=target.firstChild,boundary=section.childNodes[1];
+  if(target.innerHTML!=='<section>A<marquee>BC</marquee>D</section>'||
+     target.childNodes.length!==1||boundary.parentNode!==section||boundary.firstChild.data!=='BC'||
+     section.lastChild.data!=='D'||section.ownerDocument!==document||
+     section.isConnected!==target.isConnected)throw Error('ordinary scope ownership');
+  target.innerHTML='<article>A<ul><li>B</article>C';
+  var article=target.firstChild,list=article.lastChild,item=list.firstChild;
+  if(target.innerHTML!=='<article>A<ul><li>B</li></ul></article>C'||
+     item.parentNode!==list||list.parentNode!==article||target.lastChild.data!=='C'||
+     item.ownerDocument!==document)throw Error('ordinary list traversal');
+  target.innerHTML='<select><optgroup><option>A</select>B';
+  var select=target.firstChild,group=select.firstChild,option=group.firstChild;
+  if(target.innerHTML!=='<select><optgroup><option>A</option></optgroup></select>B'||
+     option.parentNode!==group||group.parentNode!==select||target.lastChild.data!=='B'||
+     option.ownerDocument!==document||select.value!=='A')throw Error('select target before scope boundary');
+  target.innerHTML='<section><b>A</section>B</b>C';
+  var first=target.firstChild.firstChild,copy=target.childNodes[1];
+  if(target.innerHTML!=='<section><b>A</b></section><b>B</b>C'||first===copy||
+     copy.parentNode!==target||copy.ownerDocument!==document)throw Error('ordinary end formatting');
+  var retained=target.firstChild,before=target.innerHTML,refused=false;
+  try { target.innerHTML='<section><object>A</section>'; } catch(e) { refused=true; }
+  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('object admission remains atomic');
+  refused=false;
+  try { target.innerHTML='<button>A</button>'; } catch(e) { refused=true; }
+  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('button admission remains atomic');
 }
 verify(document.createElement('div'));verify(document.getElementById('root'));
 "#);

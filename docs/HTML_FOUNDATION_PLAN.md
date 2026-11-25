@@ -902,6 +902,50 @@ unchanged. Added connected/detached Page assertions are not executed by this
 native selection. Paragraph/BR synthesis, broader end rules and Windows/browser/
 corpus acceptance remain separate; F05 stays partial.
 
+**Paragraph/BR end recovery increment:** in the supported native body path, a
+P end closes an in-button-scope paragraph or inserts and immediately closes a
+real attribute-free P. A BR end follows ordinary attribute-free void BR
+insertion. End-token id/href/attributes and duplicate-attribute evidence never
+transfer to recovered nodes. Existing insertion, formatting, table placement,
+node/depth admission and cancellation remain authoritative; empty paragraph
+synthesis does not reconstruct formatting.
+
+A bounded initial-template gate retains the required ignore behavior for these
+ends before a template leaves its initial state. Text and markup leaves do not
+change that state. The exact ten head-metadata starts retain it, including title;
+other original starts exit it before structure/table helpers can consume them.
+Void starts retain that transition, and nested template identities restore their
+outer state on closure. Storage is fallible and bounded by the existing depth
+limit. Exited-initial state does not imply a complete later-template mode.
+
+All 23 frozen new native checks pass, up from three, with all 299 existing HTML
+checks passing, for 322 total. All eight optimized native scenarios pass after
+reproducing missing behavior in the baseline. Cases cover actual trees, scope,
+metadata and consumed-token transitions, nested/root template state, formatting,
+table placement, exact capacities and cancellation/recovery. Four older refusal
+fixtures now have narrow positive parser assertions with other guards retained.
+Direct parser assertions inside a mixed Page test are not executed by this
+selection and do not establish Page behavior. Later template modes and full
+foreign/mode/Windows/browser acceptance remain separate; F05 stays partial.
+
+**Ordinary block-end increment:** the shared scoped-end helper recognizes the
+exact 28-name in-body group, including button and select. An exact native HTML
+target must be in ordinary scope and is tested before barriers; missing or
+blocked targets are ignored. Only recognition changes. The existing scan, root
+floor, LI extras, strict dispatch and generic form/table/foreign/marker behavior
+remain intact.
+
+All 19 frozen original cases and two separately frozen disabled-noscript/table
+cases pass, up from seven of 21. All 322 prior native HTML checks remain passing,
+for 343 total. Eight optimized native scenarios pass, up from three. The
+supplement verifies disabled-noscript traversal and following fostered text,
+alongside the actual table boundary and raw-iframe guards. Generic table fences
+and modes remain unchanged. Original expected outcomes remain unchanged.
+Added connected/detached Page assertions are not executed by the native
+selection. Checked listing/select restrictions, enabled-noscript behavior and
+broader form/marker/template/foreign/mode/Windows/browser requirements remain
+separate; F05 stays partial.
+
 **Deliverables**
 
 - Implement all 21 reviewed insertion modes, plus the foreign-content rules,
