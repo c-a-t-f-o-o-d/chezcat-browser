@@ -29,7 +29,10 @@
     "work_packages": 33,
     "forward_items": 34,
     "qualified_requirement_groups": 0,
-    "fresh_runtime_passes": 615
+    "fresh_runtime_passes": 2710,
+    "merged_implementation_slices": 13,
+    "packages_with_recorded_slices": 12,
+    "qualified_work_packages": 0
   },
   "status_policy": {
     "planned_not_qualified": "Requirement or package exists in the plan; no acceptance claim.",
@@ -1186,7 +1189,1223 @@
         "revert/revert-layer, complete origin/layer cascade behavior, dynamic viewport distinctions and general CSSOM serialization remain open. No script CSSOM whitelist members are added by inline helper admission.",
         "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
         "C00 and complete C04/C05/C11 selections remain unqualified; no complete requirement group or package is closed."
-      ]
+      ],
+      "integrated_revision": "80673efb303f0ca7197fcaf232b0ba96f0d775b9",
+      "pull_request": 642
+    },
+    {
+      "id": "C03-S01",
+      "name": "Shared is/where selector groups and forgiving arguments",
+      "status": "partial",
+      "packages": [
+        "C03"
+      ],
+      "requirement_families": [
+        "CSS-F03"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2026/WD-selectors-4-20260122/",
+          "sections": [
+            "3.9",
+            "4.1",
+            "4.2",
+            "4.3",
+            "4.4",
+            "15",
+            "16.1",
+            "17.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-syntax-3-20261001/",
+          "sections": [
+            "4.3.1",
+            "4.3.2",
+            "5.4.2",
+            "5.4.10",
+            "5.5.8",
+            "5.5.9",
+            "5.5.10",
+            "7.2"
+          ]
+        }
+      ],
+      "implemented": [
+        "Stylesheet and native topology queries share :is() and :where() over the existing supported complex-selector grammar. Each argument list forms a union, multiple groups in a compound intersect, and empty or all-invalid groups remain valid predicates that match no element.",
+        "The specificity of :is() is the maximum among accepted arguments, including an argument that does not match the element. :where() and its contents contribute zero. Discarded invalid arguments contribute nothing; outer lists and :not() retain strict failure behavior.",
+        "Argument boundaries preserve nested balanced functions/blocks, quoted punctuation, escaped punctuation and comments. Boundary recognition does not enable escaped selector matching. Unmatched closing delimiters and bad-string newlines reject the enclosing selector syntax.",
+        "Groups use existing exact DOM string comparisons, ancestry and sibling relations, structural predicates and native checkedness/focus/hover. Cached rule syntax is evaluated against current node attributes, topology and state. Hover discovery recurses through groups; optional alternatives do not become mandatory candidate-index keys.",
+        "The parser distinguishes invalid members from source/list/part/depth-limit and allocation refusal. Refusal cannot be discarded by forgiving lists. Matching refusal propagates through nested groups and negation without fabricating a positive match.",
+        "Production topology queries and cold stylesheet parsing prepay group syntax work and storage from raw source, including comments and discarded alternatives, before allocating the group representation. Ordinary and transform stylesheet budget paths both use this admission. Valid cache hits reuse the admitted representation without reparsing, while current matching and other work remain charged. Fresh allowances permit recovery without partial publication.",
+        "Ordinary native fixtures connect grouped selectors to actual layout rectangles, background pixels and link hit regions. Native form checkedness, class/source replacement, reparenting and hover changes exercise current matching and cached-rule reuse."
+      ],
+      "remaining": [
+        "The shared selector grammar remains finite. Complete CSS tokenization, URL-token and bad-URL recovery, automatic EOF block/function closure, namespace handling and escaped selector matching remain open.",
+        ":has(), :scope, relative selectors, nth-of selector filtering and other unimplemented selector families remain outside this increment. The existing terminal pseudo-element recognition still creates no generated boxes.",
+        "Existing source/list/part/depth caps remain compatibility limitations, not CSS validity rules or completion of capacity work. Propagating allocation refusal does not establish unrestricted selector capacity.",
+        "Complete selector invalidation, general stylesheet/CSSOM integration and unchanged browser WPT acceptance remain open. Native cache/state fixtures do not establish every browser event or document-lifecycle path.",
+        "Windows frontend, real HTTP loading and XHTML presentation have not been executed for this slice.",
+        "C00 inputs and the complete C03 selection remain unqualified; no complete requirement group or package is closed."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "native_tests_total": 148,
+        "original_selector_group_regressions": 45,
+        "existing_related_css_and_layout_tests": 103,
+        "production_probe_count": 10,
+        "production_probe_cases": [
+          "restored-rule-paint",
+          "maximum-zero-specificity",
+          "forgiving-strict-lists",
+          "complex-nested-groups",
+          "class-source-cache",
+          "topology-mutation",
+          "native-checked-state",
+          "hover-cache-state",
+          "comments-quoted-members",
+          "refusal-recovery"
+        ],
+        "scope": "Native selector parsing, matching, specificity, forgiving arguments, current topology/state, query admission and cache behavior, with real layout rectangles, background pixels and link hits. Windows frontend, HTTP, XHTML presentation and browser WPT acceptance are not established by this selection.",
+        "existing_test_corrections": [
+          "The now-supported nested selector :not(:is(.x)) is included among valid negation cases. All remaining strict negation and malformed-list controls are retained."
+        ]
+      },
+      "source_files_revision": "bd88e717c9bc6b31b2d37ddfadf3375d02e77bce",
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "f586bea9556b5811001d548851a7b4fe0e836c6a",
+          "sha256": "aa29af4d0bb357286dcff4d3c6bcbf720a2432eff33e86c4225c6dad45bff154"
+        },
+        "src/css_selector_groups.rs": {
+          "git_blob": "06acbc79b0e9818d875aa11487e3dda1b8a8e758",
+          "sha256": "c8507747ad0a29cca2cf8061c972e39c2cf6c6229b34e1500f0b38b851f6decf"
+        },
+        "src/css_structural.rs": {
+          "git_blob": "a4cb61d0761dc849bdd7877273f1a0ac5c982c52",
+          "sha256": "4893ba08d8d3d7560f1b3e1f306e231b70c4dc4d8644f777b3b27ba722d9d3ff"
+        },
+        "src/css_attribute_substrings.rs": {
+          "git_blob": "8f928bc4913fafad64cdda4516c1932adafaee8b",
+          "sha256": "07d2bb66d55affc6f30efa5d5d799775865d0138f38feb790d27292ab7baede3"
+        },
+        "src/css_selector_group_tests.rs": {
+          "git_blob": "4af012847c2a3efd78f4d1d783e32aef0fb82e1d",
+          "sha256": "32aeb5ce8702b6d218140b7b91ea81ba9284a01eb1f7f6af8282090444193062"
+        },
+        "src/css_selector_negation_protocol_tests.rs": {
+          "git_blob": "d162a3e79dce3b8af4127a790fcf25b410a19feb",
+          "sha256": "791397085f5ecda1ad8212c2cad49dbf2ded0ba80d3eb8cc4e460d6442a03b34"
+        },
+        "src/css_rule_candidates.rs": {
+          "git_blob": "6f1a55c99c0e6e923fd10e3a204526463719bffb",
+          "sha256": "f0a4f7ee00a9fb2f42540c6229cbbbaecb3b42d508f92e3cdbd39d1fa3dd4848"
+        },
+        "src/css_stylesheet_cache.rs": {
+          "git_blob": "0792dd2c97d838d542f6fb43e628e0878f69a774",
+          "sha256": "bdd02c0b334bcd4f55b0afe9dc33568cde0a969d73404611942650e1d21dcc6e"
+        },
+        "src/html.rs": {
+          "git_blob": "9b8887ed5010cb20fe37be6200b3c5a00b812586",
+          "sha256": "7f0f969413bf67fd19a0ff7668ef5b765b96a449ba72ca0ac4d5b50809145b3c"
+        },
+        "src/forms.rs": {
+          "git_blob": "a28dcd49216995fc85c97a3436a31ab7a637f9c7",
+          "sha256": "08a47eed6e5ae1cac43fd81c90b4cefc1a2e1a7c88e864a0cc37a13677efb953"
+        },
+        "src/layout.rs": {
+          "git_blob": "bbdf32280143c92ed8a2f78298f3adb29bdde983",
+          "sha256": "138ff93ec2b55e710e74ada1d54f836f48b7bfca5ce38a16e93f199498215458"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "bd88e717c9bc6b31b2d37ddfadf3375d02e77bce",
+      "pull_request": 649
+    },
+    {
+      "id": "C04-S05",
+      "name": "Flex alignment custom properties and explicit defaulting",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05",
+        "C13"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05",
+        "CSS-F07",
+        "CSS-F11"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2025/CRD-css-flexbox-1-20251014/",
+          "sections": [
+            "8.1",
+            "8.2",
+            "8.3",
+            "8.4",
+            "9.5",
+            "9.6"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2026/WD-css-align-3-20261008/",
+          "sections": [
+            "4.1",
+            "4.3",
+            "5.1",
+            "5.1.3",
+            "6.2",
+            "6.2.4",
+            "7.2"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "4.4",
+            "7.1",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/",
+          "sections": [
+            "2.1",
+            "2.3",
+            "3",
+            "3.1",
+            "3.3"
+          ]
+        }
+      ],
+      "properties": [
+        "justify-content",
+        "align-content",
+        "align-items",
+        "align-self"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The four existing longhands share literal and substituted inherit/initial/unset handling. They remain naturally noninherited; initial and unset select the existing start main-axis, stretched line/item alignment and auto self-alignment representations.",
+        "Explicit inheritance uses a real element parent. Synthetic document and fragment contexts select initial values, while genuine null-namespace element parents remain eligible. Inherited align-self:auto stays auto and resolves against the current container at use time.",
+        "The existing finite grammar is preserved: justify-content normal/flex-start use start; align-content normal uses stretch; align-items and non-auto align-self preserve normal/stretch, start/flex-start and end/flex-end aliases. Existing center/distribution/stretch values and logical start/end representations are reused; no new alignment keywords are added.",
+        "Inherited custom properties, case-sensitive names and nested fallbacks reach the same keyword grammar. Invalid literals leave earlier declarations intact; missing, cyclic or invalid substituted winners select initial behavior without reviving an earlier declaration.",
+        "Native inline declaration-name and text admission use the same exact four-property classifier and value grammar, including real var-function detection. Work/copy admission precedes value parsing when a caller budget is supplied. This does not extend the separate scripting property whitelist.",
+        "Ordinary cascade work and the force-layout/transform budget entry charge alignment value admission and variable expansion through existing accounting. Warm-cache controls distinguish source admission from substitution work; refusal cannot report a successful partially computed native result, and fresh allowances recover.",
+        "Existing layout consumers apply the resulting fields to row/column/reversed flex placement, multi-line content distribution, stretch, per-item overrides and auto-margin precedence. A finite implicit-grid regression covers shared fields. Manual native border rectangles, opaque item-background pixels and link-hit boundaries agree after source/custom-property changes and cache reuse."
+      ],
+      "remaining": [
+        "The existing enum aliases remain finite rendering representations: normal and stretch are not newly distinguished as general computed values across every layout mode. Full Box Alignment computed-value/serialization fidelity is not claimed.",
+        "Baseline and first/last-baseline alignment, safe/unsafe modifiers, left/right/self-start/self-end additions, writing modes/RTL, wrap-reverse and new place-* shorthands remain outside this increment.",
+        "The scripting property whitelist is unchanged, including its omission of align-content. Supplied-list native inline admission does not establish new DOM CSSOM getters, setters, indexed members or serialization.",
+        "revert/revert-layer and complete origin/layer cascade behavior remain open. Shared implicit-grid regression coverage does not implement authored grid tracks, placement or full grid alignment.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05/C13 requirements remain unqualified; no complete requirement group or package is closed."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "native_tests_total": 128,
+        "existing_related_css_and_layout_tests": 91,
+        "original_flex_alignment_regressions": 37,
+        "production_probe_count": 10,
+        "production_probe_cases": [
+          "variable-center-axes",
+          "explicit-reset-values",
+          "inheritance-and-auto",
+          "reverse-logical-alignment",
+          "wrapped-line-content",
+          "auto-margin-priority",
+          "invalid-substituted-winner",
+          "inline-importance-and-fallback",
+          "source-variable-cache",
+          "budget-refusal-recovery"
+        ],
+        "scope": "Native literal/substituted alignment computation, inline helper admission, ordinary and transform-budgeted accounting, cached styles and existing flex/finite-grid geometry, pixels and hit regions. This selection does not establish new script CSSOM members or Windows/browser acceptance."
+      },
+      "source_files_revision": "a9dbef4c080e96e20aca092ee06b9d09ade4318b",
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "9421618ad39942c2839fd8f7cad90559c01cccd5",
+          "sha256": "de6c70e55cbf0af6fd740e3feb584d42836ff5357e4b6477544db12422f1a347"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "22fac8dfcc0eb509fdd8a0f90683294d988dc195",
+          "sha256": "dcae1f8351521fd59737086f57a504369d22b853c37923f87d553953d800ebe8"
+        },
+        "src/css_flex_alignment_tests.rs": {
+          "git_blob": "b936889f48d69f658424c31633d73bb9fbe0ab2b",
+          "sha256": "0ec4457695fa47015baa875984b6092ccd9f1290d2433b64205d6ae5840b5a58"
+        },
+        "src/css_computed_style.rs": {
+          "git_blob": "4b763e7089043f639c6150b6e023529f47d6ddb4",
+          "sha256": "a224818df6e5b7c7ed76a7e86731743280f7c58ddde9ed4bba00ed4498c62f88"
+        },
+        "src/css_stylesheet_cache.rs": {
+          "git_blob": "0792dd2c97d838d542f6fb43e628e0878f69a774",
+          "sha256": "bdd02c0b334bcd4f55b0afe9dc33568cde0a969d73404611942650e1d21dcc6e"
+        },
+        "src/css_grid_alignment.rs": {
+          "git_blob": "3d172c5af8352bfc20dc9d814d3cbb076c15afbe",
+          "sha256": "0a45a2a0b75661f0d4cac21ecff1bde94163a5ec1df31674b4ca645deda1c0ea"
+        },
+        "src/layout.rs": {
+          "git_blob": "bbdf32280143c92ed8a2f78298f3adb29bdde983",
+          "sha256": "138ff93ec2b55e710e74ada1d54f836f48b7bfca5ce38a16e93f199498215458"
+        },
+        "src/layout_grid.rs": {
+          "git_blob": "c1d356dcd3cdd9e0ae1f599c4495d0845a8e3b85",
+          "sha256": "39be6fc41a9287182c93f7dd7b2da6d19921c64eeee6b30e5186a44767a8b09a"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        },
+        "src/html.rs": {
+          "git_blob": "9b8887ed5010cb20fe37be6200b3c5a00b812586",
+          "sha256": "7f0f969413bf67fd19a0ff7668ef5b765b96a449ba72ca0ac4d5b50809145b3c"
+        },
+        "src/forms.rs": {
+          "git_blob": "a28dcd49216995fc85c97a3436a31ab7a637f9c7",
+          "sha256": "08a47eed6e5ae1cac43fd81c90b4cefc1a2e1a7c88e864a0cc37a13677efb953"
+        },
+        "src/host_objects.rs": {
+          "git_blob": "20e6dc3a3a0e57c7fe7c9006f45e54dba4c4eef6",
+          "sha256": "c70fa3de60d3354c0fe6a1956654e33aadcfdb859e7cb7d10bcdc679c1b80a6a"
+        },
+        "src/javascript.rs": {
+          "git_blob": "acacb8101eb4937b0e70f7327d83d8e7c984b013",
+          "sha256": "4e194f07e865acd60ad345ac7108ae8cf0a4d3adca85453d9af583148955d58f"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "a9dbef4c080e96e20aca092ee06b9d09ade4318b",
+      "pull_request": 654
+    },
+    {
+      "id": "C04-S06",
+      "name": "Font family, weight, style and shorthand custom values",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05",
+        "C07"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05",
+        "CSS-F08"
+      ],
+      "requirement_groups": [
+        "CSS-F04-R01",
+        "CSS-F05-R03",
+        "CSS-F08-R01"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2026/WD-css-fonts-4-20261112/",
+          "sections": [
+            "2.1",
+            "2.1.1",
+            "2.2",
+            "2.2.1",
+            "2.4",
+            "2.7"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/",
+          "sections": [
+            "2.1",
+            "2.3",
+            "3",
+            "3.1",
+            "3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "4.4",
+            "7.1",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        }
+      ],
+      "properties": [
+        "font-family",
+        "font-weight",
+        "font-style",
+        "font"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The existing finite font-family, font-weight, font-style and font shorthand values share custom-property substitution and literal/substituted inherit, initial and unset. Naturally inherited values use the computed real element parent; synthetic document/fragment contexts select initial components, while genuine null-namespace element parents remain eligible.",
+        "Family spelling, quoted commas and quoted keyword or var-looking text remain raw family data. Case-sensitive custom-property names, inherited values and nested fallbacks feed the same receiving grammar. Integer weights 1 through 1000 and the existing normal/bold/bolder/lighter choices are supported; relative weights compute once against the parent, including preserving inherited extremes below 100 for lighter and above 900 for bolder. The bold flag stays synchronized.",
+        "The finite font shorthand atomically sets all represented components: size, family list, numeric weight, italic state and line-height. Omitted represented components reset. Invalid literals retain earlier values; missing, cyclic and invalid substituted winners use inherited unset without reviving an earlier declaration.",
+        "Shorthand ordering shares font-size availability and the stylesheet line-height checkpoint. Resource refusal remains distinguishable from an ordinary invalid computed value; unavailable substituted size is not reported as certain, and a later admitted literal recovers. Accepted stylesheet shorthand contributions participate in the existing inline line-height revert-layer checkpoint.",
+        "Native inline declaration-name and text helpers admit the three longhands through the same finite grammar and token-aware variable detection. Work/copy admission precedes parsing. Full font shorthand indexed expansion remains explicitly refused and no scripting property whitelist is expanded.",
+        "Ordinary and transform-budgeted routes account for source, expansion, expanded parser storage and each additional inherited family-vector/string clone. Equal-source warm-cache witnesses require extra copied expansion bytes to be admitted before a successful result; zero-work/copy refusals leave source untouched and fresh allowances recover.",
+        "Exhaustion of the shared finite font allowance refuses ordinary and transform-budgeted computation even when the caller allowance is larger. Unbudgeted computation marks the result incomplete rather than exposing a stale font winner as complete; fresh computation recovers. Two separately frozen supplemental cases cover this resource edge.",
+        "Existing native font selection, shaping, line layout, rasterization and link-hit consumers receive the computed values. The repository-original Geometry TTF gives AV widths of 26/51 pixels at 20/40px, caret positions 12/24 and visible synthetic bold/italic changes. Literal controls, exact glyph pixels, line advances and exclusive hit bounds agree after source/custom-property mutation and cache reuse."
+      ],
+      "remaining": [
+        "The prior finite family and shorthand grammar remains bounded; this is not complete CSS Fonts syntax or a property-registry replacement. Fractional weights, variable axes, angled oblique and system-font shorthands are not added.",
+        "No new font decoder, loader, font-fetch behavior, feature/variation controls, font-width/stretch implementation, synthesis-control property or general shaping algorithm is introduced.",
+        "The represented shorthand components are finite. Full font-variant, stretch, feature, variation and synthesis reset coverage remains open, including behavior accepted syntactically by older finite parsing without a corresponding represented field.",
+        "Native inline helper parity adds no new scripting/App members, complete DOM CSSOM shorthand expansion or canonical computed serialization. Existing line-height checkpoint coverage does not establish a general origin/layer or revert/revert-layer model.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05/C07 requirements remain unqualified; no complete requirement group or work package is closed."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "native_tests_total": 142,
+        "original_font_value_regressions": 45,
+        "primary_native_tests_total": 140,
+        "supplemental_native_tests_total": 2,
+        "existing_related_css_font_and_layout_tests": 95,
+        "production_probe_count": 10,
+        "production_probe_cases": [
+          "family_case_quotes_and_fallback",
+          "weight_relative_and_inherited",
+          "style_variables_and_defaults",
+          "shorthand_all_components",
+          "shorthand_invalid_atomic_reset",
+          "shorthand_order_and_importance",
+          "stylesheet_line_height_checkpoint",
+          "source_and_custom_property_cache_mutation",
+          "ordinary_budget_refusal_recovery",
+          "transform_budget_refusal_recovery"
+        ],
+        "scope": "Finite font value/defaulting cases and affected custom-property, cache, text and geometry tests. Original font bytes exercise native glyph pixels and hits. The 140-case primary selection and two separately selected allowance cases total 142; neither Windows/browser acceptance nor general shaping is established.",
+        "existing_test_corrections": [
+          "The previous font:var(--font) unsupported-value assertion was updated before the baseline selection to expect the newly supported 24px size. Its later line-height override and remaining assertions were retained."
+        ]
+      },
+      "source_files_revision": "eba203f2c4201af27cbb3a48a1ebf161ca3ef867",
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "e635da38993c07eab0625d1677541ce61e8cc444",
+          "sha256": "a6f1d3fe3be6272adab04d8134eb6eadd16d1a806a62a544257bb624a02d1cb8"
+        },
+        "src/css_font_values.rs": {
+          "git_blob": "65b75f0b2ee2946a3f318db33040ab6c7a540703",
+          "sha256": "8fe3de212d913cb7a89957b82b04569b67558d679466b244c5f60db2363fbe69"
+        },
+        "src/css_font_value_tests.rs": {
+          "git_blob": "594b016ca1d1beb3c750d4b80261870615a1b784",
+          "sha256": "c98d994f9647fd72108fbf72c878687552ed1f0194a9da05f0242ef576bdaaba"
+        },
+        "src/css_font_value_budget_tests.rs": {
+          "git_blob": "084eedd49c380432113ae812b512e5d304e5492f",
+          "sha256": "68a7e8c6b4edce254e58d87f0a999d316a9c056eaa33d9e9a97ff2cad59c36c9"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "22fac8dfcc0eb509fdd8a0f90683294d988dc195",
+          "sha256": "dcae1f8351521fd59737086f57a504369d22b853c37923f87d553953d800ebe8"
+        },
+        "src/css_line_height.rs": {
+          "git_blob": "b2f6124f9156433ccdada2d6305f8b65dadb291b",
+          "sha256": "e4690b736d017c4c247979f2350708674b936393630e8ecca5457303996c61d7"
+        },
+        "src/css_line_height_tests.rs": {
+          "git_blob": "be092a540b3775a3923d693d7e2f4abad059b782",
+          "sha256": "317b73bcb87babcff35223b4fa401196a95d32097339c18f01df8cf5274054cb"
+        },
+        "src/css_computed_style.rs": {
+          "git_blob": "4b763e7089043f639c6150b6e023529f47d6ddb4",
+          "sha256": "a224818df6e5b7c7ed76a7e86731743280f7c58ddde9ed4bba00ed4498c62f88"
+        },
+        "src/css_stylesheet_cache.rs": {
+          "git_blob": "0792dd2c97d838d542f6fb43e628e0878f69a774",
+          "sha256": "bdd02c0b334bcd4f55b0afe9dc33568cde0a969d73404611942650e1d21dcc6e"
+        },
+        "src/layout.rs": {
+          "git_blob": "bbdf32280143c92ed8a2f78298f3adb29bdde983",
+          "sha256": "138ff93ec2b55e710e74ada1d54f836f48b7bfca5ce38a16e93f199498215458"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        },
+        "src/font.rs": {
+          "git_blob": "a7b484cf19876dbe6b8012569424aafe64573b59",
+          "sha256": "9ed15e6dd24c1b5503aa43f7ed681341b189b2e7f07a74f213648f8f2501fc75"
+        },
+        "src/fonts.rs": {
+          "git_blob": "5ce4d90f819239d13cc1cb00a7d1b5d31d8ddc6c",
+          "sha256": "8f592d56257eb932229d1bbc9013b06d709cbd5312210897dd03b2b5184ad820"
+        },
+        "src/text.rs": {
+          "git_blob": "69cf73eb86a610d86a75b708bb4bc4809922c80e",
+          "sha256": "a3a9293da995793cb340e60c8dc9cdce4f97ef96bdeeef17cced5a97676fd689"
+        },
+        "src/html.rs": {
+          "git_blob": "9b8887ed5010cb20fe37be6200b3c5a00b812586",
+          "sha256": "7f0f969413bf67fd19a0ff7668ef5b765b96a449ba72ca0ac4d5b50809145b3c"
+        },
+        "src/forms.rs": {
+          "git_blob": "a28dcd49216995fc85c97a3436a31ab7a637f9c7",
+          "sha256": "08a47eed6e5ae1cac43fd81c90b4cefc1a2e1a7c88e864a0cc37a13677efb953"
+        },
+        "src/host_objects.rs": {
+          "git_blob": "3ea0def6a8d390507c0f865bf9acdea48c4319f9",
+          "sha256": "8455a871fd3581d3cbd4ff8a594c08a7bfed4e1b2c1bc358eb13463ae968b2b8"
+        },
+        "src/javascript.rs": {
+          "git_blob": "388f04774b637ff706a8e93aee756856355c6f60",
+          "sha256": "ac52f5076371f20138e4942b2ee637cf46a83f5eb152ff128326e4a867faa9cd"
+        },
+        "pages/fonts/chezcat-geometry.ttf": {
+          "git_blob": "830b71464d0e281df92deaca284708bb9bfdb8f8",
+          "sha256": "1f0106e78934590e6b6fc0948744a038a6948f4f2f8873f2efda3b8ae50d1276"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "eba203f2c4201af27cbb3a48a1ebf161ca3ef867",
+      "pull_request": 660
+    },
+    {
+      "id": "C04-S07",
+      "name": "Inherited alignment and whitespace custom values",
+      "status": "partial",
+      "packages": [
+        "C04",
+        "C05",
+        "C08"
+      ],
+      "requirement_families": [
+        "CSS-F04",
+        "CSS-F05",
+        "CSS-F09"
+      ],
+      "requirement_groups": [
+        "CSS-F04-R01",
+        "CSS-F05-R03",
+        "CSS-F09-R01"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-text-3-20260814/",
+          "sections": [
+            "3",
+            "4",
+            "6"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/",
+          "sections": [
+            "2.1",
+            "2.3",
+            "3",
+            "3.1",
+            "3.3"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2022/CR-css-cascade-5-20220113/",
+          "sections": [
+            "4.4",
+            "7.1",
+            "7.2",
+            "7.3.1",
+            "7.3.2",
+            "7.3.3"
+          ]
+        }
+      ],
+      "properties": [
+        "text-align",
+        "white-space"
+      ],
+      "keywords": [
+        "inherit",
+        "initial",
+        "unset"
+      ],
+      "implemented": [
+        "The existing represented text-align and white-space values share custom-property substitution and literal/substituted inherit, initial and unset. Both inherit naturally from completed real element parents; synthetic document/fragment contexts select initial values while genuine null-namespace element parents remain eligible.",
+        "Invalid literals preserve earlier declarations. Missing, cyclic, empty or invalid substituted winners use inherited unset without reviving earlier author or presentation-hint values. Case-sensitive names, inherited aliases, nested fallbacks and token boundaries keep the shared custom-property semantics.",
+        "Text alignment updates align and legacy_align together. Inherited/defaulted values preserve both parent components; literal alignment and initial clear the legacy block-alignment marker. Whitespace changes preserve alignment and all unrelated computed style components.",
+        "Native inline declaration-name and text helpers use the same finite admission and actual var-token detection. Quoted var-looking data and unsupported literal syntax do not displace valid earlier declarations. This retains the existing represented alignment bridge without claiming modern text-align shorthand expansion.",
+        "Ordinary and transform-budgeted routes charge source, substitution and expanded parsing. Equal-length warm-cache consumers require additional expanded copied bytes to be admitted. Shared finite allowance exhaustion refuses budgeted computation even with ample caller allowances; unmetered readback is incomplete, and fresh admitted computation recovers.",
+        "Existing layout, native glyph rasterization and link-hit consumers receive the represented alignment and whitespace values. Original-font controls cover line placement, collapsing/wrapping, preserved whitespace, legacy alignment, source/custom-property changes and cache reuse. Ten scenarios are covered by nine valid original scenarios plus one separately corrected alignment scenario."
+      ],
+      "remaining": [
+        "start/end retain existing physical left/right aliases. Full logical alignment, bidi/writing modes, justification and modern text-align-all/text-align-last shorthand expansion are not added.",
+        "break-spaces retains the existing PreWrap alias and is not claimed as distinct conformant whitespace processing. pre-line, modern whitespace shorthand components and broader CSS Text behavior remain unfinished.",
+        "No text-decoration propagation, new shaping/font-loading algorithm, broader CSSOM property surface or complete computed serialization is introduced.",
+        "Windows frontend, real HTTP loading, XHTML presentation and unchanged browser WPT acceptance have not been executed for this slice.",
+        "C00 and complete C04/C05/C08 requirements remain unqualified; no complete requirement group or work package is closed."
+      ],
+      "native_evidence": {
+        "status": "PASS_WITH_DOCUMENTED_ORIGINAL_PROBE_DEFECT",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "native_tests_total": 162,
+        "existing_related_css_font_and_layout_tests": 125,
+        "original_text_value_regressions": 37,
+        "production_probe_count": 10,
+        "production_probe_passed": 9,
+        "production_probe_failed": 1,
+        "production_probe_cases": [
+          "alignment_values_and_fallback",
+          "alignment_defaults_and_legacy",
+          "whitespace_collapsing_and_wrapping",
+          "whitespace_preservation_and_alias",
+          "invalid_computed_values_reset",
+          "native_inline_admission_and_cascade",
+          "root_and_user_agent_defaults",
+          "source_and_custom_property_cache_mutation",
+          "ordinary_budget_refusal_recovery",
+          "transform_budget_refusal_recovery"
+        ],
+        "original_production_status": "FAIL_OR_INCOMPLETE",
+        "original_failed_production_scenarios": [
+          "alignment_defaults_and_legacy"
+        ],
+        "corrected_production_probe_count": 1,
+        "covered_production_scenarios": 10,
+        "scope": "Finite text-align/white-space variables, inherited defaulting, inline helper admission and related font/layout/cache/resource tests. Nine original production scenarios passed; one faulty initial-value oracle remains recorded as a failure and has a separate corrected passing execution. No full modern text shorthand, bidi/writing-mode or Windows/browser acceptance is established."
+      },
+      "corrected_production_evidence": {
+        "status": "PASS",
+        "scenario": "alignment_defaults_and_legacy",
+        "executions": 1,
+        "reason": "The original --align:initial custom property is guaranteed-invalid, so its inherited text-align consumer correctly uses the parent Center value. The corrected property-initial fixture uses var(--missing,initial), and retains the original custom-initial input with its inherited Center/legacy expectation.",
+        "production_source_changed": false,
+        "original_result": "Nine original scenarios passed and one original fixture failed; that original result is preserved. The corrected execution covers the tenth scenario without adding native tests.",
+        "normative_reference": "https://www.w3.org/TR/2022/CR-css-variables-1-20220616/#guaranteed-invalid"
+      },
+      "source_files_revision": "cab3bd02318deeefb610619e3e28b6eb22bef41b",
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "f0158428adfdd6411a9f0d32ece240e64de8d0a9",
+          "sha256": "9e7f53dcddc7fec274a617d73cefe00fec1ad788b9c2255b4de989f42b353917"
+        },
+        "src/css_text_values.rs": {
+          "git_blob": "c68467b5934664bcd11c47134c155f815d947299",
+          "sha256": "ca75166bc00edea9f3424edea91108ed8e588a52094b8c431a0ee49c4bddf1e3"
+        },
+        "src/css_text_value_tests.rs": {
+          "git_blob": "e7943d1b69764cbf017b7ef3edca106ef1f53a93",
+          "sha256": "15184838a9c9f5e6fb91cbdea31a64ebc0b42e6952d1fbbdfa219e9925790bab"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "22fac8dfcc0eb509fdd8a0f90683294d988dc195",
+          "sha256": "dcae1f8351521fd59737086f57a504369d22b853c37923f87d553953d800ebe8"
+        },
+        "src/css_computed_style.rs": {
+          "git_blob": "4b763e7089043f639c6150b6e023529f47d6ddb4",
+          "sha256": "a224818df6e5b7c7ed76a7e86731743280f7c58ddde9ed4bba00ed4498c62f88"
+        },
+        "src/css_stylesheet_cache.rs": {
+          "git_blob": "0792dd2c97d838d542f6fb43e628e0878f69a774",
+          "sha256": "bdd02c0b334bcd4f55b0afe9dc33568cde0a969d73404611942650e1d21dcc6e"
+        },
+        "src/css_font_values.rs": {
+          "git_blob": "65b75f0b2ee2946a3f318db33040ab6c7a540703",
+          "sha256": "8fe3de212d913cb7a89957b82b04569b67558d679466b244c5f60db2363fbe69"
+        },
+        "src/css_font_value_tests.rs": {
+          "git_blob": "594b016ca1d1beb3c750d4b80261870615a1b784",
+          "sha256": "c98d994f9647fd72108fbf72c878687552ed1f0194a9da05f0242ef576bdaaba"
+        },
+        "src/css_font_value_budget_tests.rs": {
+          "git_blob": "084eedd49c380432113ae812b512e5d304e5492f",
+          "sha256": "68a7e8c6b4edce254e58d87f0a999d316a9c056eaa33d9e9a97ff2cad59c36c9"
+        },
+        "src/css_font_size_variable_tests.rs": {
+          "git_blob": "446b0772c4813230c312f0297ea4f1cef143cc74",
+          "sha256": "00d695e7d084a1a604e8b97989a819df7a791fa9d73b09edcad95ed9024518f7"
+        },
+        "src/css_line_height.rs": {
+          "git_blob": "b2f6124f9156433ccdada2d6305f8b65dadb291b",
+          "sha256": "e4690b736d017c4c247979f2350708674b936393630e8ecca5457303996c61d7"
+        },
+        "src/css_line_height_tests.rs": {
+          "git_blob": "be092a540b3775a3923d693d7e2f4abad059b782",
+          "sha256": "317b73bcb87babcff35223b4fa401196a95d32097339c18f01df8cf5274054cb"
+        },
+        "src/layout.rs": {
+          "git_blob": "bbdf32280143c92ed8a2f78298f3adb29bdde983",
+          "sha256": "138ff93ec2b55e710e74ada1d54f836f48b7bfca5ce38a16e93f199498215458"
+        },
+        "src/layout_intrinsic_text_tests.rs": {
+          "git_blob": "373de63f362bccfee2b25c9437febe3865ec00dc",
+          "sha256": "97423ea19451cd4e1736ace3c7a8f038f86674477ebc9b0808967a6af68243af"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        },
+        "src/font.rs": {
+          "git_blob": "a7b484cf19876dbe6b8012569424aafe64573b59",
+          "sha256": "9ed15e6dd24c1b5503aa43f7ed681341b189b2e7f07a74f213648f8f2501fc75"
+        },
+        "src/fonts.rs": {
+          "git_blob": "5ce4d90f819239d13cc1cb00a7d1b5d31d8ddc6c",
+          "sha256": "8f592d56257eb932229d1bbc9013b06d709cbd5312210897dd03b2b5184ad820"
+        },
+        "src/text.rs": {
+          "git_blob": "69cf73eb86a610d86a75b708bb4bc4809922c80e",
+          "sha256": "a3a9293da995793cb340e60c8dc9cdce4f97ef96bdeeef17cced5a97676fd689"
+        },
+        "src/html.rs": {
+          "git_blob": "9b8887ed5010cb20fe37be6200b3c5a00b812586",
+          "sha256": "7f0f969413bf67fd19a0ff7668ef5b765b96a449ba72ca0ac4d5b50809145b3c"
+        },
+        "src/forms.rs": {
+          "git_blob": "a28dcd49216995fc85c97a3436a31ab7a637f9c7",
+          "sha256": "08a47eed6e5ae1cac43fd81c90b4cefc1a2e1a7c88e864a0cc37a13677efb953"
+        },
+        "src/host_objects.rs": {
+          "git_blob": "3ea0def6a8d390507c0f865bf9acdea48c4319f9",
+          "sha256": "8455a871fd3581d3cbd4ff8a594c08a7bfed4e1b2c1bc358eb13463ae968b2b8"
+        },
+        "src/javascript.rs": {
+          "git_blob": "a0512531ec36b91806d081d745e84af03cb4e744",
+          "sha256": "564463552fde2281adba7f21a48d8258f7ca8f52a98d5c383bab24f8224e4819"
+        },
+        "pages/fonts/chezcat-geometry.ttf": {
+          "git_blob": "830b71464d0e281df92deaca284708bb9bfdb8f8",
+          "sha256": "1f0106e78934590e6b6fc0948744a038a6948f4f2f8873f2efda3b8ae50d1276"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "cab3bd02318deeefb610619e3e28b6eb22bef41b",
+      "pull_request": 663
+    },
+    {
+      "id": "C06-S01",
+      "name": "Image intrinsic width from definite height",
+      "status": "partial",
+      "packages": [
+        "C06",
+        "C13"
+      ],
+      "requirement_families": [
+        "CSS-F07",
+        "CSS-F11"
+      ],
+      "requirement_groups": [
+        "CSS-F07-R02",
+        "CSS-F11-R02",
+        "CSS-F11-R04"
+      ],
+      "source_observations": [
+        "LA03",
+        "LA05"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/CSS2/visudet.html#inline-replaced-width",
+          "sections": [
+            "10.3.2"
+          ]
+        },
+        {
+          "url": "https://www.w3.org/TR/2025/CRD-css-flexbox-1-20251014/#algo-main-item",
+          "sections": [
+            "9.2 step 3B",
+            "4.5"
+          ]
+        }
+      ],
+      "implemented": [
+        "A decoded image with known natural dimensions, an automatic width and a definite supported height contributes the natural-ratio-transferred width during intrinsic measurement. The shared contribution reaches direct row-flex images and shrink-to-content link wrappers instead of retaining the tiny decoded width.",
+        "The original decoded 2 by 2 image with height 120px reproduced a 2 by 120 direct image and a 2px-wide clipped link card in the frozen baseline. The canonical original cases require 120 by 120 image/card geometry, matching ordinary image layout, with full quadrant pixels, clipping and far-edge link ownership.",
+        "Original square, wide and tall encoded images, literal and variable heights and integer zoom factors 1 and 2 share the measured ratio. Explicit CSS/HTML widths, natural-size controls, unknown-image fallback and unresolved percentage-height boundaries remain covered.",
+        "Decoded-size, custom-property and source/cache mutations rebuild the intrinsic contribution and preserve ordinary native paint and hit targets. Existing shared layout, intrinsic-text and inline-flex regression cohorts remain unchanged."
+      ],
+      "remaining": [
+        "The supported transfer requires known natural image dimensions and a definite supported height. It does not implement authored aspect-ratio or complete intrinsic/replaced-element sizing.",
+        "Fractional tiny-image natural-size rounding, border-box height transfer, broader min/max-height handling and general percentage-height resolution remain separate.",
+        "Complete flex/grid algorithms, writing modes, replaced-element minimum rules and all cross-axis interactions are not qualified by this increment.",
+        "No decoder, networking, HTML, scripting, API or dependency change is introduced. The recorded native selection does not establish Windows App, HTTP navigation or unchanged browser WPT acceptance.",
+        "C00 and complete C06/C13 requirements remain unqualified; no complete requirement group or work package is closed."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "native_tests_total": 64,
+        "original_image_ratio_regressions": 10,
+        "existing_shared_layout_tests": 45,
+        "existing_intrinsic_text_tests": 4,
+        "existing_inline_flex_tests": 5,
+        "existing_related_tests": 54,
+        "production_probe_count": 6,
+        "production_probe_passed": 6,
+        "production_probe_failed": 0,
+        "production_probe_cases": [
+          "direct_height_ratio",
+          "clipped_link_cards",
+          "wide_and_tall_ratios",
+          "variable_height_integer_zoom",
+          "explicit_and_indefinite_controls",
+          "decoded_size_and_variable_cache_mutation"
+        ],
+        "scope": "Known natural image dimensions and definite CSS height feed automatic intrinsic width through direct flex items and clipped link cards. Native production cases check decoded original fixture pixels, geometry and hits. This selection does not establish full replaced sizing, authored aspect-ratio, Windows frontend or live navigation."
+      },
+      "source_files_revision": "99f9636ab739dc3d3b70cb72aeaa18880745d417",
+      "source_files": {
+        "src/layout.rs": {
+          "git_blob": "d617fad4a12a5fa79c0e9b78c36724d4ae0055d1",
+          "sha256": "9c861fb6cd30220c4189e1ff4f2e9e440206a7d8cb20ce016237396531fcebff"
+        },
+        "src/layout_image_ratio_tests.rs": {
+          "git_blob": "55c786fc4d89e1e28bb047da96d766f5256b5d67",
+          "sha256": "c05a1affc0c15f86e40ddc40bcdf5a4c4ab4ed1f12c91d5a51c96e16612729b1"
+        },
+        "src/layout_intrinsic_text_tests.rs": {
+          "git_blob": "373de63f362bccfee2b25c9437febe3865ec00dc",
+          "sha256": "97423ea19451cd4e1736ace3c7a8f038f86674477ebc9b0808967a6af68243af"
+        },
+        "src/layout_inline_flex_tests.rs": {
+          "git_blob": "1cd3a86056a582430eff286d832bcf8d5e0831d9",
+          "sha256": "3ebbe4085e78623a92e0528729fcb23ed5f9a38574965f2760ceec65dc127b5a"
+        },
+        "src/css.rs": {
+          "git_blob": "f0158428adfdd6411a9f0d32ece240e64de8d0a9",
+          "sha256": "9e7f53dcddc7fec274a617d73cefe00fec1ad788b9c2255b4de989f42b353917"
+        },
+        "src/css_custom_properties.rs": {
+          "git_blob": "22fac8dfcc0eb509fdd8a0f90683294d988dc195",
+          "sha256": "dcae1f8351521fd59737086f57a504369d22b853c37923f87d553953d800ebe8"
+        },
+        "src/css_computed_style.rs": {
+          "git_blob": "4b763e7089043f639c6150b6e023529f47d6ddb4",
+          "sha256": "a224818df6e5b7c7ed76a7e86731743280f7c58ddde9ed4bba00ed4498c62f88"
+        },
+        "src/css_stylesheet_cache.rs": {
+          "git_blob": "0792dd2c97d838d542f6fb43e628e0878f69a774",
+          "sha256": "bdd02c0b334bcd4f55b0afe9dc33568cde0a969d73404611942650e1d21dcc6e"
+        },
+        "src/css_image_placement.rs": {
+          "git_blob": "15ceed5c2c557f4170fc05838758daa2dd7a56b3",
+          "sha256": "148c42780b36e03d5c533b07fe4dc2de27480a2e9547c80534f0a111de0b6384"
+        },
+        "src/image.rs": {
+          "git_blob": "775cbc1ec434ee784b3a042e573e3650c32f259a",
+          "sha256": "31f2be17d8a753605a07408a4a6674cada11ba32ec2bfcec5efef3f9d44f9972"
+        },
+        "src/image_metadata.rs": {
+          "git_blob": "612326de89399a2e2f7099ca8d1d570495cdcacf",
+          "sha256": "e286202d4feac265d2400c8cdb75ee0d3b38043aed12778e419224887b3720d9"
+        },
+        "src/paint.rs": {
+          "git_blob": "25578645e19a97767178cdf3bb3026af3d3d23c4",
+          "sha256": "2ce2cde5363aafdc5504c5ec2fb8c0b3b93210935883a76d7ebb192c7a6389f4"
+        },
+        "src/html.rs": {
+          "git_blob": "9b8887ed5010cb20fe37be6200b3c5a00b812586",
+          "sha256": "7f0f969413bf67fd19a0ff7668ef5b765b96a449ba72ca0ac4d5b50809145b3c"
+        },
+        "src/forms.rs": {
+          "git_blob": "a28dcd49216995fc85c97a3436a31ab7a637f9c7",
+          "sha256": "08a47eed6e5ae1cac43fd81c90b4cefc1a2e1a7c88e864a0cc37a13677efb953"
+        },
+        "src/font.rs": {
+          "git_blob": "a7b484cf19876dbe6b8012569424aafe64573b59",
+          "sha256": "9ed15e6dd24c1b5503aa43f7ed681341b189b2e7f07a74f213648f8f2501fc75"
+        },
+        "src/fonts.rs": {
+          "git_blob": "5ce4d90f819239d13cc1cb00a7d1b5d31d8ddc6c",
+          "sha256": "8f592d56257eb932229d1bbc9013b06d709cbd5312210897dd03b2b5184ad820"
+        },
+        "src/text.rs": {
+          "git_blob": "69cf73eb86a610d86a75b708bb4bc4809922c80e",
+          "sha256": "a3a9293da995793cb340e60c8dc9cdce4f97ef96bdeeef17cced5a97676fd689"
+        },
+        "pages/fonts/chezcat-geometry.ttf": {
+          "git_blob": "830b71464d0e281df92deaca284708bb9bfdb8f8",
+          "sha256": "1f0106e78934590e6b6fc0948744a038a6948f4f2f8873f2efda3b8ae50d1276"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "99f9636ab739dc3d3b70cb72aeaa18880745d417",
+      "pull_request": 664
+    },
+    {
+      "id": "C13-S01",
+      "name": "Exact CSS order values and visual flex/default-grid item ordering",
+      "status": "partial",
+      "packages": [
+        "C13",
+        "C14"
+      ],
+      "requirement_families": [
+        "CSS-F11"
+      ],
+      "requirement_groups": [
+        "CSS-F11-R02",
+        "CSS-F11-R03",
+        "CSS-F11-R04"
+      ],
+      "source_observations": [
+        "LA05",
+        "LA06"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2026/CRD-css-display-3-20260605/#order-property",
+          "sections": [
+            "3: Display Order: the order property",
+            "3.1: Reordering and Accessibility"
+          ]
+        }
+      ],
+      "implemented": [
+        "Original Rust/std-only signed integer order values preserve exact arbitrary-length admitted digits, normalize signs/leading zeroes, keep allocation-free zero defaults and compare without floating-point rounding or integer clamping.",
+        "The property is initially zero and noninherited. Existing cascade paths handle explicit inherit/initial/unset/revert and the current inline revert-layer rollback, custom-property fallbacks/cycles and invalid-at-computed-value-time reset to zero; malformed literal declarations preserve the prior winner.",
+        "Comment normalization preserves token boundaries on CSSOM admission paths; variable-parser work/storage and inline name indexing use the existing resource meter. Refused variable maps/expansions or exhausted resources remain unavailable and do not publish fabricated zero or complete computed snapshots.",
+        "Stable ascending ordinal groups drive existing row/column/reverse/inline-flex and supported wrapping layout, plus the existing single implicit-column grid. Equal values follow current source child order, including DOM movement, while anonymous items retain zero and source grouping boundaries.",
+        "Visual ranks carry item ordering through paint and hit regions, including equal-z positioned items and existing transform/opacity contexts. Explicit unequal z levels retain precedence; absolute/fixed children have effective zero for item-order painting.",
+        "Semantic document/reading/control order remains tied to source order. Normal flow remains unaffected, nested containers have independent groups, and style/custom-property/DOM mutation recomputes warm layout correctly.",
+        "Inline and computed-style order readback, set/remove and cssText routes use the shared value representation. Actual Page tests cover those routes separately from the native test count."
+      ],
+      "remaining": [
+        "Functional integer math, including calc(), is not admitted by this finite order grammar. Full Values/Cascade grammar, origins/layers and all CSSOM IDL behavior remain separate requirements.",
+        "General explicit/implicit grid placement and track sizing, inline-grid/subgrid, complete flex wrapping/baseline/minimum-size algorithms, writing modes/RTL/orthogonal flows and fragmentation remain open.",
+        "Actual Page/CSSOM and Windows App results are separate evidence lanes. This native selection does not establish full browser, HTTP navigation, accessibility-tree or unchanged browser WPT acceptance.",
+        "Current source/work/storage refusal remains distinct from successful default values. Adjacent property, parser and resource limits are unchanged.",
+        "No complete CSS-F11 requirement group, C13/C14 package or full property conformance claim is closed. Original implementation and test sources remain distinct from specification references."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "native_tests_total": 690,
+        "native_tests_passed": 690,
+        "native_tests_failed": 0,
+        "new_original_native_regressions": 38,
+        "original_order_value_regressions": 20,
+        "original_order_layout_regressions": 18,
+        "affected_css_tests": 543,
+        "affected_layout_tests": 147,
+        "production_probe_count": 8,
+        "production_probe_passed": 8,
+        "production_probe_failed": 0,
+        "production_probe_cases": [
+          "signed_stable_rows",
+          "directions_and_wrapping",
+          "inline_and_nested_containers",
+          "grid_rows_and_anonymous_items",
+          "overlap_context_pixels_and_hits",
+          "positioned_effective_zero",
+          "style_cache_and_dom_ties",
+          "source_and_resource_guards"
+        ],
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "scope": "The 690-case primary native selection includes 38 new order cases and earlier CSS/layout regressions. Eight production scenarios cover geometry, ordering, pixels and hit ownership. Targeted repeats and integration reruns do not add to the aggregate. Actual Page/CSSOM tests are separate from this native selection; no Windows, HTTP or browser WPT acceptance is inferred."
+      },
+      "source_files_revision": "82d6ff9932a1b0be3335bc22145be661ddafe197",
+      "source_files": {
+        "src/css.rs": {
+          "git_blob": "60277d88201467b50a4131b27babfe20b1e7d711",
+          "sha256": "90b34d29b152d49c115783f0c48effb48ed4f4b0558a3eb5d061fa31a7162204"
+        },
+        "src/css_computed_style.rs": {
+          "git_blob": "6ebf45badfe23e39b9fa321a9d14f9900157962d",
+          "sha256": "8363f0d707baf49ed2f4b40dbbb10e1afa7deed37c40a34972b764702a56db1e"
+        },
+        "src/css_z_index.rs": {
+          "git_blob": "19e27786bb5f88192ee9bc81ee7eedb39973da4b",
+          "sha256": "d63f99c139858fe7a2b74d9e551dd886bdff0379b9224441c8c812b86ed8475b"
+        },
+        "src/css_order.rs": {
+          "git_blob": "d51b448377158785cff365ce8bd2fadd2455dd60",
+          "sha256": "2b5363ee2f54621f634fd5056e61a43e7c9fa4d735c1569119a21db0c14c6de3"
+        },
+        "src/css_order_tests.rs": {
+          "git_blob": "0290e2d2e1178a9ccb2cce0ac33eb6394d2e745d",
+          "sha256": "f0de519d10f2f307be16c9f1093775e807db0c5039f6cf8738f7b5eecb63e4d4"
+        },
+        "src/layout.rs": {
+          "git_blob": "8e062a69d3eacda5d33533e2deea3a4f445e3728",
+          "sha256": "5e58c452cd1c85f97aab9d7aa0d74e3503e986547e6fc16f2b6dca58b4ff5a75"
+        },
+        "src/layout_order.rs": {
+          "git_blob": "e655a8f0c9bd1c5a8c39e8e8490948a735e7b811",
+          "sha256": "94d2619514e7c423a3bcbdfe80b0dfd9c0565e60e15625c43e1e0c705c471425"
+        },
+        "src/layout_order_tests.rs": {
+          "git_blob": "98a994e38d5c382519e0f204c47bb978ab74a8ee",
+          "sha256": "f8b324384ecb01459b067d8a574edc304a32676218d3b39afc6ea883853421ec"
+        },
+        "src/layout_grid.rs": {
+          "git_blob": "80bc909ac61a47599bf3d0af9aa4e5faa7cfefe1",
+          "sha256": "29ce709dbfadaabab4444427be01ef015d66e3778513e9bae95af46a76fe0f55"
+        },
+        "src/layout_stacking.rs": {
+          "git_blob": "c80269de7d9dde2e5b495ac555e15ff2c79a8e00",
+          "sha256": "f357fa3bb6ad43f23aebc135f89881f5d3a854abbbf8ee52c680daf49c6329dc"
+        },
+        "src/layout_opacity.rs": {
+          "git_blob": "93f2426b6952ea1dca457fd562f0c186b406857b",
+          "sha256": "ac78c0adcf956474eb80b1aa56c3377ba8c57300484b218fd5549c519fea1ee7"
+        },
+        "src/layout_translate.rs": {
+          "git_blob": "b95ce21fd50e487eb3e07808587006bf41323cfd",
+          "sha256": "1dc2bce47f7010df414e8afaf7e58fbb247431cefeaeb8e0ea1b12d68c9a8bb3"
+        },
+        "src/script_computed_style.rs": {
+          "git_blob": "44ddca16421c1defbf1b3131d70afae53ede269d",
+          "sha256": "fa34c5613e157da9cec9adb20b14c411a725c2cffebf569230f09f06c8b45431"
+        },
+        "src/script_css_text.rs": {
+          "git_blob": "c251c5cda749bca8560b4233de9d3bee6fd68800",
+          "sha256": "247a4e2070c2b250dcb3059a2fa89da56aca1cda51363c148b69f7c73929deca"
+        },
+        "src/script_inline_style.rs": {
+          "git_blob": "627ca418cab656604118d999a53271468206deef",
+          "sha256": "09df56135d1efebe2bb03d7287431ac7098959a4b6b0ba7b6922d72b3fb40f15"
+        },
+        "src/scripting.rs": {
+          "git_blob": "e2b41f87f1f0dcaeef4e33195c0b611d58581ed3",
+          "sha256": "05ba36838b98dfe8201b7f7436e76837112e36be4d06459b7d5e27251212f20b"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "82d6ff9932a1b0be3335bc22145be661ddafe197",
+      "pull_request": 667
+    },
+    {
+      "id": "C12-S01",
+      "name": "Anonymous rows for consecutive direct CSS table cells",
+      "status": "partial",
+      "packages": [
+        "C12"
+      ],
+      "requirement_families": [
+        "CSS-F11"
+      ],
+      "requirement_groups": [
+        "CSS-F11-R01",
+        "CSS-F11-R04"
+      ],
+      "source_observations": [
+        "LA07"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/CSS22/tables.html#anonymous-boxes",
+          "sections": [
+            "17.2.1: consecutive boxes and anonymous table objects",
+            "17.2.1 stage 2 steps 1 and 2: missing row wrappers under tables and row groups",
+            "17.2.1 stage 3 step 1: missing row parents for consecutive table cells"
+          ],
+          "reviewed": "2026-11-25",
+          "scope": "Finite direct-cell row generation only; no complete anonymous-cell/table-parent algorithm claim."
+        }
+      ],
+      "implemented": [
+        "Original Rust/std-only formatting rows now represent either a real row node or an anonymous direct-cell run, with a separate parent reference. Consecutive admitted table-cell children of supported tables and row groups share one row without inserting DOM nodes or reusing parent node geometry for a nonexistent row.",
+        "The same row collection drives shared column sizing, intrinsic width and final layout. Explicit row boundaries split anonymous runs; nested tables retain their own cell/column structures, and row-group client extents follow the rendered rows.",
+        "Finite image-card fixtures verify natural-ratio widths, separated-border gaps, actual cell overflow clips, link hit bounds, padding/negative margins, translated/scrolling ancestors and decoded-size updates with cached styles. Existing explicit-row height/alignment/spacing behavior is retained.",
+        "A table-wide preflight limits the new row repair to supported structures. Seven supplementary guards cover tested visible-content fallback, nested row-group fallback, omitted permanently unrendered content/hidden controls, hidden or transparent cells retaining space, and the existing per-row column bound."
+      ],
+      "remaining": [
+        "Anonymous cells around ordinary non-table content, general missing table parents, broader misparenting, nested row-group repair, captions/columns and out-of-flow anonymous-table behavior remain outside this slice. Tested unsupported structures retain the older fallback rather than partial new repair.",
+        "Spanning, complete fixed/automatic table sizing, collapsed-border conflict resolution, full baseline/vertical-align, empty-cell behavior, writing modes/RTL and fragmented repeated headers/footers remain open.",
+        "Existing traversal, row/cell and per-row column bounds remain. Supplementary capacity/fallback guards do not establish a complete table resource-admission or exhaustion qualification.",
+        "The recorded native component selection does not establish script execution, Windows App navigation, fetched resources, complete-page rendering, browser WPT or accessibility acceptance.",
+        "No complete C12 package, CSS-F11 requirement group or table module is qualified."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "native_tests_total": 709,
+        "native_tests_passed": 709,
+        "native_tests_failed": 0,
+        "new_original_native_regressions": 19,
+        "affected_css_tests": 543,
+        "affected_layout_tests": 166,
+        "frozen_original_regressions": 12,
+        "supplementary_guard_regressions": 7,
+        "production_probe_count": 6,
+        "production_probe_passed": 6,
+        "production_probe_failed": 0,
+        "production_probe_cases": [
+          "six_image_strip",
+          "explicit_row_equivalence",
+          "row_groups",
+          "nested_tables",
+          "scroll_and_translation",
+          "decoded_size_update"
+        ],
+        "raster_and_hit_probe_count": 5,
+        "geometry_and_hit_only_probes": [
+          "row_groups"
+        ],
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "scope": "The 709-case native selection includes 12 frozen row regressions, seven supplementary fallback/capacity guards and earlier CSS/layout regressions. All six original production scenarios verify geometry and hits; five additionally verify raster pixels. The row_groups scenario supplies geometry/hit evidence only. No full browser, script or Windows App acceptance is inferred."
+      },
+      "source_files_revision": "cec62e2dcf0df0e894e176efc64a2573f48a7ac6",
+      "source_files": {
+        "docs/CAPABILITIES.md": {
+          "git_blob": "bc492c697ad70f38a05bda95180c808d8e559f61",
+          "sha256": "afd57ca7dc2b082982230120ca4e353ae4476db3b940022253bae96fa06e997e"
+        },
+        "src/layout.rs": {
+          "git_blob": "c7d33f95739bf297736879e86bb462040cec21eb",
+          "sha256": "391d136b9fed1b0927a28ee118588112e803902176dac5cbb57a192e7bef9c1f"
+        },
+        "src/layout_table_rows.rs": {
+          "git_blob": "da2e74062a428d3912b03e7f6d7957323817bd79",
+          "sha256": "baefd0e4c86fe8d0925cd2cb83765d4e08f3c8348b38c1de9e41ca52fb412f85"
+        },
+        "src/layout_table_anonymous_tests.rs": {
+          "git_blob": "94707e096a8af1fc7cf4317b16a657fe41893cf8",
+          "sha256": "dc07758f33431b0e0a11c218333dfae49c1381a487d6c8d06096fdb54c561c70"
+        },
+        "src/layout_table_anonymous_guard_tests.rs": {
+          "git_blob": "86fb249fd152f2ad137988b6ce90201efb1e9f4e",
+          "sha256": "ce748add28712b5263cb1810d6c546d774c55dd8c15cabe3dbecfdceea7e049d"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "cec62e2dcf0df0e894e176efc64a2573f48a7ac6",
+      "pull_request": 668
+    },
+    {
+      "id": "C11-S01",
+      "name": "Native button CSS background image discovery and painting",
+      "status": "partial",
+      "packages": [
+        "C11"
+      ],
+      "requirement_families": [
+        "CSS-F14"
+      ],
+      "requirement_groups": [
+        "CSS-F14-R02"
+      ],
+      "source_observations": [
+        "LA16",
+        "LA17",
+        "LA18"
+      ],
+      "specification_bindings": [
+        {
+          "url": "https://www.w3.org/TR/2024/CRD-css-backgrounds-3-20240311/",
+          "sections": [
+            "2.1 Layering Multiple Background Images",
+            "2.2 Background Images",
+            "2.3 Tiling Images",
+            "2.4 Positioning Images",
+            "2.8 Background Positioning Area",
+            "2.9 Sizing Images"
+          ],
+          "claim": "Finite existing single-layer background behavior connected to native controls, not full module qualification."
+        }
+      ],
+      "implemented": [
+        "Native button-family layout retains one existing CSS image source and presentation after normal control admission.",
+        "Layout background discovery and hidden retention use existing request ownership and checked storage. No new fetch or redirect path.",
+        "Shared native painter draws face, image, border/focus and caption in order using existing bounded sampling, clipping and opacity ownership.",
+        "Style/source replacement and retirement recompute normal discovery without duplicate paint items."
+      ],
+      "remaining": [
+        "Full native control styling, authored borders/radii, rich button children, image-layer clipping and multiple image layers remain open.",
+        "Other native control families retain their existing background-image behavior.",
+        "The recorded component selection does not establish Windows App navigation, real resource completion, connected scripting or browser WPT acceptance.",
+        "No complete C11 package or CSS-F14 requirement group is qualified."
+      ],
+      "native_evidence": {
+        "status": "PASS",
+        "native_tests_total": 52,
+        "native_tests_passed": 52,
+        "native_tests_failed": 0,
+        "new_original_native_regressions": 16,
+        "production_probe_count": 6,
+        "production_probe_passed": 6,
+        "host": "Linux x86_64",
+        "rust": "1.99.1",
+        "scope": "The 52-case native selection includes 10 new source/layout cases, six new painter cases and 36 affected existing cases. Six production scenarios call the same native button painter used by App. These component results do not establish a complete Windows App, resource-worker or script/navigation run.",
+        "fixture_corrections": [
+          "The caption oracle distinguishes fully opaque glyph samples from a measured coverage-254 sample and checks its exact compositing over each backdrop. The initial failed oracle remains separate from the passing corrected result.",
+          "A production discovery fixture now explicitly sets display:none on its hidden control because its author display:block rule otherwise overrides the hidden attribute default. The three-source expectation and source replacement/retirement checks are unchanged; no product change was made for that fixture correction."
+        ],
+        "production_probe_cases": [
+          "icon_pixels_and_native_edges",
+          "sizes_repeats_and_zoom",
+          "alpha_focus_and_disabled",
+          "font_and_bitmap_caption_foreground",
+          "clipped_moved_and_scrolled",
+          "source_discovery_and_invalidation"
+        ],
+        "production_probe_failed": 0,
+        "execution_reuse": "Five unchanged production scenario results were reused; only the corrected source-discovery scenario was re-executed. Unrelated interface registrations were source-compared without repeating unchanged native executions."
+      },
+      "source_files_revision": "99117d8ea322c7f9e9e225113d7674040ea9dd36",
+      "source_files": {
+        "docs/CAPABILITIES.md": {
+          "git_blob": "927ed527cffa3c597afc59019df3fbf5abe4ac0e",
+          "sha256": "76f8f7973747a47b54e120aa738a1dcab5ac2c46a76eb717c85d87c8b62a5d59"
+        },
+        "src/app.rs": {
+          "git_blob": "c2329e70e00ce31aa575b446b2030c8a77c6917e",
+          "sha256": "94bf56650307c26ab12fe59a21cd95b56cb0d138527dffe2e6444cad62b928ff"
+        },
+        "src/app_font_tests.rs": {
+          "git_blob": "f9e74340fb3e20739ffd91aa57262d328bbe6117",
+          "sha256": "7bcda581e27209c0a846bf4f98921dbc177280d1a96117a4579b6fa2b493de35"
+        },
+        "src/layout.rs": {
+          "git_blob": "4d27d677b71199d1dbc76d17bdae82aa796eaa50",
+          "sha256": "9247bc024ac32469f632e97fa77e407d5ee144a57c6293292bd7b00aa59b0966"
+        },
+        "src/layout_button_background_tests.rs": {
+          "git_blob": "e127f485f8ef9dc4f9005891e3ac17da3d7eaeaa",
+          "sha256": "6f09f766132c1f4a344bc29e32a402866fde3dba7ae1dd7b4d07df748332e71c"
+        },
+        "src/layout_visibility.rs": {
+          "git_blob": "494a5ed913cb6a0f10b93f10b2118340bb576cb3",
+          "sha256": "4f1f93286b03076529aed315e2872782ac6a02c0fe454c24a93eff718dc78a8d"
+        },
+        "src/paint.rs": {
+          "git_blob": "817b4235cb8d89d2bdef25e1fb3081111ef4e680",
+          "sha256": "980d06f453a6cb666cf507c145054cf6856854689f4924813bf999e021531c48"
+        },
+        "src/paint_button.rs": {
+          "git_blob": "80119e04c848c30053f83fcca6776dd7587505fd",
+          "sha256": "69b3795420dd5e30276afa61d51773bc4349278f44e6972a30d3136f1ef7760b"
+        },
+        "src/paint_button_tests.rs": {
+          "git_blob": "99736ac3fa721dae1af62ac9f49dfa3ce8696682",
+          "sha256": "03f16f7a05613a624642e3625c91fe7af23f2663c7c8f4e792ddbdbac34d83db"
+        }
+      },
+      "source_identity_scope": "File identities describe the public integrated implementation. Recorded executions retain their selected component scope and do not claim a new run of the entire merge revision.",
+      "integrated_revision": "99117d8ea322c7f9e9e225113d7674040ea9dd36",
+      "pull_request": 671
     }
   ],
   "source_observations": [
@@ -6550,7 +7769,8 @@
       "required_selection": null,
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
-        "C01-S01"
+        "C01-S01",
+        "C03-S01"
       ]
     },
     {
@@ -6607,7 +7827,10 @@
         "C04-S01",
         "C04-S02",
         "C04-S03",
-        "C04-S04"
+        "C04-S04",
+        "C04-S05",
+        "C04-S06",
+        "C04-S07"
       ]
     },
     {
@@ -6654,7 +7877,10 @@
         "C04-S01",
         "C04-S02",
         "C04-S03",
-        "C04-S04"
+        "C04-S04",
+        "C04-S05",
+        "C04-S06",
+        "C04-S07"
       ]
     },
     {
@@ -6701,7 +7927,10 @@
         "LA13"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C06-S01"
+      ]
     },
     {
       "id": "C07",
@@ -6739,7 +7968,10 @@
         "LA11"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S06"
+      ]
     },
     {
       "id": "C08",
@@ -6786,7 +8018,10 @@
         "LA13"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S07"
+      ]
     },
     {
       "id": "C09",
@@ -6919,7 +8154,8 @@
       "required_selection": null,
       "scope_track": "selected_implementation_program",
       "preparatory_slices": [
-        "C04-S04"
+        "C04-S04",
+        "C11-S01"
       ]
     },
     {
@@ -6964,7 +8200,10 @@
         "LA13"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C12-S01"
+      ]
     },
     {
       "id": "C13",
@@ -7008,7 +8247,12 @@
         "LA13"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C04-S05",
+        "C06-S01",
+        "C13-S01"
+      ]
     },
     {
       "id": "C14",
@@ -7053,7 +8297,10 @@
         "LA13"
       ],
       "required_selection": null,
-      "scope_track": "selected_implementation_program"
+      "scope_track": "selected_implementation_program",
+      "preparatory_slices": [
+        "C13-S01"
+      ]
     },
     {
       "id": "C15",
@@ -8036,5 +9283,5 @@
     "Full SVG/MathML, Unicode data/font formats, codec profiles, Fetch/HTML/DOM/WebIDL, worklets and native window/input/print services retain adjacent owners. Any required dependency is a blocker.",
     "Historical/superseded specifications remain visible; selected current owners resolve replacement rules. A newer module level does not automatically supersede every lower-level requirement."
   ],
-  "runtime_evidence_scope": "fresh_runtime_passes sums recorded native test-case pass executions across separately source-bound implementation slices, including repeated regression cases. It is neither a current-revision retest total nor a unique-test/conformance count. Production probes are separate. Historical source_observations retain their static audit baseline. No WPT/browser or complete requirement-group pass is inferred."
+  "runtime_evidence_scope": "fresh_runtime_passes sums recorded native test-case pass executions across separately source-bound implementation slices, including repeated regression cases. Each slice contributes its primary selected total once, including explicitly recorded supplementary cases; targeted repeats and integration reruns do not add again. It is neither a current-revision retest total nor a unique-test/conformance count. Production probes are separate, and original failed fixture executions remain recorded when a corrected oracle is run separately. merged_implementation_slices and packages_with_recorded_slices describe finite delivered increments, not qualified packages or a percentage of remaining work. Historical source_observations and implementation_inventory retain their static audit baseline. No WPT/browser or complete requirement-group pass is inferred."
 }
