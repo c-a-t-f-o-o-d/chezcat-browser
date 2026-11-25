@@ -7051,3 +7051,7 @@ mod app_textarea_disabled_tests;
 #[cfg(test)]
 #[path="app_textarea_required_tests.rs"]
 mod app_textarea_required_tests;
+
+#[cfg(test)]
+#[path="app_textarea_read_only_tests.rs"]
+mod app_textarea_read_only_tests;
