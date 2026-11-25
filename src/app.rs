@@ -7067,3 +7067,7 @@ mod app_textarea_text_length_tests;
 #[cfg(test)]
 #[path="app_textarea_default_value_tests.rs"]
 mod textarea_default_value_tests;
+
+#[cfg(test)]
+#[path="app_textarea_max_length_tests.rs"]
+mod textarea_max_length_tests;
