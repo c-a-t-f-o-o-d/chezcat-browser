@@ -10249,3 +10249,7 @@ mod script_font_size;
 #[cfg(test)]
 #[path="script_pre_alias_tests.rs"]
 mod pre_alias_tests;
+
+#[cfg(test)]
+#[path="script_unknown_interface_tests.rs"]
+mod unknown_interface_tests;
