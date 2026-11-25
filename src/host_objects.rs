@@ -715,6 +715,10 @@ impl Runtime {
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"minLength","\0HTMLTextAreaElement.get.minLength",Some("\0HTMLTextAreaElement.set.minLength"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"minLength","\0HTMLInputElement.get.minLength",Some("\0HTMLInputElement.set.minLength"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"wrap","\0HTMLTextAreaElement.get.wrap",Some("\0HTMLTextAreaElement.set.wrap"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"step","\0HTMLInputElement.get.step",Some("\0HTMLInputElement.set.step"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"max","\0HTMLInputElement.get.max",Some("\0HTMLInputElement.set.max"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"min","\0HTMLInputElement.get.min",Some("\0HTMLInputElement.set.min"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"pattern","\0HTMLInputElement.get.pattern",Some("\0HTMLInputElement.set.pattern"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLTextAreaElement.get.autocomplete",Some("\0HTMLTextAreaElement.set.autocomplete"))?;}
             if name == "HTMLSelectElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLSelectElement.get.autocomplete",Some("\0HTMLSelectElement.set.autocomplete"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"autocomplete","\0HTMLInputElement.get.autocomplete",Some("\0HTMLInputElement.set.autocomplete"))?;}
