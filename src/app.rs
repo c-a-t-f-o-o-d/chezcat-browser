@@ -6867,3 +6867,7 @@ mod map_areas_tests;
 #[cfg(test)]
 #[path="app_area_alt_tests.rs"]
 mod area_alt_tests;
+
+#[cfg(test)]
+#[path="app_area_coords_tests.rs"]
+mod area_coords_tests;
