@@ -726,6 +726,8 @@ impl Runtime {
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"acceptCharset","\0HTMLFormElement.get.acceptCharset",Some("\0HTMLFormElement.set.acceptCharset"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"rel","\0HTMLFormElement.get.rel",Some("\0HTMLFormElement.set.rel"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"target","\0HTMLFormElement.get.target",Some("\0HTMLFormElement.set.target"))?;}
+            if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"formTarget","\0HTMLButtonElement.get.formTarget",Some("\0HTMLButtonElement.set.formTarget"))?;}
+            if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"formTarget","\0HTMLInputElement.get.formTarget",Some("\0HTMLInputElement.set.formTarget"))?;}
             if name == "HTMLFormElement" {self.define_host_attribute(prototype,window,"noValidate","\0HTMLFormElement.get.noValidate",Some("\0HTMLFormElement.set.noValidate"))?;}
             if name == "HTMLButtonElement" {self.define_host_attribute(prototype,window,"formNoValidate","\0HTMLButtonElement.get.formNoValidate",Some("\0HTMLButtonElement.set.formNoValidate"))?;}
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"formNoValidate","\0HTMLInputElement.get.formNoValidate",Some("\0HTMLInputElement.set.formNoValidate"))?;}
