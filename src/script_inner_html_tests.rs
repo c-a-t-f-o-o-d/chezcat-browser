@@ -481,7 +481,7 @@ verify(document.createElement('div'));verify(document.getElementById('root'));
 
 #[test]
 fn inner_html_ordinary_end_scope_preserves_connected_and_detached_owner_links() {
-    let (_, _, page, outcome) = run("<div id=root></div>", r#"
+    let (mut doc, mut forms, mut page, outcome) = run("<div id=root></div>", r#"
 function verify(target) {
   target.innerHTML='<section>A<marquee>B</section>C</marquee>D';
   var section=target.firstChild,boundary=section.childNodes[1];
@@ -503,14 +503,25 @@ function verify(target) {
   var first=target.firstChild.firstChild,copy=target.childNodes[1];
   if(target.innerHTML!=='<section><b>A</b></section><b>B</b>C'||first===copy||
      copy.parentNode!==target||copy.ownerDocument!==document)throw Error('ordinary end formatting');
-  var retained=target.firstChild,before=target.innerHTML,refused=false;
-  try { target.innerHTML='<section><object>A</section>'; } catch(e) { refused=true; }
-  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('object admission remains atomic');
-  refused=false;
-  try { target.innerHTML='<button>A</button>'; } catch(e) { refused=true; }
-  if(!refused||target.firstChild!==retained||target.innerHTML!==before)throw Error('button admission remains atomic');
+
 }
-verify(document.createElement('div'));verify(document.getElementById('root'));
+var detached=document.createElement('div'),connected=document.getElementById('root');verify(detached);verify(connected);
 "#);
     assert_eq!(outcome.errors, 0, "{}", page.report());
+    // Unsupported resources use the existing native refusal boundary. Check
+    // that boundary directly rather than expecting a catchable JS exception.
+    for target in ["detached", "connected"] {
+        page.begin_job();
+        page.runtime.execute(&format!("var checked={target},retained=checked.firstChild,before=checked.innerHTML;"),
+            &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
+        for markup in ["<section><object>A</section>", "<button>A</button>"] {
+            page.begin_job();let tree=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;
+            let error=page.runtime.execute(&format!("checked.innerHTML='{markup}';"),
+                &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap_err();
+            assert!(error.contains("unsupported resources")||error.contains("native controls/forms"),"{error}");
+            assert_eq!(format!("{:?}",doc.nodes),tree);assert_eq!(page.state.dom_commits,commits);
+            page.begin_job();page.runtime.execute("if(checked.firstChild!==retained||checked.innerHTML!==before)throw 'fragment refusal must preserve actual nodes';",
+                &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
+        }
+    }
 }

@@ -6943,3 +6943,7 @@ mod param_metadata_tests;
 #[cfg(test)]
 #[path="app_param_detached_copy_tests.rs"]
 mod param_detached_copy_tests;
+
+#[cfg(test)]
+#[path="app_param_connection_tests.rs"]
+mod param_connection_tests;
