@@ -408,6 +408,7 @@ struct Event {
     keyboard: Option<KeyboardInput>,
     mouse: Option<AnchorMouseInput>,
     focus: Option<Option<u32>>,
+    submitter: Option<Option<u32>>,
     timestamp: f64,
 }
 
@@ -1308,6 +1309,7 @@ impl Page {
         runtime.define_wheel_event_interface(WINDOW).expect("fixed WheelEvent interface");
         runtime.define_keyboard_event_interface(WINDOW).expect("fixed KeyboardEvent interface");
         runtime.define_focus_event_interface(WINDOW).expect("fixed FocusEvent interface");
+        runtime.define_submit_event_interface(WINDOW).expect("fixed SubmitEvent interface");
         runtime.define_progress_event_interface(WINDOW).expect("fixed ProgressEvent interface");
         runtime.define_animation_event_interface(WINDOW).expect("fixed AnimationEvent interface");
         runtime.define_error_event_interface(WINDOW).expect("fixed ErrorEvent interface");
@@ -2006,6 +2008,21 @@ impl Page {
         }
     }
 
+    pub(crate) fn dispatch_submit(&mut self,doc:&mut Document,forms:&mut Forms,target:usize,submitter:Option<usize>)->Outcome{
+        if !self.state.enabled||!doc.scripting_enabled{return Outcome::default();}
+        let before=self.state.errors;
+        let checked=(||{
+            let bridge=Bridge{doc,forms,state:&mut self.state};
+            if !bridge.form_length_receiver(node_handle(target)){return Err("Submit requires a genuine native form.".into());}
+            bridge.native_node_access(node_handle(target)).map_err(|(_,e)|e)?;
+            bridge.submit_event_argument(WINDOW,submitter.map(node_handle).map(Value::Host).as_ref()).map_err(|(_,e)|e)?;
+            Ok::<(),String>(())
+        })();
+        if let Err(error)=checked{self.state.error("submit",&error);return Outcome{prevented:true,errors:self.state.errors-before,..Outcome::default()};}
+        let(prevented,complete)=self.dispatch_composed_status(doc,forms,node_handle(target),"submit",true,true,false,None,None,submitter.map(node_handle));
+        Outcome{prevented:prevented||!complete,layout_changed:std::mem::take(&mut self.state.changed),errors:self.state.errors.saturating_sub(before)}
+    }
+
     fn dispatch_to(
         &mut self,
         doc: &mut Document,
@@ -2028,7 +2045,7 @@ impl Page {
         bubbles: bool,
         composed: bool,
     ) -> bool {
-        self.dispatch_composed_status(doc, forms, target, event, cancelable, bubbles, composed, None, None).0
+        self.dispatch_composed_status(doc, forms, target, event, cancelable, bubbles, composed, None, None, None).0
     }
 
     // Existing callers retain their cancellation result; native anchor input
@@ -2038,6 +2055,7 @@ impl Page {
         event: &str, cancelable: bool, bubbles: bool, composed: bool,
         mouse: Option<AnchorMouseInput>,
         focus: Option<Option<u32>>,
+        submitter: Option<u32>,
     ) -> (bool, bool) {
         // Resource completion can reach a native event tail in the same job
         // as a fatal script. It must not revive that job or queue later work.
@@ -2091,6 +2109,7 @@ impl Page {
             target:if target==WINDOW&&event=="load"{DOCUMENT}else{target},
             current:target,name,cancelable,bubbles,prevented:false,stopped:false,immediate:false,
             phase:0,passive:false,keyboard:self.state.pending_keyboard.take(),mouse,focus,
+            submitter:if event=="submit"{Some(submitter)}else{None},
             timestamp:self.state.clock_ms(Instant::now()),
         });
         let mut complete = true;
@@ -3633,6 +3652,7 @@ impl Host for Bridge<'_> {
                 else if self.mouse_receiver(object) {"MouseEvent"}
                 else if self.keyboard_receiver(object) {"KeyboardEvent"}
                 else if self.focus_receiver(object) {"FocusEvent"}
+                else if self.submit_event_receiver(object) {"SubmitEvent"}
                 else if self.error_event_receiver(object) {"ErrorEvent"}
                 else if self.animation_receiver(object) {"AnimationEvent"}
                 else if self.progress_receiver(object) {"ProgressEvent"}
@@ -4651,7 +4671,7 @@ impl Host for Bridge<'_> {
         if script_element_selectors::operation(method).is_some() && self.selector_operation_receiver(object,method) {
             return if self.is_frame_handle(object) {&[]} else {&[(0,true)]};
         }
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return &[(0,true)];}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return &[(0,true)];}
         if object==WINDOW && method=="cancelAnimationFrame" {return &[(0,false)];}
         if object == HISTORY && matches!(method,"replaceState"|"pushState") { return &[(1, true), (2, true)]; }
@@ -4975,6 +4995,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0CustomEvent.")||method=="initCustomEvent") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return Some(object);}
+        if self.event_target_interface(object)&&method.starts_with("\0SubmitEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0WheelEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0ErrorEvent.") {return Some(object);}
         if self.event_target_interface(object)&&method.starts_with("\0AnimationEvent.") {return Some(object);}
@@ -4986,7 +5007,7 @@ impl Host for Bridge<'_> {
     }
 
     fn unpublished_base_event_owner(&self,object:u32,method:&str,result:u32)->Option<u32> {
-        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")) {
+        if !(object==DOCUMENT&&method=="createEvent"||self.event_target_interface(object)&&matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")) {
             return None;
         }
         if self.state.created_events.last().is_none_or(|event|event.handle!=result) {return None;}
@@ -5100,7 +5121,7 @@ impl Host for Bridge<'_> {
             return match method { "setProperty" => 2, "getPropertyValue" | "removeProperty" => 1, _ => 0 };
         }
         if script_element_selectors::operation(method).is_some() && self.selector_operation_receiver(object,method) {return 1;}
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {return 1;}
         if method=="getModifierState"&&self.mouse_receiver(object) || method=="\0KeyboardEvent.getModifierState"&&self.keyboard_receiver(object) {return 1;}
         if object==WINDOW && matches!(method,"requestAnimationFrame"|"cancelAnimationFrame") {return 1;}
         if method=="dispatchEvent"&&self.dispatch_receiver(object){return 1;}
@@ -5454,7 +5475,7 @@ impl Host for Bridge<'_> {
         if matches!(method,"load"|"pause")&&self.media_interface_receiver(object)&&!self.media_element_receiver(object) {
             return Err(("NotSupportedError","This media element has no implemented player binding.".into()));
         }
-        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {
+        if matches!(method,"Event"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent"|"CustomEvent")&&self.event_target_interface(object) {
             if !self.state.enabled||!self.doc.scripting_enabled {return Err(("InvalidStateError","Event construction is disabled.".into()));}
             if args.get(1).is_some_and(|value|!matches!(value,Value::Undefined|Value::Null|Value::Object(_)|Value::Function(_)|Value::Host(_))) {
                 return Err(("TypeError",format!("{method}Init requires an object, null or undefined.")));
@@ -5475,6 +5496,7 @@ impl Host for Bridge<'_> {
         if method.starts_with("\0AnimationEvent.")&&!self.animation_receiver(object) {return Err(("TypeError","AnimationEvent operation requires a genuine AnimationEvent.".into()));}
         if method.starts_with("\0ProgressEvent.")&&!self.progress_receiver(object) {return Err(("TypeError","ProgressEvent operation requires a genuine ProgressEvent.".into()));}
         if method.starts_with("\0FocusEvent.")&&!self.focus_receiver(object) {return Err(("TypeError","FocusEvent operation requires a genuine FocusEvent.".into()));}
+        if method.starts_with("\0SubmitEvent.")&&!self.submit_event_receiver(object) {return Err(("TypeError","SubmitEvent operation requires a genuine SubmitEvent.".into()));}
         if method.starts_with("\0KeyboardEvent.")&&!self.keyboard_receiver(object) {
             return Err(("TypeError","KeyboardEvent operation requires a genuine KeyboardEvent.".into()));
         }
@@ -6139,6 +6161,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&method.starts_with("\0Media.") {return self.media_interface_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0KeyboardEvent.") {return self.keyboard_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0FocusEvent.") {return self.focus_receiver(receiver);}
+        if self.event_target_interface(object)&&method.starts_with("\0SubmitEvent.") {return self.submit_event_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0WheelEvent.") {return self.wheel_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0ErrorEvent.") {return self.error_event_receiver(receiver);}
         if self.event_target_interface(object)&&method.starts_with("\0AnimationEvent.") {return self.animation_receiver(receiver);}
@@ -6437,6 +6460,7 @@ impl Host for Bridge<'_> {
         if method=="CustomEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail"]));}
         if method=="UIEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view"]));}
         if method=="FocusEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","detail","view","relatedTarget"]));}
+        if method=="SubmitEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","submitter"]));}
         if method=="ErrorEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","colno","error","filename","lineno","message"]));}
         if method=="AnimationEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","animationName","elapsedTime","pseudoElement"]));}
         if method=="ProgressEvent"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed","lengthComputable","loaded","total"]));}
@@ -6500,6 +6524,7 @@ impl Host for Bridge<'_> {
             self.ui_view_argument(object,Some(value))?;
         }
         if method=="FocusEvent"&&self.event_target_interface(object)&&member=="relatedTarget" {self.mouse_target_argument(object,Some(value))?;}
+        if method=="SubmitEvent"&&self.event_target_interface(object)&&member=="submitter" {self.submit_event_argument(object,Some(value))?;}
         if matches!(method,"MouseEvent"|"WheelEvent")&&self.event_target_interface(object) {
             if member=="relatedTarget" {self.mouse_target_argument(object,Some(value))?;}
             if matches!(member,"screenX"|"screenY"|"clientX"|"clientY")
@@ -6530,6 +6555,7 @@ impl Host for Bridge<'_> {
         if method=="MouseEvent"&&self.event_target_interface(object) {return self.construct_mouse_event(object,args,fields);}
         if method=="KeyboardEvent"&&self.event_target_interface(object) {return self.construct_keyboard_event(object,args,fields);}
         if method=="FocusEvent"&&self.event_target_interface(object) {return self.construct_focus_event(object,args,fields);}
+        if method=="SubmitEvent"&&self.event_target_interface(object) {return self.construct_submit_event(object,args,fields);}
         if method=="ErrorEvent"&&self.event_target_interface(object) {return self.construct_error_event(object,args,fields);}
         if method=="AnimationEvent"&&self.event_target_interface(object) {return self.construct_animation_event(object,args,fields);}
         if method=="ProgressEvent"&&self.event_target_interface(object) {return self.construct_progress_event(object,args,fields);}
@@ -6740,7 +6766,7 @@ impl Host for Bridge<'_> {
             if self.created_event_method(object, property).is_some() { return Ok(true); }
             let mouse = self.state.event.as_ref().unwrap().mouse.is_some();
             let keyboard = self.state.event.as_ref().unwrap().keyboard.is_some();
-            return Ok((mouse || self.focus_receiver(object)) && self.event_native_member(object, property) || keyboard && keyboard_property(property)
+            return Ok((mouse || self.focus_receiver(object) || self.submit_event_receiver(object)) && self.event_native_member(object, property) || keyboard && keyboard_property(property)
                 || matches!(
                     property,
                     "type"
@@ -7094,6 +7120,7 @@ impl Host for Bridge<'_> {
         if self.node_tree_method_member(object,property) {return Ok(Value::Undefined);}
         if script_named_map::element(object).is_some() { return self.named_map_get(object, property); }
         if script_class_list::element(object).is_some() { return self.class_list_get(object,property); }
+        if property=="submitter"&&self.submit_event_receiver(object){return self.submit_event_value(object);}
         if let Some(result) = self.created_event_get(object, property) { return result; }
         if script_attr::index(object).is_some() { return self.attr_get(object, property); }
         if let Some(value) = self.frame_get(object, property) { return value; }
@@ -8335,6 +8362,7 @@ impl Host for Bridge<'_> {
         if method=="\0KeyboardEvent.getModifierState" {return self.keyboard_modifier_state(object,args);}
         if let Some(property)=method.strip_prefix("\0KeyboardEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0FocusEvent.get.") {return self.get(object,property);}
+        if method=="\0SubmitEvent.get.submitter" {return self.submit_event_value(object);}
         if let Some(property)=method.strip_prefix("\0WheelEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0ErrorEvent.get.") {return self.get(object,property);}
         if let Some(property)=method.strip_prefix("\0AnimationEvent.get.") {return self.get(object,property);}
@@ -12086,3 +12114,7 @@ mod form_reset_tests;
 #[cfg(test)]
 #[path="script_form_reset_output_tests.rs"]
 mod form_reset_output_tests;
+
+#[cfg(test)]
+#[path="script_submit_event_tests.rs"]
+mod submit_event_tests;

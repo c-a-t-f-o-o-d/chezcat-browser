@@ -2252,7 +2252,7 @@ impl App {
             self.error(error);
             return;
         }
-        if self.script_event(owner, "submit", true) {
+        if self.script_event_with_submitter(owner, "submit", true, submitter) {
             return;
         }
         match self.forms.submit_request(
@@ -2788,17 +2788,16 @@ impl App {
         }
     }
     fn script_event(&mut self, target: usize, event: &str, cancelable: bool) -> bool {
+        self.script_event_with_submitter(target,event,cancelable,None)
+    }
+    fn script_event_with_submitter(&mut self, target: usize, event: &str, cancelable: bool, submitter:Option<usize>) -> bool {
         self.inspector.invalidate();
         let Some(page) = &mut self.scripting else {
             return false;
         };
-        let outcome = page.dispatch(
-            &mut self.document,
-            &mut self.forms,
-            target,
-            event,
-            cancelable,
-        );
+        let outcome = if event=="submit"{
+            page.dispatch_submit(&mut self.document,&mut self.forms,target,submitter)
+        }else{page.dispatch(&mut self.document,&mut self.forms,target,event,cancelable)};
         self.apply_history_replacement();
         if outcome.layout_changed {
             self.reflow();
@@ -7215,3 +7214,7 @@ mod form_reset_tests;
 #[cfg(test)]
 #[path="app_form_reset_output_tests.rs"]
 mod form_reset_output_tests;
+
+#[cfg(test)]
+#[path="app_submit_event_tests.rs"]
+mod submit_event_tests;
