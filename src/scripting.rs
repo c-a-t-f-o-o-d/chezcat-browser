@@ -10855,3 +10855,7 @@ mod optgroup_connection_tests;
 #[cfg(test)]
 #[path="script_optgroup_fragment_tests.rs"]
 mod optgroup_fragment_tests;
+
+#[cfg(test)]
+#[path="script_optgroup_adoption_tests.rs"]
+mod optgroup_adoption_tests;

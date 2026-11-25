@@ -35,7 +35,7 @@ impl Bridge<'_>{
     let item=&self.doc.nodes[index];
     if matches!(item.namespace,crate::html::Namespace::UnknownForeign){return Err(failure("Adoption requires known namespace provenance."));}
     if self.doc.native_focus.get()==Some(index){return Err(failure("Adopting the native focused subtree requires focus lifecycle integration."));}
-    if self.forms.controls.contains_key(&index)||matches!(&item.kind,NodeKind::Element{tag,..} if matches!(tag.as_str(),"html"|"head"|"body"|"title"|"base"|"meta"|"form"|"fieldset"|"legend"|"input"|"button"|"select"|"option"|"optgroup"|"textarea"|"img"|"iframe"|"object"|"embed"|"script"|"style"|"link"|"canvas"|"video"|"audio"|"source"|"template")){
+    if self.forms.controls.contains_key(&index)||matches!(&item.kind,NodeKind::Element{tag,..} if matches!(tag.as_str(),"html"|"head"|"body"|"title"|"base"|"meta"|"form"|"fieldset"|"legend"|"input"|"button"|"select"|"option"|"textarea"|"img"|"iframe"|"object"|"embed"|"script"|"style"|"link"|"canvas"|"video"|"audio"|"source"|"template") || tag=="optgroup" && item.namespace!=crate::html::Namespace::Html){
      return Err(failure("Adopting native structural, resource or control state requires its dedicated lifecycle hooks."));
     }
     if item.namespace==crate::html::Namespace::Svg&&!crate::html::svg_dom_transfer(item){return Err(failure("Adopting unsupported SVG native state is unavailable."));}
