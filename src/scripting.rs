@@ -1745,6 +1745,7 @@ impl Page {
                 "onchange",
                 "onsubmit",
                 "onreset",
+                "oninvalid",
                 "onload",
                 "onkeydown",
                 "onkeyup",
@@ -1752,7 +1753,7 @@ impl Page {
                 "onerror","onloadstart","onabort","onemptied","ondurationchange","onloadedmetadata","onloadeddata",
                 "oncanplay","oncanplaythrough","onplay","onplaying","onwaiting","onpause","onseeking","onseeked","ontimeupdate","onended",
             ] {
-                if !matches!(name,"onclick"|"onauxclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"onload"|"onkeydown"|"onkeyup"|"onfocus"|"onblur")
+                if !matches!(name,"onclick"|"onauxclick"|"oninput"|"onchange"|"onsubmit"|"onreset"|"oninvalid"|"onload"|"onkeydown"|"onkeyup"|"onfocus"|"onblur")
                     && !self.state.embedded_video.as_ref().is_some_and(|video|video.node==node) {continue;}
                 let Some(source) = doc.attr(node, name) else {
                     continue;
@@ -2008,6 +2009,39 @@ impl Page {
         }
     }
 
+    /// Snapshot invalid candidates before callbacks. The backing remains charged
+    /// across every dispatch, including listeners that remove later candidates.
+    pub(crate) fn validate_native_submission(&mut self,doc:&mut Document,forms:&mut Forms,owner:usize,submitter:Option<usize>)->Result<(Outcome,bool,Option<usize>),String>{
+        let before=self.state.errors;
+        let enabled=self.state.enabled&&doc.scripting_enabled;
+        if enabled {
+            if self.runtime.invocation_failed_fatally(){return Err("The script job failed; nothing was submitted.".into());}
+            let bridge=Bridge{doc,forms,state:&mut self.state};
+            bridge.native_node_access(node_handle(owner)).map_err(|(_,e)|e)?;
+        }
+        let work=doc.nodes.len().checked_mul(2).and_then(|n|forms.controls.len().checked_mul(forms.controls.len()).and_then(|m|n.checked_add(m))).ok_or("Validation work overflow.")?;
+        if enabled{self.state.work(work)?;script_text_content::deadline(&self.state)?;}
+        let available=if enabled{self.state.retained_limit.saturating_sub(self.state.retained)}else{usize::MAX};
+        let snapshot=forms.validation_snapshot(doc,owner,submitter,available)?;
+        let storage=snapshot.storage_bytes();
+        if enabled{self.state.copies(snapshot.peak_bytes)?;script_text_content::deadline(&self.state)?;self.state.replace_storage(0,storage,0)?;}
+        let invalid=!snapshot.nodes.is_empty();let mut unhandled=None;
+        let result:Result<(),String>=(||{
+            for &node in &snapshot.nodes{
+                let (canceled,complete)=if enabled{
+                    Bridge{doc,forms,state:&mut self.state}.native_node_access(node_handle(node)).map_err(|(_,e)|e)?;
+                    self.dispatch_composed_status(doc,forms,node_handle(node),"invalid",true,false,false,None,None,None)
+                }else{(false,true)};
+                if !complete{return Err("Required-field invalid event delivery did not complete; nothing was submitted.".into());}
+                if !canceled&&unhandled.is_none(){unhandled=Some(node);}
+            }
+            Ok(())
+        })();
+        if enabled{self.state.retained-=storage;}
+        result?;
+        Ok((Outcome{prevented:false,layout_changed:std::mem::take(&mut self.state.changed),errors:self.state.errors.saturating_sub(before)},invalid,unhandled))
+    }
+
     pub(crate) fn dispatch_submit(&mut self,doc:&mut Document,forms:&mut Forms,target:usize,submitter:Option<usize>)->Outcome{
         if !self.state.enabled||!doc.scripting_enabled{return Outcome::default();}
         let before=self.state.errors;
@@ -2064,7 +2098,7 @@ impl Page {
             self.cancel_media_selection();
             return (false, false);
         }
-        let result = self.event_path(doc, target);
+        let result = if event=="invalid"{self.event_path_with_detached(doc,target,true)}else{self.event_path(doc, target)};
         let path = match result {
             Ok(path) => path,
             Err(error) => {
@@ -2205,6 +2239,9 @@ impl Page {
     }
 
     fn event_path(&mut self, doc: &Document, target: u32) -> Result<Vec<u32>, String> {
+        self.event_path_with_detached(doc,target,false)
+    }
+    fn event_path_with_detached(&mut self,doc:&Document,target:u32,allow_detached:bool)->Result<Vec<u32>,String>{
         self.state.work(1)?;
         self.state.rebuild(doc)?;
         if target == WINDOW {
@@ -2214,7 +2251,8 @@ impl Page {
             let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,DOCUMENT,0)?;self.state.push_dispatch_temporary(&mut path,WINDOW,0)?;return Ok(path);
         }
         let node = node_index(target).ok_or("Unknown event target.")?;
-        if !self.state.tree.active.get(node).copied().unwrap_or(false)
+        if !(allow_detached && self.state.detached_nodes.contains(&node))
+            && !self.state.tree.active.get(node).copied().unwrap_or(false)
             && !(tag(doc, node) == "script" && self.state.dom.created.contains(&node))
             && !(tag(doc, node) == "img" && self.state.images.entries.contains_key(&node))
         {
@@ -2900,7 +2938,7 @@ impl Bridge<'_> {
             || event == "message" && self.message_port_owner(handle).is_some()
             || self.media_element_receiver(handle) && script_media::event_name(event) || matches!(
             event,
-            "click" | "auxclick" | "input" | "change" | "submit" | "reset" | "keydown" | "keyup" | "focus" | "blur" | "focusin" | "focusout"
+            "click" | "auxclick" | "input" | "change" | "submit" | "reset" | "invalid" | "keydown" | "keyup" | "focus" | "blur" | "focusin" | "focusout"
         ) || event == "DOMContentLoaded" && matches!(handle, DOCUMENT | WINDOW)
             || event == "load" && handle == WINDOW
             || matches!(event, "load" | "error")
@@ -6640,7 +6678,7 @@ impl Host for Bridge<'_> {
                 ("document", true), ("console", true), ("navigator", true),
                 ("clientInformation", true), ("location", true), ("performance", true),
                 ("onclick", true), ("onauxclick", true), ("oninput", true), ("onchange", true), ("onsubmit", true),
-                ("onreset", true), ("onload", true), ("onkeydown", true), ("onkeyup", true),
+                ("onreset", true), ("oninvalid", true), ("onload", true), ("onkeydown", true), ("onkeyup", true),
                 ("onfocus",true),("onblur",true)]);
         }
         if self.frame_context(window).is_none() { return Err("Unknown Window key receiver.".into()); }
@@ -8736,7 +8774,7 @@ fn keyboard_property(property: &str) -> bool {
 
 fn handler_event(property: &str) -> Option<&str> {
     match property {
-        "onclick" | "onauxclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "onload" | "onkeydown"
+        "onclick" | "onauxclick" | "oninput" | "onchange" | "onsubmit" | "onreset" | "oninvalid" | "onload" | "onkeydown"
         | "onkeyup" | "onerror" | "onfocus" | "onblur" => Some(&property[2..]),
         _ => None,
     }
@@ -12118,3 +12156,7 @@ mod form_reset_output_tests;
 #[cfg(test)]
 #[path="script_submit_event_tests.rs"]
 mod submit_event_tests;
+
+#[cfg(test)]
+#[path="script_invalid_event_tests.rs"]
+mod invalid_event_tests;

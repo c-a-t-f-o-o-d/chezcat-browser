@@ -654,6 +654,9 @@ fn set_form_value(editor: &mut Editor, text: &str, kind: Kind) {
 mod forms_reset;
 pub(crate) use forms_reset::ResetPlan;
 
+#[path="forms_validation.rs"]
+mod forms_validation;
+
 pub struct Forms {
     pub controls: BTreeMap<usize, Control>,
     /// Bounds must not silently change the values sent to a server.
@@ -1221,67 +1224,10 @@ impl Forms {
         owner: usize,
         submitter: Option<usize>,
     ) -> Result<(), String> {
-        if self.limited {
-            return Err(
-                "This page exceeds the form value/control limits; nothing was submitted.".into(),
-            );
-        }
-        if submitter.is_some_and(|node| {
-            !self.controls.get(&node).is_some_and(|c| {
-                c.owner == Some(owner)
-                    && matches!(c.kind, Kind::Submit | Kind::Image)
-                    && !c.disabled
-            })
-        }) {
-            return Err("The submit button is not available.".into());
-        }
-        let validate = doc.attr(owner, "novalidate").is_none()
-            && !submitter.is_some_and(|id| doc.attr(id, "formnovalidate").is_some());
-        for control in self.controls.values() {
-            if control.owner != Some(owner) || control.disabled {
-                continue;
-            }
-            let required = control.required
-                || control.kind == Kind::Radio
-                    && !control.name.is_empty()
-                    && self.controls.values().any(|c| {
-                        c.owner == Some(owner)
-                            && c.group_root == control.group_root
-                            && c.kind == Kind::Radio
-                            && c.name == control.name
-                            && c.required
-                    });
-            if validate
-                && required
-                && !(matches!(control.kind, Kind::Text | Kind::TextArea) && control.readonly)
-            {
-                let missing = match control.kind {
-                    Kind::Text | Kind::TextArea => control.value.chars.is_empty(),
-                    Kind::Select => control
-                        .select
-                        .as_ref()
-                        .and_then(|state| state.selected.and_then(|index| state.options.get(index)))
-                        .is_none_or(|option| option.placeholder),
-                    Kind::Checkbox => !control.checked,
-                    Kind::Radio if control.name.is_empty() => !control.checked,
-                    Kind::Radio => !self.controls.values().any(|c| {
-                        c.owner == Some(owner)
-                            && c.group_root == control.group_root
-                            && c.kind == Kind::Radio
-                            && c.name == control.name
-                            && c.checked
-                    }),
-                    _ => false,
-                };
-                if missing {
-                    return Err(format!(
-                        "Complete the required field: {}.",
-                        if control.name.is_empty() {
-                            "unnamed field"
-                        } else {
-                            &control.name
-                        }
-                    ));
+        if self.validation_enabled(doc, owner, submitter)? {
+            for (&node,control) in &self.controls {
+                if self.required_value_missing(owner, control) {
+                    return Err(self.required_message(node));
                 }
             }
         }
@@ -1297,6 +1243,12 @@ impl Forms {
         base: &Location,
     ) -> Result<Submission, String> {
         self.serialize_submission(doc, owner, submitter, current, base, true)
+    }
+
+    /// The native host has already completed interactive validation. Listener
+    /// changes must not trigger a second validation pass during serialization.
+    pub(crate) fn validated_submit_request(&self,doc:&Document,owner:usize,submitter:Option<usize>,current:&Location,base:&Location)->Result<Submission,String>{
+        self.serialize_submission(doc,owner,submitter,current,base,false)
     }
 
     /// HTMLFormElement.submit() bypasses interactive constraint validation and
