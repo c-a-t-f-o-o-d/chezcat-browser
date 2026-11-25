@@ -977,11 +977,13 @@ foreign or uncertain fallback retain their separate handling.
 
 All 21 frozen new native checks pass, up from seven; all 359 prior HTML checks
 remain passing, for 380 total. All eight optimized native scenarios pass, up
-from three. Original expectations are unchanged. Exact retained trees and
+from three. Original native expectations are unchanged. Exact retained trees and
 following text, native option/ruby/noscript cases, formatting identity, table
 placement, foreign/root guards, capacities and cancellation/recovery are
-measured. Added admitted connected/detached Page assertions remain unexecuted
-by the native selection. Full foreign, specialized-mode, Page, Windows and
+measured. Connected/detached Page assertions remain unexecuted
+by the native selection. Refusal checks inspect native errors directly while
+retaining tree, commit-generation and node-identity assertions; actual Page
+validation remains required. Full foreign, specialized-mode, Page, Windows and
 browser acceptance remain separate; F05 stays partial.
 
 **Deliverables**
