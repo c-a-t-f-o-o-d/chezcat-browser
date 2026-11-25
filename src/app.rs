@@ -6845,3 +6845,7 @@ mod semantic_html_tests;
 #[cfg(test)]
 #[path="app_unknown_fallback_tests.rs"]
 mod unknown_fallback_tests;
+
+#[cfg(test)]
+#[path="app_mod_datetime_tests.rs"]
+mod mod_datetime_tests;
