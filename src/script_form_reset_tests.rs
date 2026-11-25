@@ -52,7 +52,7 @@ fn form_reset_checked_preparation_refuses_without_partial_native_state_and_recov
   let Value::Host(form)=p.runtime.execute("x;",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap()else{panic!("form")};
   let before=f.controls.iter().map(|(&n,c)|(n,c.value.text(),c.value.cursor,c.value.anchor,c.value.offset,c.dirty_value,c.checked,c.dirty_checked,c.caption.clone())).collect::<Vec<_>>();
   let limit=p.state.retained_limit;p.begin_job();match mode{0=>p.state.copy_work=0,1=>p.state.host_work=0,2=>p.state.retained_limit=p.state.retained,_=>p.state.execution_deadline=Some(Instant::now())};
-  assert!(Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}.complete_native_form_reset(form).is_err(),"mode {mode}");
+  assert!(Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}.prepare_native_form_reset(form).is_err(),"mode {mode}");
   assert_eq!(f.controls.iter().map(|(&n,c)|(n,c.value.text(),c.value.cursor,c.value.anchor,c.value.offset,c.dirty_value,c.checked,c.dirty_checked,c.caption.clone())).collect::<Vec<_>>(),before);
   p.state.retained_limit=limit;p.state.execution_deadline=None;p.begin_job();run(&mut d,&mut f,&mut p,"x.reset();if(document.getElementById('edit').value!=='Seed'||document.getElementById('area').value!=='Area')throw 'reset fresh recovery';");
  }
@@ -64,9 +64,9 @@ fn form_reset_fatal_listener_unwinds_lock_keeps_native_values_and_recovers(){
  let out=p.console_eval(&mut d,&mut f,"if(edit.value!=='dirty'||captured.currentTarget!==null||captured.eventPhase!==0)throw 'fatal partial reset';x.removeEventListener('reset',heavy);x.reset();if(edit.value!=='Seed')throw 'lock recovery';");assert_eq!(out.errors,0,"{}",p.report());
 }
 #[test]
-fn form_reset_output_refusal_preserves_callback_side_effects_and_native_values(){
+fn form_reset_owned_output_restores_defaults_and_preserves_callback_side_effects(){
  let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,"var x=document.getElementById('form'),edit=document.getElementById('edit'),output=document.createElement('output');x.appendChild(output);output.defaultValue='default';output.value='dirty';edit.value='dirty';x.onreset=function(){x.setAttribute('data-side','kept');};");
- p.begin_job();let error=p.runtime.execute("x.reset();",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("OUTPUT"),"{error}");assert!(p.state.synthetic_dispatches.is_empty());p.begin_job();run(&mut d,&mut f,&mut p,"if(edit.value!=='dirty'||output.value!=='dirty'||x.getAttribute('data-side')!=='kept')throw 'refusal side effects';document.body.appendChild(output);x.reset();if(edit.value!=='Seed'||output.value!=='dirty')throw 'refusal recovery';");
+ p.begin_job();run(&mut d,&mut f,&mut p,"x.reset();if(edit.value!=='Seed'||output.value!=='default'||x.getAttribute('data-side')!=='kept')throw 'reset side effects';output.value='outside';document.body.appendChild(output);edit.value='dirty';x.reset();if(edit.value!=='Seed'||output.value!=='outside')throw 'unrelated output isolation';");assert!(p.state.synthetic_dispatches.is_empty()&&p.state.form_reset_pending.is_none());
 }
 
 #[test]

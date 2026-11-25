@@ -590,6 +590,7 @@ struct State {
     media_queries: Vec<String>,
     abort_signals: Vec<script_abort::Record>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
+    form_reset_pending: Option<script_form_reset::PendingReset>,
     #[cfg(test)]
     disable_event_factory: bool,
     tree: Tree,
@@ -685,6 +686,7 @@ impl State {
             media_queries: Vec::new(),
             abort_signals: Vec::new(),
             synthetic_dispatches: Vec::new(),
+            form_reset_pending: None,
             #[cfg(test)]
             disable_event_factory: false,
             tree: Tree::default(),
@@ -6400,7 +6402,10 @@ impl Host for Bridge<'_> {
         Err("Deleting this native host property is not implemented.".into())
     }
     fn begin_form_reset(&mut self,object:u32)->Result<Option<usize>,String>{self.begin_native_form_reset(object)}
+    fn prepare_form_reset(&mut self,object:u32)->Result<(),String>{self.prepare_native_form_reset(object)}
+    fn next_form_reset_output(&mut self,object:u32)->Result<Option<u32>,String>{self.next_native_form_reset_output(object)}
     fn complete_form_reset(&mut self,object:u32)->Result<(),String>{self.complete_native_form_reset(object)}
+    fn finish_form_reset(&mut self,object:u32){self.finish_native_form_reset(object);}
     fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
     fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<usize, String> {
         self.commit_abort_dispatch(controller, reason)
@@ -12077,3 +12082,7 @@ mod script_button_value;
 #[cfg(test)]
 #[path="script_form_reset_tests.rs"]
 mod form_reset_tests;
+
+#[cfg(test)]
+#[path="script_form_reset_output_tests.rs"]
+mod form_reset_output_tests;

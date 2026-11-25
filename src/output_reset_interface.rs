@@ -4,7 +4,7 @@ impl Runtime{
  pub(crate) fn reset_native_output(&mut self,target:u32,host:&mut dyn Host)->Result<(),String>{
   self.reset_native_output_inner(target,host).map_err(|error|error.message)
  }
- fn reset_native_output_inner(&mut self,target:u32,host:&mut dyn Host)->Result<(),Fault>{
+ pub(super) fn reset_native_output_inner(&mut self,target:u32,host:&mut dyn Host)->Result<(),Fault>{
   self.validate_native_access(target,host)?;
   self.reject_foreign_window(&Value::Host(target),host)?;
   let value=host.get(target,"defaultValue").map_err(Fault::new)?;

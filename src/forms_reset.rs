@@ -22,6 +22,9 @@ fn reserve<T>(values:&mut Vec<T>,count:usize,available:usize)->Result<usize,Stri
 }
 impl ResetPlan {
     pub(crate) fn bytes(&self)->usize{self.bytes}
+    pub(crate) fn storage_bytes(&self)->Result<usize,String>{
+        self.updates.capacity().checked_mul(std::mem::size_of::<Update>()).and_then(|n|n.checked_add(self.bytes)).ok_or_else(||"Form reset plan storage overflow.".into())
+    }
     pub(crate) fn prepare(forms:&Forms,doc:&Document,owner:usize,available:usize)->Result<Self,String>{
         if forms.limited{return Err("Form reset requires completely admitted native controls.".into());}
         let count=forms.controls.values().filter(|c|c.owner==Some(owner)).count();

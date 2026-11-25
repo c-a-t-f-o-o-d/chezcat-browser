@@ -2,18 +2,23 @@
 //! https://html.spec.whatwg.org/multipage/form-elements.html#the-output-element
 use super::*;
 impl Bridge<'_>{
- fn form_reset_outputs(&mut self,owner:usize)->Result<Vec<usize>,String>{
+ pub(super) fn form_reset_outputs(&mut self,owner:usize)->Result<Vec<usize>,String>{
   self.state.rebuild(self.doc)?;
   if self.doc.nodes.get(owner).is_none_or(|node|node.namespace!=crate::html::Namespace::Html)||tag(self.doc,owner)!="form"{return Err("Reset requires a genuine HTML form.".into());}
   self.native_node_access(node_handle(owner)).map_err(|(_,message)|message)?;
   let mut pending=Vec::new();let mut outputs=Vec::new();
-  script_text_replacement::push(self.state,&mut pending,0,0)?;
+  let mut root=owner;let mut steps=0usize;
+  while let Some(parent)=self.state.tree.parents.get(root).copied().flatten(){
+   self.state.work(1)?;script_text_content::deadline(self.state)?;
+   steps=steps.checked_add(1).filter(|&n|n<=self.doc.nodes.len()).ok_or("Invalid reset root ancestry.")?;root=parent;
+  }
+  script_text_replacement::push(self.state,&mut pending,root,0)?;
   while let Some(node)=pending.pop(){
    self.state.work(1)?;script_text_content::deadline(self.state)?;
    let other=script_text_replacement::bytes(&[&outputs],0)?;
    for &child in self.doc.nodes[node].children.iter().rev(){script_text_replacement::push(self.state,&mut pending,child,other)?;}
    let object=node_handle(node);
-   if !self.html_output_receiver(object)||self.state.dom.connected.get(node)!=Some(&true){continue;}
+   if !self.html_output_receiver(object){continue;}
    let scratch=script_text_replacement::bytes(&[&pending,&outputs],0)?;
    self.state.replace_storage(0,scratch,0)?;
    let association=self.control_form_owner_get(object);

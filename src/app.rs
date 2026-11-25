@@ -7211,3 +7211,7 @@ mod button_type_value_tests;
 #[cfg(test)]
 #[path="app_form_reset_tests.rs"]
 mod form_reset_tests;
+
+#[cfg(test)]
+#[path="app_form_reset_output_tests.rs"]
+mod form_reset_output_tests;
