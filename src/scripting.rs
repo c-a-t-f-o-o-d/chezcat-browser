@@ -10851,3 +10851,7 @@ mod optgroup_detached_copy_tests;
 #[cfg(test)]
 #[path="script_optgroup_connection_tests.rs"]
 mod optgroup_connection_tests;
+
+#[cfg(test)]
+#[path="script_optgroup_fragment_tests.rs"]
+mod optgroup_fragment_tests;
