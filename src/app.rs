@@ -6935,3 +6935,7 @@ mod area_connection_tests;
 #[cfg(test)]
 #[path="app_param_name_tests.rs"]
 mod param_name_tests;
+
+#[cfg(test)]
+#[path="app_param_metadata_tests.rs"]
+mod param_metadata_tests;

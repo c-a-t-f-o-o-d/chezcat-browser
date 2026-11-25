@@ -644,6 +644,7 @@ impl Runtime {
             if name == "HTMLAreaElement" {self.define_host_attribute(prototype,window,"ping","\0HTMLAreaElement.get.ping",Some("\0HTMLAreaElement.set.ping"))?;}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"name","\0HTMLMapElement.get.name",Some("\0HTMLMapElement.set.name"))?;}
             if name == "HTMLParamElement" {self.define_host_attribute(prototype,window,"name","\0HTMLParamElement.get.name",Some("\0HTMLParamElement.set.name"))?;}
+            if name=="HTMLParamElement"{for &(property,_,get,set) in super::param_metadata_interface::MEMBERS{self.define_host_attribute(prototype,window,property,get,Some(set))?;}}
             if name == "HTMLMapElement" {self.define_host_attribute(prototype,window,"areas","\0HTMLMapElement.get.areas",None)?;}
             if name == "HTMLModElement" {self.define_host_attribute(prototype,window,"dateTime","\0HTMLModElement.get.dateTime",Some("\0HTMLModElement.set.dateTime"))?;}
             if name == "HTMLDataElement" {self.define_host_attribute(prototype,window,"value","\0HTMLDataElement.get.value",Some("\0HTMLDataElement.set.value"))?;}
