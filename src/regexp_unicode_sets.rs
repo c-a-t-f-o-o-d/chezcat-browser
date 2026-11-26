@@ -95,6 +95,7 @@ fn part_ranges(part: ClassPart, budget: &mut usize) -> Result<Ranges, Error> {
             let mut out = Vec::new();push(&mut out, *low, *high, budget)?;return Ok(out);
         }
         ClassPart::Property(ranges, inverted) => (*ranges, *inverted),
+        ClassPart::StringProperty(_) => return Err(Error::Syntax("A string property requires string-set lowering.")),
         ClassPart::Digit(inverted) => (&[(48,57)], *inverted),
         ClassPart::Word(inverted) => (&[(48,57),(65,90),(95,95),(97,122)], *inverted),
         ClassPart::Space(inverted) => (&[(9,13),(32,32),(0xa0,0xa0),(0x1680,0x1680),(0x2000,0x200a),(0x2028,0x2029),(0x202f,0x202f),(0x205f,0x205f),(0x3000,0x3000),(0xfeff,0xfeff)], *inverted),
@@ -161,6 +162,33 @@ fn append(left: &mut Set, mut right: Set, budget: &mut usize) -> Result<(), Erro
 }
 
 impl Parser<'_> {
+    fn property_set(&mut self, members: &'static [&'static [u32]]) -> Result<Set, Error> {
+        // Properties of strings retain their syntactic MayContainStrings
+        // status even when subsequent algebra removes every long member.
+        let mut set=Set { may_strings: true, ..Set::default() };
+        spend(self.budget,members.len())?;
+        for &member in members {
+            if let [character] = member {
+                push(&mut set.ranges,*character,*character,self.budget)?;
+            } else {
+                let mut value=Vec::new();
+                reserve(&mut value,member.len(),self.budget)?;
+                spend(self.budget,member.len())?;
+                value.extend_from_slice(member);
+                reserve(&mut set.strings,1,self.budget)?;
+                set.strings.push(value);
+            }
+        }
+        normalize(&mut set.ranges,self.budget)?;
+        // Generated members are strictly lexicographically ordered and unique.
+        Ok(set)
+    }
+
+    pub(super) fn unicode_property_node(&mut self, members: &'static [&'static [u32]]) -> Result<usize, Error> {
+        let set=self.property_set(members)?;
+        self.lower_set_node(set)
+    }
+
     fn set_operator(&self) -> Option<u16> {
         let unit = self.peek()?;
         (matches!(unit, 38 | 45) && self.units.get(self.at + 1) == Some(&unit)).then_some(unit)
@@ -229,6 +257,9 @@ impl Parser<'_> {
             return Ok((self.string_disjunction()?, false));
         }
         let part = self.set_character()?;
+        if let ClassPart::StringProperty(members) = part {
+            return Ok((self.property_set(members)?,false));
+        }
         let character = matches!(part, ClassPart::Range(_, _));
         Ok((Set { ranges: part_ranges(part, self.budget)?, ..Set::default() }, character))
     }
@@ -289,7 +320,11 @@ impl Parser<'_> {
     }
 
     pub(super) fn unicode_set_node(&mut self) -> Result<usize, Error> {
-        let mut set = self.unicode_class()?;
+        let set = self.unicode_class()?;
+        self.lower_set_node(set)
+    }
+
+    fn lower_set_node(&mut self, mut set: Set) -> Result<usize, Error> {
         let mut parts = Vec::new();
         reserve(&mut parts, set.ranges.len(), self.budget)?;
         for (low, high) in set.ranges { parts.push(ClassPart::Range(low, high)); }

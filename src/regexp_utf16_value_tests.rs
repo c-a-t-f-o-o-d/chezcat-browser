@@ -385,3 +385,45 @@ if(!/^\p{Alphabetic}$/u.test('é')||!/^\P{ASCII}$/v.test('😀')||/^\P{ASCII}$/v
 'ok';
 "#);
 }
+#[test]
+fn unicode_emoji_properties_native_results_and_string_consumers_are_exact() {
+    // The full source contains several independent expanded RGI expressions.
+    // Exercise shipping defaults without changing the small regression profile.
+    assert_eq!(Runtime::new().execute(r#"
+var re=/(?<x>\p{RGI_Emoji})/gv,m=re.exec('!👩‍💻');if(m.index!==1||m[0]!=='👩‍💻'||m.groups.x!=='👩‍💻'||re.lastIndex!==6||!re.unicodeSets||re.unicode)throw 'emoji result';
+if('a👩‍💻b'.replace(/\p{RGI_Emoji}/gv,'!')!=='a!b')throw 'emoji replace';
+var pieces='a👩‍💻b'.split(/(\p{RGI_Emoji})/v);if(pieces.length!==3||pieces[1]!=='👩‍💻'||pieces[2]!=='b')throw 'emoji split';
+if('!🇺🇸'.search(/\p{RGI_Emoji_Flag_Sequence}/v)!==1||'👍🏽'.match(/\p{RGI_Emoji_Modifier_Sequence}/v)[0]!=='👍🏽')throw 'emoji consumers';
+if('😀A'.replace(/[\p{RGI_Emoji}&&\q{😀|}]/gv,'!')!=='!A')throw 'emoji intersection';
+if('😀A'.replace(/[\p{RGI_Emoji}\q{}]/gv,'!')!=='!!A!')throw 'emoji empty progress';
+'ok';
+"#, &mut NoHost).unwrap().to_text(),"ok");
+}
+
+#[test]
+fn unicode_emoji_properties_native_refusal_does_not_publish_and_fresh_job_recovers() {
+    for work in [true,false] {
+        let mut runtime=Runtime::for_test();
+        runtime.execute(r"var pattern='\\p{Basic_Emoji}',finished=false;",&mut NoHost).unwrap();
+        let retained=runtime.retained_regexp;
+        let allowance=runtime.limits.capacity.retained_regexp;
+        if work {runtime.regexp_work=0;} else {runtime.limits.capacity.retained_regexp=0;}
+        let error=runtime.execute("try{new RegExp(pattern,'v');}catch(e){finished=true;}finally{finished=true;}",&mut NoHost).unwrap_err();
+        assert!(error.contains(if work {"Regular-expression work limit"} else {"Retained regexp limit"}),"{error}");
+        assert_eq!(runtime.retained_regexp,retained);
+        runtime.limits.capacity.retained_regexp=allowance;
+        runtime.begin_job();
+        assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'v').test('😀');",&mut NoHost).unwrap().to_text(),"true");
+    }
+}
+
+#[test]
+fn unicode_emoji_properties_native_syntax_and_recovery_are_exact() {
+    succeeds(r#"
+for(var pair of [['\\p{RGI_Emoji}','u'],['\\P{Basic_Emoji}','v'],['[^\\p{Basic_Emoji}]','v'],['\\p{basic_emoji}','v']]){
+var error=null;try{new RegExp(pair[0],pair[1]);}catch(e){error=e;}if(!(error instanceof SyntaxError))throw 'emoji syntax';
+}
+if(!/^\p{Basic_Emoji}$/v.test('😀')||/^\p{Basic_Emoji}$/v.test('❤')||!/^\p{Basic_Emoji}$/v.test('❤️'))throw 'emoji recovery';
+'ok';
+"#);
+}
