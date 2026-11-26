@@ -37,21 +37,27 @@ impl Bridge<'_> {
                 return Err("NotFoundError: Reference is not a child of the destination.".into());
             }
         }
-        // An explicit Text-only donor may use passive noscript ancestry.
-        // Replace-all and other child kinds keep ordinary mutation admission.
-        let mut passive_text_fragment = fragment && !all;
-        if passive_text_fragment {
+        // Actual leaf Text roots may use passive noscript ancestry, including
+        // replace-all and empty donors. Other child kinds keep ordinary guards.
+        let mut passive_text_roots = fragment;
+        if passive_text_roots {
             for &child in &self.doc.nodes[donor].children {
                 self.state.work(1)?;
                 let node = self.doc.nodes.get(child).ok_or("Fragment child identity is unavailable.")?;
                 if node.namespace != crate::html::Namespace::None
                     || !matches!(node.kind, NodeKind::Text(_)) || !node.children.is_empty() {
-                    passive_text_fragment = false;
+                    passive_text_roots = false;
                     break;
                 }
             }
         }
-        if passive_text_fragment { self.passive_text_mutation_ancestors(parent)?; }
+        if all && !fragment {
+            self.state.work(1)?;
+            let node = &self.doc.nodes[donor];
+            passive_text_roots = node.namespace == crate::html::Namespace::None
+                && matches!(node.kind, NodeKind::Text(_)) && node.children.is_empty();
+        }
+        if passive_text_roots { self.passive_text_mutation_ancestors(parent)?; }
         else { self.mutation_ancestors(parent)?; }
         if !matches!(self.doc.nodes[parent].namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) && !self.fragment_receiver(node_handle(parent)) {
             return Err("Fragment insertion requires a known HTML, SVG or fragment container; no tree was changed.".into());
@@ -174,3 +180,7 @@ mod tests;
 #[cfg(test)]
 #[path="script_noscript_text_fragments_tests.rs"]
 mod noscript_text_fragments_tests;
+
+#[cfg(test)]
+#[path="script_noscript_replace_children_tests.rs"]
+mod noscript_replace_children_tests;
