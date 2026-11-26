@@ -1123,6 +1123,10 @@ impl Bridge<'_> {
         self.checked_mutation_ancestors(node, false)
     }
 
+    pub(super) fn passive_text_mutation_ancestors(&mut self, node: usize) -> Result<(), String> {
+        self.checked_mutation_ancestors(node, true)
+    }
+
     fn checked_mutation_ancestors(&mut self, node: usize, passive_text: bool) -> Result<(), String> {
         let mut current = Some(node);
         while let Some(index) = current {
@@ -1753,7 +1757,7 @@ impl Bridge<'_> {
             }
             self.state.prepare_pi_invalidation()?;
             let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_));
-            self.checked_mutation_ancestors(node, true)?;
+            self.passive_text_mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
                 DomString::new()
             } else {
@@ -2162,3 +2166,7 @@ mod noscript_host_retirement_tests {
 #[cfg(test)]
 #[path="script_noscript_character_data_tests.rs"]
 mod noscript_character_data_tests;
+
+#[cfg(test)]
+#[path="script_noscript_text_algorithms_tests.rs"]
+mod noscript_text_algorithms_tests;

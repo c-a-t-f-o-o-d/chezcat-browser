@@ -16,7 +16,7 @@ impl Bridge<'_>{
   let mut children=Vec::new();children.try_reserve_exact(count).map_err(|_|"Cannot reserve normalization children.")?;for index in 0..count{children.push(self.whole_text_child(object,index).ok_or("Normalization child disappeared.")?);}Ok(children)
  }
  fn normalize_parent_guard(&mut self,parent:u32)->Result<(),String>{
-  if self.state.inert_documents.node(parent).is_some(){return Ok(());}let node=if parent==DOCUMENT{0}else{self.dom_node(parent)?};if node!=0&&self.doc.nodes[node].namespace!=crate::html::Namespace::Html&&!matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment){return Err("Normalization requires known attribute/tree namespace provenance.".into());}self.mutation_ancestors(node)?;if self.dom_script(node){return Err("Normalization of native script contents requires its children-changed lifecycle hook.".into());}Ok(())
+  if self.state.inert_documents.node(parent).is_some(){return Ok(());}let node=if parent==DOCUMENT{0}else{self.dom_node(parent)?};if node!=0&&self.doc.nodes[node].namespace!=crate::html::Namespace::Html&&!matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment){return Err("Normalization requires known attribute/tree namespace provenance.".into());}self.passive_text_mutation_ancestors(node)?;if self.dom_script(node){return Err("Normalization of native script contents requires its children-changed lifecycle hook.".into());}Ok(())
  }
  pub(in crate::scripting) fn prepare_shared_normalize(&mut self,target:u32)->Result<NativeNormalizeInfo,String>{
   if !self.normalize_receiver(target){return Err("normalize requires a genuine accessible Node.".into());}if self.state.normalize_plan.is_some(){return Err("A normalization proposal is already active.".into());}self.state.rebuild(self.doc)?;
