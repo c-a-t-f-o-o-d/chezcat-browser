@@ -287,6 +287,13 @@ impl Bridge<'_> {
             end: point,
         })
     }
+    pub(super) fn clone_range_in_native_realm(&mut self,owner:u32,receiver:u32)->Result<Value,String>{
+        if owner!=WINDOW{self.contains_child_document(owner)?;}
+        self.range_live_access(receiver,CLONE,&[]).map_err(|error|match error{Error::Fatal(message)|Error::Exception(_,message)=>message})?;
+        let mut record=*self.range_record(receiver).filter(|record|!record.fixed).ok_or("A genuine live Range is required for cloning.")?;
+        record.owner=owner;
+        self.copy_range(record)
+    }
     fn copy_range(&mut self, record: Record) -> Result<Value, String> {
         self.state.work(1)?;
         let index = u32::try_from(self.state.ranges.len())
