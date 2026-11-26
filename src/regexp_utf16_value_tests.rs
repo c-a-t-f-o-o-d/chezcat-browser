@@ -206,3 +206,38 @@ fn utf16_regexp_scalar_result_input_keeps_the_original_copy_budget() {
             if last == (if method == "exec" { 1.0 } else { 0.0 })));
     }
 }
+
+#[test]
+fn unicode_character_sets_native_exec_keeps_exact_units_and_sticky_offsets() {
+    succeeds(r#"
+var text='😀A\ud800\n🚀', re=/./gu, found=re.exec(text);
+if(found[0]!=='😀'||found.index!==0||re.lastIndex!==2)throw 'paired dot';
+found=re.exec(text);if(found[0]!=='A'||found.index!==2||re.lastIndex!==3)throw 'BMP dot';
+found=re.exec(text);if(found[0].length!==1||found[0].charCodeAt(0)!==0xd800||re.lastIndex!==4)throw 'unpaired dot';
+found=re.exec(text);if(found[0]!=='🚀'||found.index!==5||re.lastIndex!==7)throw 'skip newline';
+if(re.exec(text)!==null||re.lastIndex!==0)throw 'end reset';
+var sticky=new RegExp('[^!]','uy');sticky.lastIndex=1;
+if(sticky.exec('😀')[0]!=='😀'||sticky.lastIndex!==2)throw 'interior sticky';
+sticky.lastIndex=2;if(sticky.exec('😀')!==null||sticky.lastIndex!==0)throw 'sticky end';
+if(!/^.$/su.test('\n')||/^.$/u.test('\u2029')||!/^.$/su.test('\u2029'))throw 'dotAll';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_character_sets_native_string_consumers_keep_captures_and_progress() {
+    succeeds(r#"
+var text='😀A🚀', list=text.match(/\D/gu);
+if(list.length!==3||list[0]!=='😀'||list[2]!=='🚀')throw 'global match';
+if(text.search(/[^A]/u)!==0||'A😀'.search(/\W/u)!==1)throw 'search offsets';
+if(text.replace(/([^!]+?)A/u,'<$1>')!=='<😀>🚀')throw 'capture replacement';
+var seen='';var result=text.replace(/./gu,function(value,index,input){
+ seen=seen+index+':'+value.length+';';if(input!==text)throw 'real input';return '['+value+']';
+});
+if(seen!=='0:2;2:1;3:2;'||result!=='[😀][A][🚀]')throw 'callback units and offsets';
+if('a😀b🚀c'.split(/\W/u).join('|')!=='a|b|c')throw 'split code points';
+if('😀A'.match(/[^!]*?/gu).length!==3||'😀A'.replace(/[^!]*?/gu,'-')!=='-😀-A-')throw 'empty progress';
+if(!/^[^\D]+$/u.test('59')||/^[^\D]+$/u.test('😀')||!/^\W+$/u.test('😀🚀'))throw 'complement union';
+'ok';
+"#);
+}
