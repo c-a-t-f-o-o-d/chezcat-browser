@@ -296,7 +296,7 @@ impl Parser {
                             backwards: true,
                             ..
                         }
-                ) {
+                ) || self.unicode && matches!(self.nodes[atom], Node::Look { .. }) {
                     return Err(Error::Syntax(
                         "A regular-expression assertion cannot be quantified.",
                     ));
@@ -392,8 +392,6 @@ impl Parser {
                 let capture = if self.eat(b'?' as u16) {
                     if self.eat(b':' as u16) {
                         None
-                    } else if self.unicode {
-                        return Err(Error::Unsupported("Unicode regexp assertions and named groups are not implemented."));
                     } else if self.eat(b'=' as u16) {
                         assertion = Some((true, false));
                         None
@@ -460,9 +458,6 @@ impl Parser {
                     return self.push(Node::Reference(Reference::Name(name)));
                 }
                 if self.peek().is_some_and(|unit| (49..=57).contains(&unit)) {
-                    if self.unicode {
-                        return Err(Error::Unsupported("Unicode regexp backreferences are not implemented."));
-                    }
                     let mut number = 0usize;
                     while let Some(unit @ 48..=57) = self.peek() {
                         number = number
@@ -711,6 +706,9 @@ impl Parser {
             }
             48 => {
                 if self.peek().is_some_and(|u| (48..=57).contains(&u)) {
+                    if self.unicode {
+                        return Err(Error::Syntax("Unicode regexp null escape cannot precede a decimal digit."));
+                    }
                     return Err(Error::Unsupported(
                         "Legacy regexp octal escapes are not implemented.",
                     ));
@@ -718,6 +716,9 @@ impl Parser {
                 0
             }
             49..=57 => {
+                if self.unicode {
+                    return Err(Error::Syntax("Unicode regexp character classes cannot contain decimal escapes."));
+                }
                 return Err(Error::Unsupported(
                     "Legacy regexp octal/decimal class escapes are not implemented.",
                 ))
@@ -897,6 +898,9 @@ impl Compiler<'_> {
             Node::Reference(reference) => {
                 let indices = match reference {
                     Reference::Number(index) if *index <= self.groups => vec![*index],
+                    Reference::Number(_) if self.unicode => {
+                        return Err(Error::Syntax("Unicode regexp decimal escape has no corresponding capture."));
+                    }
                     Reference::Number(_) => {
                         return Err(Error::Unsupported(
                             "Legacy regexp octal/decimal escapes are not implemented.",
@@ -1444,7 +1448,13 @@ impl Regex {
                             {
                                 return Err(Error::Unsupported("Case-insensitive non-ASCII regexp backreferences are not implemented."));
                             }
-                            let matched = input[start..end]
+                            // Backreferences compare whole Unicode input characters,
+                            // including isolated surrogates; a captured lone unit
+                            // cannot match one half of a later surrogate pair.
+                            let boundaries = !self.flags.unicode
+                                || !(target > 0 && starts_surrogate_pair(input, target - 1))
+                                    && !(target + length > 0 && starts_surrogate_pair(input, target + length - 1));
+                            let matched = boundaries && input[start..end]
                                 .iter()
                                 .zip(&input[target..target + length])
                                 .all(|(a, b)| {

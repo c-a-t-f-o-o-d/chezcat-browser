@@ -281,3 +281,31 @@ fn unicode_surrogate_pattern_split_backend_preserves_exact_units_and_native_reco
     assert_eq!(runtime.execute(r"'a\ud800b'.split(/\ud800/u).join('|')",&mut NoHost).unwrap().to_text(),"a|b");
     assert_eq!(runtime.execute(r"/^\ud800$/u.test('\ud800') ? 'ok' : 'bad'",&mut NoHost).unwrap().to_text(),"ok");
 }
+
+#[test]
+fn unicode_group_reference_native_results_named_captures_and_consumers_keep_offsets() {
+    succeeds(r#"
+var re=/(?<x>.)\k<x>/gu, found=re.exec('!😀😀');
+if(found.index!==1||found[0]!=='😀😀'||found[1]!=='😀'||found.groups.x!=='😀'||found.input!=='!😀😀'||re.lastIndex!==5)throw 'exact named result';
+if(re.exec('!😀😀')!==null||re.lastIndex!==0)throw 'global reset';
+if('x😀A'.replace(/(?<=(.))A/u,'<$1>')!=='x😀<😀>')throw 'lookbehind replacement';
+var pieces='😀😀!'.split(/(?<x>.)\k<x>/u);if(pieces.length!==3||pieces[0]!==''||pieces[1]!=='😀'||pieces[2]!=='!')throw 'captured split';
+if('😀A'.search(/(?<=😀)A/u)!==2||'😀A'.match(/(?!😀)./u)[0]!=='A')throw 'assertion consumers';
+var clone=new RegExp(re);if(clone.source!==re.source||clone.flags!=='gu'||!clone.unicode)throw 'clone metadata';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_group_reference_native_errors_boundaries_and_fresh_state_are_preserved() {
+    succeeds(r#"
+for(var pattern of ['(?=a)*','(a)\\2','\\01','[\\1]','(?<x>a)\\k<y>']){
+ var error=null;try{new RegExp(pattern,'u');}catch(e){error=e;}
+ if(!(error instanceof SyntaxError))throw 'Unicode grammar syntax';
+}
+if(/(\ud800)\1/u.test('\ud800\ud800\udc00')||/(?<=\1(\udc00))A/u.test('\ud800\udc00\udc00A'))throw 'reference pair boundaries';
+if(!/(\ud800)\1/u.test('\ud800\ud800')||!/(?<=\1(\udc00))A/u.test('\udc00\udc00A'))throw 'isolated reference recovery';
+if(!/^\1(.)$/u.test('😀')||!/^(a|(b))\2c$/u.test('ac'))throw 'forward unmatched';
+'ok';
+"#);
+}
