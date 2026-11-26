@@ -2186,3 +2186,7 @@ mod noscript_text_algorithms_tests;
 #[cfg(test)]
 #[path="script_noscript_text_children_tests.rs"]
 mod noscript_text_children_tests;
+
+#[cfg(test)]
+#[path="script_noscript_variadic_text_tests.rs"]
+mod noscript_variadic_text_tests;
