@@ -241,3 +241,44 @@ if(!/^[^\D]+$/u.test('59')||/^[^\D]+$/u.test('😀')||!/^\W+$/u.test('😀🚀')
 'ok';
 "#);
 }
+
+#[test]
+fn unicode_surrogate_pattern_native_source_captures_and_consumers_are_exact() {
+    succeeds(r#"
+var raw=new RegExp('\ud800','gu'), escaped=new RegExp('\\uD800','gu');
+if(raw.source!=='\ud800'||raw.toString()!=='/\ud800/gu')throw 'raw source';
+for(var re of [raw,escaped]){
+ var m=re.exec('😀\ud800x');if(m.index!==2||m[0].charCodeAt(0)!==0xd800||re.lastIndex!==3)throw 'lone match';
+ re.lastIndex=0;if(re.test('😀'))throw 'paired input excluded';
+}
+var pair=/\uD83D\uDE00+/u, found=pair.exec('x😀😀');
+if(found.index!==1||found[0].length!==4)throw 'pair quantifier';
+if('😀\ud800😀'.replace(/\ud800/u,'-')!=='😀-😀')throw 'exact replacement';
+
+if('😀\ud800'.search(/\ud800/u)!==2)throw 'search offset';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_surrogate_pattern_native_classes_and_mixed_escapes_keep_grammar() {
+    succeeds(r#"
+if(!/^[\uD83D\uDE00-\uD83D\uDE03]+$/u.test('😀😃')||/^[\uD83D\uDE00-\uD83D\uDE03]+$/u.test('🚀'))throw 'paired range';
+if(!/^[^\uD800-\uDFFF]+$/u.test('😀')||/^[^\uD800-\uDFFF]+$/u.test('\ud800'))throw 'surrogate range complement';
+if(/\uD83D+/u.test('😀')||/\u{d83d}\u{de00}/u.test('😀')||/\uD83D\u{de00}/u.test('😀'))throw 'separate atoms';
+var rawHigh='\ud83d',rawLow='\ude00';
+if(new RegExp(rawHigh+'\\uDE00','u').test('😀')||new RegExp('\\uD83D'+rawLow,'u').test('😀'))throw 'raw escaped distinction';
+if(!new RegExp(rawHigh+rawLow,'u').test('😀'))throw 'raw pair';
+var error=null;try{new RegExp('[\\uDFFF-\\uD800]','u');}catch(e){error=e;}
+if(!(error instanceof SyntaxError)||!/^\ud800$/u.test('\ud800'))throw 'syntax then recovery';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_surrogate_pattern_split_backend_refusal_preserves_native_recovery() {
+    let mut runtime=Runtime::for_test();
+    let error=runtime.execute(r"'a\ud800b'.split(/\ud800/u)",&mut NoHost).unwrap_err();
+    assert!(error.contains("This string method does not support unpaired UTF-16 surrogates."),"{error}");
+    assert_eq!(runtime.execute(r"/^\ud800$/u.test('\ud800') ? 'ok' : 'bad'",&mut NoHost).unwrap().to_text(),"ok");
+}
