@@ -307,7 +307,10 @@ fn unicode_set_algebra_grammar_flags_and_classic_boundaries_are_preserved() {
     assert!(matches!(Regex::compile("a","iv",&mut 100_000),Err(Error::Unsupported(_))));
     let re=Regex::compile(r"^[\&\-\!\#\%\,\:\;\<\=\>\@\`\~\(\)\[\]\{\}\/\|]$","v",&mut 100_000).unwrap();
     for unit in b"&-!#%,:;<=>@`~()[]{}/|" {assert!(re.find(&[u16::from(*unit)],0,false,&mut 100_000).unwrap().is_some());}
-    for pattern in [r"[\q{ab|cd}]",r"[\p{Letter}]",r"[\P{ASCII}]"] {assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Unsupported(_))),"{pattern}");}
+    let strings=Regex::compile(r"^[\q{ab|cd}]$","v",&mut 100_000).unwrap();
+    assert!(strings.find(&[97,98],0,false,&mut 100_000).unwrap().is_some());
+    assert!(strings.find(&[97,99],0,false,&mut 100_000).unwrap().is_none());
+    for pattern in [r"[\p{Letter}]",r"[\P{ASCII}]"] {assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Unsupported(_))),"{pattern}");}
     let classic=Regex::compile("^[a&&b]$","u",&mut 100_000).unwrap();assert!(classic.find(&[38],0,false,&mut 100_000).unwrap().is_some());
     let flags=Flags::parse("yvmsg").unwrap();assert_eq!(flags.text(),"gmsvy");
 }
@@ -339,4 +342,46 @@ fn unicode_set_algebra_predefined_sets_agree_at_character_boundaries() {
     let re=Regex::compile(r"^[[\u{0}-\u{10ffff}]--[\u{1}-\u{10fffe}]]$","v",&mut 100_000).unwrap();
     for input in [vec![0],vec![0xdbff,0xdfff]]{assert!(re.find(&input,0,false,&mut 100_000).unwrap().is_some());}
     assert!(re.find(&[1],0,false,&mut 100_000).unwrap().is_none());
+}
+
+#[test]
+fn unicode_string_set_order_backtracking_and_direction_are_exact() {
+    for (pattern,text,whole,capture) in [(r"([\q{a|ab|abc}])","abc",(0,3),(0,3)),(r"^([\q{a|ab|abc}])bc$","abc",(0,3),(0,1)),(r"(?<=([\q{a|ba|cba}]))!","cba!",(3,4),(0,3)),(r"([\q{😀|😀A}])","😀A",(0,3),(0,3))] {
+        let re=Regex::compile(pattern,"v",&mut 100_000).unwrap();let input:Vec<_>=text.encode_utf16().collect();
+        assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some(whole),Some(capture)],"{pattern}");
+    }
+    let re=Regex::compile(r"^[\q{a|ab|}]*$","v",&mut 100_000).unwrap();assert!(re.find(&[97,98,97],0,false,&mut 100_000).unwrap().is_some());
+    assert!(Regex::compile(r"^[\q{}]$","v",&mut 100_000).unwrap().find(&[],0,false,&mut 100_000).unwrap().is_some());
+}
+
+#[test]
+fn unicode_string_set_algebra_keeps_characters_strings_and_empty_distinct() {
+    for (pattern,accepted,rejected) in [(r"^[[\q{ab|a|😀|}]&&[\q{ab|😀|z|}]]$",vec!["ab","😀",""],vec!["a","z"]),(r"^[[\q{ab|a|}]--[\q{ab}]]$",vec!["a",""],vec!["ab","b"]),(r"^[[\q{ab|a}]a-c]$",vec!["ab","a","b","c"],vec!["abc",""]),(r"^[[\q{a|ab}]&&[a-z]]$",vec!["a"],vec!["ab","b"]),(r"^[^\q{a|b}]$",vec!["c","😀"],vec!["a","b",""]),(r"^[^[\q{ab}]&&[a]]$",vec!["a","b","😀"],vec!["ab",""])] {
+        let re=Regex::compile(pattern,"v",&mut 100_000).unwrap();
+        for text in accepted {assert!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 100_000).unwrap().is_some(),"{pattern} {text}");}
+        for text in rejected {assert!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 100_000).unwrap().is_none(),"{pattern} {text}");}
+    }
+}
+
+#[test]
+fn unicode_string_set_escapes_preserve_code_points_and_lone_units() {
+    for pattern in [r"^[\q{\uD83D\uDE00A}]$",r"^[\q{😀A}]$"] {
+        let re=Regex::compile(pattern,"v",&mut 100_000).unwrap();assert!(re.find(&[0xd83d,0xde00,65],0,false,&mut 100_000).unwrap().is_some());
+    }
+    let re=Regex::compile(r"^[\q{\u{d83d}\u{de00}A}]$","v",&mut 100_000).unwrap();assert!(re.find(&[0xd83d,0xde00,65],0,false,&mut 100_000).unwrap().is_none());
+    let re=Regex::compile(r"^[\q{\ud800A|a\|b|\-\!}]$","v",&mut 100_000).unwrap();
+    for input in [vec![0xd800,65],vec![97,124,98],vec![45,33]] {assert!(re.find(&input,0,false,&mut 100_000).unwrap().is_some());}
+    assert!(re.find(&[0xd800,0xdc00,65],0,false,&mut 100_000).unwrap().is_none());
+}
+
+#[test]
+fn unicode_string_set_syntax_work_refusal_and_fresh_recovery_are_preserved() {
+    for pattern in [r"[^\q{ab}]",r"[^\q{}]",r"[^\q{ab}--\q{ab}]",r"[^\q{ab}&&\q{ab}]",r"[\q{a}-z]",r"[a-\q{z}]",r"[\q{a-b}]",r"[\q{\d}]",r"[\q{a]",r"[\q]",r"[\q{!!}]"] {
+        assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
+    }
+    for (pattern,flags) in [(r"[\p{Letter}]","v"),(r"[\q{ab}]","iv"),(".","d")] {assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));}
+    assert!(matches!(Regex::compile(r"[\q{ab}]","u",&mut 100_000),Err(Error::Syntax(_))));
+    let pattern=format!(r"[\q{{{}}}]",["abcdef";64].join("|"));assert!(matches!(Regex::compile(&pattern,"v",&mut 1_000),Err(Error::Limit(_))));
+    let re=Regex::compile(&pattern,"v",&mut 100_000).unwrap();assert!(matches!(re.find(&[97,98,99,100,101,102],0,false,&mut 0),Err(Error::Limit(_))));
+    assert_eq!(re.find(&[97,98,99,100,101,102],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,6)));
 }
