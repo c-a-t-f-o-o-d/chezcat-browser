@@ -97,8 +97,8 @@ var frame=document.createElement('iframe');frame.hidden=true;document.body.appen
 var owned=new child.StaticRange({startContainer:text,startOffset:1,endContainer:text,endOffset:3});
 if(!(owned instanceof child.StaticRange)||owned instanceof StaticRange||owned.startContainer!==text||owned.endOffset!==3)throw 'constructor owner realm';
 var caught=0;try{new child.StaticRange({startContainer:text,startOffset:0,endContainer:document.doctype,endOffset:0});}catch(e){if(e instanceof child.DOMException&&!(e instanceof DOMException)&&e.name==='InvalidNodeTypeError')caught++;}
-try{new StaticRange({startContainer:foreignDocument,startOffset:0,endContainer:text,endOffset:0});}catch(e){if(e.name==='NotSupportedError')caught++;}
-if(caught!==2)throw 'method realm and genuine unsupported endpoint';
+var childSnapshot=new StaticRange({startContainer:foreignDocument,startOffset:0,endContainer:text,endOffset:0});if(childSnapshot.startContainer!==foreignDocument||childSnapshot.endContainer!==text||childSnapshot.startOffset!==0||childSnapshot.endOffset!==0||childSnapshot.collapsed)throw 'genuine mixed child endpoint snapshot';
+if(caught!==1)throw 'method realm and genuine invalid endpoint';
 var getters=0,query={get endContainer(){getters++;return text;},get endOffset(){getters++;return 0;},get startContainer(){getters++;return foreignDocument;},get startOffset(){getters++;return 0;}};
 "#);
  p.set_location(&crate::navigation::address("https://static-range-other.test/changed",&crate::navigation::Location::home()).unwrap());
