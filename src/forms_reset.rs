@@ -97,7 +97,7 @@ impl ResetPlan {
                 let s=c.select.as_mut().unwrap();s.selected=selected;
                 for o in &mut s.options{o.dirty_selected=false;}
             }
-            if matches!(c.kind,Kind::Text|Kind::TextArea){c.dirty_value=false;}
+            if matches!(c.kind,Kind::Text|Kind::TextArea){c.dirty_value=false;c.last_value_change_user=false;}
             c.checked=u.checked;c.dirty_checked=false;
         }
     }

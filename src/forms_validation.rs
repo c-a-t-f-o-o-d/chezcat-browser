@@ -56,7 +56,7 @@ fn reserve<T>(values:&mut Vec<T>,count:usize,available:&mut usize)->Result<usize
 }
 impl Forms{
     pub(crate) fn validation_metadata_work(&self,doc:&Document)->Result<usize,String>{
-        self.controls.keys().try_fold(0usize,|total,&node|total.checked_add(validation_attribute_work(doc,node)?).ok_or("Validation metadata work overflow.".into()))
+        self.controls.keys().try_fold(0usize,|total,&node|validation_attribute_work(doc,node)?.checked_add(self.length_validation_work(doc,node)).and_then(|work|total.checked_add(work)).ok_or("Validation metadata work overflow.".into()))
     }
     pub(super) fn validation_enabled(&self,doc:&Document,owner:usize,submitter:Option<usize>)->Result<bool,String>{
         if owner>=doc.nodes.len()||doc.nodes[owner].namespace!=crate::html::Namespace::Html||tag(doc,owner)!="form"{return Err("Submission requires an existing form.".into());}
@@ -118,7 +118,7 @@ impl Forms{
         seen.resize(doc.nodes.len(),false);stack.push((root,false,false));
         while let Some((node,in_datalist,parent_select))=stack.pop(){
             if node>=doc.nodes.len()||seen[node]{return Err("Invalid validation tree topology; nothing was submitted.".into());}seen[node]=true;
-            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&c.owner==Some(owner)&&(self.required_value_missing(owner,c)||custom(node))){nodes.push(node);}
+            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&c.owner==Some(owner)&&(self.required_value_missing(owner,c)||{let(long,short)=self.length_validation_flags(doc,node);long||short}||custom(node))){nodes.push(node);}
             if stack.len().checked_add(doc.nodes[node].children.len()).is_none_or(|n|n>doc.nodes.len()){return Err("Invalid validation traversal size; nothing was submitted.".into());}
             let html=doc.nodes[node].namespace==crate::html::Namespace::Html;
             let barred=in_datalist||html&&tag(doc,node)=="datalist";

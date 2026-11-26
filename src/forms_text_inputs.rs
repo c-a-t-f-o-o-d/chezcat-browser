@@ -27,6 +27,7 @@ impl InputPlan {
                 let control = forms.controls.get_mut(&node).expect("Prepared text INPUT");
                 if let Some(value) = value { control.value = value; }
                 control.dirty_value = true;
+                control.last_value_change_user=false;
             }
             Self::CheckableValue { node, initial, value, caption } => {
                 let control = forms.controls.get_mut(&node).expect("Prepared checkable INPUT");
@@ -91,7 +92,7 @@ pub(super) fn text_control(doc: &Document, node: usize, name: &str, initial: &st
     let retained = name.len().checked_add(initial.len()).and_then(|bytes| bytes.checked_add(caption.len()))
         .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
         .ok_or("Text INPUT retained payload overflow.")?;
-    Ok((Control { owner: None, group_root: node, kind: Kind::Text, value, dirty_value: live.is_some(),
+    Ok((Control { owner: None, group_root: node, kind: Kind::Text, value, dirty_value: live.is_some(), last_value_change_user: false,
         name: copy_text(name)?, caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(),
         checked: doc.attr(node, "checked").is_some(), dirty_checked: false,

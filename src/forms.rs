@@ -472,6 +472,8 @@ pub struct Control {
     // The HTML dirty value flag belongs to the control, not its current text.
     // Setting .value to the existing/default value still makes a text control dirty.
     pub dirty_value: bool,
+    /// True only when the current value was last changed by a native user edit.
+    pub last_value_change_user: bool,
     pub name: String,
     pub caption: String,
     pub disabled: bool,
@@ -497,6 +499,10 @@ impl Control {
         if matches!(self.kind, Kind::Text | Kind::TextArea) {
             self.dirty_value = true;
         }
+    }
+    pub fn mark_user_value_change(&mut self) {
+        self.mark_value_dirty();
+        if matches!(self.kind,Kind::Text|Kind::TextArea){self.last_value_change_user=true;}
     }
     pub fn editable(&self) -> bool {
         matches!(self.kind, Kind::Text | Kind::TextArea) && !self.disabled && !self.readonly
@@ -554,7 +560,7 @@ impl Control {
         self.value.cursor += count;
         self.value.anchor = self.value.cursor;
         if deleted || count != 0 {
-            self.mark_value_dirty();
+            self.mark_user_value_change();
         }
     }
 }
@@ -579,6 +585,7 @@ impl TextDefaultPlan {
         control.initial = self.initial;
         if let Some(value) = self.value {
             control.value = value;
+            control.last_value_change_user=false;
         }
     }
 }
@@ -656,6 +663,8 @@ pub(crate) use forms_reset::ResetPlan;
 
 #[path="forms_validation.rs"]
 mod forms_validation;
+#[path="forms_length_validation.rs"]
+mod forms_length_validation;
 pub(crate) use forms_validation::{ValidationSnapshot,validation_candidate,validation_candidate_attributes,validation_attribute_work};
 
 pub struct Forms {
@@ -901,7 +910,7 @@ impl Forms {
                     kind
                 },
                 value,
-                dirty_value: false,
+                dirty_value: false, last_value_change_user: false,
                 name: name.chars().take(MAX_QUERY).collect(),
                 caption: if kind == Kind::Select {
                     String::new()
@@ -1059,6 +1068,7 @@ impl Forms {
             control.value.offset = 0;
         }
         control.mark_value_dirty();
+        control.last_value_change_user=false;
         // Text inputs keep their original default for Reset. The other supported
         // input types use the value attribute/default-value mode.
         if !matches!(kind, Kind::Text | Kind::TextArea) {
@@ -1152,6 +1162,7 @@ impl Forms {
                 }
                 if matches!(control.kind, Kind::Text | Kind::TextArea) {
                     control.dirty_value = false;
+                    control.last_value_change_user=false;
                 }
                 control.checked = control.initially_checked;
                 control.dirty_checked = false;
@@ -1227,7 +1238,7 @@ impl Forms {
     ) -> Result<(), String> {
         if self.validation_enabled(doc, owner, submitter)? {
             let snapshot=self.required_snapshot(doc,owner,0,usize::MAX)?;
-            if let Some(&node)=snapshot.nodes.first(){return Err(self.required_message(node));}
+            if let Some(&node)=snapshot.nodes.first(){return Err(self.validation_message(doc,node));}
         }
         Ok(())
     }
