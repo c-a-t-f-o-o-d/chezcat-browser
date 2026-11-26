@@ -55,9 +55,9 @@ pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
             "image" => Kind::Image,
             "reset" => Kind::Reset,
             "button" => Kind::Button,
-            "password" | "file" | "number" | "range" | "color" | "date" | "datetime-local"
+            "file" | "number" | "range" | "color" | "date" | "datetime-local"
             | "month" | "week" | "time" | "email" | "url" => Kind::Unsupported,
-            _ => Kind::Text, // text/search/tel, plus the HTML invalid-value default.
+            _ => Kind::Text, // text/search/tel/password, plus the HTML invalid-value default.
         },
         "button" => match doc
             .attr(node, "type")
@@ -469,6 +469,8 @@ pub struct Control {
     pub group_root: usize,
     pub kind: Kind,
     pub value: Editor,
+    // Display state is independent of the shared single-line value semantics.
+    pub password: bool,
     // The HTML dirty value flag belongs to the control, not its current text.
     // Setting .value to the existing/default value still makes a text control dirty.
     pub dirty_value: bool,
@@ -495,6 +497,10 @@ pub struct Control {
 }
 
 impl Control {
+    /// Native display and hit geometry never shape the password plaintext.
+    pub fn display_text(&self) -> String {
+        self.value.chars.iter().map(|&ch| if self.password { '*' } else { ch }).collect()
+    }
     pub fn mark_value_dirty(&mut self) {
         if matches!(self.kind, Kind::Text | Kind::TextArea) {
             self.dirty_value = true;
@@ -912,6 +918,7 @@ impl Forms {
                     kind
                 },
                 value,
+                password: kind == Kind::Text && doc.attr(node,"type").is_some_and(|value|value.eq_ignore_ascii_case("password")),
                 dirty_value: false, last_value_change_user: false,
                 name: name.chars().take(MAX_QUERY).collect(),
                 caption: if kind == Kind::Select {

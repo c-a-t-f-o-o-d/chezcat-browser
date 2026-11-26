@@ -12265,3 +12265,7 @@ mod text_length_validation_tests;
 #[cfg(test)]
 #[path="script_pattern_validation_tests.rs"]
 mod pattern_validation_tests;
+
+#[cfg(test)]
+#[path="script_password_input_tests.rs"]
+mod password_input_tests;

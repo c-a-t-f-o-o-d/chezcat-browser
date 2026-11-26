@@ -90,7 +90,7 @@ pub(super) fn fragment_editor_control_with_value(doc: &Document, node: usize, ki
         .and_then(|bytes| bytes.checked_add(value.chars.len().checked_mul(std::mem::size_of::<char>())?))
         .ok_or("Native control retained payload overflow.")?;
     let checked = doc.attr(node, "checked").is_some();
-    Ok((Control { owner: None, group_root: node, kind, value, dirty_value, last_value_change_user: false,
+    Ok((Control { owner: None, group_root: node, kind, value, password: kind == Kind::Text && doc.attr(node,"type").is_some_and(|value|value.eq_ignore_ascii_case("password")), dirty_value, last_value_change_user: false,
         name: name.into(), caption, disabled: doc.attr(node, "disabled").is_some(),
         readonly: doc.attr(node, "readonly").is_some(), required: doc.attr(node, "required").is_some(), checked, dirty_checked: false,
         max_length: if kind==Kind::TextArea{textarea_max_length(doc.attr(node,"maxlength"))}else if kind==Kind::Text{input_max_length(doc.attr(node,"maxlength"))}else{doc.attr(node, "maxlength").and_then(|value| value.parse().ok()).unwrap_or(MAX_VALUE_UNITS).min(MAX_VALUE_UNITS)},
@@ -174,7 +174,7 @@ impl Forms {
                     option.group = option.group.map(|node| node + base - 1);
                 }
                 for row in &mut selected.rows { if let SelectRow::Group { node, .. } = row { *node += base - 1; } }
-                let mut control = Control { owner: None, group_root: base + local - 1, kind: Kind::Select, value: Editor::default(), dirty_value: false, last_value_change_user: false, name: name.into(),
+                let mut control = Control { owner: None, group_root: base + local - 1, kind: Kind::Select, value: Editor::default(), password: false, dirty_value: false, last_value_change_user: false, name: name.into(),
                     caption: String::new(), disabled: doc.attr(local, "disabled").is_some(), readonly: false,
                     required: doc.attr(local, "required").is_some(), checked: false, dirty_checked: false, max_length: MAX_VALUE_UNITS,
                     tab_index: doc.attr(local, "tabindex").and_then(parse_tab_index).unwrap_or(0),

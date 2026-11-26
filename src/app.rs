@@ -2097,7 +2097,7 @@ impl App {
                     if control.kind == Kind::TextArea {
                         textarea::sync(rect, &mut control.value);
                     } else if let Some(font) = &rect.text_font {
-                        let shape = font.shape(&control.value.text());
+                        let shape = font.shape(&control.display_text());
                         let value = &mut control.value;
                         value.offset = value.offset.min(value.cursor).min(value.chars.len());
                         let available = (rect.width - 14).max(0);
@@ -2114,6 +2114,9 @@ impl App {
                 }
             }
         }
+    }
+    fn focused_password(&self) -> bool {
+        matches!(self.focus, Focus::Control(node) if self.forms.controls.get(&node).is_some_and(|control| control.password))
     }
     fn has_editor(&self) -> bool {
         match self.focus {
@@ -3008,6 +3011,7 @@ impl App {
                     }
                 }
                 0x43 | 0x58 => {
+                    if self.focused_password() { return PlatformAction::None; }
                     let text = if self.has_editor() {
                         self.editor().selected()
                     } else {
@@ -3249,7 +3253,7 @@ impl App {
         }
         // The platform acknowledges only a successful clipboard write. If a
         // reentrant native message changed the selection, leave the editor alone.
-        if self.editor_editable() && self.editor().selected() == text {
+        if !self.focused_password() && self.editor_editable() && self.editor().selected() == text {
             let previous = self.current_control_value();
             self.editor().delete_selection();
             self.edited_control(previous);
@@ -3531,7 +3535,7 @@ impl App {
                                     y - self.content_top() + self.scroll,
                                 )
                             } else {
-                                control_character_at(rect, &self.forms.controls[&node].value, x)
+                                control_character_at(rect, &self.forms.controls[&node], x)
                             };
                             self.forms
                                 .controls
@@ -3675,7 +3679,7 @@ impl App {
                                 y - self.content_top() + self.scroll,
                             )
                         } else {
-                            control_character_at(rect, &control.value, x)
+                            control_character_at(rect, control, x)
                         };
                         self.editor().move_to(pos, true);
                         self.sync_editors();
@@ -4232,9 +4236,10 @@ fn highlight_text(
     }
 }
 
-fn control_character_at(rect: &layout::ControlBox, value: &Editor, x: i32) -> usize {
+fn control_character_at(rect: &layout::ControlBox, control: &crate::forms::Control, x: i32) -> usize {
+    let value = &control.value;
     if let Some(font) = &rect.text_font {
-        let shape = font.shape(&value.text());
+        let shape = font.shape(&control.display_text());
         shape.hit(x - rect.x - 6 + shape.x(value.offset))
     } else {
         value.offset + ((x - rect.x - 6).max(0) / (GLYPH_ADVANCE * rect.scale)) as usize
@@ -4266,7 +4271,7 @@ fn draw_control_text(
     ))));
     if control.kind == Kind::Text {
         let value = &control.value;
-        let shape = font.shape(&value.text());
+        let shape = font.shape(&control.display_text());
         let origin = x + 6 - shape.x(value.offset);
         let text_y = y + (height - shape.height()) / 2;
         if value.chars.is_empty() && !focused {
@@ -4524,6 +4529,7 @@ fn draw_control(
             if focused && selected.contains(&i) {
                 canvas.fill_rect(px, y + 2, advance, height - 4, 0xb4d8fa);
             }
+            let ch = if control.password { '*' } else { ch };
             let mut bytes = [0u8; 4];
             canvas.text(
                 px,
@@ -7272,3 +7278,7 @@ mod text_length_validation_tests;
 #[cfg(test)]
 #[path="app_pattern_validation_tests.rs"]
 mod pattern_validation_tests;
+
+#[cfg(test)]
+#[path="app_password_input_tests.rs"]
+mod password_input_tests;
