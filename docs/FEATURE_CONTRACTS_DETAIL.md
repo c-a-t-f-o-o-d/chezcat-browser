@@ -1603,10 +1603,36 @@ detach does not reclaim or invalidate a live range.
 This increment supports accessible displayed-document nodes, including detached
 main-document nodes and fragments. Child/inert construction/endpoints, Attr
 endpoints, StaticRange, comparison/query methods, geometry, contextual fragments,
-content deletion/extraction/cloning/insertion and surrounding remain outside the
+content deletion/extraction/insertion and surrounding remain outside the
 implemented subset. Range identity is not a DOM selection, editor-selection or
 site initialization claim. Original App acceptance uses trusted input, actual
 text runs/pixels and stable neighboring editor/link hit targets.
+
+
+## Native Range content copying
+
+Range.cloneContents returns an independent native DocumentFragment for supported
+displayed-document endpoints. Collapsed ranges produce empty fragments; selected
+CharacterData copies preserve exact UTF-16 units and concrete node kinds. Whole
+subtrees and partial ancestors retain native attributes and supported namespaces,
+without copying author properties or listeners. Source nodes and range boundaries
+remain unchanged. Template hosts keep empty ordinary child lists and independent
+content fragments with the appropriate inert owner, including nested templates.
+Contained DocumentType nodes throw HierarchyRequestError; DocumentType boundary
+containers throw InvalidNodeTypeError.
+
+The selected forest, snapshots, native identities and template indexes use the
+existing checked joint publication path. Work, copy, retained storage and deadline
+refusal preserve unpublished identities and permit fresh recovery. Original native
+checks cover exact retained payload/backing; an in-process App callback inserts a
+real copied fragment and verifies paint, editor state and link targets.
+
+Inert/child Range endpoints, native control copying, active handlers and unsupported
+element lifecycles retain their existing guards. The SVG attribute producer still
+refuses arbitrary namespaced attributes; supported SVG attributes and arbitrary
+HTML attribute namespaces have separate copying witnesses. Broader Range mutation,
+parser/lifecycle integration and unchanged-browser acceptance remain required.
+This increment does not accept a foundation contract.
 
 
 ## Canonical Element.id reflection
