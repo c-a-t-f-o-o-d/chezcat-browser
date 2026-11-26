@@ -1156,6 +1156,22 @@ impl Bridge<'_> {
 
     pub(super) fn mutation_subtree_with_styles(&mut self,root:usize)->Result<(Vec<usize>,usize),String>{self.checked_mutation_subtree(root,false,true)}
 
+    // Moving the host does not interpret its raw fallback text. Actual fallback
+    // elements remain subject to the resource boundary even if scripting changes.
+    fn movable_noscript_host(&mut self, node: usize) -> Result<bool, String> {
+        let host = &self.doc.nodes[node];
+        if host.namespace != crate::html::Namespace::Html || tag(self.doc, node) != "noscript" {
+            return Ok(false);
+        }
+        self.state.work(host.children.len())?;
+        Ok(host.children.iter().all(|&child| {
+            let child = &self.doc.nodes[child];
+            matches!(&child.kind, NodeKind::Text(_))
+                && child.namespace == crate::html::Namespace::None
+                && child.children.is_empty()
+        }))
+    }
+
     pub(super) fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
@@ -1164,6 +1180,8 @@ impl Bridge<'_> {
             self.state.work(1)?;
             depth = depth.max(level);
             self.validate_svg_node(node)?;
+            let blocked_noscript = tag(self.doc, node) == "noscript"
+                && self.doc.scripting_enabled && !self.movable_noscript_host(node)?;
             let name = tag(self.doc, node);
             if self.native_button(node) || self.fresh_button(node) {
                 self.state.work(self.doc.nodes.len())?;
@@ -1196,7 +1214,7 @@ impl Bridge<'_> {
                 || name=="template"&&!self.movable_template_host(node)
                 || name == "style" && !(direct_style && self.created_html_style(node))
                 || (name=="option" || name=="optgroup" && self.doc.nodes[node].namespace!=crate::html::Namespace::Html) && !owned_select
-                || name == "noscript" && self.doc.scripting_enabled
+                || blocked_noscript
                 || name == "script" && !self.dom_script(node)
                 || name == "link" && !self.dom_stylesheet(node)
                     && !(bare_links && script_stylesheets::bare_fragment_link(self.doc, node))
@@ -2109,4 +2127,27 @@ mod noscript_loader_context_tests {
         p.begin_job();p.runtime.execute("if(fallback.firstChild!==old||watch.takeRecords().length||blocker.parentNode!==null)throw 'protected noscript tree unchanged';document.getElementById('out').textContent='Recovered';if(fallback.textContent!==old.data||document.getElementById('out').textContent!=='Recovered')throw 'native read recovery';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();
         assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
     }
+}
+
+#[cfg(test)]
+mod noscript_host_retirement_tests {
+ use super::*;
+ fn fixture(raw:bool)->(Document,Forms,Page){let source="<body><div id=from><noscript id=fallback><img id=fake src=missing><script>window.bad=1;</script>&amp;</noscript></div><div id=to></div><p id=out>Real</p>";let mut d=if raw{crate::html::parse_loaded_document_with_scripting(source,true,&||Ok(())).unwrap()}else{crate::html::parse(source)};d.scripting_enabled=true;let mut f=Forms::new(&d);let mut p=Page::new();let l=crate::navigation::address("https://noscript-host.test/",&crate::navigation::Location::home()).unwrap();p.set_location(&l);p.set_resource_base(&l);assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);(d,f,p)}
+ fn run(d:&mut Document,f:&mut Forms,p:&mut Page,s:&str){p.runtime.execute(s,&mut Bridge{doc:d,forms:f,state:&mut p.state}).unwrap();}
+ #[test]
+ fn noscript_host_retirement_whole_text_host_moves_retires_and_reconnects_with_actual_records(){
+  let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,r#"var from=document.getElementById('from'),to=document.getElementById('to'),host=document.getElementById('fallback'),text=host.firstChild,raw=text.data,watch=new MutationObserver(function(){});watch.observe(from,{childList:true});watch.observe(to,{childList:true});to.appendChild(host);var records=watch.takeRecords();if(from.childNodes.length||to.firstChild!==host||host.firstChild!==text||text.parentNode!==host||text.data!==raw||host.ownerDocument!==document||records.length!==2||records[0].target!==from||records[0].removedNodes[0]!==host||records[1].target!==to||records[1].addedNodes[0]!==host||document.getElementById('fake')!==null||window.bad!==undefined)throw 'whole raw host move';to.innerHTML='<p id=safe>Safe</p>';records=watch.takeRecords();if(host.parentNode!==null||host.firstChild!==text||text.parentNode!==host||host.textContent!==raw||host.innerHTML!==raw||document.getElementById('fallback')!==null||records.length!==1||records[0].removedNodes[0]!==host||records[0].addedNodes[0]!==document.getElementById('safe'))throw 'whole raw host retirement';from.appendChild(host);records=watch.takeRecords();if(document.getElementById('fallback')!==host||host.firstChild!==text||records.length!==1||records[0].addedNodes[0]!==host||window.bad!==undefined)throw 'whole raw host reconnect';from.removeChild(host);records=watch.takeRecords();if(host.parentNode!==null||text.data!==raw||records.length!==1||records[0].removedNodes[0]!==host)throw 'whole raw host removal';"#);assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
+ }
+ #[test]
+ fn noscript_host_retirement_interior_and_nontext_fallback_guards_remain_atomic(){
+  let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),text=host.firstChild,blocker=document.createTextNode('blocked'),watch=new MutationObserver(function(){});watch.observe(host,{childList:true,characterData:true,subtree:true});");p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
+  for code in ["host.appendChild(blocker);","text.data='changed';","host.innerHTML='<b>changed</b>'; "]{p.begin_job();let error=p.runtime.execute(code,&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(watch.takeRecords().length||blocker.parentNode!==null||host.firstChild!==text)throw 'interior unchanged';");}
+  let(mut d,mut f,mut p)=fixture(false);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),to=document.getElementById('to');");let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;p.begin_job();let error=p.runtime.execute("to.appendChild(host);",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("loaded resources"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(host.parentNode!==document.getElementById('from')||to.childNodes.length||document.getElementById('fake')!==null)throw 'nontext guarded';document.getElementById('out').textContent='Recovered';");
+ }
+ #[test]
+ fn noscript_host_retirement_move_quotas_preserve_tree_records_and_recover(){
+  let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,"var from=document.getElementById('from'),to=document.getElementById('to'),host=document.getElementById('fallback'),text=host.firstChild,watch=new MutationObserver(function(){});watch.observe(from,{childList:true});watch.observe(to,{childList:true});");p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;let limit=p.state.retained_limit;
+  for mode in 0..3{p.begin_job();match mode{0=>p.state.copy_work=0,1=>p.state.host_work=0,_=>p.state.retained_limit=p.state.retained};let error=p.runtime.execute("to.appendChild(host);",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();let category=error.to_ascii_lowercase();assert!(match mode{0=>category.contains("dom string work limit"),1=>category.contains("dom work limit"),_=>category.contains("allowance")||category.contains("retained")||category.contains("storage")},"{mode}: {error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.state.retained_limit=limit;p.begin_job();run(&mut d,&mut f,&mut p,"if(host.parentNode!==from||host.firstChild!==text||to.childNodes.length||watch.takeRecords().length)throw 'move refusal atomic';");}
+  p.begin_job();run(&mut d,&mut f,&mut p,"to.appendChild(host);if(host.parentNode!==to||host.firstChild!==text||watch.takeRecords().length!==2||window.bad!==undefined)throw 'fresh move recovery';");assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
+ }
 }
