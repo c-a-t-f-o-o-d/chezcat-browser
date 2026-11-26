@@ -754,6 +754,10 @@ impl Runtime {
                 "HTMLSelectElement"=>Some("\0HTMLSelectElement.get.willValidate"),
                 "HTMLTextAreaElement"=>Some("\0HTMLTextAreaElement.get.willValidate"),_=>None,
             }{self.define_host_attribute(prototype,window,"willValidate",operation,None)?;}
+            for &(class,key,operation)in super::CONTROL_VALIDATION_MEMBERS{
+                if name!=class{continue;}
+                if key=="validationMessage"{self.define_host_attribute(prototype,window,key,operation,None)?;}else{self.deferred_host_method(prototype,window,key,operation,0)?;}
+            }
             if name == "HTMLFormElement" {
                 self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
                 self.deferred_host_method(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;

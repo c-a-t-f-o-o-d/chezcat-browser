@@ -37,7 +37,11 @@ impl Bridge<'_>{
         }
         Ok(())
     }
+    fn validation_dispatch_authority(&self,object:u32)->Result<(),(&'static str,String)>{
+        if self.control_eligibility_class(object).is_some(){self.control_validation_authority(object)}else{self.form_validation_authority(object)}
+    }
     pub(super) fn begin_native_form_validation(&mut self,object:u32,report:bool)->Result<usize,String>{
+        if self.control_eligibility_class(object).is_some(){return self.begin_native_control_validation(object,report);}
         self.validate_form_validation(object).map_err(|(_,e)|e)?;
         let count=self.forms.controls.len();
         let work=count.checked_mul(count).and_then(|n|self.doc.nodes.len().checked_mul(2).and_then(|m|n.checked_add(m))).ok_or("Form validation work overflow.")?;
@@ -51,6 +55,9 @@ impl Bridge<'_>{
         }
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
         let snapshot=self.forms.required_snapshot(self.doc,owner,root,available)?;
+        self.publish_validation_snapshot(object,report,snapshot,available)
+    }
+    pub(super) fn publish_validation_snapshot(&mut self,object:u32,report:bool,snapshot:forms::ValidationSnapshot,available:usize)->Result<usize,String>{
         let storage=snapshot.storage_bytes();self.state.copies(snapshot.peak_bytes)?;
         let before=self.state.form_validations.capacity();let slot=std::mem::size_of::<Pending>();
         let (replacement,growth)=if self.state.form_validations.len()==before{
@@ -74,7 +81,7 @@ impl Bridge<'_>{
         let index=self.validation_index(token)?;let pending=&self.state.form_validations[index];
         if pending.current.is_some(){return Err("The previous invalid event is incomplete.".into());}
         let object=pending.form;let Some(&node)=pending.snapshot.nodes.get(pending.next)else{return Ok(None);};
-        self.form_validation_authority(object).map_err(|(_,e)|e)?;
+        self.validation_dispatch_authority(object).map_err(|(_,e)|e)?;
         self.native_node_access(node_handle(node)).map_err(|(_,e)|e)?;
         self.state.work(1)?;script_text_content::deadline(self.state)?;
         let fields=[("cancelable",Value::Bool(true))];
@@ -94,7 +101,7 @@ impl Bridge<'_>{
         let index=self.validation_index(token)?;let pending=&self.state.form_validations[index];
         if pending.current.is_some()||pending.next!=pending.snapshot.nodes.len(){return Err("Form validation is incomplete.".into());}
         let form=pending.form;let report=pending.report;let unhandled=pending.unhandled;let valid=pending.snapshot.nodes.is_empty();
-        self.form_validation_authority(form).map_err(|(_,e)|e)?;script_text_content::deadline(self.state)?;
+        self.validation_dispatch_authority(form).map_err(|(_,e)|e)?;script_text_content::deadline(self.state)?;
         if report{self.state.validation_report=Some(unhandled);if let Some(node)=unhandled{
             if self.state.dom.connected.get(node).copied().unwrap_or(false)&&self.forms.controls.get(&node).is_some_and(|c|c.focusable()){self.state.dom.pending_focus=Some(node);}
         }}

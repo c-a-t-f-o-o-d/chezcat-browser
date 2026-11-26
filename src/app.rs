@@ -7246,3 +7246,7 @@ mod control_eligibility_tests;
 #[cfg(test)]
 #[path="app_inert_control_eligibility_tests.rs"]
 mod inert_control_eligibility_tests;
+
+#[cfg(test)]
+#[path="app_control_validation_tests.rs"]
+mod control_validation_tests;
