@@ -988,6 +988,9 @@ pub trait Host {
     fn own_data(&mut self, _object: u32, _property: &str) -> Result<Option<Value>, String> {
         Err("Own-property inspection is not implemented for this host object.".into())
     }
+    /// A supported named property backed by a native attribute removes that
+    /// attribute through the existing checked, observed native operation.
+    fn named_attribute_deletion(&mut self, _object:u32, _property:&str)->Result<Option<(u32,String)>,String>{Ok(None)}
     fn delete(&mut self, _object: u32, _property: &str) -> Result<bool, String> {
         Err("Deleting this native host property is not implemented.".into())
     }
@@ -9068,7 +9071,12 @@ impl Runtime {
                 if let Some(object) = self.host_ordinary(handle, &name, host)? {
                     return self.delete_reference(Reference::Property(object.value(), name), host);
                 }
-                host.delete(handle, &name).map_err(Fault::new)?
+                self.validate_native_access(handle,host)?;
+                host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+                if let Some((owner,attribute))=host.named_attribute_deletion(handle,&name).map_err(Fault::new)? {
+                    self.call_host(owner,"removeAttribute",&[Value::String(attribute)],host)?;
+                    true
+                }else{host.delete(handle, &name).map_err(Fault::new)?}
             }
             Reference::Property(Value::Object(id), name) => {
                 self.property_name(&name)?;

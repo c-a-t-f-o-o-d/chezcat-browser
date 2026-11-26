@@ -82,6 +82,13 @@ impl Bridge<'_> {
         object: u32,
         property: &str,
     ) -> Result<Option<(u32, NativeAttributeChange)>, String> {
+        if (DATASET_BASE..EVENT_BASE).contains(&object){
+            let owner=node_handle(self.dataset_node(object)?);
+            let attribute=dataset_attribute(property)?;
+            self.state.copies(attribute.len())?;
+            let name=crate::html::AttributeName::unqualified(attribute);
+            return self.attribute_change_for_name(owner,&name).map(|change|Some((owner,change)));
+        }
         if script_inline_style::handle(object) && (property=="cssText"||css_name(property).is_ok()) {
             return self.style_attribute_change(object);
         }
