@@ -60,6 +60,13 @@ impl Bridge<'_> {
             return Err("Fragment insertion into resource or native-control interiors is not implemented; no tree was changed.".into());
         }
         let source_parent=if fragment{Some(donor)}else{self.state.tree.parents[donor]};
+        // A single-node replace-all also removes that Node from its source.
+        // Validate that ancestry before staging or publishing either tree.
+        if all && !fragment {
+            if let Some(source) = source_parent {
+                self.text_child_mutation_ancestors(source, donor)?;
+            }
+        }
         let source_at=source_parent.and_then(|source|self.doc.nodes[source].children.iter().position(|&node|node==donor));
         let root_count=if fragment{self.doc.nodes[donor].children.len()}else{1};
         self.state.work(root_count)?;

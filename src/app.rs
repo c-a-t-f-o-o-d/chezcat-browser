@@ -7550,3 +7550,7 @@ mod app_noscript_text_children_tests;
 #[cfg(test)]
 #[path="app_noscript_text_fragments_tests.rs"]
 mod app_noscript_text_fragments_tests;
+
+#[cfg(test)]
+#[path="app_replace_all_source_ancestry_tests.rs"]
+mod app_replace_all_source_ancestry_tests;

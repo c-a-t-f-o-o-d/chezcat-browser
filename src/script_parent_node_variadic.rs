@@ -97,3 +97,7 @@ impl Bridge<'_>{
   self.state.dom_committed();Ok(Value::Undefined)
  }
 }
+
+#[cfg(test)]
+#[path="script_replace_all_source_ancestry_tests.rs"]
+mod replace_all_source_ancestry_tests;

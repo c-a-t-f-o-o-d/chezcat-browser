@@ -1129,7 +1129,7 @@ impl Bridge<'_> {
 
     // Direct main-document leaf Text uses the same metered passive-host
     // admission as character data. Other child kinds retain ordinary guards.
-    fn text_child_mutation_ancestors(&mut self, parent: usize, child: usize) -> Result<(), String> {
+    pub(super) fn text_child_mutation_ancestors(&mut self, parent: usize, child: usize) -> Result<(), String> {
         let node = &self.doc.nodes[child];
         if node.namespace == crate::html::Namespace::None
             && matches!(node.kind, NodeKind::Text(_)) && node.children.is_empty() {
