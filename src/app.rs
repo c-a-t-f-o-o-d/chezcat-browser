@@ -7386,3 +7386,7 @@ mod range_clone_realm_tests;
 #[cfg(test)]
 #[path="app_event_inert_paths_tests.rs"]
 mod event_inert_paths_tests;
+
+#[cfg(test)]
+#[path="app_event_listener_signal_tests.rs"]
+mod event_listener_signal_tests;
