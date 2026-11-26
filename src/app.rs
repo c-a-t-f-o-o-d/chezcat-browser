@@ -7346,3 +7346,7 @@ mod range_extract_tests;
 #[cfg(test)]
 #[path="app_range_insert_tests.rs"]
 mod range_insert_tests;
+
+#[cfg(test)]
+#[path="app_range_surround_tests.rs"]
+mod range_surround_tests;

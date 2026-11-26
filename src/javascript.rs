@@ -776,6 +776,8 @@ pub trait Host {
     fn begin_request_notification(&mut self,_notification:xhr_interface::Notification)->Result<Option<usize>,String>{Ok(None)}
     fn finish_request_abort(&mut self,_target:u32,_generation:u64){}
     fn cancel_request_work(&mut self){}
+    fn prepare_range_surround(&mut self,_receiver:u32,_args:&[Value])->Result<u32,range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range surrounding is unavailable.".into()))}
+    fn validate_range_surround_append(&mut self,_parent:u32)->Result<(),range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range surrounding is unavailable.".into()))}
     fn prepare_range_insert(&mut self,_receiver:u32,_args:&[Value])->Result<range_interface::InsertInfo,range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range insertion is unavailable.".into()))}
     fn range_insert_reference(&mut self,_reference:Option<u32>,_node:u32)->Result<Option<u32>,String>{Err("Native Range insertion is unavailable.".into())}
     fn range_insert_position(&mut self,_parent:u32,_reference:Option<u32>,_node:u32)->Result<usize,String>{Err("Native Range insertion is unavailable.".into())}
@@ -9603,6 +9605,7 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
+        if method==range_interface::SURROUND_CONTENTS{return self.surround_native_range(object,args,host);}
         if method==range_interface::INSERT_NODE{return self.insert_native_range(object,args,host);}
         if method==range_interface::EXTRACT_CONTENTS{return self.extract_native_range(object,host);}
         if method==range_interface::DELETE_CONTENTS{return self.delete_native_range(object,host);}
