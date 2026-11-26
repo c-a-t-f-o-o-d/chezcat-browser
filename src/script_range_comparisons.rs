@@ -17,7 +17,7 @@ impl Bridge<'_> {
             return Ok(());
         }
         let Some(Value::Host(node))=args.first() else {return Err(Exception("TypeError","A genuine Node is required.".into()));};
-        let index=if self.range_attr_document(*node).is_some(){None}else{Some(self.range_node(*node).map_err(|message|Exception("NotSupportedError",message))?)};
+        let index=self.range_metadata_index(*node)?;
         if self.range_root(*node).map_err(Fatal)?!=self.range_root(record.start.node).map_err(Fatal)? {
             return if method==COMPARE_POINT {Err(Exception("WrongDocumentError","Point and Range roots differ.".into()))} else {Ok(())};
         }

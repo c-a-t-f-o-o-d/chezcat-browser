@@ -787,6 +787,8 @@ pub trait Host {
     fn prepare_range_delete(&mut self,_receiver:u32)->Result<Vec<range_interface::DeleteStep>,range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range deletion is unavailable.".into()))}
     fn finish_range_delete(&mut self,_bytes:usize){}
     fn collapse_range_delete(&mut self,_receiver:u32,_node:u32,_offset:usize)->Result<(),String>{Err("Native Range deletion is unavailable.".into())}
+    fn range_endpoint_access(&mut self,_receiver:u32,_method:&str,_args:&[Value])->Result<(),range_interface::Error>{Ok(())}
+    fn create_range_in_realm(&mut self,_owner:u32,_receiver:u32,_constructor:bool)->Result<Value,String>{Err("Native Range factory unavailable.".into())}
     fn prepare_range_operation(&mut self,_receiver:u32,_method:&str,_args:&[Value]) -> Result<(),range_interface::Error> { Err(range_interface::Error::Exception("NotSupportedError","DOM ranges are unavailable.".into())) }
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
@@ -9275,6 +9277,16 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if range_interface::operation(method) {
+            host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+            if let Err(error)=host.range_endpoint_access(object,method,args) {
+                return Err(match error {
+                    range_interface::Error::Fatal(message)=>Fault::new(message),
+                    range_interface::Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+                    range_interface::Error::Exception(kind,message)=>Fault::thrown(self.native_dom_exception(kind,&message)?),
+                });
+            }
+        }
         if method==DOCUMENT_GET_ELEMENTS_NAME {
             // A borrowed main-realm operation can create a child-owned list
             // before the child's constructors have ever been read. Initialize
@@ -9428,6 +9440,10 @@ impl Runtime {
                 return Err(Fault::thrown(exception));
             }
             return Err(Fault::exception(kind,message));
+        }
+        if matches!(method,range_interface::RANGE|range_interface::CREATE) {
+            let owner=self.browser_global.map(|(window,_)|window).ok_or_else(||Fault::new("Range factory requires its native realm."))?;
+            return host.create_range_in_realm(owner,object,method==range_interface::RANGE).map_err(Fault::new);
         }
         if method=="\0Attr.set.value"{let value=self.copy_value(args.first().ok_or_else(||Fault::exception("TypeError","Attr value setter requires one argument."))?)?;self.host_set_native(object,"value",value,host)?;return Ok(Value::Undefined);}
         if child_remove_operation(method) {

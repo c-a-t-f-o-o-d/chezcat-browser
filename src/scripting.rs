@@ -3448,6 +3448,11 @@ impl Host for Bridge<'_> {
     fn prepare_range_delete(&mut self,receiver:u32)->Result<Vec<crate::javascript::range_interface::DeleteStep>,crate::javascript::range_interface::Error>{self.range_delete_plan(receiver)}
     fn finish_range_delete(&mut self,bytes:usize){self.state.retained-=bytes;}
     fn collapse_range_delete(&mut self,receiver:u32,node:u32,offset:usize)->Result<(),String>{self.range_delete_collapse(receiver,node,offset)}
+    fn range_endpoint_access(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error>{self.range_live_access(receiver,method,args)}
+    fn create_range_in_realm(&mut self,owner:u32,receiver:u32,constructor:bool)->Result<Value,String>{
+        let document=if constructor {if owner==WINDOW {DOCUMENT}else{self.frame_child_node_handle(owner,0)?}}else{receiver};
+        self.create_range(owner,document)
+    }
     fn prepare_range_operation(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error> { self.validate_range_call(receiver,method,args) }
     fn tree_walker_document(&self, document: u32) -> bool {
         document == DOCUMENT || self.inert_node_type(document) == Some(9) || self.active_frame_document(document)
@@ -12356,3 +12361,7 @@ mod range_surround_tests;
 #[cfg(test)]
 #[path="script_range_attr_tests.rs"]
 mod range_attr_tests;
+
+#[cfg(test)]
+#[path="script_range_child_tests.rs"]
+mod range_child_tests;

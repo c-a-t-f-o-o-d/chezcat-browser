@@ -137,7 +137,7 @@ var descriptor=Object.getOwnPropertyDescriptor(AbstractRange.prototype,'startOff
 Object.defineProperty(r,'startOffset',{value:37,configurable:true});if(r.startOffset!==37||descriptor.get.call(r)!==0)throw 'ordinary property versus native slot';delete r.startOffset;
 var f=document.createElement('iframe');f.hidden=true;document.body.appendChild(f);var w=f.contentWindow,read=w.Function('value','return value.startOffset;');
 if(read(r)!==0||w.Range===Range||r instanceof w.Range)throw 'real owner prototypes';
-try{new w.Range();throw 'missing unsupported child boundary';}catch(e){if(!(e instanceof w.DOMException)||e.name!=='NotSupportedError')throw e;}
+var childRange=new w.Range();if(!(childRange instanceof w.Range)||childRange instanceof Range||childRange.startContainer!==w.document||childRange.endContainer!==w.document||childRange.startOffset||childRange.endOffset||!childRange.collapsed)throw 'genuine child constructor boundaries and canonical realm';
 "#,
     );
     let other = crate::navigation::address(
