@@ -532,6 +532,7 @@ impl Runtime {
                 self.objects[image].prototype=Some(Ordinary::Object(parent));
                 self.store_symbol_property(image,self.symbol_to_string_tag.unwrap(),Value::String("HTMLImageElement".into()),Some((false,false,true)))?;
             }
+            self.define_dataset_interface(window)?;
             self.define_node_list_iteration_interface(window)?;
             self.define_html_collection_interface(window)?;
             self.define_token_list_interface(window)?;
@@ -1140,6 +1141,25 @@ impl Runtime {
         self.put_binding(self.global_environment,"HTMLCollection".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("HTMLCollection".into(),(false,true,true));
         self.native_constructor_prototypes.insert((window,"HTMLCollection"),prototype);
+        Ok(())
+    }
+
+    fn define_dataset_interface(&mut self,window:u32)->Result<(),Fault> {
+        // HTML's DOMStringMap has only unnamed special operations. Its actual
+        // named-property backing stays on the associated Element handle.
+        let allocation=self.allocate_host_function_with_length(window,"DOMStringMap",0).map_err(Fault::new)?;
+        if let Some(Function::Host{constructible,illegal_interface_constructor,..})=self.functions.get_mut(allocation.id){
+            *constructible=true;
+            *illegal_interface_constructor=true;
+        }
+        let constructor=Value::Function(allocation.id);
+        let prototype=self.new_object(None)?;
+        self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
+        self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
+        self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("DOMStringMap".into()),Some((false,false,true)))?;
+        self.native_constructor_prototypes.insert((window,"DOMStringMap"),prototype);
+        self.put_binding(self.global_environment,"DOMStringMap".into(),Some(constructor),super::Declaration::Var,false)?;
+        self.global_attributes.insert("DOMStringMap".into(),(false,true,true));
         Ok(())
     }
 

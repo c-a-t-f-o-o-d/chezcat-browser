@@ -3726,6 +3726,7 @@ impl Host for Bridge<'_> {
             || object==DOCUMENT && (matches!(property,"constructor"|"__proto__") || !self.document_native_property(property))
     }
     fn exposed_native_prototype(&self,object:u32)->bool {
+        if (DATASET_BASE..EVENT_BASE).contains(&object){return true;}
         if self.validity_receiver(object){return true;}
         self.attr_receiver(object) || self.range_owner(object).is_some() || self.event_target_interface(object) || self.inert_interface(object).is_some() || self.document_interface_receiver(object)
             || self.ordinary_event_owner(object).is_some() || self.standalone_target_owner(object).is_some()
@@ -3756,6 +3757,9 @@ impl Host for Bridge<'_> {
     fn event_target_interface(&self,window:u32)->bool {window==WINDOW || self.frame_context(window).is_some()}
     fn node_interface_constants(&self,window:u32)->Option<&'static [(&'static str,u16)]> {self.event_target_interface(window).then_some(dom_tree::NODE_CONSTANTS)}
     fn instance_ancestry(&self, object:u32) -> Option<crate::javascript::NativeAncestry> {
+        if (DATASET_BASE..EVENT_BASE).contains(&object){
+            return self.attr_element_receiver(node_handle((object-DATASET_BASE) as usize)).then_some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"DOMStringMap"))});
+        }
         if self.validity_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"ValidityState"))});}
         if self.class_list_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"DOMTokenList"))});}
         if self.attr_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"Attr"))});}
@@ -4054,6 +4058,9 @@ impl Host for Bridge<'_> {
             || self.text_or_comment_receiver(object) || self.ordinary_event_owner(object).is_some() || self.named_map_receiver(object)
     }
     fn ordinary_lookup_tail_property(&self,object:u32,property:&str)->bool {
+        // LegacyOverrideBuiltIns keeps every supported native named property
+        // ahead of this tail; only absent names reach author prototype members.
+        if (DATASET_BASE..EVENT_BASE).contains(&object){return true;}
         if self.validity_receiver(object){return true;}
         if self.class_list_receiver(object){return true;}
         if self.inert_interface(object).is_some() { !self.inert_owns_property(object, property) }
@@ -5612,7 +5619,7 @@ impl Host for Bridge<'_> {
         if script_canvas::accessor(method).is_some() {return self.validate_canvas_accessor(object);}
         if let Some(offset) = Offset::getter(method) {return self.validate_html_offset(object, offset);}
         if script_scroll_offsets::accessor(method).is_some() {return self.validate_scroll_element(object);}
-        if matches!(method,"ValidityState"|"NodeList"|"HTMLCollection"|"NamedNodeMap"|"DOMTokenList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
+        if matches!(method,"DOMStringMap"|"ValidityState"|"NodeList"|"HTMLCollection"|"NamedNodeMap"|"DOMTokenList"|"CanvasRenderingContext2D") && self.event_target_interface(object) {return Err(("TypeError","Illegal constructor for this native interface.".into()));}
         if matches!(method,"\0HTMLCollection.get.length"|"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&!self.collection_receiver(object){return Err(("TypeError","HTMLCollection operation requires a genuine native collection.".into()));}
         if matches!(method,"\0HTMLCollection.item"|"\0HTMLCollection.namedItem")&&args.is_empty(){return Err(("TypeError","HTMLCollection method requires one argument.".into()));}
         if script_named_map::operation(method).is_some()&&!self.named_map_receiver(object){return Err(("TypeError","NamedNodeMap operation requires a genuine map.".into()));}
@@ -12589,3 +12596,7 @@ mod import_node_binding_order_tests;
 #[cfg(test)]
 #[path="script_dataset_native_writes_tests.rs"]
 mod dataset_native_writes_tests;
+
+#[cfg(test)]
+#[path="script_dataset_native_interface_tests.rs"]
+mod dataset_native_interface_tests;
