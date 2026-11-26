@@ -4876,6 +4876,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
+        if self.event_target_interface(object)&&method=="dispatchEvent"{return Some(object);}
         if script_class_list::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&(method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some()){return Some(object);}
         if self.event_target_interface(object)&&method==script_position::METHOD{return Some(object);}
@@ -12390,3 +12391,7 @@ mod range_inert_wrapping_tests;
 #[cfg(test)]
 #[path="script_range_clone_realm_tests.rs"]
 mod range_clone_realm_tests;
+
+#[cfg(test)]
+#[path="script_event_inert_paths_tests.rs"]
+mod event_inert_paths_tests;

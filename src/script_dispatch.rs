@@ -408,7 +408,14 @@ impl Bridge<'_> {
         self.state.copies(name.capacity())?;name.push_str(&self.state.created_events[id].name);
         let bubbles=self.state.created_events[id].bubbles;
         let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,object,name.capacity())?;
-        if object==DOCUMENT {
+        if self.inert_node_type(object).is_some()&&!self.attr_receiver(object) {
+            let mut parent=self.inert_observation_parent(object);
+            while let Some(node)=parent {
+                self.state.work(1)?;
+                self.state.push_dispatch_temporary(&mut path,node,name.capacity())?;
+                parent=self.inert_observation_parent(node);
+            }
+        } else if object==DOCUMENT {
             if name!="load"{self.state.push_dispatch_temporary(&mut path,WINDOW,name.capacity())?;}
         } else if object!=WINDOW&&self.standalone_target_owner(object).is_none()&&self.abort_signal_owner(object).is_none()&&!self.attr_receiver(object) {
             let node=node_index(object).ok_or("Event target is not a genuine DOM node.")?;
