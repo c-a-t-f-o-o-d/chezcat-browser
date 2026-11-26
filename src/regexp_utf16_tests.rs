@@ -217,3 +217,65 @@ fn unicode_surrogate_pattern_syntax_work_and_classic_boundaries_recover() {
     let classic=Regex::compile(r"\uD83D+","",&mut 100_000).unwrap();
     assert_eq!(classic.find(&[0xd83d,0xde00],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,1)));
 }
+
+#[test]
+fn unicode_group_reference_assertions_keep_code_point_direction_and_atomic_captures() {
+    let emoji:Vec<_>="😀".encode_utf16().collect();
+    let re=Regex::compile(r"(?=(.))\1","u",&mut 100_000).unwrap();
+    assert_eq!(re.find(&emoji,0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some((0,2)),Some((0,2))]);
+    let input:Vec<_>="😀A".encode_utf16().collect();
+    let re=Regex::compile(r"(?<=(.))A","u",&mut 100_000).unwrap();
+    assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some((2,3)),Some((0,2))]);
+    assert!(Regex::compile(r"(?<!😀)A","u",&mut 100_000).unwrap().find(&input,0,false,&mut 100_000).unwrap().is_none());
+    let re=Regex::compile(r"(?!😀).","u",&mut 100_000).unwrap();
+    assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((2,3)));
+    assert!(Regex::compile(r"(?=(.+))\1A","u",&mut 100_000).unwrap().find(&input,0,false,&mut 100_000).unwrap().is_none());
+    let input:Vec<_>="😀AB🚀!".encode_utf16().collect();
+    let re=Regex::compile(r"(?<=([😀A]+)([🚀B]+))!","u",&mut 100_000).unwrap();
+    assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some((6,7)),Some((0,3)),Some((3,6))]);
+}
+
+#[test]
+fn unicode_group_reference_numbered_named_forward_and_unmatched_are_exact() {
+    for pattern in [r"^(.+?)\1$",r"^(?<x>.)\k<x>$",r"^(?:(?<x>😀)|(?<x>A))\k<x>$"] {
+        let re=Regex::compile(pattern,"u",&mut 100_000).unwrap();
+        let same:Vec<_>="😀😀".encode_utf16().collect();let other:Vec<_>="😀🚀".encode_utf16().collect();
+        assert_eq!(re.find(&same,0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,4)));
+        assert!(re.find(&other,0,false,&mut 100_000).unwrap().is_none());
+    }
+    let re=Regex::compile(r"^\1(.)$","u",&mut 100_000).unwrap();
+    assert_eq!(re.find(&[0xd83d,0xde00],0,false,&mut 100_000).unwrap().unwrap().captures[1],Some((0,2)));
+    let re=Regex::compile(r"^(a|(b))\2c$","u",&mut 100_000).unwrap();
+    let found=re.find(&[97,99],0,false,&mut 100_000).unwrap().unwrap();assert_eq!(found.captures[2],None);
+    assert!(Regex::compile(r"^(a\1)$","u",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
+}
+
+#[test]
+fn unicode_group_reference_lone_surrogates_cannot_consume_half_an_input_pair() {
+    for pattern in [r"(\ud800)\1",r"(?<x>\ud800)\k<x>"] {
+        let re=Regex::compile(pattern,"u",&mut 100_000).unwrap();
+        assert!(re.find(&[0xd800,0xd800,0xdc00],0,false,&mut 100_000).unwrap().is_none(),"{pattern}");
+        assert_eq!(re.find(&[0xd800,0xd800],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,2)));
+    }
+    let re=Regex::compile(r"(?<=\1(\udc00))A","u",&mut 100_000).unwrap();
+    assert!(re.find(&[0xd800,0xdc00,0xdc00,65],0,false,&mut 100_000).unwrap().is_none());
+    assert_eq!(re.find(&[0xdc00,0xdc00,65],0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some((2,3)),Some((1,2))]);
+    let classic=Regex::compile(r"(\ud800)\1","",&mut 100_000).unwrap();
+    assert_eq!(classic.find(&[0xd800,0xd800,0xdc00],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,2)));
+}
+
+#[test]
+fn unicode_group_reference_grammar_syntax_and_work_refusal_preserve_recovery() {
+    for pattern in [r"(?=a)*",r"(?!a)+",r"(?<=a)?",r"\1",r"(a)\2",r"\01",r"[\1]",r"[\01]",r"(?<x>a)\k<y>"] {
+        assert!(matches!(Regex::compile(pattern,"u",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
+    }
+    assert!(Regex::compile(r"(?=a)?a","",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
+    assert!(matches!(Regex::compile(r"\1","",&mut 100_000),Err(Error::Unsupported(_))));
+    for (pattern,flags) in [("(?<é>a)","u"),(r"\p{Letter}","u"),(".","iu"),(".","v"),(".","d")] {
+        assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
+    }
+    let pattern=r"(?<=(.))\1";assert!(matches!(Regex::compile(pattern,"u",&mut 0),Err(Error::Limit(_))));
+    let re=Regex::compile(pattern,"u",&mut 100_000).unwrap();
+    assert!(matches!(re.find(&[0xd83d,0xde00,0xd83d,0xde00],0,false,&mut 0),Err(Error::Limit(_))));
+    assert_eq!(re.find(&[0xd83d,0xde00,0xd83d,0xde00],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((2,4)));
+}
