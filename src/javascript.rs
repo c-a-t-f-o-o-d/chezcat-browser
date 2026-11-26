@@ -26,6 +26,8 @@ mod property_key_proxy_tests;
 #[cfg(test)]
 #[path = "property_key_native_tests.rs"]
 mod property_key_native_tests;
+#[path="processing_instruction_interface.rs"]
+pub(crate) mod processing_instruction_interface;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
 #[path="anchor_url_interface.rs"]
@@ -765,6 +767,8 @@ pub struct NativeAttributeChange {
 
 pub enum NativeControlValidation{Message(Value),Dispatch(usize)}
 pub trait Host {
+    fn prepare_pi_operation(&mut self,_object:u32,_method:&str,_args:&[Value])->Result<processing_instruction_interface::Prepared,String>{Err("Native PI operations are unavailable.".into())}
+    fn finish_pi_operation(&mut self,_object:u32,_committed:bool){}
     /// Opt-in exact native named-property reads; None preserves unsupported receivers.
     fn named_units_property(&mut self,_object:u32,_units:&[u16])->Result<Option<Value>,String>{Ok(None)}
     /// Opt-in, native console printer. The runtime may describe genuine Error
@@ -9434,6 +9438,7 @@ impl Runtime {
             }
         }
         if let Err((kind,message))=host.validate_call(object,method,args) {
+            if processing_instruction_interface::operation(method).is_some()&&kind=="InvalidCharacterError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if (method=="\0CharacterData.substringData"||character_data_interface::operation(method).is_some()||method==text_split_interface::METHOD)&&kind=="IndexSizeError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if dom_exception::factory_validation(method, kind) {
                 return Err(Fault::thrown(self.native_dom_exception(kind, &message)?));
@@ -9471,6 +9476,14 @@ impl Runtime {
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) { return self.insert_adjacent(object, method, args, host); }
         if let Some((name, true)) = window_relationships::operation(method) {
             return self.set_window_relationship(object, name, args, host);
+        }
+        if processing_instruction_interface::operation(method).is_some(){
+            use processing_instruction_interface::Prepared;
+            match host.prepare_pi_operation(object,method,args).map_err(Fault::new)?{
+                Prepared::Result(value)=>return Ok(value),
+                Prepared::Write{data,result}=>{let outcome=self.host_set_native(object,"data",data,host);host.finish_pi_operation(object,outcome.is_ok());outcome?;return Ok(result);},
+                Prepared::Names(names)=>{if names.len()>self.limits.heap.object_properties{return Err(Fault::new("PI attribute names exceed the array/property allowance."));}let output=Value::Object(self.new_object(Some(names.len()))?);for(index,name)in names.into_iter().enumerate(){self.step()?;let(text,units)=name.into_parts();let value=units.map_or_else(||Value::String(text),Value::StringUnits);self.create_data_property(&output,PropertyKey::String(index.to_string()),value,host)?;}return Ok(output);}
+            }
         }
         if method=="\0Element.getAttributeNames" {
             let names=host.attribute_name_snapshot(object).map_err(Fault::new)?;

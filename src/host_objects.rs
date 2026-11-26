@@ -1211,6 +1211,7 @@ impl Runtime {
         }
         if name == "ProcessingInstruction" {
             self.define_readonly_node_getter(prototype, window, "target", PROCESSING_INSTRUCTION_TARGET_GET)?;
+            for(key,operation,length)in super::processing_instruction_interface::METHODS{self.deferred_host_method(prototype,window,key,operation,length)?;}
         }
         self.native_constructor_prototypes.insert((window, name), prototype);
         self.put_binding(

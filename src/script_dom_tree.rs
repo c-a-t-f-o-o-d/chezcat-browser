@@ -1698,6 +1698,7 @@ impl Bridge<'_> {
             if !matches!(property, "data" | "nodeValue" | "textContent") {
                 return Ok(false);
             }
+            self.state.prepare_pi_invalidation()?;
             let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_));
             self.mutation_ancestors(node)?;
             let text = if matches!(value, Value::Null) && property != "data" {
@@ -1715,6 +1716,7 @@ impl Bridge<'_> {
                 _ => unreachable!("character data was checked above"),
             }
             self.state.dom_committed();
+            self.state.invalidate_pi_attributes(object);
             if self.state.dom.connected[node] && renders_text {
                 self.state.layout_changed();
                 if let Some(parent) =
