@@ -24,6 +24,19 @@ mod tests {
         (d,f,p)
     }
     #[test]
+    fn range_native_cloning_exact_inert_partial_bundle_retained_capacity(){
+        for kind in ["createTextNode","createCDATASection","createComment","createProcessingInstruction"]{
+            let(mut d,mut f,mut p)=fixture();p.begin_job();
+            let source=if kind=="createProcessingInstruction"{"owner.createProcessingInstruction('target','\\uD800A\\uDC00')".replace("\\\\","\\")}else{format!("owner.{kind}('\\uD800A\\uDC00')").replace("\\\\","\\")};
+            let script=format!("var owner=new Document(),data={source};r=owner.createRange();r.setStart(data,1);r.setEnd(data,3);");p.runtime.execute(&script,&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();p.begin_job();let record=*p.state.ranges.last().unwrap();
+            let mut b=Bridge{doc:&mut d,forms:&mut f,state:&mut p.state};let before=(b.state.retained,b.template_import_backing(),b.state.inert_documents.generated.len());
+            let Value::Host(copy)=b.clone_range_contents(record).unwrap()else{panic!("native inert fragment")};let child=b.state.inert_documents.node(copy).unwrap().children[0];let mut payload=0;
+            for handle in [copy,child]{let node=b.state.inert_documents.node(handle).unwrap();payload+=node.children.capacity()*size_of::<u32>();payload+=match &node.kind{Kind::Element(name)=>name.capacity(),Kind::Text(text)=>text.capacity(),Kind::ProcessingInstruction{target,data}=>target.capacity()+data.capacity(),_=>0};}
+            for source in &b.state.inert_documents.generated[before.2..]{payload+=node_bytes(&source.node)+size_of::<Node>()+2*size_of::<usize>();}
+            assert_eq!(b.state.retained-before.0,payload+b.template_import_backing()-before.1,"{kind}");assert_eq!((b.state.ranges.last().unwrap().start,b.state.ranges.last().unwrap().end),(record.start,record.end));
+        }
+    }
+    #[test]
     fn range_clone_contents_exact_retained_storage_for_partial_and_template_forests(){
         for template in [false,true] {
             let(mut d,mut f,mut p)=fixture();
@@ -79,24 +92,29 @@ struct Pending {
 }
 impl Bridge<'_> {
     pub(in crate::scripting) fn clone_range_contents(&mut self, range: Record) -> Result<Value,String> {
+        let owner=self.state.inert_documents.node(range.start.node).map_or_else(||self.range_attr_document(range.start.node).unwrap_or(DOCUMENT),|node|node.owner);
         let mut plan=Vec::new();
         plan.try_reserve_exact(1).map_err(|_|"Cannot reserve Range clone root.")?;
-        plan.push(CopyItem{source:None,owner:DOCUMENT,parent:None,template:None,units:None,children:Vec::new()});
+        plan.push(CopyItem{source:None,owner,parent:None,template:None,units:None,children:Vec::new()});
         let mut pending=Vec::new();
         if range.start!=range.end {
             let mut common=range.start.node;
             while common!=range.end.node && self.range_ancestor_child(common,range.end.node)?.is_none() {
                 common=self.range_parent(common)?.ok_or("Range clone has no common ancestor.")?;
             }
-            let index=self.range_node(common)?;
-            if self.doc.nodes[index].kind.character_dom_string().is_some() {
-                pending.push(Pending{source:common,owner:DOCUMENT,parent:Some(0),template:None,select:true});
+            if self.character_data_source(common).is_some() {
+                pending.push(Pending{source:common,owner,parent:Some(0),template:None,select:true});
+            } else if let Some(node)=self.state.inert_documents.node(common){
+                let count=node.children.len();self.state.work(count)?;
+                pending.try_reserve_exact(count).map_err(|_|"Cannot reserve inert Range clone roots.")?;
+                for &child in self.state.inert_documents.node(common).unwrap().children.iter().rev(){pending.push(Pending{source:child,owner,parent:Some(0),template:None,select:true});}
             } else {
+                let index=self.range_node(common)?;
                 let children=&self.doc.nodes[index].children;
                 self.state.work(children.len())?;
                 pending.try_reserve_exact(children.len()).map_err(|_|"Cannot reserve Range clone roots.")?;
                 for &child in children.iter().rev() {
-                    pending.push(Pending{source:node_handle(child),owner:DOCUMENT,parent:Some(0),template:None,select:true});
+                    pending.push(Pending{source:node_handle(child),owner,parent:Some(0),template:None,select:true});
                 }
             }
         }
@@ -116,8 +134,7 @@ impl Bridge<'_> {
             if plan.len()>=self.inert_remaining_entries() {return Err("Range clone identity allowance exhausted.".into());}
             let position=plan.len();
             let units=if task.select && !full {
-                let index=self.range_node(source)?;
-                self.doc.nodes[index].kind.character_dom_string().map(|text|{
+                self.character_data_source(source).map(|text|{
                     let start=if source==range.start.node {range.start.offset}else{0};
                     let end=if source==range.end.node {range.end.offset}else{text.utf16_len()};
                     (start,end-start)
@@ -155,7 +172,7 @@ impl Bridge<'_> {
                 };
                 pending.try_reserve(children.len()).map_err(|_|"Cannot reserve inert Range child traversal.")?;
                 for &child in children.iter().rev() {
-                    pending.push(Pending{source:child,owner:task.owner,parent:Some(position),template:None,select:false});
+                    pending.push(Pending{source:child,owner:task.owner,parent:Some(position),template:None,select:!full});
                 }
             }
             self.state.work(plan.len())?;
@@ -179,6 +196,16 @@ impl Bridge<'_> {
             for &child in &item.children {children.push(handle(child)?);}
             self.state.copies(children.capacity()*size_of::<u32>())?;
             let kind=if let Some(source)=item.source {
+                if let Some((offset,count))=item.units.filter(|_|self.state.inert_documents.node(source).is_some()){
+                    let kind=self.range_inert_copy_data_kind(source,offset,count)?;
+                    let index=source_base.checked_add(sources.len()).ok_or("Inert Range clone source overflow.")?;
+                    let node=Node{kind,namespace:crate::html::Namespace::None,children:Vec::new()};
+                    let bytes=node_bytes(&node).checked_add(size_of::<Node>()+2*size_of::<usize>()).ok_or("Inert Range clone source payload overflow.")?;
+                    payload=payload.checked_add(bytes).ok_or("Inert Range clone payload overflow.")?;
+                    sources.try_reserve_exact(1).map_err(|_|"Cannot reserve inert Range clone data source.")?;
+                    sources.push(GeneratedNode{node:Rc::new(node),unsafe_nonce:false});
+                    Kind::Parsed{source:ParsedSource::Generated(index),initial_template:None}
+                }else{
                 let copy_bytes=self.state.inert_documents.node(source).map(|node|match &node.kind {
                     Kind::Element(name)=>name.len(),Kind::Text(data)=>data.used_bytes(),
                     Kind::ProcessingInstruction{target,data}=>target.len()+data.used_bytes(),_=>0,
@@ -247,6 +274,7 @@ impl Bridge<'_> {
                         Kind::Parsed{source:ParsedSource::Generated(source_index),initial_template:None}
                     }
                 }
+                }
             } else {Kind::Fragment{template:None}};
             let owned=match &kind {
                 Kind::Element(name)=>name.capacity(),Kind::Text(data)=>data.capacity(),
@@ -270,5 +298,29 @@ impl Bridge<'_> {
             .and_then(|n|n.checked_add(payload)).ok_or("Range clone staging peak overflow.")?;
         if temporary>self.state.retained_limit.saturating_sub(self.state.retained) {return Err("Range clone staging peak allowance exhausted.".into());}
         self.publish_inert_batch(first,entries,sources,payload,links,true)
+    }
+}
+
+impl Bridge<'_>{
+    fn range_inert_copy_data_kind(&mut self,source:u32,offset:usize,count:usize)->Result<NodeKind,String>{
+        let text=self.character_data_source(source).ok_or("Inert Range partial source is not CharacterData.")?;
+        let work=text.used_bytes().checked_mul(3).and_then(|n|n.checked_add(count.checked_mul(3)?)).ok_or("Inert Range clone data work overflow.")?;
+        self.state.work(work)?;
+        let bytes=count.checked_mul(size_of::<u16>()).ok_or("Inert Range clone unit storage overflow.")?;self.state.copies(bytes)?;
+        let mut units=Vec::new();units.try_reserve_exact(count).map_err(|_|"Cannot reserve inert Range clone units.")?;
+        units.extend(self.character_data_source(source).unwrap().code_units().skip(offset).take(count));
+        let (projection,raw)=DomString::projected_size(&units)?;
+        let storage=projection.checked_add(if raw{bytes}else{0}).ok_or("Inert Range clone string storage overflow.")?;self.state.copies(storage)?;
+        let data=DomString::from_units(&units,self.state.retained_limit.saturating_sub(self.state.retained))?;
+        Ok(match self.inert_node_type(source){
+            Some(3)=>NodeKind::Text(data),Some(4)=>NodeKind::Cdata(data),Some(8)=>NodeKind::Comment(data),
+            Some(7)=>{
+                let length=match self.inert_import_source(source){Some(ImportSource::ProcessingInstruction{target,..})=>target.len(),Some(ImportSource::Parsed{node,..})=>{let NodeKind::ProcessingInstruction{target,..}=&node.kind else{return Err("Inert Range PI source kind changed.".into());};target.len()},_=>return Err("Inert Range PI source is unavailable.".into())};
+                self.state.copies(length)?;
+                let target=match self.inert_import_source(source){Some(ImportSource::ProcessingInstruction{target,..})=>script_clone_node::copy_text(target)?,Some(ImportSource::Parsed{node,..})=>{let NodeKind::ProcessingInstruction{target,..}=&node.kind else{unreachable!()};script_clone_node::copy_text(target)?},_=>unreachable!()};
+                NodeKind::ProcessingInstruction{target,data}
+            },
+            _=>return Err("Inert Range CharacterData kind changed during copying.".into()),
+        })
     }
 }
