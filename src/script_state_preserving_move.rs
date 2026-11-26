@@ -52,7 +52,7 @@ impl Bridge<'_>{
   if self.inert_mutation_receiver(parent){self.mutate_inert_children(parent,parent_node_interface::MOVE,&adjusted)?;return Ok(Value::Undefined);}
   let Value::Host(handle)=adjusted[0]else{unreachable!()};let child=node_index(handle).ok_or("Native moving node index unavailable.")?;let parent=node_index(parent).ok_or("Native move parent index unavailable.")?;
   let old=self.state.tree.parents[child].ok_or("Native move old parent unavailable.")?;
-  self.mutation_ancestors(parent)?;self.mutation_ancestors(old)?;
+  self.text_child_mutation_ancestors(parent,child)?;self.text_child_mutation_ancestors(old,child)?;
   let(descendants,depth)=self.checked_mutation_subtree(child,false,false)?;
   let mut ancestor=Some(parent);let mut parent_depth=0usize;
   while let Some(node)=ancestor{self.state.work(1)?;parent_depth=parent_depth.checked_add(1).ok_or("Native move depth overflow.")?;ancestor=self.state.tree.parents[node];}
@@ -78,3 +78,7 @@ impl Bridge<'_>{
   Ok(Value::Undefined)
  }
 }
+
+#[cfg(test)]
+#[path="script_noscript_text_move_before_tests.rs"]
+mod noscript_text_move_before_tests;

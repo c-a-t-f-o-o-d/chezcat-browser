@@ -7562,3 +7562,7 @@ mod app_noscript_replace_children_tests;
 #[cfg(test)]
 #[path="app_noscript_variadic_text_tests.rs"]
 mod app_noscript_variadic_text_tests;
+
+#[cfg(test)]
+#[path="app_noscript_text_move_before_tests.rs"]
+mod app_noscript_text_move_before_tests;
