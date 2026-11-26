@@ -2949,7 +2949,8 @@ impl Bridge<'_> {
         if self.state.event_type_refused(event.len()) {
             return Err(format!("Event type exceeds the {}-byte limit.",self.state.event_type_allowance()));
         }
-        if !self.dispatch_receiver(handle) {return Err("Listener receiver is not a supported EventTarget.".into());}
+        if !self.listener_receiver(handle) {return Err("Listener receiver is not a supported EventTarget.".into());}
+        if let Some(owner)=self.frame_contains_node(handle).map(|(owner,_)|owner).or_else(||self.frame_context(handle).map(|_|handle)){self.contains_child_document(owner)?;}
         Ok(())
     }
 
@@ -3019,6 +3020,31 @@ impl Bridge<'_> {
         }
     }
 
+    fn default_listener_passive(&mut self,target:u32,event:&str)->Result<bool,String>{
+        if !matches!(event,"touchstart"|"touchmove"|"wheel"|"mousewheel"){return Ok(false);}
+        if self.event_target_interface(target)||target==DOCUMENT{return Ok(true);}
+        if let Some(kind)=self.inert_node_type(target){
+            if kind==9{return Ok(true);}
+            if kind!=1{return Ok(false);}
+            let owner=self.inert_node_document(target).ok_or("Missing native listener node document.")?;
+            if self.inert_document_roots(owner).is_some_and(|(root,_)|root==Some(target)){return Ok(true);}
+            return self.inert_document_structure_get(owner,"body").map(|body|matches!(body,Value::Host(node) if node==target));
+        }
+        if let Some((owner,node))=self.frame_contains_node(target){
+            if node==0{return Ok(true);}
+            let count=self.contains_child_document(owner)?.nodes.len();self.state.work(count.saturating_mul(2))?;
+            let document=self.frame_child_node_handle(owner,0)?;
+            for property in ["documentElement","body"]{
+                let value=self.frame_get_with_caller(self.state.navigation_incumbent.or(Some(WINDOW)),document,property).ok_or("Missing initial child Document.")??;
+                if matches!(value,Value::Host(node) if node==target){return Ok(true);}
+            }
+            return Ok(false);
+        }
+        let Some(node)=node_index(target)else{return Ok(false);};
+        self.state.rebuild(self.doc)?;
+        Ok(self.state.tree.document_element==Some(node)||self.state.tree.body==Some(node))
+    }
+
     fn event_listener(
         &mut self,
         object: u32,
@@ -3030,12 +3056,13 @@ impl Bridge<'_> {
             return Err("Event listeners need an event name and callback.".into());
         }
         let mut options = ListenerOptions::default();
+        let mut passive_present=false;
         if let Some(fields) = fields {
             for (name, value) in fields {
                 match *name {
                     "capture" => options.capture = value.truthy(),
                     "once" => options.once = value.truthy(),
-                    "passive" => options.passive = value.truthy(),
+                    "passive" => {options.passive=value.truthy();passive_present=!matches!(value,Value::Undefined);},
                     "signal" if !matches!(value, Value::Undefined) => {
                         let Value::Host(signal)=value else {return Err("Listener signal requires a genuine AbortSignal.".into());};
                         let owner=self.abort_signal_owner(*signal).ok_or("Listener signal requires a genuine AbortSignal.")?;
@@ -3065,6 +3092,7 @@ impl Bridge<'_> {
             return Err("An EventListener callback must be an object or null.".into());
         }
         if method == "addEventListener" {
+            if !passive_present{options.passive=self.default_listener_passive(object,&event)?;}
             self.state
                 .add_listener(object, &event, args[1].clone(), false, options)?;
         } else {
@@ -5615,7 +5643,7 @@ impl Host for Bridge<'_> {
         }
         if method=="dispatchEvent"{return self.validate_dispatch(object,args);}
         if matches!(method, "addEventListener" | "removeEventListener") {
-            if !self.dispatch_receiver(object) {
+            if !self.listener_receiver(object) {
                 return Err(("TypeError", "Listener receiver must be a supported EventTarget.".into()));
             }
             if !matches!(args.get(1), Some(Value::Object(_) | Value::Function(_) | Value::Host(_) | Value::Null | Value::Undefined)) {
@@ -6294,8 +6322,11 @@ impl Host for Bridge<'_> {
             return self.event_receiver(receiver);
         }
         if matches!(method,"load"|"pause"|"play") && self.media_element_receiver(object) {return self.media_element_receiver(receiver);}
-        if matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener") {
-            return (self.event_target_interface(object)||self.dispatch_receiver(object)) && self.dispatch_receiver(receiver);
+        if matches!(method,"addEventListener"|"removeEventListener") {
+            return (self.event_target_interface(object)||self.listener_receiver(object))&&self.listener_receiver(receiver);
+        }
+        if method=="dispatchEvent" {
+            return (self.event_target_interface(object)||self.dispatch_receiver(object))&&self.dispatch_receiver(receiver);
         }
         if object==DOCUMENT && matches!(method,"createAttribute"|"createAttributeNS"|"createElementNS") {return receiver==DOCUMENT;}
         if object == HISTORY { return receiver == HISTORY && matches!(method,"replaceState"|"pushState"); }
@@ -12408,3 +12439,7 @@ mod event_inert_paths_tests;
 #[cfg(test)]
 #[path="script_event_listener_signal_tests.rs"]
 mod event_listener_signal_tests;
+
+#[cfg(test)]
+#[path="script_event_default_passive_tests.rs"]
+mod event_default_passive_tests;
