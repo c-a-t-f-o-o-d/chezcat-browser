@@ -3470,6 +3470,11 @@ impl Host for Bridge<'_> {
         if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
         self.dataset_own_key_snapshot(object).map(Some)
     }
+    fn named_key_prototype_enumeration(&self,object:u32)->bool{(DATASET_BASE..EVENT_BASE).contains(&object)}
+    fn named_scalar_presence(&mut self,object:u32,name:&str)->Result<Option<bool>,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
+        self.dataset_key_attribute(object,name.encode_utf16()).map(|attribute|Some(attribute.is_some()))
+    }
     fn named_units_setter(&self,object:u32)->bool{(DATASET_BASE..EVENT_BASE).contains(&object)}
     fn named_units_assignment(&mut self,object:u32,units:&[u16])->Result<crate::javascript::NativeNamedAssignment,String>{self.dataset_units_assignment(object,units)}
     fn named_units_deletion(&mut self,object:u32,units:&[u16])->Result<Option<crate::javascript::NativeNamedDeletion>,String>{
@@ -12664,3 +12669,7 @@ mod dataset_native_definitions_tests;
 #[cfg(test)]
 #[path="script_dataset_own_key_snapshot_tests.rs"]
 mod dataset_own_key_snapshot_tests;
+
+#[cfg(test)]
+#[path="script_dataset_inherited_keys_tests.rs"]
+mod dataset_inherited_keys_tests;

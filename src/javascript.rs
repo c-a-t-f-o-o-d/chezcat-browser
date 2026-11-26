@@ -992,6 +992,9 @@ pub trait Host {
     /// None retains the original key policy. This supplies only native own names,
     /// without author getters, inherited properties or synthetic expando storage.
     fn named_own_keys(&mut self,_object:u32)->Result<Option<Vec<NativeNamedKey>>,String>{Ok(None)}
+    /// Explicit opt-in joins native named keys to the genuine ordinary chain.
+    fn named_key_prototype_enumeration(&self,_object:u32)->bool{false}
+    fn named_scalar_presence(&mut self,_object:u32,_name:&str)->Result<Option<bool>,String>{Ok(None)}
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())
     }
@@ -7923,6 +7926,12 @@ impl Runtime {
                 for name in keys {
                     self.step()?;
                     self.work(name.byte_len())?;
+                    if let Value::Host(handle)=source {
+                        if let Some(present)=self.host_named_enumeration_member(*handle,&name,host)? {
+                            if present{return Ok(Some(name.into_value()));}
+                            continue;
+                        }
+                    }
                     if let StringKey::Units(units) = &name {
                         let Some(base) = self.units_lookup_base(source, host)? else { continue; };
                         let owner = self.units_dispatch_owner(base, units)?;

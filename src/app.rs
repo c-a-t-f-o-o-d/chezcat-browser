@@ -7478,3 +7478,7 @@ mod dataset_native_definitions_tests;
 #[cfg(test)]
 #[path="app_dataset_own_key_snapshot_tests.rs"]
 mod dataset_own_key_snapshot_tests;
+
+#[cfg(test)]
+#[path="app_dataset_inherited_keys_tests.rs"]
+mod dataset_inherited_keys_tests;
