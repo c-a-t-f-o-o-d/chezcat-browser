@@ -240,6 +240,7 @@ impl Bridge<'_> {
             let image=tag(self.doc,source)=="img";
             let style=tag(self.doc,source)=="style";
             if image{self.validate_plain_image(source)?;}
+            let passive_noscript = tag(self.doc,source)=="noscript" && self.movable_noscript_host(source)?;
             let item = &self.doc.nodes[source];
             let children = if deep { item.children.as_slice() } else { &[] };
             if style&&children.iter().any(|&child|!matches!(self.doc.nodes[child].kind,NodeKind::Text(_) | NodeKind::Cdata(_))){return Err("Cloned STYLE requires plain direct text children.".into());}
@@ -261,7 +262,7 @@ impl Bridge<'_> {
                 let text_input = tag == "input" && self.native_text_input(source) && forms::fragment_text_input(self.doc,source) && item.children.is_empty() && self.doc.attr(source,"form").is_none();
                 let radio = tag == "input" && self.owned_native_radio(source);
                 let svg=item.namespace==crate::html::Namespace::Svg;
-                if !svg&&(item.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag) || tag == "meta" || textarea || text_input || radio || image || style)
+                if !svg&&(item.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag) || passive_noscript || tag == "meta" || textarea || text_input || radio || image || style)
                     || attrs.iter().any(|attr| attr.name.namespace.is_empty()
                         && (script_element_properties::event_handler_content_attribute(tag,&attr.name) || tag!="style" && attr.name.html_is("is")))) {
                     return Err("Cloning this element or its native state is not implemented.".into());
@@ -404,3 +405,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_radio_clone_tests.rs"]
 mod radio_clone_tests;
+
+#[cfg(test)]
+#[path="script_noscript_host_clone_tests.rs"]
+mod noscript_host_clone_tests;

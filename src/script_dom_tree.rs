@@ -1158,7 +1158,7 @@ impl Bridge<'_> {
 
     // Moving the host does not interpret its raw fallback text. Actual fallback
     // elements remain subject to the resource boundary even if scripting changes.
-    fn movable_noscript_host(&mut self, node: usize) -> Result<bool, String> {
+    pub(super) fn movable_noscript_host(&mut self, node: usize) -> Result<bool, String> {
         let host = &self.doc.nodes[node];
         if host.namespace != crate::html::Namespace::Html || tag(self.doc, node) != "noscript" {
             return Ok(false);
