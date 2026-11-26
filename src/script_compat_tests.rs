@@ -3761,7 +3761,9 @@ document.head.appendChild(second);second.src='/two.js';
 second.onerror=function(e){if(this!==second||e.target!==second||e.bubbles||this.isConnected||this.parentNode!==null)throw 'detached error receiver';document.title+=' + error';};
 document.head.removeChild(second);
 var data=document.createElement('script');data.type='application/json';data.id='data';data.text='never executed';document.getElementById('root').appendChild(data);
-if(!first.isConnected||first.parentNode!==document.head||second.isConnected||!data.isConnected||document.querySelector('script')!==first||document.getElementById('data')!==data||document.getElementById('root').textContent!=='')throw 'physical or inert tree';
+if(!first.isConnected||first.parentNode!==document.head||second.isConnected||!data.isConnected||document.querySelector('script')!==first||document.getElementById('data')!==data||document.getElementById('root').textContent!=='never executed')throw 'physical or inert tree';
+// Nonexecutable data-block text remains part of the actual descendant tree.
+if(data.text!=='never executed'||data.textContent!=='never executed'||data.firstChild.nodeType!==3||data.firstChild.data!=='never executed'||data.firstChild.parentNode!==data||document.getElementById('root').firstChild!==data)throw 'native data-block text children';
 "#],
     );
     assert_eq!(outcome.errors, 0, "{}", page.report());

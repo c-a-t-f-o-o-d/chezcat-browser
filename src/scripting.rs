@@ -4323,6 +4323,7 @@ impl Host for Bridge<'_> {
     fn nullable_scalar_setter(&self,object:u32,property:&str)->bool{property=="hidden"&&self.html_reflection_receiver(object)}
     fn nullable_string_setter(&self,object:u32,property:&str)->bool{self.aria_reflection_attribute(object,property)}
     fn string_setter(&self, object: u32, property: &str) -> bool {
+        if property == "text" && self.attr_element_receiver(object) && node_index(object).is_some_and(|node| self.dom_script(node)) { return true; }
         if self.html_label_for_member(object,property){return true;}
         if self.time_datetime_member(object,property){return true;}
         if self.area_alt_member(object,property){return true;}
@@ -4788,6 +4789,7 @@ impl Host for Bridge<'_> {
         if property=="charset" && node_index(object).is_some_and(|node|self.resource_charset_element(node)) {return true;}
         if property!="origin" && script_anchor_url::property(property) && self.native_anchor(object) {return true;}
         if property=="text" && self.title_receiver(object) || object==DOCUMENT && property=="title" {return true;}
+        if property == "text" && self.attr_element_receiver(object) && node_index(object).is_some_and(|node| self.dom_script(node)) { return true; }
         if property == "nodeValue" && self.text_content_receiver(object) { return true; }
         if self.charset_member(object, property) { return true; }
         if self.meta_member(object, property) { return true; }
@@ -12705,3 +12707,7 @@ mod dataset_symbol_properties_tests;
 #[cfg(test)]
 #[path="script_dataset_reflect_get_tests.rs"]
 mod dataset_reflect_get_tests;
+
+#[cfg(test)]
+#[path="script_script_data_block_tree_tests.rs"]
+mod script_data_block_tree_tests;
