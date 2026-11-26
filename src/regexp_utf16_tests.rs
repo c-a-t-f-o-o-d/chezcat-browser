@@ -48,7 +48,7 @@ fn utf16_regexp_raw_and_scalar_compilation_keep_sources_costs_and_invalid_gramma
     let unicode = Regex::compile_units(&[0xd842],"u",&mut 100_000).unwrap();
     assert_eq!(unicode.source_units.as_deref(),Some([0xd842].as_slice()));
     assert_eq!(unicode.find(&[0xd842],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,1)));
-    for flags in ["v","d"] {
+    for flags in ["d"] {
         assert!(matches!(Regex::compile_units(&[0xd842],flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
     let mut empty = 0;
@@ -166,7 +166,7 @@ fn unicode_character_sets_work_refusal_preserves_compiled_recovery() {
     for pattern in [r"[^\d-q]", r"[q-\D]", r"\q", "[z-a]"] {
         assert!(matches!(Regex::compile(pattern,"u",&mut 100_000),Err(Error::Syntax(_))));
     }
-    for (pattern, flags) in [(r"\p{Letter}","u"),(".","iu"),(".","v"),(".","d")] {
+    for (pattern, flags) in [(r"\p{Letter}","u"),(".","iu"),(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
 }
@@ -271,11 +271,72 @@ fn unicode_group_reference_grammar_syntax_and_work_refusal_preserve_recovery() {
     }
     assert!(Regex::compile(r"(?=a)?a","",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
     assert!(matches!(Regex::compile(r"\1","",&mut 100_000),Err(Error::Unsupported(_))));
-    for (pattern,flags) in [("(?<é>a)","u"),(r"\p{Letter}","u"),(".","iu"),(".","v"),(".","d")] {
+    for (pattern,flags) in [("(?<é>a)","u"),(r"\p{Letter}","u"),(".","iu"),(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
     let pattern=r"(?<=(.))\1";assert!(matches!(Regex::compile(pattern,"u",&mut 0),Err(Error::Limit(_))));
     let re=Regex::compile(pattern,"u",&mut 100_000).unwrap();
     assert!(matches!(re.find(&[0xd83d,0xde00,0xd83d,0xde00],0,false,&mut 0),Err(Error::Limit(_))));
     assert_eq!(re.find(&[0xd83d,0xde00,0xd83d,0xde00],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((2,4)));
+}
+
+#[test]
+fn unicode_set_algebra_nested_union_intersection_and_subtraction_are_exact() {
+    for (pattern,kind) in [(r"^[[a-z]&&[^aeiou]]$",0),(r"^[[a-z]--[aeiou]--[x-z]]$",1),(r"^[[a-c][x-z]😀]$",2),(r"^[\d&&[^5]]$",3)] {
+        let re=Regex::compile(pattern,"v",&mut 100_000).unwrap();
+        for unit in (0u32..=127).chain([0xd800,0xdc00,0x1f600]) {
+            let input=if unit>0xffff {vec![0xd83d,0xde00]}else{vec![unit as u16]};
+            let vowel=matches!(unit,97|101|105|111|117);
+            let expected=match kind {0=>(97..=122).contains(&unit)&&!vowel,1=>(97..=119).contains(&unit)&&!vowel,2=>matches!(unit,97..=99|120..=122|0x1f600),_=>matches!(unit,48..=52|54..=57)};
+            assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().is_some(),expected,"{pattern} U+{unit:x}");
+        }
+    }
+    for pattern in [r"^[[😀-😃]--[😁]]+$",r"^[[^\uD800-\uDFFF]&&[😀-😃]]+$"] {
+        let re=Regex::compile(pattern,"v",&mut 100_000).unwrap();
+        let input:Vec<_>="😀😃".encode_utf16().collect();assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,4)));
+        assert!(re.find(&[0xd800],0,false,&mut 100_000).unwrap().is_none());
+    }
+}
+
+#[test]
+fn unicode_set_algebra_grammar_flags_and_classic_boundaries_are_preserved() {
+    for pattern in ["[a&&]","[&&a]","[a&&b--c]","[ab&&c]","[a-z&&x]","[a&&b-c]","[a--]","[a-]","[-a]","[a|b]","[(]","[{]","[/]","[!!]","[a&&&b]",r"[\d-a]"] {
+        assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
+    }
+    for flags in ["uv","vu","vv"] {assert!(matches!(Regex::compile("a",flags,&mut 100_000),Err(Error::Syntax(_))),"{flags}");}
+    assert!(matches!(Regex::compile("a","iv",&mut 100_000),Err(Error::Unsupported(_))));
+    let re=Regex::compile(r"^[\&\-\!\#\%\,\:\;\<\=\>\@\`\~\(\)\[\]\{\}\/\|]$","v",&mut 100_000).unwrap();
+    for unit in b"&-!#%,:;<=>@`~()[]{}/|" {assert!(re.find(&[u16::from(*unit)],0,false,&mut 100_000).unwrap().is_some());}
+    for pattern in [r"[\q{ab|cd}]",r"[\p{Letter}]",r"[\P{ASCII}]"] {assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Unsupported(_))),"{pattern}");}
+    let classic=Regex::compile("^[a&&b]$","u",&mut 100_000).unwrap();assert!(classic.find(&[38],0,false,&mut 100_000).unwrap().is_some());
+    let flags=Flags::parse("yvmsg").unwrap();assert_eq!(flags.text(),"gmsvy");
+}
+
+#[test]
+fn unicode_set_algebra_capture_direction_work_and_fresh_recovery_are_preserved() {
+    let re=Regex::compile(r"(?<=([[😀A]--[B]]+))!","v",&mut 100_000).unwrap();let input:Vec<_>="😀A!".encode_utf16().collect();
+    assert_eq!(re.find(&input,0,false,&mut 100_000).unwrap().unwrap().captures,vec![Some((3,4)),Some((0,3))]);
+    let pattern=format!("[{}]",["[a-z]";80].join("&&"));
+    assert!(matches!(Regex::compile(&pattern,"v",&mut 1_000),Err(Error::Limit(_))));
+    let re=Regex::compile(&pattern,"v",&mut 100_000).unwrap();assert!(re.retained_bytes>0);
+    assert!(matches!(re.find(&[97],0,false,&mut 0),Err(Error::Limit(_))));
+    assert!(re.find(&[97],0,false,&mut 100_000).unwrap().is_some());
+    let nested=format!("{}a{}","[".repeat(MAX_DEPTH+2),"]".repeat(MAX_DEPTH+2));assert!(matches!(Regex::compile(&nested,"v",&mut 100_000),Err(Error::Limit(_))));
+    assert!(Regex::compile(r"^[\uD800--a]$","v",&mut 100_000).unwrap().find(&[0xd800],0,false,&mut 100_000).unwrap().is_some());
+}
+
+#[test]
+fn unicode_set_algebra_predefined_sets_agree_at_character_boundaries() {
+    for pattern in [r"^[\d]$",r"^[\D]$",r"^[\w]$",r"^[\W]$",r"^[\s]$",r"^[\S]$",r"^[^\D]$",r"^[\d\S]$"] {
+        let unicode=Regex::compile(pattern,"u",&mut 100_000).unwrap();let sets=Regex::compile(pattern,"v",&mut 100_000).unwrap();
+        for unit in (0u32..=128).chain([0xa0,0x1680,0x1fff,0x2000,0x200a,0x200b,0x2027,0x2028,0x2029,0x202a,0x202f,0x2030,0x205f,0x2060,0x3000,0x3001,0xd800,0xdc00,0xfeff,0xff00,0xffff,0x10000,0x1f600,0x10ffff]) {
+            let input=if unit<=0xffff{vec![unit as u16]}else{vec![0xd800+((unit-0x10000)>>10)as u16,0xdc00+((unit-0x10000)&1023)as u16]};
+            assert_eq!(sets.find(&input,0,false,&mut 100_000).unwrap().is_some(),unicode.find(&input,0,false,&mut 100_000).unwrap().is_some(),"{pattern} U+{unit:x}");
+        }
+    }
+    assert!(matches!(Regex::compile(r"[\q]","v",&mut 100_000),Err(Error::Syntax(_))));
+    let re=Regex::compile(r"^[\u{0}-\u{10ffff}--[\u{1}-\u{10fffe}]]$","v",&mut 100_000).unwrap_err();assert!(matches!(re,Error::Syntax(_)));
+    let re=Regex::compile(r"^[[\u{0}-\u{10ffff}]--[\u{1}-\u{10fffe}]]$","v",&mut 100_000).unwrap();
+    for input in [vec![0],vec![0xdbff,0xdfff]]{assert!(re.find(&input,0,false,&mut 100_000).unwrap().is_some());}
+    assert!(re.find(&[1],0,false,&mut 100_000).unwrap().is_none());
 }

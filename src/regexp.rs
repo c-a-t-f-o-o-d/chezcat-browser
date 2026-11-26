@@ -14,6 +14,9 @@ const MAX_GROUP_NAME_BYTES: usize = 256;
 const MAX_MARKS: usize = 64;
 const MAX_STACK: usize = 1024;
 
+#[path = "regexp_unicode_sets.rs"]
+mod unicode_sets;
+
 #[cfg(test)]
 #[path = "regexp_utf16_tests.rs"]
 mod utf16_tests;
@@ -39,7 +42,9 @@ pub struct Flags {
     pub insensitive: bool,
     pub multiline: bool,
     pub dot_all: bool,
+    // Shared Unicode character mode, enabled by either u or v.
     pub unicode: bool,
+    pub unicode_sets: bool,
     pub sticky: bool,
 }
 
@@ -53,10 +58,11 @@ impl Flags {
                 'm' => &mut flags.multiline,
                 's' => &mut flags.dot_all,
                 'u' => &mut flags.unicode,
+                'v' => &mut flags.unicode_sets,
                 'y' => &mut flags.sticky,
-                'v' | 'd' => {
+                'd' => {
                     return Err(Error::Unsupported(
-                        "Unicode sets and indices regexp flags are not implemented.",
+                        "RegExp indices are not implemented.",
                     ))
                 }
                 _ => return Err(Error::Syntax("Invalid regular-expression flag.")),
@@ -66,6 +72,10 @@ impl Flags {
             }
             *entry = true;
         }
+        if flags.unicode && flags.unicode_sets {
+            return Err(Error::Syntax("Unicode regexp flags u and v are mutually exclusive."));
+        }
+        flags.unicode |= flags.unicode_sets;
         if flags.unicode && flags.insensitive {
             return Err(Error::Unsupported("Unicode regexp case folding is not implemented."));
         }
@@ -78,7 +88,8 @@ impl Flags {
             (self.insensitive, 'i'),
             (self.multiline, 'm'),
             (self.dot_all, 's'),
-            (self.unicode, 'u'),
+            (self.unicode && !self.unicode_sets, 'u'),
+            (self.unicode_sets, 'v'),
             (self.sticky, 'y'),
         ]
         .into_iter()
@@ -206,7 +217,7 @@ struct NamedCapture {
     alternatives: Vec<(usize, usize)>,
 }
 
-struct Parser {
+struct Parser<'a> {
     units: Vec<u16>,
     at: usize,
     nodes: Vec<Node>,
@@ -214,13 +225,15 @@ struct Parser {
     depth: usize,
     insensitive: bool,
     unicode: bool,
+    unicode_sets: bool,
+    budget: &'a mut usize,
     named_mode: bool,
     names: Vec<NamedCapture>,
     alternatives: Vec<(usize, usize)>,
     next_alternative: usize,
 }
 
-impl Parser {
+impl Parser<'_> {
     fn push(&mut self, node: Node) -> Result<usize, Error> {
         if self.nodes.len() == MAX_CODE {
             return Err(Error::Limit("Regular-expression syntax limit reached."));
@@ -733,6 +746,7 @@ impl Parser {
                     "Unicode regexp properties are not implemented.",
                 ))
             }
+            _ if self.unicode_sets && in_class && b"&-!#%,:;<=>@`~".iter().any(|&punct| unit == u16::from(punct)) => u32::from(unit),
             _ if self.unicode && (unit != b'-' as u16 || !in_class)
                 && !b"^$\\.*+?()[]{}|/".iter().any(|&syntax| unit == u16::from(syntax)) =>
                 return Err(Error::Syntax("Invalid Unicode regexp identity escape.")),
@@ -763,6 +777,9 @@ impl Parser {
         }
     }
     fn class(&mut self) -> Result<Class, Error> {
+        if self.unicode_sets {
+            return self.unicode_class();
+        }
         let inverted = self.eat(b'^' as u16);
         let mut parts = Vec::new();
         while self.peek() != Some(b']' as u16) {
@@ -1210,6 +1227,8 @@ impl Regex {
             depth: 0,
             insensitive: flags.insensitive,
             unicode: flags.unicode,
+            unicode_sets: flags.unicode_sets,
+            budget,
             named_mode,
             names: Vec::new(),
             alternatives: Vec::new(),
@@ -1224,7 +1243,7 @@ impl Regex {
         let mut compiler = Compiler {
             code: Vec::new(),
             marks: 0,
-            budget,
+            budget: parser.budget,
             names: &parser.names,
             groups: parser.groups,
             unicode: flags.unicode,
@@ -1794,7 +1813,7 @@ mod tests {
         }
         assert!(matches!(Regex::compile("{", "", &mut 0), Err(Error::Limit(_))));
         assert!(matches!(Regex::compile("{", "u", &mut 100_000), Err(Error::Syntax(_))));
-        assert!(matches!(Regex::compile("{", "v", &mut 100_000), Err(Error::Unsupported(_))));
+        assert!(matches!(Regex::compile("{", "v", &mut 100_000), Err(Error::Syntax(_))));
         for (pattern, end) in [("a{2,3}", 3), ("a{2,3}?", 2)] {
             let mut budget = 100_000;
             let regex = Regex::compile(pattern, "", &mut budget).unwrap();
@@ -2065,7 +2084,8 @@ mod tests {
             );
         }
         assert!(matches!(Regex::compile("}", "u", &mut 100_000), Err(Error::Syntax(_))));
-        for flags in ["v", "d"] {
+        assert!(matches!(Regex::compile("}", "v", &mut 100_000), Err(Error::Syntax(_))));
+        for flags in ["d"] {
             assert!(matches!(
                 Regex::compile("}", flags, &mut 100_000),
                 Err(Error::Unsupported(_))

@@ -309,3 +309,30 @@ if(!/^\1(.)$/u.test('😀')||!/^(a|(b))\2c$/u.test('ac'))throw 'forward unmatche
 'ok';
 "#);
 }
+
+#[test]
+fn unicode_set_algebra_native_metadata_and_consumers_keep_code_points() {
+    succeeds(r#"
+var re=/[[a-z]--[aeiou]]+/gv;
+if(!re.unicodeSets||re.unicode||re.flags!=='gv'||re.toString()!=='/[[a-z]--[aeiou]]+/gv')throw 'v metadata';
+var m=re.exec('aBcdef');if(m.index!==2||m[0]!=='cd'||re.lastIndex!==4)throw 'v match';
+var copy=new RegExp(re);if(!copy.unicodeSets||copy.unicode||copy.source!==re.source)throw 'v clone';
+if('😀A'.split(/(?:)/v).join('|')!=='😀|A'||'😀'.replace(/(?:)/gv,'!')!=='!😀!')throw 'v empty progress';
+if('😀A'.match(/(?:)/gv).length!==3)throw 'v global progress';
+if('😀A'.search(/[[😀A]&&[^😀]]/v)!==2)throw 'v search';
+var lone=new RegExp('[[\\ud800]--[a]]','v');if(!lone.test('\ud800')||lone.test('😀'))throw 'v lone units';
+if(!/(?<x>[[😀A]--[A]])\k<x>/v.test('😀😀'))throw 'v shared groups';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_set_algebra_native_invalid_syntax_and_fresh_recovery_are_exact() {
+    succeeds(r#"
+for(var pair of [['a','uv'],['a','vu'],['a','vv'],['[a&&b--c]','v'],['[a-z&&b]','v'],['[a-]','v'],['[!!]','v']]){
+ var error=null;try{new RegExp(pair[0],pair[1]);}catch(e){error=e;}if(!(error instanceof SyntaxError))throw 'v syntax';
+}
+if(!/[a&&b]/u.test('&')||!/^[[a-z]&&[^aeiou]]$/v.test('b')||/^[[a-z]&&[^aeiou]]$/v.test('a'))throw 'fresh v grammar';
+'ok';
+"#);
+}
