@@ -7350,3 +7350,7 @@ mod range_insert_tests;
 #[cfg(test)]
 #[path="app_range_surround_tests.rs"]
 mod range_surround_tests;
+
+#[cfg(test)]
+#[path="app_range_attr_tests.rs"]
+mod range_attr_tests;

@@ -113,6 +113,11 @@ impl Bridge<'_> {
     pub(super) fn range_owner(&self, handle: u32) -> Option<u32> {
         self.range_record(handle).map(|range| range.owner)
     }
+    // Attr is alone in its tree; ownerElement is not a parent and its value
+    // is not child CharacterData. Its actual document still owns new fragments.
+    pub(in crate::scripting) fn range_attr_document(&self,handle:u32)->Option<u32>{
+        self.state.attributes.get(script_attr::index(handle)?).map(|attr|attr.document)
+    }
     pub(in crate::scripting) fn range_node(&self, handle: u32) -> Result<usize, String> {
         if handle == DOCUMENT {
             return Ok(0);
@@ -124,6 +129,7 @@ impl Bridge<'_> {
             })
     }
     pub(in crate::scripting) fn range_length(&mut self, handle: u32) -> Result<usize, String> {
+        if self.range_attr_document(handle).is_some(){self.state.work(1)?;return Ok(0);}
         let node = self.range_node(handle)?;
         let item = &self.doc.nodes[node];
         if let Some(text) = item.kind.character_dom_string() {
@@ -134,6 +140,7 @@ impl Bridge<'_> {
         }
     }
     pub(in crate::scripting) fn range_parent(&mut self, handle: u32) -> Result<Option<u32>, String> {
+        if self.range_attr_document(handle).is_some(){self.state.work(1)?;return Ok(None);}
         let node = self.range_node(handle)?;
         self.state.work(1)?;
         Ok(self
@@ -299,7 +306,10 @@ impl Bridge<'_> {
             }
             STRINGIFY => return self.range_string(record),
             CLONE => return self.copy_range(record),
-            CLONE_CONTENTS => return self.clone_range_contents(record),
+            CLONE_CONTENTS => {
+                if record.start==record.end {if let Some(document)=self.range_attr_document(record.start.node){return self.call(document,"createDocumentFragment",&[]);}}
+                return self.clone_range_contents(record);
+            },
             DETACH => return Ok(Value::Undefined),
             COLLAPSE => {
                 if args.first().is_some_and(Value::truthy) {
@@ -313,7 +323,7 @@ impl Bridge<'_> {
                 let Some(Value::Host(node)) = args.first() else {
                     return Err("A genuine Node is required for a Range boundary.".into());
                 };
-                self.range_node(*node)?;
+                if self.range_attr_document(*node).is_none(){self.range_node(*node)?;}
                 let point = if matches!(method, SET_START | SET_END) {
                     let offset = range_offset(args.get(1).unwrap_or(&Value::Undefined))?;
                     if offset > self.range_length(*node)? {
@@ -467,10 +477,10 @@ impl Bridge<'_> {
             {
                 return Err(Exception("TypeError", "A genuine Node is required.".into()));
             }
-            let node = self
+            let node = if self.range_attr_document(*handle).is_some(){None}else{Some(self
                 .range_node(*handle)
-                .map_err(|error| Exception("NotSupportedError", error))?;
-            if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)) {
+                .map_err(|error| Exception("NotSupportedError", error))?)};
+            if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && node.is_some_and(|node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_))) {
                 return Err(Exception("InvalidNodeTypeError","A DocumentType cannot be a Range boundary.".into()));
             }
             if matches!(method, SET_START | SET_END) {
@@ -487,14 +497,7 @@ impl Bridge<'_> {
             if matches!(
                 method,
                 START_BEFORE | START_AFTER | END_BEFORE | END_AFTER | SELECT_NODE
-            ) && self
-                .state
-                .tree
-                .parents
-                .get(node)
-                .copied()
-                .flatten()
-                .is_none()
+            ) && self.range_parent(*handle).map_err(Fatal)?.is_none()
             {
                 return Err(Exception(
                     "InvalidNodeTypeError",
