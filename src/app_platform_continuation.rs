@@ -27,7 +27,7 @@ impl EditorState {
 }
 #[derive(Clone, PartialEq, Eq)]
 struct ControlState {
-    owner:Option<usize>,kind:Kind,name:String,disabled:bool,readonly:bool,max_length:usize,
+    owner:Option<usize>,kind:Kind,password:bool,name:String,disabled:bool,readonly:bool,max_length:usize,
 }
 #[derive(Clone, PartialEq, Eq)]
 enum Target {
@@ -92,7 +92,7 @@ impl App {
                 if !matches!(control.kind,Kind::Text|Kind::TextArea) || editable&&!control.editable()
                     || self.document.nodes.get(node).is_none()
                     || !self.page.controls.iter().any(|rect|rect.node==node) {return None;}
-                (&control.value,Some(ControlState {owner:control.owner,kind:control.kind,name:control.name.clone(),
+                (&control.value,Some(ControlState {owner:control.owner,kind:control.kind,password:control.password,name:control.name.clone(),
                     disabled:control.disabled,readonly:control.readonly,max_length:control.max_length}))
             },
             _=>return None,

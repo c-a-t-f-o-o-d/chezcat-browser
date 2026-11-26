@@ -110,6 +110,6 @@ x.value='C\rD\n';x.defaultValue='EF';if(x.value!=='CD'||x.defaultValue!=='EF')th
 form.reset();if(x.value!=='EF'||x.validity.patternMismatch)throw 'password reset';
 x.value='G😀';x.removeAttribute('pattern');if(!x.checkValidity())throw 'raw script value';
 "#);
- p.begin_job();let error=p.runtime.execute("x.type='text';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("type transition"),"{error}");run(&mut d,&mut f,&mut p,"if(x.type!=='password'||x.value!=='G😀')throw 'transition refusal recovery';");
+ run(&mut d,&mut f,&mut p,"x.type='text';if(x.type!=='text'||x.value!=='G😀')throw 'text transition retains value';x.type='password';if(x.type!=='password'||x.value!=='G😀')throw 'password transition retains value';");
  let input=node(&d,"input");assert!(f.controls[&input].editable());let owner=node(&d,"form");assert!(f.validate_submission(&d,owner,None).is_ok());run(&mut d,&mut f,&mut p,"form.method='post';form.action='https://pattern-validation.test/submit';");let location=crate::navigation::address("https://pattern-validation.test/",&crate::navigation::Location::home()).unwrap();let sent=f.submit_request(&d,owner,None,&location,&location).unwrap();let crate::http::Request::FormPost{body,..}=sent.request else{panic!("native password POST")};assert_eq!(String::from_utf8(body).unwrap(),"q=G%F0%9F%98%80&other=");
 }

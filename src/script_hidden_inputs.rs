@@ -35,6 +35,12 @@ impl Bridge<'_> {
         let node = self.node(object)?;
         let key = match property { "defaultValue"|"value"=>"value", "name"=>"name", _=>"type" };
         let text = if property=="value" && matches!(value,Value::Null) { String::new() } else { self.text(value)? };
+        if key == "type" && self.native_text_input(node) && forms::input_kind(&text) == Kind::Text {
+            // Move the once-converted value into the shared transaction.
+            // No extra uncharged copy is needed for a type-only update.
+            self.public_attribute(node,crate::html::AttributeName::unqualified(key.into()),Some(text))?;
+            return Ok(true);
+        }
         self.hidden_input_attribute(node,&crate::html::AttributeName::unqualified(key.into()),&Some(text))
     }
     pub(super) fn hidden_input_attribute(&mut self, node: usize, name: &crate::html::AttributeName,

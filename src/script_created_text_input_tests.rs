@@ -183,8 +183,11 @@ fn created_text_input_unsupported_context_type_and_interior_changes_are_atomic()
     let host = id(&doc, "host");
     let foreign = id(&doc, "foreign");
     let inert = id(&doc, "inert");
+    let original = controls(&forms);
+    run(&mut doc, &mut forms, &mut page, "input.type='search';if(input.type!=='search'||input.value!=='edited'||input.defaultValue!=='default'||input.name!=='q')throw 'admitted search transition';input.type=' text ';if(input.type!=='text'||input.getAttribute('type')!==' text '||input.value!=='edited')throw 'invalid type default';input.removeAttribute('type');");
+    assert_eq!(controls(&forms), original);
     for source in [
-        "input.type='hidden';", "input.type='checkbox';", "input.type='search';", "input.type=' text ';",
+        "input.type='hidden';", "input.type='checkbox';",
         "document.getElementById('foreign').appendChild(input);",
         "document.getElementById('inert').appendChild(input);",
         "input.innerHTML='<span>not native contents</span>';",

@@ -3,6 +3,7 @@
 use super::*;
 
 pub(crate) enum InputPlan {
+    TextType { node: usize, password: bool },
     Admit { controls: BTreeMap<usize, Control>, retained_bytes: usize },
     Name { node: usize, name: String },
     RadioName { node: usize, name: String, uncheck: Vec<usize> },
@@ -17,6 +18,7 @@ impl InputPlan {
     }
     pub(crate) fn commit(self, forms: &mut Forms) {
         match self {
+            Self::TextType { node, password } => forms.controls.get_mut(&node).expect("Prepared text INPUT").password = password,
             Self::Admit { mut controls, .. } => forms.controls.append(&mut controls),
             Self::Name { node, name } => forms.controls.get_mut(&node).expect("Prepared INPUT").name = name,
             Self::RadioName { node, name, uncheck } => {
