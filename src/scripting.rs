@@ -156,6 +156,9 @@ mod script_dispatch;
 mod script_ranges;
 #[path = "script_abort.rs"]
 mod script_abort;
+#[path = "script_pi_attributes.rs"]
+mod script_pi_attributes;
+use crate::javascript::processing_instruction_interface;
 #[path = "script_message_channel.rs"]
 mod script_message_channel;
 #[path = "script_media_query_list.rs"]
@@ -563,6 +566,8 @@ struct State {
     ranges: Vec<script_ranges::Record>,
     node_list_references: usize,
     attributes: Vec<script_attr::Attr>,
+    pi_attributes:Vec<script_pi_attributes::Record>,
+    pi_pending:Option<script_pi_attributes::Pending>,
     attached_attributes: Vec<usize>,
     declined_images: usize,
     declined_beacons: usize,
@@ -664,6 +669,8 @@ impl State {
             ranges: Vec::new(),
             node_list_references: 0,
             attributes: Vec::new(),
+            pi_attributes:Vec::new(),
+            pi_pending:None,
             attached_attributes: Vec::new(),
             declined_images: 0,
             declined_beacons: 0,
@@ -4587,6 +4594,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if processing_instruction_interface::operation(method).is_some(){return processing_instruction_interface::conversions(method).iter().any(|(i,string)|*i==index&&*string);}
         if index==0&&(self.listener_receiver(object)&&matches!(method,"addEventListener"|"removeEventListener")
             ||self.event_target_interface(object)&&matches!(method,"Event"|"CustomEvent"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent")
             ||self.event_receiver(object)&&matches!(method,"initEvent"|"initCustomEvent"|"initUIEvent"|"initMouseEvent")){return true;}
@@ -4748,6 +4756,7 @@ impl Host for Bridge<'_> {
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
         if method==text_split_interface::METHOD{return &[(0,false)];}
+        if processing_instruction_interface::operation(method).is_some(){return processing_instruction_interface::conversions(method);}
         if let Some(edit)=character_data_interface::operation(method){return edit.conversions();}
         if method==character_substring::METHOD{return &[(0,false),(1,false)];}
         if method=="getAttributeNode"{return &[(0,true)];}if method=="getAttributeNodeNS"{return &[(0,true),(1,true)];}
@@ -5121,6 +5130,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_selectors::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
+        if self.event_target_interface(object)&&processing_instruction_interface::operation(method).is_some(){return Some(object);}
         if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -5153,6 +5163,8 @@ impl Host for Bridge<'_> {
         self.ordinary_event_owner(result)
     }
     fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
+    fn prepare_pi_operation(&mut self,object:u32,method:&str,args:&[Value])->Result<processing_instruction_interface::Prepared,String>{self.prepare_pi(object,method,args)}
+    fn finish_pi_operation(&mut self,object:u32,committed:bool){self.finish_pi(object,committed);}
     fn attribute_name_snapshot(&mut self,object:u32)->Result<Vec<DomString>,String>{self.attribute_names(object)}
     fn event_path_snapshot(&mut self,event:u32)->Result<Vec<u32>,String>{self.copy_event_path(event)}
 
@@ -5235,6 +5247,7 @@ impl Host for Bridge<'_> {
         if element_names::namespace_method(method){return 1;}
         if method==character_substring::METHOD{return 2;}
         if method==text_split_interface::METHOD{return 1;}
+        if processing_instruction_interface::operation(method).is_some(){return processing_instruction_interface::arity(method);}
         if let Some(edit)=character_data_interface::operation(method){return edit.arity();}
         if self.doctype_receiver(object)&&dom_tree::node_mutation_method(method){return if matches!(method,"insertBefore"|"replaceChild"){2}else{1};}
         if method==script_inert_documents::CREATE_DOCTYPE{return 3;}
@@ -5606,6 +5619,7 @@ impl Host for Bridge<'_> {
                 Err(("InvalidCharacterError", "ProcessingInstruction requires a valid XML name and data without ?>.".into()))
             };
         }
+        if processing_instruction_interface::operation(method).is_some(){return self.validate_pi_operation(object,method,args);}
         if method==character_substring::METHOD{return self.validate_substring_data(object,args);}
         if method==text_whole::GETTER{return if self.text_node_receiver(object){Ok(())}else{Err(("TypeError","wholeText requires a genuine Text or CDATA node.".into()))};}
         if method==text_split_interface::METHOD{return self.validate_text_split(object,args);}
@@ -6053,6 +6067,7 @@ impl Host for Bridge<'_> {
         if method==character_substring::METHOD{return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if method==text_whole::GETTER||method==text_split_interface::METHOD{return self.event_target_interface(object)&&self.text_node_receiver(receiver);}
         if method==node_normalize_interface::METHOD{return self.event_target_interface(object)&&self.normalize_receiver(receiver);}
+        if processing_instruction_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.pi_receiver(receiver);}
         if character_data_interface::operation(method).is_some(){return self.event_target_interface(object)&&self.character_data_receiver(receiver);}
         if let Some((interface,_))=placeholder::operation(method){if self.event_target_interface(object){return self.placeholder_interface(receiver)==Some(interface);}}
         if self.event_target_interface(object)&&method.starts_with("\0XHR.") {
@@ -12498,3 +12513,7 @@ mod abort_signal_timeout_tests;
 #[cfg(test)]
 #[path="script_abort_signal_any_tests.rs"]
 mod abort_signal_any_tests;
+
+#[cfg(test)]
+#[path="script_pi_pseudo_attributes_tests.rs"]
+mod pi_pseudo_attributes_tests;

@@ -7414,3 +7414,7 @@ mod abort_signal_timeout_tests;
 #[cfg(test)]
 #[path="app_abort_signal_any_tests.rs"]
 mod abort_signal_any_tests;
+
+#[cfg(test)]
+#[path="app_pi_pseudo_attributes_tests.rs"]
+mod pi_pseudo_attributes_tests;
