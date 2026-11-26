@@ -6031,6 +6031,9 @@ mod literal_prototype_tests;
 #[path = "app_string_concat_tests.rs"]
 mod string_concat_tests;
 #[cfg(test)]
+#[path = "app_utf16_string_split_tests.rs"]
+mod utf16_string_split_tests;
+#[cfg(test)]
 #[path = "app_string_last_index_utf16_tests.rs"]
 mod string_last_index_utf16_tests;
 
