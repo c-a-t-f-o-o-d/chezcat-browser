@@ -7290,3 +7290,7 @@ mod text_type_transition_tests;
 #[cfg(test)]
 #[path="app_text_family_admission_tests.rs"]
 mod text_family_admission_tests;
+
+#[cfg(test)]
+#[path="app_domparser_template_publication_tests.rs"]
+mod domparser_template_publication_tests;
