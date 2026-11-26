@@ -6370,8 +6370,9 @@ impl Runtime {
                 "multiline" => Some(Value::Bool(expression.flags.multiline)),
                 "dotAll" => Some(Value::Bool(expression.flags.dot_all)),
                 "sticky" => Some(Value::Bool(expression.flags.sticky)),
-                "unicode" => Some(Value::Bool(expression.flags.unicode)),
-                "unicodeSets" | "hasIndices" => Some(Value::Bool(false)),
+                "unicode" => Some(Value::Bool(expression.flags.unicode && !expression.flags.unicode_sets)),
+                "unicodeSets" => Some(Value::Bool(expression.flags.unicode_sets)),
+                "hasIndices" => Some(Value::Bool(false)),
                 _ => None,
             };
             if let Some(value) = value {
