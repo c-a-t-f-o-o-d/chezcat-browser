@@ -1,6 +1,9 @@
 //! Bounded inert HTML DOMParser output, separate from the active document tree.
 //! https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-parsing-and-serialization
 use super::*;
+#[cfg(test)]
+#[path="script_domparser_template_publication_tests.rs"]
+mod template_publication_tests;
 
 pub(in crate::scripting) const CONSTRUCTOR: &str = "DOMParser";
 pub(in crate::scripting) const PARSE: &str = "\0DOMParser.parseFromString";
@@ -19,6 +22,18 @@ fn document_elements(nodes: &[Node]) -> Result<(usize, usize, usize), String> {
     let head=child(html,&["head"]).ok_or("Missing parsed HTML head.")?;
     let body=child(html,&["body","frameset"]).ok_or("Missing parsed HTML body or frameset.")?;
     Ok((html,head,body))
+}
+
+fn parsed_template(node: &Node) -> bool {
+    node.namespace == crate::html::Namespace::Html
+        && matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "template")
+}
+
+fn parsed_document_entries(nodes: &[Node]) -> Result<usize, String> {
+    let templates = nodes.iter().filter(|node| parsed_template(node)).count();
+    nodes.len().checked_add(1).and_then(|count| count.checked_add(templates))
+        .and_then(|count| count.checked_add(if templates == 0 { 0 } else { 2 }))
+        .ok_or("Parsed template identity count overflow.".into())
 }
 
 impl Bridge<'_> {
@@ -53,10 +68,7 @@ impl Bridge<'_> {
                 Ok(())
             })?;
         let (html, head, body) = document_elements(&parsed.nodes)?;
-        let count = parsed
-            .nodes
-            .len()
-            .saturating_add(1);
+        let count = parsed_document_entries(&parsed.nodes)?;
         if count > available {
             return Err("Inert DOM identity limit reached.".into());
         }
@@ -72,119 +84,129 @@ impl Bridge<'_> {
     }
 
     fn publish_parsed_document(
-        &mut self,
-        mut parsed: Document,
-        url: String,
-        roots: (usize, usize, usize),
-        doctype_position: Option<usize>,
-        count: usize,
+        &mut self, mut parsed: Document, url: String, roots: (usize, usize, usize),
+        doctype_position: Option<usize>, count: usize,
     ) -> Result<Value, String> {
+        if count != parsed_document_entries(&parsed.nodes)? || count > self.inert_remaining_entries() {
+            return Err("Parsed document identity reservation is inconsistent.".into());
+        }
         let arena = &self.state.inert_documents;
         let document = FIRST_ENTRY + arena.entries.len() as u32;
         let implementation = document + 1;
         let first = document + 2;
-        let handle = |local: usize| {
-            if local == 0 {
-                document
-            } else {
-                first + local as u32 - 1
-            }
+        let handle = |local: usize| if local == 0 { document } else { first + local as u32 - 1 };
+        let template_count = parsed.nodes.iter().filter(|node| parsed_template(node)).count();
+        let associated = if template_count == 0 { None } else {
+            Some(document.checked_add(u32::try_from(parsed.nodes.len().checked_add(1)
+                .ok_or("Parsed template owner count overflow.")?).map_err(|_|"Parsed template owner count overflow.")?)
+                .ok_or("Parsed template owner handle overflow.")?)
         };
-        let doctype=doctype_position.map(handle);
-        let (html, head, body) = roots;
         let generated_base = arena.generated.len();
-        let mut entries = Vec::new();
-        let mut generated = Vec::new();
-        let mut parents = Vec::new();
-        entries
-            .try_reserve_exact(count)
-            .map_err(|_| "Cannot reserve inert document identities.")?;
-        generated
-            .try_reserve_exact(parsed.nodes.len() - 1)
-            .map_err(|_| "Cannot reserve inert document source nodes.")?;
-        parents
-            .try_reserve_exact(parsed.nodes.len())
-            .map_err(|_| "Cannot reserve inert document parent links.")?;
-        parents.resize(parsed.nodes.len(), None);
-        let mut payload = url.capacity().saturating_add(parsed.title.capacity());
+        let (html, head, body) = roots;
+        // All owner/edge decisions remain local until the shared batch admits
+        // both the document and every template content identity together.
+        self.state.work(parsed.nodes.len())?;
+        self.state.copies(parsed.nodes.len().checked_mul(
+            size_of::<(Option<u32>, u32, Option<u32>)>() + size_of::<usize>())
+            .ok_or("Parsed template traversal storage overflow.")?)?;
+        let mut topology = Vec::new();
+        topology.try_reserve_exact(parsed.nodes.len()).map_err(|_|"Cannot reserve parsed owner plan.")?;
+        topology.resize(parsed.nodes.len(), (None, document, None));
+        let mut templates = Vec::new();
+        templates.try_reserve_exact(template_count).map_err(|_|"Cannot reserve parsed template plan.")?;
         for (local, node) in parsed.nodes.iter().enumerate() {
-            self.state.work(node.children.len().saturating_add(1))?;
-            for &child in &node.children {
-                parents[child] = Some(handle(local));
-            }
-            if let NodeKind::Element { tag, attrs, .. } = &node.kind {
-                if tag == "template" {
-                    return Err(
-                        "Template contents in DOMParser documents are outside the admitted subset."
-                            .into(),
-                    );
-                }
-                self.state.work(attrs.len())?;
+            if parsed_template(node) {
+                let fragment = associated.unwrap().checked_add(2)
+                    .and_then(|first| first.checked_add(templates.len() as u32))
+                    .ok_or("Parsed template fragment handle overflow.")?;
+                topology[local].2 = Some(fragment);
+                templates.push(local);
             }
         }
-        let children_for = |children: &[usize], extra: usize| -> Result<Vec<u32>, String> {
+        let mut pending = Vec::new();
+        pending.try_reserve_exact(parsed.nodes.len()).map_err(|_|"Cannot reserve parsed owner traversal.")?;
+        pending.push(0);
+        while let Some(local) = pending.pop() {
+            let source = &parsed.nodes[local];
+            self.state.work(source.children.len().saturating_add(1))?;
+            let (parent, owner) = if let Some(fragment) = topology[local].2 {
+                (fragment, associated.unwrap())
+            } else { (handle(local), topology[local].1) };
+            for &child in &source.children {
+                topology[child].0 = Some(parent);
+                topology[child].1 = owner;
+                pending.push(child);
+            }
+            if let NodeKind::Element { attrs, .. } = &source.kind { self.state.work(attrs.len())?; }
+        }
+        let children_for = |children: &[usize]| -> Result<Vec<u32>, String> {
             let mut result = Vec::new();
-            result
-                .try_reserve_exact(children.len() + extra)
-                .map_err(|_| "Cannot reserve inert document child links.")?;
+            result.try_reserve_exact(children.len()).map_err(|_|"Cannot reserve parsed child links.")?;
             result.extend(children.iter().copied().map(handle));
             Ok(result)
         };
-        let document_children=children_for(&parsed.nodes[0].children,0)?;
-        let node = |kind, parent, children| {
-            Entry::Node(InertNode {
-                kind,
-                owner: document,
-                parent,
-                children,
-            })
-        };
-        payload = payload.saturating_add(document_children.capacity() * size_of::<u32>());
-        entries.push(node(
-            Kind::Document(DocumentNodes {
-                xml_interface:false,kind:parsed.kind,mode:parsed.mode,content_type:"text/html",
-                implementation,
-                doctype,
-                url,base_url_override:None,
-                html: Some(handle(html)),
-                head: Some(handle(head)),
-                body: Some(handle(body)),
-                title: std::mem::take(&mut parsed.title),
-            }),
-            None,
-            document_children,
-        ));
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(count).map_err(|_|"Cannot reserve parsed document identities.")?;
+        let mut generated = Vec::new();
+        generated.try_reserve_exact(parsed.nodes.len()-1).map_err(|_|"Cannot reserve parsed source nodes.")?;
+        let document_children = children_for(&parsed.nodes[0].children)?;
+        let mut payload = url.capacity().checked_add(parsed.title.capacity())
+            .and_then(|bytes|bytes.checked_add(document_children.capacity()*size_of::<u32>()))
+            .ok_or("Parsed document payload overflow.")?;
+        entries.push(Entry::Node(InertNode {
+            kind: Kind::Document(DocumentNodes {
+                xml_interface:false, kind:parsed.kind, mode:parsed.mode, content_type:"text/html",
+                implementation, doctype:doctype_position.map(handle), url, base_url_override:None,
+                html:Some(handle(html)), head:Some(handle(head)), body:Some(handle(body)),
+                title:std::mem::take(&mut parsed.title),
+            }), owner:document, parent:None, children:document_children,
+        }));
         entries.push(Entry::Implementation);
+        let mut fragments = Vec::new();
+        fragments.try_reserve_exact(template_count).map_err(|_|"Cannot reserve parsed template fragments.")?;
+        let mut links = Vec::new();
+        links.try_reserve_exact(template_count).map_err(|_|"Cannot reserve parsed template content index.")?;
+        for local in templates {
+            let children = children_for(&parsed.nodes[local].children)?;
+            payload = payload.checked_add(children.capacity()*size_of::<u32>())
+                .ok_or("Parsed template child payload overflow.")?;
+            links.push((handle(local),topology[local].2.unwrap()));
+            fragments.push(Entry::Node(InertNode {
+                kind:Kind::Fragment { template:Some(handle(local)) }, owner:associated.unwrap(),
+                parent:None, children,
+            }));
+        }
         for (offset, mut source) in parsed.nodes.drain(1..).enumerate() {
             let local = offset + 1;
-            let children = children_for(&source.children, 0)?;
+            let children = if topology[local].2.is_some() { Vec::new() } else { children_for(&source.children)? };
             let metadata = match &source.kind {
-                NodeKind::Element { tag, href, .. } => tag
-                    .capacity()
-                    .saturating_add(href.as_ref().map_or(0, String::capacity)),
+                NodeKind::Element { tag, href, .. } => tag.capacity()
+                    .checked_add(href.as_ref().map_or(0,String::capacity)).ok_or("Parsed element metadata overflow.")?,
                 _ => 0,
             };
-            payload = payload
-                .saturating_add(node_bytes(&source))
-                .saturating_add(metadata)
-                .saturating_add(size_of::<Node>() + 2 * size_of::<usize>())
-                .saturating_add(children.capacity() * size_of::<u32>());
+            payload = payload.checked_add(node_bytes(&source)).and_then(|bytes|bytes.checked_add(metadata))
+                .and_then(|bytes|bytes.checked_add(size_of::<Node>()+2*size_of::<usize>()))
+                .and_then(|bytes|bytes.checked_add(children.capacity()*size_of::<u32>()))
+                .ok_or("Parsed source payload overflow.")?;
             source.children = Vec::new();
-            generated.push(GeneratedNode {
-                node: Rc::new(source),
-                unsafe_nonce: parsed.nonce_unsafe_nodes.contains(&local),
-            });
-            entries.push(node(
-                Kind::Parsed {
-                    source: ParsedSource::Generated(generated_base + offset),
-                    initial_template: None,
-                },
-                parents[local],
-                children,
-            ));
+            generated.push(GeneratedNode { node:Rc::new(source), unsafe_nonce:parsed.nonce_unsafe_nodes.contains(&local) });
+            entries.push(Entry::Node(InertNode {
+                kind:Kind::Parsed { source:ParsedSource::Generated(generated_base+offset), initial_template:None },
+                owner:topology[local].1, parent:topology[local].0, children,
+            }));
         }
+        if let Some(owner) = associated {
+            entries.push(Entry::Node(InertNode {
+                kind:Kind::TemplateDocument { implementation:owner+1, kind:parsed.kind, html:None, doctype:None },
+                owner, parent:None, children:Vec::new(),
+            }));
+            entries.push(Entry::Implementation);
+            entries.extend(fragments);
+        }
+        debug_assert_eq!(entries.len(),count);
         self.state.copies(payload)?;
-        self.publish_inert_batch(document,entries,generated,payload,Vec::new(),true)
+        self.publish_inert_batch_with_document(document,entries,generated,payload,links,true,
+            associated.map(|owner|(document,owner)))
     }
 }
 
