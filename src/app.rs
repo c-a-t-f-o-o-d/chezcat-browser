@@ -7526,3 +7526,7 @@ mod app_noscript_host_clone_tests;
 #[cfg(test)]
 #[path="app_noscript_inert_import_tests.rs"]
 mod app_noscript_inert_import_tests;
+
+#[cfg(test)]
+#[path="app_noscript_text_content_tests.rs"]
+mod app_noscript_text_content_tests;
