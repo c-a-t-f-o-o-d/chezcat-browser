@@ -1,606 +1,126 @@
-<div align="center">
-
-# Browser compatibility scope
-
-*Measured workflows—not a blanket list of supported libraries.*
+# Measured compatibility
 
 [Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Documentation](README.md)
 
-</div>
-
----
-
 ## How to read this page
 
-> [!IMPORTANT]
-> **Load → startup → render → interact → async.** These are separate outcomes.
-> HTTP 200, successful parsing, zero startup errors, or one green test does not
-> establish a working website or support for every version of a framework.
+**Loading, startup, rendering, interaction and asynchronous updates are separate
+outcomes.** HTTP 200, successful parsing or zero startup errors alone does not
+establish a working website or every version of a framework.
 
-**Current verified release: [0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).**
-Its Windows build, release checks, published assets and extracted runtime passed
-verification for tagged source `122d0b7`. See the
-[release record](RELEASING.md#current-verified-release) for that evidence.
+The current verified release is
+[0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4),
+from tagged source `122d0b7`. Its delivery evidence is in the
+[release record](RELEASING.md#current-verified-release). The results below retain
+the source revisions actually measured. They are not fresh runs on that release
+or current development source. Later implementation changes do not revise an
+earlier observation.
 
-**Application results retain their measured source revisions.** The records below
-show the latest recorded outcome for each workload and preserve earlier checkpoints.
-They do not substitute for a new run on the published release or current development
-source. [Capabilities](CAPABILITIES.md) records the current implementation scope.
-The [CSS foundation plan](CSS_FOUNDATION_PLAN.md) compares that source with the
-standards and queues work after HTML/XHTML. Its static audit adds no new browser
-or application outcome to this page.
-
-[Homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Integration fixtures](#recent-shared-increments) · [Latest recorded results](#current-scorecard) · [Measurement method](#measurement-method)
+[Homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Workflow results](#current-scorecard) · [Integration fixtures](#recent-shared-increments) · [Measurement method](#measurement-method)
 
 ### Latest reviewed signed-out homepage checkpoint
 
-The latest reported signed-out homepage check used
-[`cad5f7c`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cad5f7c14a8fe8ebe2637e4c5269e84eed9697da),
-including PR #429. The page still showed the skeleton, and the DOM walker reached
-its 30-second deadline. This does not establish a usable header, guide or search
-field. Search submission, results, watch navigation and playback remain unproved.
-PR #430 subsequently integrated at
-[`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c);
-no post-PR #430 live acceptance result is recorded.
+The latest recorded signed-out YouTube homepage check used
+[`cad5f7c`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cad5f7c14a8fe8ebe2637e4c5269e84eed9697da).
+The page still showed a skeleton, and the DOM walker reached its 30-second
+deadline. A usable header, guide and search field were not established.
+Search submission, results, watch navigation and playback remain unproved.
 
-<a id="recent-shared-increments"></a>
-
-### Recorded integration fixtures
-
-<details>
-<summary><strong>Original component and DOM fixture records</strong></summary>
-
-| Integrated source | What was actually exercised | Evidence boundary |
-| :--- | :--- | :--- |
-| **Selected component path · PR #416** | Original App composition covers nested inert ownership, attribute preparation/import, styles, author/native ARIA forwarding, deferred observer/Promise jobs, icons, events, focus, typing and a native link. | This fixture models required calls for the selected noPatch path. It does not execute the matching deployed polyfill or demonstrate full native Custom Elements/Shadow DOM. [PR #416](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416) |
-| **Native base URLs · PR #429** | An original loopback App checks admitted and CSP-blocked bases, actual relative-image requests and pixels, preserved edited input and native link activation. | Existing HTTP(S) URL projection and 16 KiB bounds remain. Live main-document base mutation and wider schemes are outside this increment. [PR #429](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429) |
-| **DOM traversal bookkeeping · PR #430** | One original depth-16 fixture using an unmodified pinned polyfill completes the same 17 constructors/connections and 2,033,391 script entries. The single development timing pair is 24.583 s before and 22.595 s after the change. | Preliminary fixture evidence, without a performance guarantee or a new live-site pass. Script deadlines, upstream code and page configuration were unchanged. [PR #430](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/430) |
-| **Passive HTML/custom-host content · PR #433** | The PR records 49 focused affected checks, including an original App click → Promise → observer/Range/pixel update with neighboring editor and link checks; production compile and publication controls also passed. | Integrated at `ce464a4` after the alpha.2 tag. Newly created inert-leaf promotion was still incomplete at that revision; the Text increment below follows it. This is not a new website result. [PR #433](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433) |
-| **New inert Text identities · PR #434** | The PR records 8 focused checks covering direct App activation, refusal/recovery, observers, Range, pixels and neighboring editor/link behavior. The affected selection retains 75 passes and corrects its 70,000-identity assertion for the two identity domains; production compile and publication controls pass. | Integrated at `117bbb5` after the alpha.2 tag. Native quota exhaustion retains atomic promotion refusal. General inert element creation and subtree clones remain outside this increment; no actual-site usability is claimed. [PR #434](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434) |
-| **Constructed inert HTML/SVG identities · PR #435** | The PR records 84 focused affected checks, including created HTML/style/SVG App pixels, a Promise-driven trusted click, preserved editor state and link hits, refusal/recovery, production compile and publication controls. | Integrated at `ad58c9a` after the alpha.2 tag. General inert subtree cloning remains incomplete; protected controls, late handlers and resource rules retain their checks. No new actual-site result is claimed. [PR #435](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435) |
-
-</details>
-
-The current implementation priority is the **HTML/XHTML document foundation**.
-The [foundation plan](HTML_FOUNDATION_PLAN.md) and [roadmap](ROADMAP.md) define its
-dependency order and acceptance gates. The broader [CSS program](CSS_FOUNDATION_PLAN.md)
-starts after F14. The signed-out shell, search/results, watch navigation/Back and
-playback require their actual CSS/platform dependencies and retain separate
-journey checks. Connected original App fixtures establish package
-integration; [capabilities](CAPABILITIES.md) records what is implemented or guarded.
-
-<details>
-<summary><strong>🧭 Earlier signed-out homepage observations</strong></summary>
-
-These records retain their original builds, inputs and first failures. They are
-not current-source failures unless a later measurement reproduces them.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T04:13:04Z** used clean
-[`fff35f8`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/fff35f8e9dc80e5ec33a1b82b648bcdba5c5cae7),
-including genuine ErrorEvent records. All 43 script executions and 61 callback
-invocations succeeded, with 49 listeners and zero escaped script errors. The
-inspected page still shows the skeleton without usable header/guide/search.
-A console.error entry contains an opaque script object; the underlying reported
-failure remains untraced. Zero escaped errors does not establish initialization.
-Images were off, fresh HTTPS/trust/origin/resource guards remained active, and
-external JavaScript body hashes are unavailable. Later journey milestones are
-not demonstrated.
-
-The connected inert-query App fixture establishes real stamping operations and
-paint in that fixture. Subsequent source adds mixed import/activation,
-namespace-aware SVG and finite mutation/lifecycle behavior. Their remaining
-limits are recorded in [capabilities](CAPABILITIES.md), and their implementation
-checks do not establish a usable homepage.
-A merge alone does not schedule a live-site run; package readiness or a specific
-blocking unknown determines the next site checkpoint.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T04:04:08Z** used clean
-[`c3081a5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/c3081a51d137dcc845905e051a5d80246e84b719),
-including genuine nested template fragments. JavaScript was enabled and images
-off. All 43 script executions succeeded, but inspected pixels still show the
-skeleton without usable header/guide/search. DOMContentLoaded fails on missing
-`ErrorEvent` at 72:194 in a polyfill error-reporting fallback. That secondary
-failure may mask an earlier exception; its resolution is not established by
-constructor tests. There were 49 listeners and one escaped error. The prior
-nested-template parser refusal is absent in this distinct live cohort.
-
-Existing transport/trust/origin/resource guards remain active. External script
-body hashes are unavailable; later journey milestones remain unproved. The
-connected ErrorEvent increment supplies genuine retained data and synthetic
-propagation, without claiming automatic global error reporting or a working site.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T03:42:22Z** used clean
-[`0f24be5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/0f24be5cb6de6c6194ac210185f8d4dab82faaf6),
-including genuine WheelEvent records. JavaScript was enabled and images off;
-saved HTML reports `LOGGED_IN=false`. All 43 script executions succeeded. The
-inspected page still shows the skeleton without usable header/guide/search.
-A DOMContentLoaded callback fails in checked HTML fragment parsing through the
-native innerHTML wrapper at 81:621; there are 47 listeners and one escaped error,
-with invocation counts 49 attempted, 48 successful and one failed.
-
-A separate bounded diagnostic on that source plus a tag/context-only error
-message change identifies a nested template start tag in a template context.
-It is development evidence, not a clean integrated-source rerun. The connected
-increment implements real nested inert content rather than suppressing that
-refusal. Existing transport/trust/resource guards remain active. External script
-body hashes are unavailable and later journey milestones remain unproved.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T03:28:33Z** used clean
-[`d8957da`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/d8957da57a583220b915165afe87e6f18c130702),
-including attribute-specific supported-token queries. JavaScript was enabled and
-images off; saved HTML reports `LOGGED_IN=false`. Inspected pixels still show a
-skeleton without usable header/guide/search. The sole escaped failure is missing
-`WheelEvent` at 40747:73 in handler metadata (5966:53 rethrow). Execute counts were
-44 attempted, 43 successful and one failed; invocation counts were 61/61/0.
-The prior sandbox query callback failures are absent in this distinct cohort.
-External JavaScript body hashes are unavailable; this is not an exact-byte replay.
-
-The owner's separate clean `d8957da` navigation at **03:26:36Z** reports the
-original WheelEvent metadata failure at 40735:73 and later timer 7 calling
-undefined `Hq(64,N)` at 461:80. Its binding and relationship to aborted startup
-remain unproved. The sandbox fault is absent; a successful native XHR telemetry
-request does not establish feed/search loading. Neither observation proves a
-usable shell or later journey milestones. Existing guards remain active.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T03:15:00Z** used clean
-[`e3f721d`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e3f721d8cef5d175618318040c5c941348aee62c),
-including live sandbox attribute lists. JavaScript was enabled and images off;
-saved HTML reports `LOGGED_IN=false`. Pixels still show a skeleton without usable
-header/guide/search. Main execution first fails on missing `WheelEvent` at
-40735:73 in handler metadata (5966:53 rethrow). Two later failures, from
-DOMContentLoaded and timer 42, read the unsupported token-list `supports` method
-at 6503:35. There were 43 script executions (42 successful), 42 listeners and
-three errors; invocation counts were 26 attempted, 24 successful and two failed.
-This distinct live cohort has no exported JavaScript body hashes. Existing
-security/resource guards remain active; later journey milestones are unproved.
-
-The earlier owner's separate clean `ae478b5` navigation at **03:06:04Z** still shows the
-skeleton and the same original WheelEvent metadata failure, plus the earlier
-sandbox-property failure. A later owner console adds timer 7 calling undefined
-`Hq(64,N)` at 461:80. The binding and its relationship to aborted startup are
-unproved; it is not identified as a specific BigInt API. That later owner error
-is distinct from the two token-query failures above.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T02:57:49Z** used clean
-[`ae478b5`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/ae478b5fe86fe93db83104852e5249755e8470b6),
-including genuine AnimationEvent construction. JavaScript was enabled and images
-off; saved HTML reports `LOGGED_IN=false`. The inspected render remains a
-skeleton without usable site header/guide/search. The first failure is an
-unsupported native iframe `sandbox` property read at 6503:24. There were 43
-script executions (42 successful), 39 listeners and one error. The earlier
-AnimationEvent reference error is absent in this distinct live cohort; external
-JavaScript body hashes remain unavailable. Existing trust, TLS, CSP, origin,
-credentials and native-resource guards remain active. Query/results, watch/Back
-and playback remain unproved.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T02:46:27Z** used clean
-[`88e5509`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/88e5509688dbe691d2770e69080df9e3e0a57b91),
-including renderer-backed computed font size. JavaScript was enabled and images
-off; saved HTML reports `LOGGED_IN=false`. It still renders a skeleton without
-usable header/guide/search. The first original error is missing `AnimationEvent`
-at 39130:80 in animation-handler type metadata; 5966:53 is the rethrow. There
-were 43 script executions (42 successful), 43 listeners and one error. The earlier
-computed-font-size refusal is absent in this distinct live response cohort;
-external JavaScript body hashes remain unavailable. Existing security/resource
-guards remain active. Query/results, watch/Back and playback are unproved.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T02:37:21Z** used clean
-[`44ef2a1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/44ef2a1bd8e5df0a5db28323897938dfcf2aabc9),
-including genuine anchor interface identity. JavaScript was enabled and images
-off; saved HTML reports `LOGGED_IN=false`. Actual pixels remain a skeleton,
-without usable site header/guide/search. The first failure is an unsupported
-computed declaration `fontSize` read at 38099:264. There were 43 script executions
-(42 successful), 44 listeners and one error. The previous anchor interface error
-is absent in this distinct `kevlar_base` response cohort; JavaScript body hashes
-remain unavailable. Existing trust, TLS, CSP, origin, credentials and native
-resource guards remain active. Query/results, watch/Back and playback remain
-unproved.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T02:31:00Z** used clean
-[`e5b3d7b`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/e5b3d7bb6805ff13a43c9606d1d5f265f0667842),
-including the touch-action CSS increment. JavaScript was enabled and images off;
-saved HTML reports `LOGGED_IN=false`. Actual pixels remain a skeleton without
-usable header/guide/search. The first original failure is missing
-`HTMLAnchorElement` at 31124:299 in `endpointLink` type metadata; 2222:68 is the
-rethrow. There were 44 script executions (43 successful), 45 listeners and one
-error. This run selected a different `base_module_set` script family, so it is
-not an identical-input comparison with the earlier `kevlar_base` cohort; external
-JavaScript body hashes are unavailable. Existing trust, TLS, CSP, origin,
-credential and native-resource guards remain active. Query/results, watch/Back
-and playback remain unproved.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T02:20:42Z** used clean
-[`305725e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/305725e5643fa6af76a6e37626b4431a8a5d44bd),
-including the genuine buffered XHR increment. With JavaScript enabled and images
-off, the saved HTML reports `LOGGED_IN=false`. It still renders a skeleton with
-no usable header/guide/search. The first escaped failure is a refused CSS
-`touchAction` write, originally 33256:127. There were 43 script executions
-(42 successful), 44 listeners and one error. The previous XHR reference error is
-absent in this distinct response cohort; external JavaScript body hashes are
-unavailable. This does not demonstrate application API success, a usable shell,
-query/results, watch/Back or playback. Existing trust, TLS, CSP, origin,
-credential and native-resource guards remain enabled.
-
-**Previous isolated development run.**
-
-The isolated signed-out Windows run at **2026-11-21T00:44:53Z** used clean
-[`94ba833`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/94ba833341601e890ee8b62c6ba6d0f0548d5a23),
-with JavaScript enabled and images off; saved HTML reports `LOGGED_IN=false`.
-The first escaped failure is now missing `XMLHttpRequest` in an unguarded
-`XMLHttpRequest.prototype.fetch` probe, originally 28091:544; 5966:53 is the
-rethrow. There were 43 script executions (42 successful), 22 listeners and one
-escaped error. Actual pixels remain a skeleton without usable site search or
-later journey milestones. The prior FocusEvent reference error is absent in
-this distinct response cohort; external JavaScript body hashes are unavailable,
-so this is not an identical-input comparison. Genuine XHR implementation checks
-are separate from a new site result. Existing security/native-resource guards
-remain enabled, and the optional nonstandard prototype.fetch stays absent.
-
-**Previous owner checkpoint.**
-
-The owner's **2026-11-21T00:36:03Z** signed-out navigation reports a dirty
-development build based on `6c92856`; the base hash does not identify its
-uncommitted edits or executable. It still shows a skeleton and hidden search.
-The first escaped failure is missing `FocusEvent` in `onFocusOut` type metadata,
-originally 27041:350; 5966:53 is the rethrow. All 15 recorded requests succeeded
-with gzip; 42 of 43 script executions succeeded. No escaped resource-budget
-refusal was reported. This confirms the same interface family already under
-implementation, not that a focus event had fired or later focus behavior worked.
-External JavaScript body hashes and the tested executable hash are unavailable;
-this is a distinct response cohort from the isolated run below. A usable shell
-and later journey milestones remain unproved.
-
-**Previous isolated development run.**
-
-The next isolated signed-out Windows run at **2026-11-21T00:21:22Z** used clean
-[`6c92856`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/6c928569f34674a9f7b34abcf2d9450de1846682),
-with JavaScript enabled and images off. Saved HTML reports `LOGGED_IN=false`.
-It stops at missing `FocusEvent` in dynamic application type metadata on
-`VK.prototype.onFocusOut`, originally 22346:68; 2222:68 is the rethrow. There
-were 44 script executions (43 successful), 39 listeners and one escaped error.
-The inspected render remains a skeleton without usable site header/sidebar/search.
-The textarea reference error is absent in this distinct live response cohort;
-external JavaScript body hashes remain unavailable, so this is not an
-identical-input comparison. Existing security and native-resource checks remain
-enabled. FocusEvent implementation checks are separate from a new site result.
-Query/results/watch/Back/media journey milestones remain unproved.
-
-**Previous isolated development run.**
-
-The next isolated signed-out Windows run at **2026-11-21T00:02:35Z** used clean
-[`bddb41a`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/bddb41a1ee3e55ba465931296beda91795ea58c8),
-with JavaScript enabled and images off. The saved HTML reports `LOGGED_IN=false`.
-It reaches the dynamic application bundle and stops at missing
-`HTMLTextAreaElement`, originally at 19335:330 in type metadata; 2222:68 is the
-rethrow. There were 44 script executions (43 successful), 39 listeners and one
-escaped error. The inspected render remains a skeleton, without the usable
-site shell or later journey milestones. The earlier form reference error is
-absent in this distinct live cohort; external JavaScript body hashes remain
-unavailable, so this is not an identical-input comparison. Existing security
-and native-resource checks remain enabled.
-
-**Previous isolated development run.**
-
-A later isolated Windows run at **2026-11-20T23:37:19Z** used clean
-[`2497be9`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/2497be93f3c7376131b40be29cc29274364c7193),
-with JavaScript enabled, images off and a fresh signed-out profile. The saved
-HTML reports `LOGGED_IN=false`. The first escaped error is now
-`HTMLFormElement is not defined` at original application-script 21740:111 in
-type metadata; 5966:53 is the rethrow. The Range reference error is absent in
-this run. There were 43 script executions (42 successful), 22 listeners and one
-escaped error. The inspected App render still shows a skeleton: usable site
-header/guide/search, query/results, watch/Back and media remain unproved.
-This is a new live response cohort, not an exact-byte replay of the earlier run;
-external JavaScript response-body hashes were not exported. Existing trust,
-TLS, CSP, origin, credential and native resource checks stayed enabled.
-
-**Earlier owner-supplied checkpoint, retained on its tested source.**
-
-The November 20, 2026 owner-supplied YouTube logs and HTML/Elements exports
-identify a clean development build at
-[`cffb9d1`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/cffb9d1914d28c93378f7a180e9693410aca0513).
-This record summarizes those supplied observations; the documentation review did
-not build or run the browser. Raw captures are not published.
-
-| Stage | Observed result on that source |
-| :--- | :--- |
-| Delivery and decoding | All 15 recorded responses returned HTTP 200 and used gzip. The main application script decoded from 2,616,211 to 10,900,223 bytes. Missing Brotli did not block this run. |
-| Script execution | 42 of 43 executions succeeded. The original escaped failure was `ReferenceError: Range is not defined` at 18966:421; 5966:53 was the application's rethrow. This ratio is not a compatibility percentage. |
-| DOM and visible output | The live body gained `rounded-container`, which was absent from the source HTML. The page still showed a skeleton; the masthead was not usable and search remained hidden. |
-| User journey | A usable shell, query submission, results, watch navigation/Back and real video/audio playback were not demonstrated. |
-
-[PR #359](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/359) subsequently
-integrated genuine live Range boundaries for supported displayed-document nodes
-at `2497be9`. Its focused implementation/App checks do not retest this owner run
-or establish a usable YouTube shell. Range still has explicit unsupported cases
-in [CAPABILITIES.md](CAPABILITIES.md); new site results must retain their actual
-build and input identity. The selected page supplies `webcomponents-all-noPatch`
-with forced ShadyDOM/noPatch behavior, so native custom elements and complete
-Shadow DOM are not established prerequisites for this measured path.
-
-</details>
-
-<details>
-<summary><strong>Earlier framework source identities</strong></summary>
-
-**Earlier source snapshots (November 17–18, 2026).**
-
-This page retains the earlier evidence snapshot through source `a65d37c` on
-November 17, 2026, including PR #31, #32 and #34 results. The Bootstrap row adds
-later measurements on `3456e67`, `5c89eea` and `5c22afd`, followed by the combined
-`main` recheck on `25654fa`. The latest rows separate selector candidate `02cd0f8`,
-integrated in `main` at `991cba3`, from measured computed-style build `63a2259`,
-integrated through PR #62 at `5c21400`.
-PR #64/#65 add measurements on `a82267e` and `7b8a5fb`, integrated by `bf0c737`.
-PR #67/#68 retain Slottable measurement `a6a2619` and HTML-container candidate
-`13d7dae`, integrated by `main` `5309a68`. Candidate and main CI each pass 2,695
-normal tests and 25 journeys. The interaction captures below use `13d7dae`.
-PR #69/#71 integrate computed `position` and layout-backed `offsetParent`.
-Their measured builds `c74503c` and `96666d3` retain open-menu and trusted-choice
-evidence at both widths, with the next errors recorded separately below.
-PR #74/#75/#76 add offset coordinates, bounded translations and genuine
-`Node.contains`. The unchanged Bootstrap dropdown passes on integrated source
-`ec7db2f61cddb78c457b2966b72e1e362b89e66a`: trusted opening, Amber selection and
-closing have paired DOM/pixel evidence at 1280/640.
-The [catalogue](compatibility.json)
-retains its exact source-bound records and classification of 44 named families
-and formats; older records are not silently relabeled as newer runs. Source
-changes after this snapshot require their own rechecks.
-
-</details>
-
-[Latest homepage checkpoint](#latest-reviewed-signed-out-homepage-checkpoint) · [Latest recorded results](#current-scorecard) · [Progression](#measured-progression)
-· [Method](#measurement-method) · [Historical evidence](#historical-evidence)
+A subsequent integration at
+[`1de1f24`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c)
+has no later live acceptance result in this record. Original component fixtures
+and newly implemented interfaces do not establish that the live site works.
 
 <a id="current-scorecard"></a>
 
 ## Latest recorded workflow results
 
-These are source-bound workflow measurements, separate from current release
-verification. The combined framework run used `067ac5e`, with integration baseline
-`6089546`; other rows identify their own measured revisions. Current source
-improvements do not alter those observations. See the
-[machine-readable records](compatibility.json) for exact build and capture identities.
+The combined framework run used
+[`067ac5e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c);
+its results belong to the historical `6089546` integration baseline. Other
+measurements identify their own sources below. The
+[machine-readable catalogue](compatibility.json) retains full source identities,
+available executable/capture hashes, viewport details and measurement limits.
 
-| Workload | Observed progress | Remaining boundary | Evidence |
-| :--- | :--- | :--- | :--- |
-| **Web Animations 2.3.2** | In the standard build, a trusted seek to 500 ms paints all 576 tested pixels with the expected midpoint color. The next-lite build changes all 3,456 opacity-tile pixels from white to gray to near-black at 0, 500 and 1,000 ms. The edited input survives both workflows. | Offline measurements used `a965b2b`. Public main at `e2dabcf` has the same tracked tree. Live signed-out behavior still needs a retest. | [Functional background colors, PR #141](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/141) · [Group opacity, PR #142](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/142) |
-| **Bootstrap 5.3.9 progress meter and action stack** | At 640 and 1280 px on `5298918`, the 240×16 meter matches the literal fill at 25% and 75%, with its caption on one line. At 640 px on `067ac5e`, the two 160×40 action links form one column. A trusted click changes the gap from 8 to 16 px. The second link receives its own trusted click. | In the separate 192 px column on `e11acce`, the fixed 64 px link stayed at the start for center and end. On `b4f35e4`, the focused grid fixture places start, center and end actions at their expected painted and clickable positions. Authored grid tracks and RTL alignment remain open. | [Implicit grid rows, PR #112](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/112) |
-| **jQuery 1.12.4 + Bootstrap 3.4.1** | At 1280×800 on `7608f4c`, W2 loads its pinned assets, paints the initial control and passes the deep radio-clone step. | Both `7608f4c` and `f2e1823` stop during initialization at 4743:4 while assigning the raw `onfocusin` attribute on a DIV. The dropdown, form and async stages remain blocked. | [Native radio clones, PR #115](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/115) |
-| **jQuery 4.0.0, separate input app** | At 1280×800 on integrated `067ac5e`, the application initializes, handles trusted input and displays its asynchronous timer update. | This case exercises the pinned input app. AJAX and Deferred have separate requirements. | [Workflow record](compatibility.json) |
-| **Bootstrap 5.3.9 + Popper 2.11.8 dropdown** | On `067ac5e`, the original cards render responsively at 1280×800 and 640×800. Trusted opening, Amber selection and closing pass at both sizes. | The responsive layout and dropdown are the measured component scope. | [Workflow record](compatibility.json) |
-| **React and ReactDOM 18.3.1, original 1280×800 app** | On `2f9fa8d`, both pinned production runtimes export successfully. The scheduled ReactDOM callback passes its `HTMLIFrameElement` test. The native editor and paint controls pass. | On both `2f9fa8d` and `f2e1823`, the callback stops at 58:228 reading `activeElement.contentEditable` before the component mounts. | [Iframe interface, PR #114](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/114) |
-| **Vue 2.7.16 runtime** | On `067ac5e`, the W3 app mounts, renders, accepts an edit and two clicks, and completes its asynchronous update. Foundation places the panels side by side at 1280 px and stacks them at 640 px. | The two W3 configurations use Foundation CSS with Vue 2.7.16. | [Workflow record](compatibility.json) |
-| **Vue 3.5.45 runtime, separate 1280×800 app** | On `067ac5e`, Vue mounts its blue 64×24 box, input and two buttons. Editing and clicking twice displays `count=2 name=Ada 雪 phase=ready`. The next-tick and timer callbacks display `phase=complete` and update the title. | Both `067ac5e` and `45f9491` completed all 17 actions. All five captured stages were fault-free, and the independent edited field retained its live and default values. | [Workflow record](compatibility.json) |
-
-<details>
-<summary><strong>Earlier source-bound scorecard</strong></summary>
-
-### Earlier source-bound scorecard
-
-The following rows preserve the initial measurements and carry their original result boundaries.
-
-| Workload | Observed progress | Remaining boundary | Evidence |
-| :--- | :--- | :--- | :--- |
-| **Historical dev137 homepage and original script probes** | On clean dev137 (`1aeef14`), the main script decoded to 10,883,200 bytes and entered the engine. The homepage still showed two lines and three gray placeholders without a site header or search box. Forty of 43 scripts completed. On the earlier `ed0491f` offline App, computed opacity, substring selectors and escaped property names passed alongside seven controls. | On that build the application script stopped on a UTF-16 surrogate escape; two other scripts stopped on detached STYLE text assignment and the CSS work limit during an opacity read. These are historical failures; see the newer owner checkpoint above. | [Tested dev137 source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/1aeef14cea5383b0bb8c894720b99a50ec05b836) |
-| **Earlier Web Components polyfills 2.8.1 checkpoint** | At `84274f5`, the pinned bundle assigns CSS text to a fresh detached STYLE element. All eleven independent offline controls pass. | The bundle stops at 125:228 when it calls `document.head.insertBefore` with that element. Component startup and its search control remain unverified on this build. The later original component and traversal fixtures are recorded [above](#recent-shared-increments). | [Tested source](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/84274f54738031a57003901caed0e35240975bcc) |
-| **Original compressed-script and Document probes** | On `e66b0ad`, an 8 MiB + 1 byte gzip script compiles and paints its marker. The 27-case script policy suite includes two exact 16 MiB cases covering parser and dynamic TLS loading. On `1ff9c51`, all six Document interface stages and seven App controls pass, including distinct main/child constructors and borrowed getters. | On that tested revision, a 16 MiB + 1 byte script was refused. This is not the current source allowance; see [current capacities](CAPABILITIES.md) and [execution limits](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/1de1f24e4052fab14157c1419cb6a6e1fdbccf3c/src/execution_limits.rs). These probes did not establish live shell, search or playback. | [Document, PR #121](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/121) and [script allowance, PR #122](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/122), merged into `main` at `83385ca`. |
-| **Original canvas rectangles and colors** | On `f53ab3e`, the 80×48 App passes all five drawing stages and nine controls for stable `getContext('2d')`, default-black `fillRect`, transparent `clearRect`, same-width reset and saved-context repaint. App pixel controls cover `object-fit: none` and `scale-down`. On `124686e`, all three color App stages pass, including trusted paint, the `#704040` alpha blend and reset. | The same binary's independent App paints and preserves its edited field, then stops at undefined `getImageData` at 28:18. That older failure is preserved here; current source includes finite [RGBA pixel readback](CAPABILITIES.md). Paths, transforms and export remain outside these measurements. | [Rectangles, PR #125](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/125), integrated at `ca845b4`, and [solid colors, `124686e`](https://github.com/c-a-t-f-o-o-d/chezcat-browser/commit/124686ee77f4a972a288aa46178cc2553e009dfe), integrated in `main` at `9610baf`. |
-| **Original canvas dimension reflection** | Measured `3e7366a` passes all five dimension stages and seven App controls. The stages cover parsed/default values, IDL and Attr changes, detached ownership and saved accessors. The edited native and literal pixels remain unchanged. | The next stage stops at unsupported `getContext('2d')` at 17:86. Dimension reflection does not establish 2D drawing. | [Canvas dimensions, PR #123](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/123). This result retains its measured feature source. |
-| **Bootstrap 5.3.9 progress meter and action stack** | On `5298918`, the meter matches its 240×16 reference at 25 and 75 percent. Its automatic caption fits on one line and matches the explicit-width reference at 640 and 1280 px. | At 640 px, two links in a `d-grid gap-2` stack sit side by side. The literal and flex controls each draw two 160×40 rows, with an 8 px gap that grows to 16 px after a trusted click. | [Caption sizing](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/108) and [recorded geometry](compatibility.json). |
-| **Original async form/search/navigation** | Ready state, Unicode submission, readable results, destination activation, exactly one Back and a different query pass the bounded App workflow | Not a live public-service claim | Existing original workflow records |
-| **jQuery 1.12.4 + Bootstrap 3.4.1** | On `bfc6b26`, W2 creates a radio, sets its checked attribute and name, and appends it. An independent App selects the created radio with trusted input and resets its form while preserving an edited field in another form. | At 1280×800, initialization stops at 4509:23 on the deep clone of the radio’s container. Dropdown input and async updates remain unreached. | [Native radio inputs](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/113). |
-| **Original async function and async arrow pages** | On integrated `c669dd9`, both pages visibly entered a pending state, resumed with 11, and caught a rejection with 21. The page also displayed the effect of a throw after suspension and a later handler observed the same reason. | Each page exercised 23 actions and one intentional unhandled rejection. The measurements cover the await forms used on those pages. | [Await continuations](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/100). |
-| **jQuery 4.0.0, separate input app** | The exact optimized PR #34 candidate passes the unchanged offline App workflow through initialization, genuine trusted input and asynchronous timer text update | Limited to this pinned app; no AJAX/Deferred, every-version or full-framework claim | [PR #34](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/34), candidate `a9eadfa` |
-| **Foundation 6.9.0 generated CSS** | Unchanged JS-enabled fixture forms two columns at 1280 px and stacks at 640 px, with independent image pixels | Vue startup and optional Foundation JavaScript are separate; this is not complete styling | CP3 fixture and App geometry/pixel/hit controls |
-| **React and ReactDOM 18.3.1, original 1280×800 app** | On `2f9fa8d`, ReactDOM gets past the iframe identity check. The independent App distinguishes native controls, parsed and detached frames, and each realm’s constructor. | Initialization stops at 58:228 when ReactDOM reads `contentEditable` on the active element. The component has yet to mount. | [Iframe element identity](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/114) and [workflow record](compatibility.json). |
-| **Vue 2.7.16 runtime** | On `1561f4d`, the unchanged W3 app mounts, renders, accepts edited input and two clicks, and completes its asynchronous update. Its Foundation layout uses two columns at 1280 px and stacks at 640 px. | These results cover the two W3 configurations. | Exact source and stages in the [catalogue](compatibility.json). |
-| **Vue 3.5.45 runtime, separate 1280×800 app** | On integrated `f0dc9ef`, the component mounts with its blue 64×24 box, text input, and two buttons. Typing and two clicks display `count=2 name=Ada 雪 phase=ready`. Vue’s next-tick and timer callbacks then display `phase=complete` and set the document title. | All 17 actions completed. The five captured stages and retained final frame were fault-free. The independent edited input kept its live and default values. | [HTML label properties, PR #96](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/96) |
-| **Bootstrap 5.3.9 + Popper 2.11.8, selector checkpoint** | The unchanged sample initializes and renders responsive cards at 1280/640 on selector candidate `02cd0f8`. | The first trusted click reaches missing `getComputedStyle` at 3734:21 before a menu choice. | [PR #60](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60) integrated in `main` at `991cba3`. The measurement retains candidate identity `02cd0f8`. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, computed-style checkpoint** | Measured feature build `63a2259` passes initialization, initial rendering and responsive layout at both widths. Its local and CI gates pass 2,657 normal tests and 25 journeys. | The first trusted click fails Popper's `node.toString()` at 1736:9 before a menu choice. | [PR #62](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62) integrated in `main` at `5c21400`. Earlier source-bound observations remain in the catalogue. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, overflow checkpoint** | Measured `7b8a5fb` passes initialization, initial rendering and responsive layout at 1280/640. | The first trusted click reaches unsupported `assignedSlot` at 1979:7. The menu remains closed and the choice snapshot is absent. | [PR #65](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65) integrated at `bf0c737`. The preceding `a82267e` observation is retained separately. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, Slottable/container checkpoint** | At 1280/640 on `13d7dae`, initialization/render/responsive layout pass, the menu visibly paints open, and its trusted amber-choice callback runs. | The menu stays visibly open after selection. The first microtask fault is computed `position` at 1990:5. Input remains failed, with 0/2 configurations passing. | [PR #67](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67) measurement `a6a2619` first reached `node.toString()` at 1736:9. [PR #68](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68)'s later candidate `13d7dae` supplies the partial interaction evidence, distinct from integrated `main` `5309a68` CI and published 0.81.0-alpha.2. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, computed-position checkpoint** | On measured `c74503c` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `offsetParent` at 1994:12. Input remains failed at both widths. | [PR #69](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69) integrates live computed `position` reads from the rendering cascade. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, offset-parent checkpoint** | On measured `96666d3` at 1280/640, initialization/render/responsive layout pass, the menu opens and the trusted Amber-choice callback runs. | The menu remains visible after selection. The first microtask fault is `scrollLeft` at 3154:19. Input remains failed at both widths. | [PR #71](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71) integrates layout-backed `offsetParent` identities. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, scroll-offset checkpoint** | Qualified feature `e7be7cd` passes 2,732 normal tests and 25 journeys locally and in CI. At 1280/640 the unchanged sample initializes, renders responsively, opens its menu and runs the trusted Amber choice. | The chosen menu remains visible. The first microtask fault is `offsetLeft` at 1927:10. Input remains failed at both widths. | [PR #72](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72) integrates at `main` `13f5cd4`. These captures retain feature source `e7be7cd`. Relative offset coordinates are the next capability after PR #71's offset-parent identities. |
-| **Bootstrap 5.3.9 + Popper 2.11.8, integrated dropdown** | On clean integrated `ec7db2f`, load, startup, initial render, trusted open/Amber-choice/close and responsive cards pass at 1280×800 and 640×800, with zero script errors: 2/2 selected configurations. Open and closed states have paired DOM and pixel evidence. | One pinned offline app; async is not applicable and reference interaction was not run. Whole-framework support remains unproved. | Integrated [PR #74](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74) offsets, [PR #75](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75) translations and [PR #76](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76) contains. Exact build and capture digests are in the [catalogue](compatibility.json). |
-| **Bootstrap card styling, 640 and 1280 px** | On `7d40d7f`, the page's root variables supply its caption color and 1 px border. On `8ebf051`, all 144 samples just outside the rounded corners show white and the straight edges retain the same pixels. Trusted open, Amber selection and close pass at both widths. | The two wide cards still touch. The same executable gives a 24 px gutter with literal column padding and a 0 px gutter with calculated padding in the original grid reduction. | [Root selector PR #82](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/82) and [rounded border PR #85](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/85), integrated at `82053ba` and `903cc6e` respectively. |
-| **Original CSS-variable box reduction** | PR #31 changes the box from 80×30 to 104×46, matching a literal control's opaque pixels, anchor hits and live reflow | This measurement covers the selected padding and border values. | [PR #31](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/31), candidate `5cd5e52` |
-| **Reference browser** | Initial DOM and pixel captures exist for the original fixture | Interactions were not run; no reference-interaction denominator | Initial-state comparison only |
-
-**Status of a PR is not a new measurement.** The linked observations retain their
-actual source and executable identity even after integration. The earlier
-published **0.81.0-alpha.2** predates the later DOM/string/anchor/text-input/Event/
-CSS-variable changes; it is distinct from the 0.82.0 release line.
-
-</details>
-
-<details>
-<summary><strong>Measured progression of earlier capabilities</strong></summary>
-
-## Measured progression
-
-This progression preserves earlier capability checkpoints. Its boundary column
-describes what each increment established at the time, rather than a current
-feature inventory; consult [capabilities](CAPABILITIES.md) for later coverage.
-
-| Shared capability | What changed | What it does not prove |
+| Workload | Recorded outcome | Scope and remaining boundary |
 | :--- | :--- | :--- |
-| **Collections, calls and Node identity** | Real live lists, checked borrowed slice/apply, genuine Document accessors and fresh text replacement | Full DOM or library startup |
-| **Comments and RegExp conversion** | Genuine native-created Comment leaves and standard input ToString on existing exec/test paths | Parsed comments, complete CharacterData, generic RegExpExec or object-valued lastIndex |
-| **Responsive CSS** | Initial-font em media, terminal pseudo-target recognition, explicit box-sizing inheritance and fractional flex fitting | Generated-content painting or unblocked Vue execution |
-| **Select and hidden inputs** | Genuine native controls, retained identities/edited values and guarded tree/form ownership | Arbitrary input types, explicit new associations or unrestricted fragment mutation |
-| **Concat and Node roots** | Ordered generic string concatenation and real connected/detached/reconnected roots | Broader prototype operations or Shadow DOM |
-| **Anchor URL reflection** | Scoped live HTTP(S) URL values used by ordinary page code | Unrestricted URL/navigation behavior |
-| **Text INPUT fragments** | Staged native creation, dirty/default value semantics, real Reset and focus retirement | Complete library interaction from the input correction alone |
-| **Base Event property lookup** | Genuine ordinary string/symbol lookup and protected native state; enables the pinned modern input/timer workflow | AJAX/Deferred or general framework conformance |
-| **CSS custom properties** | Winning custom cascade, inherited computed values, bounded fallbacks/cycles and real box painting | Alpha colors, calc(), CSSOM or complete component styling |
-| **Element siblings** | Element and CharacterData sibling getters skip Text and Comment nodes and enforce document access checks. Bootstrap reads its next element sibling on `3456e67`. | Full CharacterData, unrestricted child-context access or Bootstrap initialization |
-| **Canonical Element selectors** | Scripts can borrow `Element.prototype.querySelector` and `querySelectorAll`. The latter returns a static NodeList. `02cd0f8` also clears the recorded dropdown selector boundary. | Wider selector grammar, child Element queries or dropdown interaction |
-| **NodeList iteration** | Supported main-document NodeLists expose bounded indexed iteration. Bootstrap spreads its selector results and initializes at both widths on combined `main` `25654fa`. | Complete NodeList APIs or a working dropdown |
-| **Native button padding** | Supported padding changes native button boxes and caption placement. The separate Bootstrap comparison below records the visible result. | Complete native appearance or a combined main workflow result |
-| **Computed custom styles** | Live read-only custom-property values on measured `63a2259`, integrated at `5c21400`, advance the unchanged Bootstrap click into Popper at both widths. | Full CSSOM or a working dropdown |
-| **DOM object stringification and Slottable** | PR #67 adds ordinary-tree Element/Text `assignedSlot` getters. PR #68 adds ordinary object stringification for DIV, BODY and HTML through their own interfaces. MAIN uses HTMLElement. `13d7dae` paints the open menu and runs the trusted choice at both widths. | The close step is still open. The catalogue retains earlier measured failures. |
-| **Computed overflow** | Resolved physical axes share the rendering cascade and rectangular paint/hit clipping. `7b8a5fb` advances to `assignedSlot` at 1979:7. | Initial element scroll positions only. Element scrolling and scrollbar widgets remain unimplemented. |
-| **Computed position and offset parents** | Integrated PR #69/#71 expose live computed `position` and supported layout-backed HTMLElement `offsetParent` identities. Measured `c74503c` reaches `offsetParent`, then `96666d3` reaches `scrollLeft`. | The menu remains visible after trusted selection at both widths. Scroll offsets and a completed dropdown workflow are not established by these runs. |
-| **Viewport scroll offsets** | PR #72 integrates at `13f5cd4`. Its qualified feature `e7be7cd` reads and writes the standard-document root's vertical scroll and returns zero for supported non-scrollable axes. Real App scrolling, pixels and hits are tested. | Nested element scrolling and scrollbar widgets remain outside this slice. The measured dropdown still reaches an unimplemented relative offset coordinate. |
-| **Offsets, translations and contains** | PR #74/#75/#76 preserve raw offset geometry, add bounded translated paint/hits and visual rectangles, and use genuine inclusive Node ancestry. Together, integrated `ec7db2f` completes the pinned dropdown at both widths. | Wider transforms, nested scrolling and whole-framework conformance remain outside this result. |
+| Web Animations 2.3.2 | On `a965b2b`, the standard build's trusted 500 ms seek paints all 576 tested pixels with the expected midpoint color. The next-lite build paints its 3,456-pixel opacity tile white, gray and near-black at 0, 500 and 1,000 ms. The edited input survives. | Public source `e2dabcf` has the same tracked tree. These are offline workflows, with no new live-site result. |
+| Bootstrap 5.3.9 progress meter and action stack | On `5298918`, the 240×16 meter matches the literal 25%/75% fills and has a single-line caption at 640 and 1280 px. On `067ac5e` at 640 px, two 160×40 action links form one column; a trusted click changes the gap from 8 to 16 px and the second link receives its click. | A separate `e11acce` fixture retained start alignment for center/end. The later `b4f35e4` focused fixture verifies painted and clickable start/center/end positions. Authored grid tracks and RTL alignment remain open; these are distinct observations. |
+| jQuery 1.12.4 + Bootstrap 3.4.1 | At 1280×800 on `7608f4c`, the pinned application loads, paints its initial control and passes the deep radio-clone step. | Initialization stops at jQuery 4743:4 assigning raw onfocusin on a DIV. The same first failure is recorded on `f2e1823`. Dropdown/form input and async remain blocked. |
+| jQuery 4.0.0 input application | At 1280×800 on `067ac5e`, startup, trusted input and the asynchronous timer update pass. | This result covers the selected input application. It does not establish AJAX or Deferred support. |
+| Bootstrap 5.3.9 + Popper 2.11.8 dropdown | On `067ac5e`, cards render responsively at 1280×800 and 640×800; trusted opening, Amber selection and closing pass at both sizes. | These are the measured layout and dropdown components, not whole-framework conformance. |
+| React and ReactDOM 18.3.1 | At 1280×800 on `2f9fa8d`, the production runtimes export, the scheduled callback passes its HTMLIFrameElement check, and native editor/paint controls pass. | On `2f9fa8d` and `f2e1823`, the callback fails at 58:228 reading activeElement.contentEditable before component mount. Later native-interface changes are not a rerun of this application. |
+| Vue 2.7.16 with Foundation 6.9.0 | On `067ac5e`, the application mounts, renders, accepts an edit and two clicks, and completes an asynchronous update. Foundation panels form two columns at 1280 px and stack at 640 px. | The result covers these two configurations and the pinned runtime/CSS versions. |
+| Vue 3.5.45 runtime | At 1280×800 on `067ac5e`, the component mounts, accepts editing and two clicks, then completes next-tick and timer updates. Both `067ac5e` and the later `45f9491` run complete 17 actions with five fault-free captured stages and a retained independent editor. | The selected runtime-only application is measured; unrelated components and sites are not established. |
 
-The integrated menu crop is 225×39 px at both widths. Opening changes 8,760
-pixels; selection/closing changes 8,763 from the open state, with 7,631 returning
-to their loaded colors. The DOM records `Bootstrap dropdown open`, then
-`Bootstrap dropdown closed` and `Bootstrap trusted choice amber`. The cards are
-beside each other at 1280 and stacked at 640. These are transition measurements,
-not a claim that the final image equals the initial or a reference browser.
+<a id="measured-progression"></a>
+<a id="historical-evidence"></a>
+<a id="earlier-source-bound-scorecard"></a>
 
-A separate original App probe stopped at missing `WeakMap` at 11:92 on
-`ec7db2f`. On measured `acd5703`, a trusted click sets the visible count to 4
-and one timer completes with the title `WeakMap pass`.
-[WeakMap PR #78](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/78) integrated at `5c8fe78`.
+### Source and comparison details
 
-The separate padding comparison uses loaded captures from `5c89eea` and
-`e94388c`. At both widths the unchanged Bootstrap toggle grows from 167×29 to
-191×41 px. Its caption shifts 12 px right and 6 px down, and the aligned original
-content crop matches. Caption attribution uses a 102 px content offset derived
-from source constants. Capture metadata did not independently calibrate that
-offset. The padding branch predates the NodeList merge and initialization fails
-on both compared builds. [PR #54](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54)
-integrates padding in `main` at `25654fa`. A recheck on that combined main build
-initializes at both widths and records 191×41 px loaded toggles. The first trusted
-click on that build fails the dropdown selector at 357:27 before the menu opens.
+The earlier integrated Bootstrap dropdown measurement on
+`ec7db2f` retains exact build, source-map, configuration and capture digests in
+the catalogue. At both widths its menu crop is 225×39 pixels. Opening changes
+8,760 pixels; selection/closing changes 8,763, with 7,631 returning to their
+loaded colors. These are observed transitions, not equality with the initial
+image or a reference browser. Reference interaction was not run for that result.
 
-The text-input PR's original App checks cover trusted fill, Backspace/Delete,
-latest Reset defaults, neighboring pixels/hits, and a removed editor refusing
-subsequent typing/paste. Its local and hosted candidate gates passed 2,411 normal
-tests and 25 journeys on `3d45d7e`; those numbers describe that candidate, not an
-unbounded compatibility percentage or a fresh test of every later commit.
+The Vue 3 record on `f0dc9ef` retains the actual state sequence: editing and two
+clicks produce `count=2 name=Ada 雪 phase=ready`; next-tick and timer delivery
+produce `phase=complete` and the title “Vue3 asynchronous update complete.”
+A separate async function/arrow fixture on `c669dd9` completes 23 actions per
+page, including pending, fulfilled and caught states with retained rejection
+identity. These records keep their original sources.
 
-The Event candidate `a9eadfa` passed 70 related interface controls and its local/hosted
-normal gates (2,434 tests and 25 journeys). The CSS candidate `5cd5e52` passed
-2,427 tests and 25 journeys. These are distinct candidate records, not numbers
-recomputed by this documentation refresh. Earlier failed gates remain historical
-evidence; later green results do not erase them.
+Earlier failures and subsequent passes belong to their own builds and inputs.
+A new native capability, a changed first failure or an accepted source change
+does not retroactively change an application result.
 
-</details>
+<a id="recent-shared-increments"></a>
+
+### Recorded integration fixtures
+
+| Fixture | Observed behavior | Boundary |
+| :--- | :--- | :--- |
+| Selected component path on `cd0b372` | Original application composition exercises nested inert ownership, attribute import, styles, ARIA forwarding, observer/Promise jobs, icons, events, focus, typing and a native link. | Models calls required by the selected noPatch path. It does not run the matching deployed polyfill or establish full native Custom Elements/Shadow DOM. |
+| Native base URLs on `cad5f7c` | Original loopback application checks admitted/CSP-blocked bases, real relative-image requests and pixels, retained edited input and native link activation. | Existing HTTP(S) projection and 16 KiB bounds remain. Wider schemes and live main-document base mutation are outside this result. |
+
+These fixtures establish their described native application behavior. They are
+separate from the signed-out homepage checkpoint and from physical-device results.
 
 ## Measurement method
 
-The active language reference is ECMAScript 2025, edition 16; DOM uses its living
-specification. Use original model tests, pinned upstream cases, actual App/input/
-render journeys, and reference captures for their distinct purposes.
+The recorded language reference is ECMAScript 2025, edition 16; DOM uses its
+pinned living-specification source. The catalogue preserves those reference
+identities alongside the selected result records.
 
-| Record | Required distinction |
+| Record | What must remain explicit |
 | :--- | :--- |
-| **Inputs** | Exact versions, unmodified distribution bytes, compatible dependencies and retained notices |
-| **Execution** | Build/source identity, viewport/configuration, actual command and observed first failure |
-| **Stages** | Loading, parsing where directly observed, startup, initial rendering, input effects and async behavior |
-| **Failures** | First causal blocker versus cascades, unsupported host/runner setup, failed assertion or unavailable prerequisite |
-| **Comparison** | ChezCat output versus independently observed reference output; never substitute one for the other |
+| Inputs | Exact versions, unmodified distribution bytes, compatible dependencies and retained notices. |
+| Execution | Actual source/build identity, viewport/configuration, and observed first failure. A later commit does not replace the compiled identity. |
+| Stages | Loading, parsing where directly observed, startup, initial render, input effects and async behavior. |
+| Failure | First causal blocker, subsequent cascades, unsupported host setup and failed assertions are distinct. |
+| Comparison | ChezCat output and independently observed reference output retain separate identities and observed stages. |
 
-Do not infer a dedicated parser pass when only a later runtime error is observed.
-Do not treat an unavailable test host as a language assertion failure. Hosted
-verification remains offline; this document authorizes no live-service probing.
+A runtime error does not by itself prove a dedicated parser pass. An unavailable
+test host is not a language assertion failure. Source inspection, model tests,
+application journeys, reference captures, release checks and live sessions have
+different evidence scopes.
 
 ### Frameworks are workloads, not production dependencies
 
-Generated server output is assessed as delivered HTML/CSS/JS, not by server brand.
-TypeScript/JSX build tools are not browser engines; their compiled output still
-requires browser capabilities. External test runners need an honest adapter.
-Unresolved product identities remain unassessed. Modules, async networking,
-strings, storage, workers, accessibility, fonts/layout and frames retain their
-recorded partial/missing scope.
+Generated server output is evaluated as delivered HTML/CSS/JavaScript. A server
+brand, TypeScript or JSX build tool does not establish the browser capabilities
+its output needs. The selected fixtures do not imply support for other versions,
+all components or an entire application family.
 
-## Historical evidence
+<a id="where-to-go-next"></a>
 
-<details>
-<summary><strong>🧭 Earlier blockers remain useful evidence</strong></summary>
+## Related documentation
 
-Legacy W2 advanced from select fragments to hidden INPUT mutation at 1265:4,
-then to `div.innerHTML = '<input/>'` at 2684:2. PR #32's later source-bound check
-advances to createDocumentFragment. Those earlier failures remain valid for their
-original builds; they are not the current first blocker at the newer checkpoint.
-
-Modern jQuery originally failed getRootNode at 4321:7, then anchor href assignment
-at 7963:1. Revision 1 also had a distinct harness problem: controls had IDs but
-the App driver required names. Revision 2 supplies those names. Startup observations
-from revision 1 remain valid; its input result is HarnessBlocked, not an invented
-library-input failure. PR #32 later reports startup success and an Event-property
-interaction boundary. PR #34 subsequently passes the unchanged pinned input/timer
-workflow after the genuine base Event property correction.
-
-Vue's earlier undefined concat at 11:3613 is replaced by the later prototype
-boundary. Bootstrap's class failure at 599:3 is an earlier source-bound result.
-After the sibling prerequisite, `3456e67` reaches the missing canonical
-`Element.prototype.querySelectorAll` call at 741:27. On `5c89eea`, that operation
-exists and the next first failure is host NodeList iteration at 741:14. At that
-checkpoint initialization and input still fail. On `5c22afd`, NodeList iteration
-allows the unchanged sample to initialize with zero startup errors at both widths.
-The first trusted click then rejects
-`[data-bs-toggle="dropdown"]:not(.disabled):not(:disabled)` at 357:27 before the
-menu opens. Load, initial rendering and responsive card layout continue to pass.
-On selector candidate `02cd0f8`, the first click advances to missing
-`getComputedStyle` at 3734:21. Measured feature build `63a2259` advances further to
-Popper's `node.toString()` at 1736:9. Both later runs still fail dropdown input.
-No reference browser was run for the separate modern cohort. Original records,
-including failed runs, are not overwritten by this presentation update.
-
-</details>
-
-<details>
-<summary><strong>📐 The responsive rendering improvement</strong></summary>
-
-At the same 1280 px viewport, the unchanged Foundation panels moved from stacked
-positions (38,163)/(38,266) to columns (38,163)/(648,163); 640 px stacking remained.
-Normal JavaScript, 100% zoom, original fixtures, unchanged distributions and
-independent pixels were retained. Separate App controls cover 1023/1024 thresholds,
-125% zoom, odd-width fitting, padding pixels and owned link hits.
-
-This establishes that finite rendering behavior—not successful Vue initialization,
-physical desktop output, or complete component styling. The later merged CSS
-custom-property work has its own original App reduction and candidate evidence;
-it does not retroactively rerun the older Foundation fixture.
-
-</details>
-
-<details>
-<summary><strong>🧪 Selected language and native-interface records</strong></summary>
-
-CP2's selected Test262 observations include 18 passes and two Array constructor-
-poisoning failures across 20 mode runs; 30 runner controls passed. No full-suite
-conformance percentage follows from that subset.
-
-Historical focused records include nine concat groups plus four substring neighbors,
-nine hidden-input groups plus twelve select neighbors, and nine Node-root groups
-plus four Node constants and thirty-two namespace controls. The genuine Node click
-fixture reports correct live roots, changed visible text/pixels and zero errors.
-These results retain their actual scopes; physical desktop and release validation
-are separate.
-
-</details>
-
-## Where to go next
-
-[Roadmap](ROADMAP.md) owns work order. [Capabilities](CAPABILITIES.md) owns implemented
-limits. [Feature contracts](FEATURE_CONTRACTS.md) owns lasting behavior and
-acceptance. The catalogue remains the machine-readable source-bound record;
-update it only from actual new measurements, not from a visual documentation pass.
+[Capabilities](CAPABILITIES.md) describes implemented subsets and exclusions.
+[Feature contracts](FEATURE_CONTRACTS.md) summarizes behavior and security
+commitments. [Roadmap](ROADMAP.md) describes the capability sequence.
+[compatibility.json](compatibility.json) is the compact source-bound result
+catalogue; a documentation edit adds no new measurement.

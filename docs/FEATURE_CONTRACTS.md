@@ -1,296 +1,110 @@
-<div align="center">
-
 # Feature contracts
-
-*A navigable guide to the behavior and acceptance requirements we preserve.*
 
 [Home](../README.md) · [Roadmap](ROADMAP.md) · [Capabilities](CAPABILITIES.md) · [Compatibility](COMPATIBILITY.md)
 
-</div>
+This page summarizes ChezCat's lasting behavior and security commitments.
+Completion requires the agreed normal, error, lifecycle and security cases;
+missing criteria cannot be hidden by reducing a contract after implementation.
+A shorter summary does not change those requirements.
 
----
+A contract is not a claim of complete implementation.
+[Capabilities](CAPABILITIES.md) describes supported subsets and exclusions;
+[Compatibility](COMPATIBILITY.md) records what an exact workload actually did.
+Planned installation and update features below remain planned.
+Accepted milestones retain the [release requirements](RELEASING.md).
 
-> [!IMPORTANT]
-> **The full contracts remain normative.** This page is an index, not a replacement
-> specification or relaxed acceptance gate. The [detailed reference](FEATURE_CONTRACTS_DETAIL.md)
-> contains the foundational contracts and later language, DOM, CSS and resource
-> increments; its historical execution notes remain scoped to their recorded source.
+## Shared commitments
 
-Scope is agreed before implementation. Completion requires all contracted normal,
-error, lifecycle and security acceptance. Missing criteria cannot be hidden by
-shrinking a contract. These documents authorize no live check or public release.
+Supported operations use genuine native state, identity and ownership. Saved
+methods and accessors must retain their receiver, realm and current-origin
+checks. Author overrides, conversions and callbacks keep their specified order
+and effects; native state must not be fabricated to make an application pass.
 
-## Choose the right document
+Requests and resource reuse retain destination, redirect, CSP, mixed-content,
+cookie, credential, MIME and response-policy checks. An API or format addition
+does not grant unrelated network or local-file authority. Replacement, removal,
+Stop and navigation retire the correct resource; stale completions cannot regain
+the authority of a later owner.
 
-| Question | Authority |
-| :--- | :--- |
-| What must the behavior and negative cases preserve? | [Full contracts](FEATURE_CONTRACTS_DETAIL.md) |
-| What is implemented at a specific source checkpoint? | [Capabilities](CAPABILITIES.md) |
-| What did an exact library/workflow actually do? | [Compatibility](COMPATIBILITY.md) and its source-bound catalogue |
-| What should be developed next? | [Roadmap](ROADMAP.md) |
-| When may a named release be published? | [Release procedure](RELEASING.md) |
-
-The detailed reference includes historical source-scoped execution notes. A note
-that a past candidate awaited validation is not a claim that its integration is
-still pending today. Likewise, a past pass is not proof of a later implementation.
-Use current source-linked evidence for status; preserve the lasting requirements.
-
-At the historical `6089546` baseline, the [compatibility scorecard](COMPATIBILITY.md) records each pinned application’s measured source, completed stages and first failure.
-
-The current verified release is
-[0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4).
-Its Windows build, release checks and published downloads passed verification.
-See the [release record](RELEASING.md#current-verified-release) for delivery
-evidence and [release history](RELEASING.md#release-history) for earlier candidates.
-
-The [HTML/XHTML foundation plan](HTML_FOUNDATION_PLAN.md) and its
-[coverage register](HTML_FOUNDATION_COVERAGE.json) now govern active development.
-They include native Custom Elements and Shadow DOM as foundation work. The
-[P1–P6 sequence](ROADMAP.md#current-product-sequence) is preserved for product
-resumption; its selected polyfill path did not itself require full native
-components. Connected App fixtures and actual site acceptance remain separate. The legacy contract directory
-below preserves foundational requirements rather than listing every newer
-language or DOM increment; those supported slices and exclusions live in
-[CAPABILITIES.md](CAPABILITIES.md).
+Checked storage, copy/work limits, deadlines and cancellation apply before
+publication where the contract requires atomicity. Refusal must preserve the
+specified existing state and allow recovery. Visible behavior is measured through
+actual layout, pixels, input and hit ownership. A model check, successful response
+or lack of script errors alone does not establish a working page.
 
 ## Contract directory
 
-Legacy section anchors below remain available for incoming documentation links.
-Each entry opens the complete corresponding requirements in the detailed reference.
+The identifiers below remain stable for existing links. They summarize enduring
+requirements rather than every later native-interface increment.
 
-<a name="t1--shared-tlstrust-and-data-coverage-baseline"></a>
+<a id="t1--shared-tlstrust-and-data-coverage-baseline"></a>
+<a id="t1"></a>
 
-### T1
+### T1 — Shared TLS/trust and data coverage
 
-**Shared TLS/trust and data coverage baseline**
+Original TLS/X.509 identity and path validation remain authoritative: hostname/SAN,
+validity, signatures, CA/usage/path and critical constraints retain their checks.
+The original hostname remains authoritative for TLS, HTTP Host, URLs, origins and
+cookies even when address-family fallback selects a different socket address.
 
-Transport, certificate policy, selected authorities and bounded fallback.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#t1--shared-tlstrust-and-data-coverage-baseline)**
+The default trust data is the reviewed conservative subset of 98 Mozilla NSS
+authorities. Exact source, selection policy and notices remain part of its
+provenance. Restricted or unsupported authorities must not become unrestricted
+trust. Custom PEM stores replace the default, deduplicate exact certificates and
+fail closed on unsupported entries under the shared 1,024-root capacity.
 
-<a name="b1--ordinary-unmarked-external-stylesheets"></a>
+Bounded serial dual-stack fallback, per-hop and overall request limits,
+cancellation and redacted diagnostics retain their explicit limits. Blocking
+OS DNS is not a strict process wall-clock guarantee. There is no implied OS-store
+lookup, automatic root update, revocation/CT, full Firefox policy or certification.
+Document diagnostics do not establish challenge clearance or site usability.
 
-### B1
+### Documents, styles and native identity
 
-**Ordinary unmarked external stylesheets**
-
-Guarded parser/dynamic stylesheets and resource ownership.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#b1--ordinary-unmarked-external-stylesheets)**
-
-<a name="b1a--finite-viewport-media-rules"></a>
-
-### B1a
-
-**Finite viewport media rules**
-
-Viewport/media evaluation, admission and source lifetime.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#b1a--finite-viewport-media-rules)**
-
-<a name="cp1--real-collections-calls-and-node-identity"></a>
-
-### CP1
-
-**Real collections, calls and Node identity**
-
-Live collections, checked array-like calls and genuine Node identity.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp1--real-collections-calls-and-node-identity)**
-
-<a name="cp2--genuine-comment-and-native-regexp-input-conversion"></a>
-
-### CP2
-
-**Genuine Comment and native RegExp input conversion**
-
-Native Comment state and ordered RegExp input conversion.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp2--genuine-comment-and-native-regexp-input-conversion)**
-
-<a name="cp8--genuine-nodegetrootnode-over-ordinary-trees"></a>
-
-### CP8
-
-**Genuine Node.getRootNode over ordinary trees**
-
-Real roots, options conversion, borrowing and access checks.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp8--genuine-nodegetrootnode-over-ordinary-trees)**
-
-<a name="cp7--finite-hidden-input-admission-and-native-form-state"></a>
-
-### CP7
-
-**Finite hidden-input admission and native form state**
-
-Hidden controls, native values, tree/form ownership and atomic refusal.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp7--finite-hidden-input-admission-and-native-form-state)**
-
-<a name="cp6--bounded-stringprototypeconcat"></a>
-
-### CP6
-
-**Bounded String.prototype.concat**
-
-Generic ordered conversion, realms, failures and work accounting.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp6--bounded-stringprototypeconcat)**
-
-<a name="cp5--finite-object-literal-prototype-setter"></a>
-
-### CP5
-
-**Finite object-literal prototype setter**
-
-Static literal prototype semantics and early errors.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp5--finite-object-literal-prototype-setter)**
-
-<a name="cp4--conventional-select-fragments-and-native-ownership"></a>
-
-### CP4
-
-**Conventional select fragments and native ownership**
-
-Select/option staging, retained state, moves and ownership.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp4--conventional-select-fragments-and-native-ownership)**
-
-<a name="cp3--responsive-stylesheet-to-layout-behavior"></a>
-
-### CP3
-
-**Responsive stylesheet-to-layout behavior**
-
-Media lengths, box-sizing and fractional flex layout.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#cp3--responsive-stylesheet-to-layout-behavior)**
-
-<a name="b2--finite-tabs-link-context-and-new-windows"></a>
-
-### B2
-
-**Finite tabs, link context and new windows**
-
-Shared authorities, tab/window identity, input and retirement.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#b2--finite-tabs-link-context-and-new-windows)**
-
-<a name="a1--about-and-running-build-identity"></a>
-
-### A1
-
-**About and running-build identity**
-
-Native About panel, exact legal views and safe descriptive metadata.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#a1--about-and-running-build-identity)**
-
-<a name="i1--one-windows-installation-package"></a>
-
-### I1
-
-**One Windows installation package**
-
-Planned per-user installer, recovery and preservation requirements.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#i1--one-windows-installation-package)**
-
-<a name="u1--opt-in-published-release-discovery"></a>
-
-### U1
-
-**Opt-in published-release discovery**
-
-Planned startup toggle, manual checks and zero-contact OFF state.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#u1--opt-in-published-release-discovery)**
-
-<a name="u2--explicitly-approved-authenticated-upgrade"></a>
-
-### U2
-
-**Explicitly approved authenticated upgrade**
-
-Planned authenticity, explicit approval and recoverable upgrade.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#u2--explicitly-approved-authenticated-upgrade)**
-
-<a name="f1--replaceable-animation-frame-operations"></a>
-
-### F1
-
-**Replaceable animation-frame operations**
-
-Real callback scheduling/cancellation despite author replacement.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f1--replaceable-animation-frame-operations)**
-
-<a name="f2--navigation-providers-and-session-history"></a>
-
-### F2
-
-**Navigation, providers and session history**
-
-Input/results/destination/Back flow and history semantics.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f2--navigation-providers-and-session-history)**
-
-<a name="f3--script-controlled-supported-local-video"></a>
-
-### F3
-
-**Script-controlled supported local video**
-
-Genuine playback operations, promises, time and decoded frames.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f3--script-controlled-supported-local-video)**
-
-<a name="f4--network-media-transaction"></a>
-
-### F4
-
-**Network media transaction**
-
-Complete bounded transfers, TLS/CORS/credentials and source lifecycle.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f4--network-media-transaction)**
-
-<a name="f5--bounded-vp8-dependencies-with-existing-pcm-synchronization"></a>
-
-### F5
-
-**Bounded VP8 dependencies with existing PCM synchronization**
-
-Finite interframes, independent references and acknowledged audio clock.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f5--bounded-vp8-dependencies-with-existing-pcm-synchronization)**
-
-<a name="c1--a-css-image-path-through-the-shared-renderer"></a>
-
-### C1
-
-**A CSS image path through the shared renderer**
-
-One background URL layer through resource policy, layout and paint.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#c1--a-css-image-path-through-the-shared-renderer)**
-
-<a name="f6--staged-authored-page-and-media-integration"></a>
-
-### F6
-
-**Staged authored page and media integration**
-
-Retained finite integration requirements and deferred broader scope.
-**[Read the full contract →](FEATURE_CONTRACTS_DETAIL.md#f6--staged-authored-page-and-media-integration)**
-
----
-
-## Later contract increments
-
-The reference has grown beyond the original milestone directory. These grouped
-links expose the current shared behavior contracts without turning the index into
-a duplicate capability matrix.
-
-| Area | Detailed requirements |
+| Contract | Required behavior |
 | :--- | :--- |
-| **History and native interfaces** | [Same-document entries](FEATURE_CONTRACTS_DETAIL.md#same-document-session-entries), [live Range boundaries](FEATURE_CONTRACTS_DETAIL.md#live-dom-range-boundary-increment), [form named lookup](FEATURE_CONTRACTS_DETAIL.md#native-form-interface-and-named-lookup) and [textarea values](FEATURE_CONTRACTS_DETAIL.md#native-textarea-interface-and-canonical-value) |
-| **Templates, owners and activation** | [Nested templates](FEATURE_CONTRACTS_DETAIL.md#nested-checked-template-fragments), [inert queries](FEATURE_CONTRACTS_DETAIL.md#inert-selectors-and-genuine-query-snapshots), [passive HTML](FEATURE_CONTRACTS_DETAIL.md#passive-html-containers-through-cloneimport), [native controls](FEATURE_CONTRACTS_DETAIL.md#default-native-control-import-and-activation), [images](FEATURE_CONTRACTS_DETAIL.md#plain-image-cloneimport-and-real-activation) and [style batches](FEATURE_CONTRACTS_DETAIL.md#inline-style-cloneimport-and-atomic-mixed-stamping) |
-| **Mutations and observation** | [Inert tree records](FEATURE_CONTRACTS_DETAIL.md#inert-tree-mutation-records-and-characterdata), [whole-content replacement](FEATURE_CONTRACTS_DETAIL.md#whole-content-replacement-notifications), [transient subtrees](FEATURE_CONTRACTS_DETAIL.md#transient-subtree-mutation-observation) and [same-owner replacement/promotion](FEATURE_CONTRACTS_DETAIL.md#same-inert-owner-node-replacement-and-loaded-parked-promotion) |
-| **Native and author properties** | [HTML reflections](FEATURE_CONTRACTS_DETAIL.md#common-htmlelement-reflections-and-author-overrides), [ARIA strings](FEATURE_CONTRACTS_DETAIL.md#element-ariamixin-nullable-string-reflections) and [placeholder hints](FEATURE_CONTRACTS_DETAIL.md#native-text-control-placeholder-reflection) |
-| **Requests and body values** | [Asynchronous XHR](FEATURE_CONTRACTS_DETAIL.md#original-script-request-and-xmlhttprequest-increment), [Headers](FEATURE_CONTRACTS_DETAIL.md#native-headers-values-for-shared-request-and-response-adapters) and [buffered Response/Body](FEATURE_CONTRACTS_DETAIL.md#buffered-response-values-and-native-body-consumption) |
-| **CSS and SVG** | [Variable layout values](FEATURE_CONTRACTS_DETAIL.md#shared-variable-sizing-and-existing-layout-grammars), [typed sizing math](FEATURE_CONTRACTS_DETAIL.md#shared-typed-sizing-calculations), [computed presentation](FEATURE_CONTRACTS_DETAIL.md#actual-computed-display-and-foreground), [SVG geometry](FEATURE_CONTRACTS_DETAIL.md#svg-geometry-in-the-shared-document-cascade) and [SVG paint](FEATURE_CONTRACTS_DETAIL.md#shared-svg-fill-stroke-and-color) |
-| **Events and diagnostics** | [AnimationEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-animationevent-construction), [WheelEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-wheelevent-construction), [ErrorEvent](FEATURE_CONTRACTS_DETAIL.md#genuine-errorevent-construction-and-synthetic-delivery) and [native Error console provenance](FEATURE_CONTRACTS_DETAIL.md#native-error-console-provenance-and-saved-namespace-operations) |
-| **Connected component preparation** | [Resource-governed flattening](FEATURE_CONTRACTS_DETAIL.md#resource-governed-iterative-array-flattening) and [template SVG with real focus](FEATURE_CONTRACTS_DETAIL.md#loaded-flow-template-svg-and-connected-component-focus) |
+| <a id="b1--ordinary-unmarked-external-stylesheets"></a><a id="b1"></a>**B1 — External stylesheets** | Parser and dynamic sheets use guarded requests, final-response URL ownership and complete decoded-source accounting. Source changes and retirement reject stale completion. Applying foreign CSS does not expose its source or grant general stylesheet CORS. |
+| <a id="b1a--finite-viewport-media-rules"></a><a id="b1a"></a>**B1a — Viewport media rules** | Supported media conditions use the actual CSS viewport and declared input profile, preserve cascade order and stylesheet ownership, and admit the whole sheet before publication. Unsupported conditions do not grant rules. |
+| <a id="cp1--real-collections-calls-and-node-identity"></a><a id="cp1"></a>**CP1 — Collections and Node identity** | Live collections and checked array-like calls retain actual node identity, mutation behavior and access authority. |
+| <a id="cp2--genuine-comment-and-native-regexp-input-conversion"></a><a id="cp2"></a>**CP2 — Comment and RegExp conversion** | Comment objects retain native state; RegExp input conversion preserves its required order, abrupt effects and receiver behavior. |
+| <a id="cp8--genuine-nodegetrootnode-over-ordinary-trees"></a><a id="cp8"></a>**CP8 — Node roots** | getRootNode follows real supported tree roots, options conversion, borrowing and access checks. |
+| <a id="cp7--finite-hidden-input-admission-and-native-form-state"></a><a id="cp7"></a>**CP7 — Hidden inputs** | Supported hidden controls preserve native values, tree/form ownership and atomic refusal. |
+| <a id="cp6--bounded-stringprototypeconcat"></a><a id="cp6"></a>**CP6 — String concatenation** | Generic ordered conversion, owner realms, failures and checked work accounting apply to the actual concatenation operation. |
+| <a id="cp5--finite-object-literal-prototype-setter"></a><a id="cp5"></a>**CP5 — Literal prototype setter** | Supported static object-literal prototype syntax retains its semantics and required early errors. |
+| <a id="cp4--conventional-select-fragments-and-native-ownership"></a><a id="cp4"></a>**CP4 — Select fragments** | Select/option staging, moves and retained state preserve native ownership without partial publication after refusal. |
+| <a id="cp3--responsive-stylesheet-to-layout-behavior"></a><a id="cp3"></a>**CP3 — Responsive layout** | Supported media lengths, box-sizing and fractional flex layout must reach actual geometry, paint and hit targets. |
 
-## Maintaining contracts
+### Browser and delivery
 
-Edit the detailed reference when changing an actual behavior contract; update this
-index only when its navigation or summary changes. Preserve code-level negatives,
-limits, source identities and original evidence. Do not treat planned installer,
-update, GPU or isolation work as implemented because it has a roadmap entry.
+| Contract | Required behavior |
+| :--- | :--- |
+| <a id="b2--finite-tabs-link-context-and-new-windows"></a><a id="b2"></a>**B2 — Tabs and windows** | Shared authorities, tab/window identity, input routing and retirement remain correct across the supported link contexts. |
+| <a id="a1--about-and-running-build-identity"></a><a id="a1"></a>**A1 — About and build identity** | Native About, exact legal views and safe descriptive metadata identify the running build without presenting metadata as authentication. |
+| <a id="i1--one-windows-installation-package"></a><a id="i1"></a>**I1 — Windows installer — planned** | A per-user installation package must preserve user data and retain its specified recovery behavior. |
+| <a id="u1--opt-in-published-release-discovery"></a><a id="u1"></a>**U1 — Release discovery — planned** | Startup discovery is opt-in, with manual checks and zero network contact while the startup setting is OFF. |
+| <a id="u2--explicitly-approved-authenticated-upgrade"></a><a id="u2"></a>**U2 — Upgrade — planned** | Upgrade requires authenticity verification, explicit approval and recoverable replacement. |
 
-Contract changes retain the existing focused development checks and applicable
-release gates. Completing a contract or PR does not trigger a release or establish
-that the remaining contracts are complete.
+### Navigation, animation and media
+
+| Contract | Required behavior |
+| :--- | :--- |
+| <a id="f1--replaceable-animation-frame-operations"></a><a id="f1"></a>**F1 — Animation frames** | Supported callbacks schedule and cancel through the real operation even when author code replaces exposed properties. |
+| <a id="f2--navigation-providers-and-session-history"></a><a id="f2"></a>**F2 — Navigation and history** | Address input, provider results, destination navigation and Back retain actual request and session-history semantics. |
+| <a id="f3--script-controlled-supported-local-video"></a><a id="f3"></a>**F3 — Local video** | Supported playback uses genuine operations, promises, time and decoded frames rather than simulated state. |
+| <a id="f4--network-media-transaction"></a><a id="f4"></a>**F4 — Network media** | Complete bounded transfers retain TLS, authored CORS/credential policy and source replacement/retirement rules. |
+| <a id="f5--bounded-vp8-dependencies-with-existing-pcm-synchronization"></a><a id="f5"></a>**F5 — VP8 and PCM synchronization** | Supported finite interframes retain independent references and synchronize against acknowledged audio progress. |
+| <a id="c1--a-css-image-path-through-the-shared-renderer"></a><a id="c1"></a>**C1 — CSS images** | The supported single URL background layer uses the shared resource policy, layout and painting lifecycle. |
+| <a id="f6--staged-authored-page-and-media-integration"></a><a id="f6"></a>**F6 — Authored page/media integration** | Supported composition must preserve the agreed page/media interactions and existing negative cases. Deferred broader scope is not completed by a finite integration fixture. |
+
+## Scope and evidence
+
+These commitments apply alongside the explicit supported subsets and refusals in
+[Capabilities](CAPABILITIES.md). Later language, DOM, CSS and resource additions
+retain the same native-state, lifetime and security principles. Native Custom
+Elements, Shadow DOM, installation, upgrades, GPU acceleration or isolation are
+not established merely by appearing in the [roadmap](ROADMAP.md).
+
+Historical measurements keep their original source, inputs and limits. A prior
+pass does not qualify a changed implementation, and a source-level feature does
+not establish a live-service result. Public release claims must identify the
+actual verified source and delivered assets.

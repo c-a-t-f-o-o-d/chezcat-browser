@@ -18,7 +18,7 @@
 > and negative or recovery checks to pass. Required failures and unrun cases keep
 > the milestone open. An accepted milestone awaiting delivery remains eligible.
 >
-> For each accepted milestone, update the capability register, roadmap and
+> For each accepted milestone, update the capability documentation, roadmap and
 > changelog, select an unused version, and qualify the exact tagged source.
 > Record the delivered source, assets and checksums after verifying the public
 > downloads and extracted runtime. Ordinary source PRs keep the current version.
@@ -77,42 +77,21 @@ the current verified release.
 ### Historical alpha.3 candidate
 
 The immutable `v0.82.0-alpha.3` tag identifies `ff5740d3dba4f549c854996c32e28adb592a8959`.
-The [hosted normal run](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
-reported 4,445 passes, four failures and one ignored adapter. The failures
-involved child-list identities, dynamic script execution, element attribute
-backing and the dynamic stylesheet queue. Its serial diagnostic reported
-4,449 passes and one ignored test. Normal qualification requires zero ignored
-cases. The build failed and publication was skipped.
-
-[PR #496](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/496) made the
-adapter a meaningful normal test while preserving the frozen case catalog.
-[PR #497](https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/497) reduced
-DOM and stylesheet work while retaining request counts, trust checks and
-deadlines. The local normal suite on its source tree passed all 4,454 tests.
-Those source checks preceded the separately verified alpha.4 tagged delivery above.
+Its [hosted normal qualification](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420)
+failed with four failures and one ignored test. Publication was skipped. Later
+corrections are part of the separately verified alpha.4 source and delivery.
 
 <a id="current-release-candidate"></a>
 
 ### Historical alpha.2 candidate
 
 The immutable `v0.82.0-alpha.2` tag identifies
-`14134aba8ac2ab001c8ec13db77f68fa220b1400`, including merged source through PR #430
-and the matching Cargo/resource versions and [change summary](../CHANGELOG.md#0820-alpha2)
-prepared in PR #431. The
+`14134aba8ac2ab001c8ec13db77f68fa220b1400`. Its
 [tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445)
-failed at the normal native-test stage. The optimized build, package checks,
-publication and downloaded-byte verification were not reached. **No alpha.2
-release assets were published.**
-
-The failure-summary step also rejected its relative output path, so this run's
-public output does not identify the failing native tests or their root cause.
-The diagnostic gap remains part of this candidate's record. Later development
-corrected the summary invocation to use its checked absolute default output path,
-preserving the existing privacy and containment rules. That repair did not recover
-this completed runner's missing diagnostics or identify its native failure.
-No qualification is claimed for this candidate. Changed release source requires
-the next unused version and tag; preserve this candidate's immutable tag.
-Development source after the tag, including PR #433, is not part of this attempt.
+failed at the normal native-test stage and also failed to produce the failure
+summary. The precise native failure was not recorded. Build/package verification
+was not reached, publication was skipped and **no alpha.2 release assets were
+published**. The tag remains an unqualified historical candidate.
 
 ### Recorded deliveries and candidates
 
