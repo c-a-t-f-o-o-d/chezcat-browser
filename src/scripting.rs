@@ -12277,3 +12277,7 @@ mod text_type_transition_tests;
 #[cfg(test)]
 #[path="script_text_family_admission_tests.rs"]
 mod text_family_admission_tests;
+
+#[cfg(test)]
+#[path="script_tree_walker_filter_tests.rs"]
+mod tree_walker_filter_tests;

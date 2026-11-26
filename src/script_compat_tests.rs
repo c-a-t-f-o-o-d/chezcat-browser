@@ -1184,8 +1184,8 @@ var calls=0, caught=0;
 try {document.createTreeWalker({}, {valueOf:function(){calls++;return 1;}});} catch(e){if(e instanceof TypeError)caught++;}
 try {TreeWalker.prototype.firstChild.call({});} catch(e){if(e instanceof TypeError)caught++;}
 try {t.currentNode=null;} catch(e){if(e instanceof TypeError)caught++;}
-try {document.createTreeWalker(root,1,function(){calls++;return 1;});} catch(e){if(e.name==='NotSupportedError')caught++;}
-if(calls||caught!==4||t.currentNode!==child)throw 'validation';
+var filtered=document.createTreeWalker(root,1,function(){calls++;return 1;});
+if(calls||caught!==3||t.currentNode!==child||filtered.nextNode()!==one||calls!==1)throw 'validation';
 var d=document.createTreeWalker(document,undefined);
 if(d.root!==document||d.firstChild()!==root||d.whatToShow!==4294967295)throw 'document root';
 var none=document.createTreeWalker(root,-4294967296);

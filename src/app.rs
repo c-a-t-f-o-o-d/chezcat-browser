@@ -7294,3 +7294,7 @@ mod text_family_admission_tests;
 #[cfg(test)]
 #[path="app_domparser_template_publication_tests.rs"]
 mod domparser_template_publication_tests;
+
+#[cfg(test)]
+#[path="app_tree_walker_filter_tests.rs"]
+mod tree_walker_filter_tests;
