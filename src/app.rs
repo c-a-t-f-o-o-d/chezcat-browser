@@ -7510,3 +7510,7 @@ mod script_data_block_tree_tests;
 #[cfg(test)]
 #[path="app_noscript_loader_context_tests.rs"]
 mod noscript_loader_context_tests;
+
+#[cfg(test)]
+#[path="app_noscript_fragment_context_tests.rs"]
+mod noscript_fragment_context_tests;

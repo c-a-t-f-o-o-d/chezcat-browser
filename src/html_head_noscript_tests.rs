@@ -274,9 +274,13 @@ fn head_noscript_body_template_and_foreign_contexts_stay_separate() {
 }
 
 #[test]
-fn head_noscript_checked_fragment_admission_is_unchanged() {
-    assert!(parse_fragment("<noscript>x</noscript>", "div", true).unwrap_err().contains("recovery is not implemented"));
-    assert!(parse_fragment("x", "noscript", false).unwrap_err().contains("element context"));
+fn head_noscript_checked_fragment_admission_tracks_scripting_context() {
+    let enabled=parse_fragment("<noscript>x</noscript>", "div", true).unwrap();
+    assert_eq!(children(&enabled, element(&enabled,"noscript")), ["text x"]);
+    assert!(enabled.scripting_enabled);
+    let context=parse_fragment("x", "noscript", false).unwrap();
+    assert_eq!(children(&context,0), ["text x"]);
+    assert!(!context.scripting_enabled);
     let document = parse_fragment("<noscript><span>x</span></noscript>", "div", false).unwrap();
     assert_eq!(children(&document, 0), ["noscript"]);
     assert_eq!(children(&document, element(&document, "noscript")), ["span"]);

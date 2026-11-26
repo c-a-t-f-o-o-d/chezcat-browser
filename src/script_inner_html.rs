@@ -188,3 +188,21 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path = "script_inner_html_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod noscript_fragment_context_tests {
+ use super::*;
+ fn fixture()->(Document,Forms,Page){let mut d=crate::html::parse_loaded_document_with_scripting("<body><div id=root><b id=old>Old</b></div><p id=out>Real</p>",true,&||Ok(())).unwrap();let mut f=Forms::new(&d);let mut p=Page::new();let l=crate::navigation::address("https://fragment-noscript.test/",&crate::navigation::Location::home()).unwrap();p.set_location(&l);p.set_resource_base(&l);assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);(d,f,p)}
+ fn run(d:&mut Document,f:&mut Forms,p:&mut Page,source:&str){p.runtime.execute(source,&mut Bridge{doc:d,forms:f,state:&mut p.state}).unwrap();}
+ #[test]
+ fn noscript_fragment_context_native_markup_observation_raw_reads_and_serialization(){
+  let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"var root=document.getElementById('root'),old=root.firstChild,watch=new MutationObserver(function(){});watch.observe(root,{childList:true});var raw='<img id=fake src=missing><script>window.bad=1;</script><style>p{color:red}</style>&amp;';root.innerHTML='<noscript id=fallback>'+raw+'</noscript><p id=after>After</p>';var fallback=document.getElementById('fallback'),records=watch.takeRecords();if(!fallback||fallback.firstChild.nodeType!==3||fallback.firstChild.data!==raw||fallback.textContent!==raw||fallback.innerHTML!==raw||fallback.outerHTML!=='<noscript id="fallback">'+raw+'</noscript>'||document.querySelectorAll('noscript').length!==1||document.getElementById('fake')!==null||document.querySelectorAll('script').length||old.parentNode!==null||records.length!==1||records[0].target!==root||records[0].removedNodes[0]!==old||records[0].addedNodes.length!==2||records[0].addedNodes[0]!==fallback||records[0].addedNodes[1]!==document.getElementById('after')||window.bad!==undefined)throw 'native fragment data and real records';"#);
+  assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());assert!(!d.nodes.iter().any(|n|matches!(&n.kind,NodeKind::Element{tag,..}if tag=="img"||tag=="script"||tag=="style")));
+ }
+ #[test]
+ fn noscript_fragment_context_native_resource_refusal_is_atomic_and_recovers(){
+  let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"var root=document.getElementById('root'),old=root.firstChild,markup='<noscript id=fallback><img id=fake src=missing>&amp;</noscript>',watch=new MutationObserver(function(){});watch.observe(root,{childList:true});"#);p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;let limit=p.state.retained_limit;
+  for mode in 0..3{p.begin_job();match mode{0=>p.state.copy_work=0,1=>p.state.host_work=0,_=>p.state.retained_limit=p.state.retained};let error=p.runtime.execute("root.innerHTML=markup;",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();let category=error.to_ascii_lowercase();assert!(match mode{0=>category.contains("dom string work limit"),1=>category.contains("dom work limit"),_=>category.contains("storage")||category.contains("allowance")||category.contains("retained")},"{mode}: {error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.state.retained_limit=limit;p.begin_job();run(&mut d,&mut f,&mut p,"if(root.firstChild!==old||watch.takeRecords().length||document.getElementById('fallback')!==null)throw 'atomic fragment refusal';");}
+  p.begin_job();run(&mut d,&mut f,&mut p,"root.innerHTML=markup;var fallback=document.getElementById('fallback');if(old.parentNode!==null||fallback.firstChild.nodeType!==3||fallback.textContent!=='<img id=fake src=missing>&amp;'||document.getElementById('fake')!==null||watch.takeRecords().length!==1)throw 'fragment recovery';");assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
+ }
+}
