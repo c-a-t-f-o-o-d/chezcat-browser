@@ -5,7 +5,7 @@ impl Bridge<'_> {
         self.attribute_method_member(object,property)&&!self.form_named_control(object,property)
     }
     pub(super) fn attribute_method_member(&self,object:u32,property:&str)->bool{
-        matches!(property,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"getAttributeNames"|"hasAttribute"|"removeAttribute"|"setAttribute")&&self.attribute_names_receiver(object)
+        matches!(property,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"getAttributeNames"|"hasAttribute"|"removeAttribute"|"setAttribute")&&self.attribute_names_receiver(object)
     }
     pub(super) fn attribute_names_receiver(&self,object:u32)->bool {
         self.inert_node_type(object)==Some(1)||self.attr_element_receiver(object)

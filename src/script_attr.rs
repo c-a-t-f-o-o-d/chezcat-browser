@@ -614,6 +614,20 @@ impl Bridge<'_> {
         self.lookup_attribute_node_at(node, slot)
     }
 
+    pub(super) fn has_attribute_ns(&mut self,object:u32,args:&[Value])->Result<Value,String>{
+        if !self.attribute_names_receiver(object){return Err("hasAttributeNS requires a genuine Element.".into());}
+        self.native_node_access(object).map_err(|(_,message)|message)?;
+        script_text_content::deadline(self.state)?;
+        let uri=namespace(args)?;
+        let local=script_attribute_names::converted_name(args.get(1).ok_or("hasAttributeNS requires two arguments.")?).map_err(|(_,message)|message)?;
+        let attrs=self.element_attribute_source(object).ok_or("Element attributes are unavailable.")?;
+        let work=attrs.iter().try_fold(attrs.len(),|work,attr|work.checked_add(attr.name.bytes()).ok_or("Attribute presence work overflow."))?;
+        self.state.work(work)?;
+        let present=self.element_attribute_source(object).ok_or("Element attributes are unavailable.")?.iter().any(|attr|attr.name.matches_names(uri,local));
+        script_text_content::deadline(self.state)?;
+        Ok(Value::Bool(present))
+    }
+
     pub(super) fn get_attribute_ns(&mut self, object: u32, args: &[Value]) -> Result<Value, String> {
         if self.inert_node_type(object)==Some(1){
             let namespace=namespace(args)?;let local=self.dom_text(args.get(1).ok_or("getAttributeNS requires two arguments.")?)?;
