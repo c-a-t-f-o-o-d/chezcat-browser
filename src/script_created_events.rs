@@ -485,7 +485,7 @@ pub(super) struct CreatedEvent {
     pub(super) owner: u32,
     pub(super) composed: bool,
     pub(super) handle: u32,
-    pub(super) name: String,
+    pub(super) name: DomString,
     pub(super) bubbles: bool,
     pub(super) cancelable: bool,
     pub(super) prevented: bool,
@@ -785,18 +785,18 @@ impl Bridge<'_> {
     fn construct_event_record(&mut self,owner:u32,args:&[Value],fields:Option<&[(&str,Value)]>,ui:Option<UiData>,mouse:Option<MouseData>,keyboard:Option<KeyboardData>,custom:Option<&Value>)->Result<Value,String> {
         if !self.state.enabled||!self.doc.scripting_enabled {return Err("Event construction is disabled.".into());}
         self.state.work(self.state.event_lookup_work(8).saturating_add(1))?;
-        let Some(Value::String(source))=args.first() else {return Err("Event requires a converted type.".into());};
-        if self.state.event_type_refused(source.len()) {return Err("Event type exceeds the host event-type/string allowance.".into());}
+        let source=match args.first(){Some(Value::String(text))=>crate::dom_string::DomStringRef::Scalar(text),Some(Value::StringUnits(units))=>crate::dom_string::DomStringRef::Raw(units),_=>return Err("Event requires a converted type.".into())};
+        if self.state.event_type_refused(source.logical_bytes()) {return Err("Event type exceeds the host event-type/string allowance.".into());}
         let detail_bytes=custom_bytes(custom)?;
         if detail_bytes>self.state.limits.host.string_bytes {return Err("CustomEvent detail exceeds the host string bound.".into());}
-        let bytes=source.len().checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
+        let bytes=source.copy_bytes()?.checked_add(detail_bytes).ok_or("Event retained text size overflow.")?;
         let keyboard_bytes=keyboard.as_ref().map_or(0,KeyboardData::payload_bytes);
         let required=bytes.checked_add(keyboard_bytes).ok_or("Event keyboard payload overflow.")?;
         if required>self.state.retained_limit.saturating_sub(self.state.retained){return Err("Event retained payload allowance exceeded.".into());}
         self.state.copies(bytes)?;
         if self.state.created_event_limit_reached(){return Err("Constructed Event allowance exceeded.".into());}
         let next=self.state.next_event.checked_add(1).filter(|next|*next<=script_class_list::BASE).ok_or("Event identity space exhausted.")?;
-        let mut name=String::new();name.try_reserve_exact(source.len()).map_err(|_|"Could not reserve Event type.")?;name.push_str(source);
+        let name=source.try_owned()?;
         let custom=custom.map(copy_custom_value).transpose()?;
         let payload=name.capacity().checked_add(owned_custom_bytes(custom.as_ref())).and_then(|bytes|bytes.checked_add(keyboard_bytes)).ok_or("Event payload storage overflow.")?;
         self.state.copies(payload.saturating_sub(required))?;
@@ -943,12 +943,10 @@ impl Bridge<'_> {
         Some((|| {
             self.state.work(self.state.event_lookup_work(8))?;
             if name == "type" {
-                let len = self.state.created_events[id].name.len();
-                self.state.copies(len)?;
-                let mut copied=String::new();
-                copied.try_reserve_exact(len).map_err(|_|"Could not reserve Event type result.")?;
-                copied.push_str(&self.state.created_events[id].name);
-                return Ok(Value::String(copied));
+                let text=&self.state.created_events[id].name;
+                if text.logical_bytes()>self.state.limits.host.string_bytes{return Err("Event type result exceeds host string allowance.".into());}
+                self.state.copies(text.logical_bytes())?;
+                return Self::dom_string_copy(&self.state.created_events[id].name);
             }
             if matches!(name,"key"|"code") && self.keyboard_receiver(object) {
                 let key=self.state.created_events[id].data.keyboard().unwrap();
@@ -1070,8 +1068,8 @@ impl Bridge<'_> {
                 self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3))?;
                 self.mouse_target_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(14))?;
             }
-            if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && matches!(args.first(), Some(Value::String(name)) if self.state.event_type_refused(name.len())) {
-                return Err(("QuotaExceededError",format!("Event type exceeds {} UTF-8 bytes.",self.state.event_type_allowance())));
+            if !self.state.created_events[self.created_event_index(object).unwrap()].dispatching && args.first().is_some_and(|value|self.state.event_type_refused(match value{Value::String(name)=>name.len(),Value::StringUnits(units)=>units.len().saturating_mul(2),_=>0})) {
+                return Err(("QuotaExceededError",format!("Event type exceeds {} string bytes.",self.state.event_type_allowance())));
             }
         }
         Ok(())
@@ -1086,7 +1084,7 @@ impl Bridge<'_> {
         let (replacement,added)=self.state.prepare_created_event_storage(0)?;
         if let Some(mut records)=replacement {records.append(&mut self.state.created_events);self.state.created_events=records;}
         let handle = self.state.next_event;
-        let event = CreatedEvent { owner:WINDOW,composed:false,handle, name: String::new(), bubbles: false, cancelable: false,
+        let event = CreatedEvent { owner:WINDOW,composed:false,handle, name: DomString::new(), bubbles: false, cancelable: false,
             prevented: false, stopped: false, immediate: false,
             target:None,current:None,phase:0,dispatching:false,initialized:false,trusted:false,passive:false,
             timestamp: self.state.clock_ms(Instant::now()),
@@ -1112,7 +1110,7 @@ impl Bridge<'_> {
                     }
                     self.validate_created_event_call(object, method, args).map_err(|(_, message)| message)?;
                     if self.state.created_events[id].dispatching {return Ok(Value::Undefined);}
-                    let name = self.text(args.first().ok_or("Event initializer requires a type.")?)?;
+                    let name = self.dom_text(args.first().ok_or("Event initializer requires a type.")?)?;
                     let number = |index| args.get(index).map(timer_integer).transpose().map(|n| n.unwrap_or(0));
                     let ui=if matches!(method,"initUIEvent"|"initMouseEvent") {
                         let view=self.ui_view_argument(self.event_owner(object).unwrap_or(WINDOW),args.get(3)).map_err(|(_,message)|message)?;

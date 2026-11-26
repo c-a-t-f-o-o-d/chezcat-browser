@@ -5,7 +5,7 @@ use super::*;
 pub(super) struct Dispatch {
     path: Vec<u32>,
     event: usize,
-    name: String,
+    name: DomString,
     visits: Vec<(u32, bool, u8)>,
     visit: usize,
     snapshot: Vec<usize>,
@@ -406,13 +406,13 @@ impl Bridge<'_> {
             unreachable!()
         };
         let id = self.created_event_index(handle).unwrap();
-        let name_len=self.state.created_events[id].name.len();
+        let name_len=self.state.created_events[id].name.used_bytes();
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
         if name_len>available{return Err("DOM retained dispatch name allowance exhausted.".into());}
-        let mut name=String::new();
-        name.try_reserve_exact(name_len).map_err(|_|"Could not reserve dispatch name.")?;
+        self.state.copies(name_len)?;
+        let name=self.state.created_events[id].name.try_clone()?;
         if name.capacity()>available{return Err("DOM retained dispatch name allocation exceeds allowance.".into());}
-        self.state.copies(name.capacity())?;name.push_str(&self.state.created_events[id].name);
+        self.state.copies(name.capacity().saturating_sub(name_len))?;
         let bubbles=self.state.created_events[id].bubbles;
         let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,object,name.capacity())?;
         if let Some((owner,node))=child {

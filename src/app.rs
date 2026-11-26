@@ -7398,3 +7398,7 @@ mod event_default_passive_tests;
 #[cfg(test)]
 #[path="app_event_child_paths_tests.rs"]
 mod event_child_paths_tests;
+
+#[cfg(test)]
+#[path="app_event_type_units_tests.rs"]
+mod event_type_units_tests;
