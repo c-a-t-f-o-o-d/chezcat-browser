@@ -5170,6 +5170,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method=="dispatchEvent"{return &[0];}
         if method==adjacent_interface::ELEMENT {return &[1];}
         if method==script_position::METHOD{return &[0];}
         if script_inert_documents::node_equality::operation(method){return &[0];}
@@ -12443,3 +12444,7 @@ mod event_listener_signal_tests;
 #[cfg(test)]
 #[path="script_event_default_passive_tests.rs"]
 mod event_default_passive_tests;
+
+#[cfg(test)]
+#[path="script_event_child_paths_tests.rs"]
+mod event_child_paths_tests;

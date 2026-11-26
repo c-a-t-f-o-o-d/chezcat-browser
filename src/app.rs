@@ -7394,3 +7394,7 @@ mod event_listener_signal_tests;
 #[cfg(test)]
 #[path="app_event_default_passive_tests.rs"]
 mod event_default_passive_tests;
+
+#[cfg(test)]
+#[path="app_event_child_paths_tests.rs"]
+mod event_child_paths_tests;

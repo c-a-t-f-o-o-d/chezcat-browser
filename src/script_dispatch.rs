@@ -288,7 +288,7 @@ impl Bridge<'_> {
         Ok(result)
     }
     pub(super) fn node_event_method(&self,object:u32,name:&str)->bool {
-        !self.is_frame_handle(object) && self.namespace_receiver(object)
+        self.namespace_receiver(object)
             && matches!(name,"addEventListener"|"removeEventListener"|"dispatchEvent")
             && !self.form_named_control(object,name)
     }
@@ -329,11 +329,11 @@ impl Bridge<'_> {
         Ok(Value::Host(handle))
     }
     pub(super) fn listener_receiver(&self,object:u32)->bool {
-        self.dispatch_receiver(object)||self.event_target_interface(object)||self.frame_contains_node(object).is_some()
+        self.dispatch_receiver(object)
     }
 
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {
-        self.standalone_target_owner(object).is_some() || self.abort_signal_owner(object).is_some() || object==WINDOW || !self.is_frame_handle(object) && self.namespace_receiver(object)
+        self.standalone_target_owner(object).is_some() || self.abort_signal_owner(object).is_some() || self.event_target_interface(object) || self.frame_contains_node(object).is_some() || !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
     pub(super) fn validate_dispatch(
         &self,
@@ -398,6 +398,9 @@ impl Bridge<'_> {
     ) -> Result<usize, String> {
         self.validate_dispatch(object, args)
             .map_err(|(_, message)| message)?;
+        let child=self.frame_contains_node(object).map(|(owner,_)|(owner,true))
+            .or_else(||self.frame_context(object).map(|_|(object,false)));
+        if let Some((owner,_))=child{self.contains_child_document(owner)?;}
         self.state.rebuild(self.doc)?;
         let Value::Host(handle) = args[0] else {
             unreachable!()
@@ -412,7 +415,21 @@ impl Bridge<'_> {
         self.state.copies(name.capacity())?;name.push_str(&self.state.created_events[id].name);
         let bubbles=self.state.created_events[id].bubbles;
         let mut path=Vec::new();self.state.push_dispatch_temporary(&mut path,object,name.capacity())?;
-        if self.inert_node_type(object).is_some()&&!self.attr_receiver(object) {
+        if let Some((owner,node))=child {
+            if node {
+                let count=self.contains_child_document(owner)?.nodes.len();
+                let mut current=object;let mut remaining=count;
+                loop {
+                    self.state.work(count.saturating_mul(2))?;
+                    let parent=self.frame_get_with_caller(self.state.navigation_incumbent.or(Some(WINDOW)),current,"parentNode").ok_or("Missing native child event parent.")??;
+                    let Value::Host(parent)=parent else{break;};
+                    remaining=remaining.checked_sub(1).ok_or("Cyclic native child event path.")?;
+                    self.state.push_dispatch_temporary(&mut path,parent,name.capacity())?;
+                    current=parent;
+                }
+                if name!="load"{self.state.push_dispatch_temporary(&mut path,owner,name.capacity())?;}
+            }
+        } else if self.inert_node_type(object).is_some()&&!self.attr_receiver(object) {
             let mut parent=self.inert_observation_parent(object);
             while let Some(node)=parent {
                 self.state.work(1)?;
