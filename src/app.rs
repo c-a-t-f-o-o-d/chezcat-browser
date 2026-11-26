@@ -7430,3 +7430,7 @@ mod child_node_variadic_tests;
 #[cfg(test)]
 #[path="app_state_preserving_move_tests.rs"]
 mod state_preserving_move_tests;
+
+#[cfg(test)]
+#[path="app_import_node_binding_order_tests.rs"]
+mod import_node_binding_order_tests;
