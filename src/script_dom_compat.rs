@@ -234,14 +234,14 @@ impl Bridge<'_> {
     }
 
     /// Borrow the original name; display projections cannot identify a key.
-    pub(super) fn dataset_units_get(&mut self,handle:u32,key:&[u16])->Result<Value,String>{
+    pub(super) fn dataset_units_attribute(&mut self,handle:u32,key:&[u16])->Result<Option<(usize,usize)>,String>{
         script_text_content::deadline(self.state)?;
         self.state.work(1)?;
         let node=self.dataset_node(handle)?;
         self.native_node_access(node_handle(node)).map_err(|(_,message)|message)?;
         let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
         self.state.work(attrs.len())?;
-        for attr in attrs.iter().filter(|a|a.name.namespace.is_empty()){
+        for (index,attr) in attrs.iter().enumerate().filter(|(_,a)|a.name.namespace.is_empty()){
             script_text_content::deadline(self.state)?;
             let name=attr.name.qualified.view();
             self.state.work(name.logical_bytes().checked_mul(4).ok_or("Dataset raw name work overflow.")?)?;
@@ -256,11 +256,18 @@ impl Bridge<'_> {
                 }else{Some(unit)}
             });
             if !converted.eq(key.iter().copied()){continue;}
-            if attr.value.logical_bytes()>self.state.limits.host.string_bytes{return Err("Dataset value exceeds 32 KiB.".into());}
-            return Self::dom_string_value(self.state,&attr.value);
+            return Ok(Some((node,index)));
         }
         script_text_content::deadline(self.state)?;
-        Ok(Value::Undefined)
+        Ok(None)
+    }
+
+    pub(super) fn dataset_units_get(&mut self,handle:u32,key:&[u16])->Result<Value,String>{
+        let Some((node,index))=self.dataset_units_attribute(handle,key)? else{return Ok(Value::Undefined)};
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        let value=&attrs[index].value;
+        if value.logical_bytes()>self.state.limits.host.string_bytes{return Err("Dataset value exceeds 32 KiB.".into());}
+        Self::dom_string_value(self.state,value)
     }
 
     pub(super) fn dataset_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
