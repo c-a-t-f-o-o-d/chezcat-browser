@@ -39,9 +39,9 @@ Release downloads, verification and earlier versions are documented in [Releasin
 | **F12–F13 · Components and presentation** | Native Custom Elements, Shadow DOM, default styles and required text/rendering behavior |
 | **F14 · Foundation qualification** | Integrated document behavior and required browser journeys |
 
-The [HTML/XHTML plan](HTML_FOUNDATION_PLAN.md) defines this sequence and its acceptance boundaries. Existing partial implementations remain useful while the full contracts are completed.
+This sequence builds the shared document behavior needed by later browser capabilities. Existing partial implementations remain useful while the full contracts are completed; [feature contracts](FEATURE_CONTRACTS.md) summarize the expected product behavior.
 
-The broader [CSS foundation program](CSS_FOUNDATION_PLAN.md) follows F14 and covers syntax, selectors, cascade, values, layout, painting, CSSOM and animation. Independent CSS improvements may proceed earlier; CSS needed by an HTML capability remains a prerequisite of that capability. JavaScript language/runtime coverage and the wider web platform retain their own requirements, including dependencies needed by the document foundation.
+The broader CSS foundation program follows F14 and covers syntax, selectors, cascade, values, layout, painting, CSSOM and animation. Independent CSS improvements may proceed earlier; CSS needed by an HTML capability remains a prerequisite of that capability. JavaScript language/runtime coverage and the wider web platform retain their own requirements, including dependencies needed by the document foundation.
 
 ### Current product sequence
 
@@ -84,8 +84,7 @@ This roadmap summarizes direction and major milestones. Detailed supported behav
 | Reference | Contents |
 | :--- | :--- |
 | [Capabilities](CAPABILITIES.md) | Implemented browser behavior and current limits |
-| [HTML/XHTML plan](HTML_FOUNDATION_PLAN.md) and [coverage](HTML_FOUNDATION_COVERAGE.json) | Document-foundation scope and acceptance |
-| [CSS plan](CSS_FOUNDATION_PLAN.md) and [coverage](CSS_FOUNDATION_COVERAGE.json) | Styling/layout scope and acceptance |
+| [Standards and fixture inventory](HTML_FOUNDATION_COVERAGE.json) | Pinned standards inputs and inventories used by the test tooling |
 | [Compatibility](COMPATIBILITY.md) | Measured website and framework outcomes, tied to their tested versions |
 | [Feature contracts](FEATURE_CONTRACTS.md) | Lasting behavior requirements |
 | [Releasing](RELEASING.md) and [changelog](../CHANGELOG.md) | Verified builds, release history and source changes |

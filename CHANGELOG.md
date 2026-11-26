@@ -20,7 +20,7 @@
 **Verified delivery.** [v0.82.0-alpha.4](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4) was published for source `122d0b7de5988493481dc4bed168d01969eef488`. The [tagged Windows workflow](https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981) qualified the build and packages. All four downloaded assets matched their SHA-256 digests, and the extracted runtime passed startup and the original App/input journey. [Checksums](https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/download/v0.82.0-alpha.4/SHA256SUMS) · [Asset sizes and SHA-256 values](docs/RELEASING.md#verified-0820-alpha4-assets).
 
 This release covers the accepted F00 requirements and native parser baseline.
-The [foundation register](docs/HTML_FOUNDATION_COVERAGE.json) retains the original
+The [foundation register](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/c6b66ad2a979b84fb81ee3ada428a0d661638e42/docs/HTML_FOUNDATION_COVERAGE.json) retains the original
 10,968 native case modes and the 21 browser-file groups awaiting their harness.
 F01 document representation, F02 encoding and F04 tokenization are partial.
 
@@ -51,8 +51,8 @@ Publication was skipped and no alpha.3 assets were delivered.
 
 ### HTML foundation baseline
 
-F00 established the [foundation plan](docs/HTML_FOUNDATION_PLAN.md), a fixed
-[coverage register](docs/HTML_FOUNDATION_COVERAGE.json), licensed and hashed
+F00 established the [foundation plan](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/c6b66ad2a979b84fb81ee3ada428a0d661638e42/docs/HTML_FOUNDATION_PLAN.md), a fixed
+[coverage register](https://github.com/c-a-t-f-o-o-d/chezcat-browser/blob/c6b66ad2a979b84fb81ee3ada428a0d661638e42/docs/HTML_FOUNDATION_COVERAGE.json), licensed and hashed
 inputs, and an original native parser-data adapter. The recorded baseline on
 `2a1e171` classified 10,968 case modes. It reported 3 passes, 3,537 failures
 and 7,428 cases blocked by missing harness support. The register retains those

@@ -22,11 +22,15 @@ PUBLIC_ROOT_FILES={'.editorconfig','.gitattributes','.gitignore','Build.cmd',
  'Run.cmd','SECURITY.md','SOURCE_REVISION','THIRD_PARTY_NOTICES.md','build.rs',
  'build_dev.cmd','rust-toolchain','rust-toolchain.toml'}
 PUBLIC_DOC_FILES={'ARCHITECTURE.md','BRANDING.md','BUILDING.md','CAPABILITIES.md',
- 'COMPATIBILITY.md','CONTRIBUTOR_PRIVACY.md','CSS_FOUNDATION_PLAN.md',
- 'CSS_FOUNDATION_COVERAGE.json','CSS_STANDARDS_INVENTORY.json','ENDORSEMENT_POLICY.md',
- 'FEATURE_CONTRACTS.md','FEATURE_CONTRACTS_DETAIL.md','HTML_FOUNDATION_COVERAGE.json',
- 'HTML_FOUNDATION_PLAN.md','LICENSE_ACCEPTANCE.md','README.md','RELEASING.md',
+ 'COMPATIBILITY.md','CONTRIBUTOR_PRIVACY.md','ENDORSEMENT_POLICY.md',
+ 'FEATURE_CONTRACTS.md','HTML_FOUNDATION_COVERAGE.json',
+ 'LICENSE_ACCEPTANCE.md','README.md','RELEASING.md',
  'ROADMAP.md','compatibility.json'}
+RETIRED_DOC_PATHS={'docs/'+name.casefold() for name in (
+ 'CSS_FOUNDATION_PLAN.md','CSS_FOUNDATION_COVERAGE.json','CSS_STANDARDS_INVENTORY.json',
+ 'FEATURE_CONTRACTS_DETAIL.md','HTML_FOUNDATION_PLAN.md')}
+# Retired documents may remain only in this already-published ancestry.
+RETIRED_DOC_HISTORY_REVISION='8bbd41a76b501d323def28a28d06d59cde9d0bf8'
 PUBLIC_LICENSE_FILES={'CHANGES-1.1.md','CONTRIBUTOR_AGREEMENT.md'}
 PUBLIC_TOOL_DATA_FILES={'compatibility_cases.json','date_review_cases_040.json',
  'object_spread_review_cases_040.json','operator_supplement_cases_041.json',
@@ -43,7 +47,7 @@ PUBLIC_EXACT.update('tools/'+name.casefold() for name in PUBLIC_TOOL_DATA_FILES)
 MAX_ASSET_SCAN_FILES=256
 MAX_ASSET_SCAN_BYTES=64*1024*1024
 
-def check_tree(entries):
+def check_tree(entries,*,historical=False):
     for name in entries:
         if not isinstance(name,str) or not name or '\\' in name or ':' in name or any(ord(char)<32 or ord(char)==127 for char in name):
             raise ValueError('Unsafe tracked publication path.')
@@ -52,6 +56,7 @@ def check_tree(entries):
             raise ValueError('Unsafe tracked publication path.')
         if any(part.startswith('.') for part in parts[1:]):
             raise ValueError('Hidden local state is not a publication input.')
+        if historical and normalized in RETIRED_DOC_PATHS:continue
         if normalized in PUBLIC_EXACT:continue
         if len(parts)>1 and parts[0] in PUBLIC_SOURCE_DIRS:continue
         if parts[0]=='tools':
@@ -146,13 +151,22 @@ def check_metadata(commit):
     return True
 
 def check(ref='HEAD'):
-    check_metadata(ref)
-    check_assets(ref)
-    roots=git('rev-list','--max-parents=0',ref).decode().splitlines()
+    candidate=git('rev-parse','--verify',ref+'^{commit}').decode().strip()
+    check_metadata(candidate)
+    check_assets(candidate)
+    roots=git('rev-list','--max-parents=0',candidate).decode().splitlines()
     if len(roots)!=1:raise ValueError('Publication must retain a single snapshot lineage.')
-    for commit in git('rev-list',ref).decode().splitlines():
+    retired_history=None
+    for commit in git('rev-list',candidate).decode().splitlines():
         entries=[p.decode('utf-8') for p in git('ls-tree','-rz','--name-only',commit).split(b'\0') if p]
-        check_tree(entries)
+        historical=False
+        if commit!=candidate and any(path.casefold() in RETIRED_DOC_PATHS for path in entries):
+            if retired_history is None:
+                try:retired_history=set(git('rev-list',RETIRED_DOC_HISTORY_REVISION).decode().splitlines())
+                except subprocess.CalledProcessError as error:
+                    raise ValueError('Cannot verify retired-document ancestry; complete the recorded source history before publication.') from error
+            historical=commit in retired_history
+        check_tree(entries,historical=historical)
         check_receipts(commit)
         if git('show',commit+':SOURCE_REVISION')!=b'$Format:%H$\n':
             raise ValueError('Committed SOURCE_REVISION must remain the literal export template.')

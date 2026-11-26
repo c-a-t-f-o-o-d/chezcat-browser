@@ -88,9 +88,9 @@ privacy and configuration checks on the latest trusted push to main.
 active focus. Integrated work includes native document and node records, shared
 text decoding for documents, scripts and stylesheets, expanded exact UTF-16
 handling in DOM APIs and class lists, and HTML parser and fragment improvements.
-The [foundation plan](docs/HTML_FOUNDATION_PLAN.md) tracks the work ahead; the
-[capability matrix](docs/CAPABILITIES.md) and [coverage register](docs/HTML_FOUNDATION_COVERAGE.json)
-record supported behavior, remaining requirements, and verification evidence.
+The [roadmap](docs/ROADMAP.md#active-foundation-sequence) describes the work ahead;
+the [capability matrix](docs/CAPABILITIES.md) records supported behavior and
+remaining limitations.
 
 *Published baseline: `0.82.0-alpha.4` · tagged source `122d0b7`.
 The highlights below describe integrated capabilities; source builds from `main`
@@ -123,18 +123,16 @@ traversal fixture; a usable YouTube homepage or playback has not been demonstrat
 
 | Now | Product work retained | Wider programs |
 | :--- | :--- | :--- |
-| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Qualify shared DOM/components, layout/input, requests, history, resources/scrolling and original media through the [P1–P6 capability packages](docs/ROADMAP.md#current-product-sequence). | The [CSS program C00–C32](docs/CSS_FOUNDATION_PLAN.md) follows F14. Full JavaScript coverage and wider media, isolation and GPU work remain incomplete and retain their own contracts. |
+| Build the [HTML/XHTML foundation](docs/ROADMAP.md#active-foundation-sequence): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Qualify shared DOM/components, layout/input, requests, history, resources/scrolling and original media through the [P1–P6 capability milestones](docs/ROADMAP.md#current-product-sequence). | Broader [CSS work](docs/ROADMAP.md#active--upcoming-milestones) follows F14. Full JavaScript coverage and wider media, isolation and GPU work remain incomplete. |
 
-Milestone completion follows the documented capability contracts and integration
-gates. Representative pages, including YouTube, provide source-bound compatibility
-evidence. The [coverage register](docs/HTML_FOUNDATION_COVERAGE.json) inventories
-requirements, not a conformance score. The foundation follows dependency order,
-with focused development checks and connected App checks at package gates. Required
-dependencies stay open until verified. Completing this baseline will not imply
-that all HTML platform APIs, all websites or YouTube playback work.
+Milestone completion requires the relevant browser behavior and integrations to
+work together. Representative pages, including YouTube, provide source-bound
+compatibility evidence. The [standards and fixture inventory](docs/HTML_FOUNDATION_COVERAGE.json)
+records reference inputs, not completion results. Completing the document foundation
+will not imply that all HTML platform APIs, all websites or YouTube playback work.
 
-**[Explore the full roadmap →](docs/ROADMAP.md)** for milestone IDs, dependencies,
-completion evidence, and deferred work. Isolation and GPU acceleration are planned,
+**[Explore the roadmap →](docs/ROADMAP.md)** for major milestones, dependencies,
+and future direction. Isolation and GPU acceleration are planned,
 not implemented; they do not block the current compatibility work.
 
 ---
@@ -300,20 +298,20 @@ and the [release procedure](docs/RELEASING.md).
 
 | Explore | What you will find |
 | :--- | :--- |
-| 🗺️ [**Roadmap**](docs/ROADMAP.md) | Merged work, current milestones, dependencies, and future architecture. |
-| 🧱 [**HTML/XHTML foundation plan**](docs/HTML_FOUNDATION_PLAN.md) | Standards scope, implementation packages, acceptance and the coverage register. |
+| 🗺️ [**Roadmap**](docs/ROADMAP.md) | Development direction, major milestones, dependencies, and future architecture. |
+| 🧱 [**Standards and fixture inventory**](docs/HTML_FOUNDATION_COVERAGE.json) | Pinned document-foundation standards and reference inputs. |
 | 📋 [**Capabilities**](docs/CAPABILITIES.md) | Implemented behavior, explicit limits, and unsupported areas. |
 | 🧪 [**Compatibility**](docs/COMPATIBILITY.md) | Versioned framework/workflow observations and first remaining blockers. |
 | 🏗️ [**Architecture**](docs/ARCHITECTURE.md) | Component ownership, execution, rendering, and security boundaries. |
-| 📐 [**Feature contracts**](docs/FEATURE_CONTRACTS.md) | Lasting behavior and acceptance requirements. |
+| 📐 [**Feature contracts**](docs/FEATURE_CONTRACTS.md) | Browser behavior and compatibility expectations. |
 | 🔧 [**Build guide**](docs/BUILDING.md) | Toolchain, source builds, and verification. |
-| 📦 [**Release procedure**](docs/RELEASING.md) | Delivery for explicitly requested releases. |
+| 📦 [**Release procedure**](docs/RELEASING.md) | Verified builds, release history, and delivery requirements. |
 | 📝 [**Changelog**](CHANGELOG.md) | Recorded source history. |
 
 ## Development and reporting
 
-Development uses one open product PR at a time. Merge each coherent change after
-its focused checks, then start the next change from updated main.
+Development uses reviewed pull requests with checks appropriate to the changed
+behavior.
 
 For bug reports and contributions, read [CONTRIBUTING.md](CONTRIBUTING.md). For
 security concerns, follow [SECURITY.md](SECURITY.md).

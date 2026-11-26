@@ -1,8 +1,9 @@
 # Native foundation cohort
 
-This is the development-only F00 input/selection lock for the
-[document foundation plan](../../../docs/HTML_FOUNDATION_PLAN.md). Production
-algorithms remain original Rust/std-only. Upstream corpus bytes stay in an
+This is the development-only F00 input/selection lock for the document foundation.
+The [standards and fixture inventory](../../../docs/HTML_FOUNDATION_COVERAGE.json)
+records the reference inputs. Production algorithms remain original Rust/std-only.
+Upstream corpus bytes stay in an
 explicit external cache and are never downloaded by the runner or shipped in a
 runtime package.
 
