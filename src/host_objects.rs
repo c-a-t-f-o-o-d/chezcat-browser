@@ -748,6 +748,12 @@ impl Runtime {
             if name == "HTMLInputElement" {self.define_host_attribute(prototype,window,"name","\0HTMLInputElement.get.name",Some("\0HTMLInputElement.set.name"))?;}
             if name == "HTMLTextAreaElement" {self.define_host_attribute(prototype,window,"defaultValue","\0HTMLTextAreaElement.get.defaultValue",Some("\0HTMLTextAreaElement.set.defaultValue"))?;}
             if name == "HTMLFieldSetElement" {self.define_host_attribute(prototype,window,"validity","\0HTMLFieldSetElement.get.validity",None)?;self.deferred_host_method(prototype,window,"setCustomValidity","\0HTMLFieldSetElement.setCustomValidity",1)?;self.define_host_attribute(prototype,window,"willValidate","\0HTMLFieldSetElement.get.willValidate",None)?;self.define_host_attribute(prototype,window,"validationMessage","\0HTMLFieldSetElement.get.validationMessage",None)?;self.deferred_host_method(prototype,window,"checkValidity","\0HTMLFieldSetElement.checkValidity",0)?;self.deferred_host_method(prototype,window,"reportValidity","\0HTMLFieldSetElement.reportValidity",0)?;self.define_host_attribute(prototype,window,"disabled","\0HTMLFieldSetElement.get.disabled",Some("\0HTMLFieldSetElement.set.disabled"))?;self.define_host_attribute(prototype,window,"name","\0HTMLFieldSetElement.get.name",Some("\0HTMLFieldSetElement.set.name"))?;self.define_host_attribute(prototype,window,"form","\0HTMLFieldSetElement.get.form",None)?;self.define_host_attribute(prototype,window,"type","\0HTMLFieldSetElement.get.type",None)?;}
+            if let Some(operation)=match name{
+                "HTMLInputElement"=>Some("\0HTMLInputElement.get.willValidate"),
+                "HTMLButtonElement"=>Some("\0HTMLButtonElement.get.willValidate"),
+                "HTMLSelectElement"=>Some("\0HTMLSelectElement.get.willValidate"),
+                "HTMLTextAreaElement"=>Some("\0HTMLTextAreaElement.get.willValidate"),_=>None,
+            }{self.define_host_attribute(prototype,window,"willValidate",operation,None)?;}
             if name == "HTMLFormElement" {
                 self.define_host_attribute(prototype,window,"length","\0HTMLFormElement.get.length",None)?;
                 self.deferred_host_method(prototype,window,"submit",super::HTML_FORM_SUBMIT,0)?;

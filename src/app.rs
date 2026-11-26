@@ -7238,3 +7238,7 @@ mod form_validation_tests;
 #[cfg(test)]
 #[path="app_form_request_tests.rs"]
 mod form_request_tests;
+
+#[cfg(test)]
+#[path="app_control_eligibility_tests.rs"]
+mod control_eligibility_tests;

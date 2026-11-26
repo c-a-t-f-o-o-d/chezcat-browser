@@ -178,6 +178,8 @@ mod script_form_reset;
 mod script_form_validation;
 #[path="script_form_request.rs"]
 mod script_form_request;
+#[path="script_control_eligibility.rs"]
+mod script_control_eligibility;
 #[path = "script_resources.rs"]
 mod script_resources;
 #[path="script_xhr.rs"]
@@ -2032,6 +2034,7 @@ impl Page {
             bridge.native_node_access(node_handle(owner)).map_err(|(_,e)|e)?;
         }
         let work=doc.nodes.len().checked_mul(2).and_then(|n|forms.controls.len().checked_mul(forms.controls.len()).and_then(|m|n.checked_add(m))).ok_or("Validation work overflow.")?;
+        let work=work.checked_add(forms.validation_metadata_work(doc)?).ok_or("Validation metadata work overflow.")?;
         if enabled{self.state.work(work)?;script_text_content::deadline(&self.state)?;}
         let available=if enabled{self.state.retained_limit.saturating_sub(self.state.retained)}else{usize::MAX};
         let snapshot=forms.validation_snapshot(doc,owner,submitter,available)?;
@@ -3359,6 +3362,7 @@ impl Bridge<'_> {
         if self.fieldset_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
+        if self.control_eligibility_member(object,property){return true;}
         if self.fieldset_validation_member(object,property){return true;}
         if self.output_validation_member(object,property){return true;}
         if self.output_validity_member(object,property)||self.validity_member(object,property){return true;}
@@ -3910,6 +3914,7 @@ impl Host for Bridge<'_> {
         if self.fieldset_member(object,property){return false;}
         if self.control_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
+        if self.control_eligibility_member(object,property){return false;}
         if self.fieldset_validation_member(object,property){return false;}
         if self.output_validation_member(object,property){return false;}
         if self.output_validity_member(object,property)||self.validity_receiver(object){return false;}
@@ -4155,6 +4160,7 @@ impl Host for Bridge<'_> {
         if self.fieldset_member(object,property){return matches!(property,"form"|"type");}
         if self.control_form_member(object,property){return true;}
         if property=="type"&&self.output_metadata_member(object,property){return true;}
+        if self.control_eligibility_member(object,property){return true;}
         if self.fieldset_validation_readonly(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
         if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object))||self.validity_member(object,property){return true;}
@@ -5003,6 +5009,7 @@ impl Host for Bridge<'_> {
         if script_fieldset::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_control_form::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_output_metadata::operation(method)&&self.event_target_interface(object){return Some(object);}
+        if script_control_eligibility::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_fieldset_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validation::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_output_validity_state::operation(method)&&self.event_target_interface(object){return Some(object);}
@@ -5441,6 +5448,7 @@ impl Host for Bridge<'_> {
         if script_fieldset::operation(method){return self.validate_fieldset(object);}
         if script_control_form::interface(method).is_some(){return self.validate_control_form(object,method);}
         if script_output_metadata::operation(method){return self.validate_output_metadata(object);}
+        if let Some(class)=script_control_eligibility::interface(method){return self.validate_control_eligibility(object,class);}
         if script_fieldset_validation::operation(method){return self.validate_fieldset(object);}
         if script_output_validation::operation(method){return self.validate_output_metadata(object);}
         if script_output_validity_state::operation(method){return self.validate_output_validity(object,method);}
@@ -6128,6 +6136,7 @@ impl Host for Bridge<'_> {
         if script_fieldset::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_control_form::interface(method).is_some(){return self.event_target_interface(object)&&self.control_form_matches(receiver,method);}
         if script_output_metadata::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
+        if let Some(class)=script_control_eligibility::interface(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if script_fieldset_validation::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else if matches!(method,script_output_validity_state::FIELD_GET|script_output_validity_state::FIELD_SET){self.fieldset_receiver(receiver)}else{self.html_output_receiver(receiver)};}
@@ -7146,6 +7155,7 @@ impl Host for Bridge<'_> {
         if self.fieldset_member(object,property){return self.fieldset_get(object,match property{"form"=>script_fieldset::FORM,"name"=>script_fieldset::NAME_GET,"disabled"=>script_fieldset::DISABLED_GET,_=>script_fieldset::TYPE});}
         if self.control_form_member(object,property){return self.control_form_get(object,self.control_form_method(object).unwrap());}
         if self.output_metadata_member(object,property){return self.output_metadata_get(object,property);}
+        if self.control_eligibility_member(object,property){return self.control_eligibility_get(object);}
         if self.fieldset_validation_readonly(object,property){return self.fieldset_validation(object,if property=="willValidate"{script_fieldset_validation::WILL_GET}else{script_fieldset_validation::MESSAGE_GET});}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
         if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object)){return self.output_validity_call(object,if self.fieldset_receiver(object){script_output_validity_state::FIELD_GET}else{script_output_validity_state::GET},&[]);}
@@ -8305,6 +8315,7 @@ impl Host for Bridge<'_> {
         if script_control_form::interface(method).is_some(){return self.control_form_get(object,method);}
         if let Some((property,setter))=script_output_value::operation(method){return if setter{Err("OUTPUT value setters require the native conversion transaction.".into())}else{self.output_value_get(object,property)};}
         if method==script_output_metadata::NAME_GET{return self.output_metadata_get(object,"name");}
+        if script_control_eligibility::interface(method).is_some(){return self.control_eligibility_get(object);}
         if script_fieldset_validation::operation(method){return self.fieldset_validation(object,method);}
         if script_output_validation::operation(method){return self.output_validation(object,method);}
         if script_output_validity_state::operation(method){return self.output_validity_call(object,method,args);}
@@ -12198,3 +12209,7 @@ mod form_validation_tests;
 #[cfg(test)]
 #[path="script_form_request_tests.rs"]
 mod form_request_tests;
+
+#[cfg(test)]
+#[path="script_control_eligibility_tests.rs"]
+mod control_eligibility_tests;
