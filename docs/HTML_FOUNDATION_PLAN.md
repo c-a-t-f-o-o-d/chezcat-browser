@@ -1245,8 +1245,11 @@ or silent input truncation is not an acceptable recovery result.
   Forward/backward callbacks distinguish flat iterator filtering from TreeWalker;
   native removal/move/replacement/content/normalization proposals adjust references
   and active candidates without requiring an observer. Checked admission, callback
-  realms, refusal/recovery and a real App consumer cover this path. Child/inert
-  Document factories and complete traversal/package entry paths remain required.
+  realms, refusal/recovery and a real App consumer cover this path. Genuine inert
+  Documents, including appropriate template owners, share both canonical traversal
+  factories and may supply independent native roots. Captured receiver/root
+  authority is rechecked after mask conversion. Child-document factories and
+  complete traversal/package entry paths remain required.
   Native TreeWalker function/object filters now distinguish subtree rejection
   from skipping across all seven movements, preserve live cursor/tree changes,
   route supported same-origin callback realms, and unwind active-filter state

@@ -252,6 +252,13 @@ impl Runtime {
             Some(Value::Host(id)) => Some(Filter::Host(*id)),
             _ => return Err(Fault::exception("TypeError", "TreeWalker filter must be an object or null.")),
         };
+        // Numeric mask conversion can run author code. Recheck the captured
+        // native inputs before reserving and publishing the walker identity.
+        self.validate_native_access(document, host)?;
+        self.validate_native_access(root, host)?;
+        if !host.tree_walker_document(document) || host.tree_walker_node_type(root).is_none() {
+            return Err(Fault::exception("TypeError", "TreeWalker native inputs are no longer accessible."));
+        }
         if self.walkers.walkers.len() >= MAX_TREE_WALKERS {
             return Err(Fault::new("TreeWalker identity limit reached."));
         }
@@ -409,4 +416,35 @@ impl Runtime {
             if node == walker.root || self.filter_tree_walker(id, node, host)? == 1 { return Ok(None); }
         }
     }
+}
+
+#[cfg(test)]
+mod inert_factory_tests {
+ use super::*;
+ #[test]
+ fn inert_traversal_factory_rechecks_captured_document_authority_after_mask_conversion(){
+  struct Guard{denied:bool}
+  impl Host for Guard{
+   fn get(&mut self,_:u32,_:&str)->Result<Value,String>{Ok(Value::Undefined)}
+   fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{panic!("unexpected native write")}
+   fn method(&self,id:u32,key:&str)->Option<&'static str>{(id==0&&key=="revoke").then_some("revoke")}
+   fn call(&mut self,id:u32,key:&str,_:&[Value])->Result<Value,String>{assert_eq!((id,key),(0,"revoke"));self.denied=true;Ok(Value::Undefined)}
+   fn tree_walker_document(&self,id:u32)->bool{id==9}
+   fn tree_walker_node_type(&self,id:u32)->Option<u32>{(id==1).then_some(1)}
+   fn native_access_owner(&self,id:u32)->Option<u32>{(id==9).then_some(99)}
+   fn validate_window_access(&self,_:Option<u32>,_:u32)->Result<(),String>{if self.denied{Err("denied captured document owner".into())}else{Ok(())}}
+  }
+  for iterator in [false,true]{
+   let mut runtime=Runtime::for_capacity_test();let mut host=Guard{denied:false};
+   runtime.put_binding(runtime.global_environment,"control".into(),Some(Value::Host(0)),Declaration::Var,true).unwrap();
+   runtime.execute("var conversions=0;var mask={valueOf:function(){conversions++;control.revoke();return 1;}};0;",&mut host).unwrap();
+   let mask=runtime.binding_value(runtime.global_environment,"mask").unwrap();let args=[Value::Host(1),mask];
+   let result=if iterator{runtime.node_iterator_builtin(node_iterator::Op::Create,&args,Value::Host(9),&mut host)}else{runtime.tree_walker_builtin(Op::Create,&args,Value::Host(9),&mut host)};
+   assert!(result.unwrap_err().display().contains("denied captured document owner"));
+   assert_eq!(runtime.binding_value(runtime.global_environment,"conversions").unwrap().to_number(),1.0);
+   host.denied=false;
+   let made=if iterator{runtime.node_iterator_builtin(node_iterator::Op::Create,&[Value::Host(1)],Value::Host(9),&mut host)}else{runtime.tree_walker_builtin(Op::Create,&[Value::Host(1)],Value::Host(9),&mut host)}.unwrap();
+   let root=if iterator{runtime.node_iterator_builtin(node_iterator::Op::Root,&[],made,&mut host)}else{runtime.tree_walker_builtin(Op::Root,&[],made,&mut host)}.unwrap();assert!(matches!(root,Value::Host(1)));
+  }
+ }
 }

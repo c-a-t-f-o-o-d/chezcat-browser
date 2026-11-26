@@ -7322,3 +7322,7 @@ mod node_iterator_state_tests;
 #[cfg(test)]
 #[path="app_node_iterator_live_tests.rs"]
 mod node_iterator_live_tests;
+
+#[cfg(test)]
+#[path="app_inert_traversal_factory_tests.rs"]
+mod inert_traversal_factory_tests;

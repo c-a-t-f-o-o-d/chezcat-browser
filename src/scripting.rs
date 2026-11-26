@@ -3439,7 +3439,7 @@ impl Host for Bridge<'_> {
     fn cancel_request_work(&mut self){self.xhr_cancel_all();}
     fn prepare_range_operation(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error> { self.validate_range_call(receiver,method,args) }
     fn tree_walker_document(&self, document: u32) -> bool {
-        document == DOCUMENT
+        document == DOCUMENT || self.inert_node_type(document) == Some(9)
     }
 
     fn tree_walker_node_type(&self, node: u32) -> Option<u32> {
@@ -12312,3 +12312,7 @@ mod node_iterator_state_tests;
 #[cfg(test)]
 #[path="script_node_iterator_live_tests.rs"]
 mod node_iterator_live_tests;
+
+#[cfg(test)]
+#[path="script_inert_traversal_factory_tests.rs"]
+mod inert_traversal_factory_tests;
