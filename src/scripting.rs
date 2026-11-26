@@ -12381,3 +12381,7 @@ mod range_inert_deletion_tests;
 #[cfg(test)]
 #[path="script_range_inert_extraction_tests.rs"]
 mod range_inert_extraction_tests;
+
+#[cfg(test)]
+#[path="script_range_inert_wrapping_tests.rs"]
+mod range_inert_wrapping_tests;
