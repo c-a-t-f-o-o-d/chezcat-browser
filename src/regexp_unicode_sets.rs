@@ -94,6 +94,7 @@ fn part_ranges(part: ClassPart, budget: &mut usize) -> Result<Ranges, Error> {
         ClassPart::Range(low, high) => {
             let mut out = Vec::new();push(&mut out, *low, *high, budget)?;return Ok(out);
         }
+        ClassPart::Property(ranges, inverted) => (*ranges, *inverted),
         ClassPart::Digit(inverted) => (&[(48,57)], *inverted),
         ClassPart::Word(inverted) => (&[(48,57),(65,90),(95,95),(97,122)], *inverted),
         ClassPart::Space(inverted) => (&[(9,13),(32,32),(0xa0,0xa0),(0x1680,0x1680),(0x2000,0x200a),(0x2028,0x2029),(0x202f,0x202f),(0x205f,0x205f),(0x3000,0x3000),(0xfeff,0xfeff)], *inverted),
