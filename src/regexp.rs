@@ -379,7 +379,6 @@ impl Parser {
             .ok_or(Error::Syntax("Missing regular-expression atom."))?;
         self.at += 1;
         match unit {
-            46 if self.unicode => Err(Error::Unsupported("Unicode regexp dot is not implemented.")),
             46 => self.push(Node::Any),
             94 => self.push(Node::Start),
             36 => self.push(Node::End),
@@ -670,9 +669,6 @@ impl Parser {
             .ok_or(Error::Syntax("Trailing regular-expression escape."))?;
         self.at += 1;
         let literal = match unit {
-            68 | 87 | 83 if self.unicode => {
-                return Err(Error::Unsupported("Unicode regexp complemented character sets are not implemented."));
-            }
             100 | 68 => return Ok(ClassPart::Digit(unit == 68)),
             119 | 87 => return Ok(ClassPart::Word(unit == 87)),
             115 | 83 => return Ok(ClassPart::Space(unit == 83)),
@@ -755,9 +751,6 @@ impl Parser {
     }
     fn class(&mut self) -> Result<Class, Error> {
         let inverted = self.eat(b'^' as u16);
-        if inverted && self.unicode {
-            return Err(Error::Unsupported("Unicode regexp inverted classes are not implemented."));
-        }
         let mut parts = Vec::new();
         while self.peek() != Some(b']' as u16) {
             let start = self.class_atom()?;
