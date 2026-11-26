@@ -2864,7 +2864,8 @@ impl Bridge<'_> {
         let detached_style = self.created_html_style(node)
             && self.state.detached_nodes.contains(&node)
             && self.state.dom.connected.get(node) == Some(&false);
-        if !self.text_content_container(node) && textarea_default.is_none() && !self.title_receiver(node_handle(node)) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
+        let passive_noscript = self.movable_noscript_host(node)?;
+        if !self.text_content_container(node) && !passive_noscript && textarea_default.is_none() && !self.title_receiver(node_handle(node)) && !detached_style && !matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment) {
             return Err(
                 "textContent replacement requires an ordinary text container, button or detached created HTML style element.".into(),
             );
@@ -2878,8 +2879,9 @@ impl Bridge<'_> {
         }
         while let Some(child) = stack.pop() {
             self.state.work(1)?;
+            let passive_noscript = self.movable_noscript_host(child)?;
             if let NodeKind::Element { tag, .. } = &self.doc.nodes[child].kind {
-                if (!self.text_content_container(child) || matches!(tag.as_str(),"button"|"option"))&&!self.movable_template_host(child) {
+                if (!self.text_content_container(child) && !passive_noscript || matches!(tag.as_str(),"button"|"option"))&&!self.movable_template_host(child) {
                     return Err("textContent cannot remove controls, resources, scripts or structural elements.".into());
                 }
             }
@@ -12711,3 +12713,7 @@ mod dataset_reflect_get_tests;
 #[cfg(test)]
 #[path="script_script_data_block_tree_tests.rs"]
 mod script_data_block_tree_tests;
+
+#[cfg(test)]
+#[path="script_noscript_text_content_tests.rs"]
+mod noscript_text_content_tests;

@@ -44,13 +44,14 @@ impl Bridge<'_> {
         let Some(node) = node_index(object).filter(|&node| self.dom_accessible(node)) else {
             return Ok(None);
         };
+        let passive_noscript = property == "textContent" && self.movable_noscript_host(node)?;
         let item = &self.doc.nodes[node];
         let supported = if property == "innerHTML" {
             item.namespace == crate::html::Namespace::Html
                 && matches!(item.kind, NodeKind::Element { .. })
                 && !matches!(tag(self.doc, node), "script" | "style")
         } else {
-            self.text_content_container(node) || self.owned_native_textarea(node) || self.title_receiver(object)
+            self.text_content_container(node) || passive_noscript || self.owned_native_textarea(node) || self.title_receiver(object)
                 || self.created_html_style(node) && self.state.detached_nodes.contains(&node)
                 || matches!(item.kind, NodeKind::DocumentFragment)
         };
