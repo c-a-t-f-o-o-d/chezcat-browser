@@ -210,6 +210,8 @@ mod string_concat;
 pub(crate) mod window_relationships;
 #[path = "string_units.rs"]
 mod string_units;
+#[path = "string_split.rs"]
+mod string_split;
 #[cfg(test)]
 #[path = "string_unit_tests.rs"]
 mod string_unit_tests;
@@ -6162,114 +6164,6 @@ impl Runtime {
 
 
 
-    fn split_string(&mut self, text: &str, args: &[Value]) -> Result<Value, Fault> {
-        self.work(text.len().saturating_mul(3))?;
-        let separator = args.first().unwrap_or(&Value::Undefined);
-        let expression = match separator {
-            Value::Object(id) => self.object(*id)?.regexp.clone(),
-            _ => None,
-        };
-        if expression.is_none() {
-            separator.primitive()?;
-        }
-        let limit_value = args.get(1).unwrap_or(&Value::Undefined);
-        limit_value.primitive()?;
-        self.work(limit_value.bytes().saturating_mul(2))?;
-        let limit = if matches!(limit_value, Value::Undefined) {
-            u32::MAX as usize
-        } else {
-            int32(limit_value.script_number()?) as u32 as usize
-        };
-        let mut pieces = Vec::new();
-        if limit == 0 {
-            return self.array_from_values(&pieces);
-        }
-        if matches!(separator, Value::Undefined) {
-            return self.array_from_values(&[Value::String(text.into())]);
-        }
-        let input: Vec<_> = text.encode_utf16().collect();
-        if let Some(expression) = expression {
-            if input.is_empty() {
-                if expression
-                    .find(&input, 0, true, &mut self.regexp_work)
-                    .map_err(Self::regexp_fault)?
-                    .is_none()
-                {
-                    pieces.push(Value::String(String::new()));
-                }
-                return self.array_from_values(&pieces);
-            }
-            let mut previous = 0;
-            let mut at = 0;
-            while at < input.len() {
-                self.step()?;
-                let Some(found) = expression
-                    .find(&input, at, true, &mut self.regexp_work)
-                    .map_err(Self::regexp_fault)?
-                else {
-                    at = regexp::advance_string_index(&input, at, expression.flags.unicode);
-                    continue;
-                };
-                if found.end() == previous {
-                    at = regexp::advance_string_index(&input, at, expression.flags.unicode);
-                    continue;
-                }
-                let value = Value::String(self.units_string(&input[previous..at])?);
-                if self.push_split(&mut pieces, value, limit)? {
-                    return self.array_from_values(&pieces);
-                }
-                for capture in found.captures.iter().skip(1) {
-                    let value = if let Some((start, end)) = capture {
-                        Value::String(self.units_string(&input[*start..*end])?)
-                    } else {
-                        Value::Undefined
-                    };
-                    if self.push_split(&mut pieces, value, limit)? {
-                        return self.array_from_values(&pieces);
-                    }
-                }
-                previous = found.end();
-                at = previous;
-            }
-            let value = Value::String(self.units_string(&input[previous..])?);
-            self.push_split(&mut pieces, value, limit)?;
-        } else {
-            self.work(separator.bytes())?;
-            let separator = separator.script_text()?;
-            if separator.is_empty() {
-                for unit in input {
-                    let value = Value::String(self.units_string(&[unit])?);
-                    if self.push_split(&mut pieces, value, limit)? {
-                        break;
-                    }
-                }
-            } else {
-                for piece in text.split(&separator) {
-                    self.work(piece.len())?;
-                    if self.push_split(&mut pieces, Value::String(piece.into()), limit)? {
-                        break;
-                    }
-                }
-            }
-        }
-        self.array_from_values(&pieces)
-    }
-
-    fn push_split(
-        &mut self,
-        pieces: &mut Vec<Value>,
-        value: Value,
-        limit: usize,
-    ) -> Result<bool, Fault> {
-        self.step()?;
-        if pieces.len() >= self.limits.heap.array_length {
-            return Err(Fault::new(format!("Array length limit reached ({}).", self.limits.heap.array_length)));
-        }
-        pieces.push(value);
-        Ok(pieces.len() >= limit)
-    }
-
-
     fn error_object(
         &mut self,
         kind: &'static str,
@@ -10483,6 +10377,9 @@ impl Runtime {
         if method == "trim" && object.is_string() {
             return self.string_trim_value(&object);
         }
+        if method == "split" && object.is_string() {
+            return self.string_split_value(&object, args);
+        }
         if let Value::StringUnits(ref units) = object {
             return match method {
                 "toString" | "valueOf" => Ok(object),
@@ -10498,7 +10395,6 @@ impl Runtime {
             }
             self.work_as(text.len().saturating_mul(3), WorkKind::StringMethodInput)?;
             return match method {
-                "split" => self.split_string(&text, args),
                 "toString" | "valueOf" => self.checked_value(Value::String(text)),
                 "toLowerCase" => self.checked_value(Value::String(text.to_lowercase())),
                 "toUpperCase" => self.checked_value(Value::String(text.to_uppercase())),
@@ -12531,10 +12427,9 @@ var separator=/,/g;separator.lastIndex=2;
             "2"
         );
         let (mut runtime, mut host) = test_runtime();
-        assert!(runtime
-            .execute("'😀'.split('');", &mut host)
-            .unwrap_err()
-            .contains("surrogate"));
+        assert_eq!(runtime
+            .execute("var halves='😀'.split('');halves.length===2&&halves[0].charCodeAt(0)===55357&&halves[1].charCodeAt(0)===56832;", &mut host)
+            .unwrap().to_text(), "true");
         runtime.begin_job();
         let input = format!("'{}'.split('');", "x".repeat(MAX_ARRAY_LENGTH + 1));
         assert!(runtime

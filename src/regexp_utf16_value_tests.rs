@@ -276,9 +276,8 @@ if(!(error instanceof SyntaxError)||!/^\ud800$/u.test('\ud800'))throw 'syntax th
 }
 
 #[test]
-fn unicode_surrogate_pattern_split_backend_refusal_preserves_native_recovery() {
+fn unicode_surrogate_pattern_split_backend_preserves_exact_units_and_native_recovery() {
     let mut runtime=Runtime::for_test();
-    let error=runtime.execute(r"'a\ud800b'.split(/\ud800/u)",&mut NoHost).unwrap_err();
-    assert!(error.contains("This string method does not support unpaired UTF-16 surrogates."),"{error}");
+    assert_eq!(runtime.execute(r"'a\ud800b'.split(/\ud800/u).join('|')",&mut NoHost).unwrap().to_text(),"a|b");
     assert_eq!(runtime.execute(r"/^\ud800$/u.test('\ud800') ? 'ok' : 'bad'",&mut NoHost).unwrap().to_text(),"ok");
 }
