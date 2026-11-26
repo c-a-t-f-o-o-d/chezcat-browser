@@ -498,7 +498,7 @@ pub(super) struct CreatedEvent {
     pub(super) initialized: bool,
     pub(super) trusted: bool,
     pub(super) passive: bool,
-    timestamp: f64,
+    pub(super) timestamp: f64,
     data: UiRecord,
     custom: Option<Value>,
     message: bool,

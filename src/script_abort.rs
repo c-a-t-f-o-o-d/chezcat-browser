@@ -13,6 +13,8 @@ pub(super) struct Record {
     controller: bool,
     reason: Value,
     timeout: Option<Timeout>,
+    dependent:bool,
+    sources:Vec<u32>,
 }
 
 impl Bridge<'_> {
@@ -81,7 +83,7 @@ impl Bridge<'_> {
             self.state.copies(self.state.abort_signals.len()*size_of::<Record>())?;
             signals.append(&mut self.state.abort_signals);self.state.abort_signals=signals;
         }
-        self.state.abort_signals.push(Record{owner,controller,reason,timeout:None});
+        self.state.abort_signals.push(Record{owner,controller,reason,timeout:None,dependent:false,sources:Vec::new()});
         self.state.retained+=bytes+added;
         Ok(index
             + if controller {
@@ -128,46 +130,108 @@ impl Bridge<'_> {
         }
     }
 
-    pub(super) fn commit_abort_dispatch(
-        &mut self,
-        controller: u32,
-        reason: Value,
-    ) -> Result<usize, String> {
-        let (record, is_signal) = self
-            .abort_record(controller)
-            .ok_or("Unknown AbortController.")?;
-        if is_signal || !matches!(record.reason,Value::Undefined) {return Err("Invalid AbortController cancellation transition.".into());}
+
+    pub(super) fn validate_abort_signal_argument(&mut self,value:&Value)->Result<u32,ArgumentError>{
+        let Value::Host(signal)=value else{return Err(ArgumentError::TypeError("A genuine AbortSignal is required.".into()));};
+        let owner=self.abort_signal_owner(*signal).ok_or_else(||ArgumentError::TypeError("A genuine AbortSignal is required.".into()))?;
+        self.window_relationship_access(owner).map_err(ArgumentError::Fatal)?;
+        Ok(*signal)
+    }
+    pub(super) fn create_dependent_signal(&mut self,owner:u32,signals:&[u32])->Result<u32,String>{
+        self.window_relationship_access(owner)?;
+        if owner!=WINDOW{self.contains_child_document(owner)?;}
+        self.state.work(signals.len().saturating_add(1))?;
+        for &signal in signals{self.validate_abort_signal_argument(&Value::Host(signal)).map_err(|error|match error{ArgumentError::TypeError(message)|ArgumentError::Fatal(message)=>message})?;}
+        if let Some(signal)=signals.iter().copied().find(|signal|self.listener_signal_aborted(*signal)){
+            let bytes=self.abort_record(signal).unwrap().0.reason.bytes();self.state.copies(bytes)?;
+            let reason=retained_storage::copy_value(&self.abort_record(signal).unwrap().0.reason)?;
+            return self.create_abort_record(owner,false,reason);
+        }
+        let mut roots=Vec::new();
+        for &signal in signals{
+            let dependent=self.abort_record(signal).unwrap().0.dependent;
+            let count=if dependent{self.abort_record(signal).unwrap().0.sources.len()}else{1};
+            for index in 0..count{
+                let root=if dependent{self.abort_record(signal).unwrap().0.sources[index]}else{signal};
+                self.state.work(roots.len().saturating_add(1))?;
+                if !roots.contains(&root){self.state.push_dispatch_temporary(&mut roots,root,0)?;}
+            }
+        }
+        let held=roots.capacity().checked_mul(size_of::<u32>()).ok_or("Abort dependency metadata overflow.")?;
+        self.state.retained=self.state.retained.checked_add(held).filter(|bytes|*bytes<=self.state.retained_limit).ok_or("Abort dependency storage allowance exhausted.")?;
+        let signal=match self.create_abort_record(owner,false,Value::Undefined){Ok(signal)=>signal,Err(error)=>{self.state.retained-=held;return Err(error);}};
+        let record=&mut self.state.abort_signals[(signal-SIGNAL_BASE)as usize];record.dependent=true;record.sources=roots;
+        Ok(signal)
+    }
+    pub(super) fn remove_aborted_signal_listeners(&mut self,signal:u32){
+        self.state.retained-=self.state.listeners.retain(|listener|listener.options.signal!=Some(signal));
+    }
+    pub(super) fn commit_abort_dispatch(&mut self,controller:u32,reason:Value)->Result<Vec<Dispatch>,String>{
+        let (record,is_signal)=self.abort_record(controller).ok_or("Unknown AbortController.")?;
+        if is_signal||!matches!(record.reason,Value::Undefined){return Err("Invalid AbortController cancellation transition.".into());}
         self.commit_signal_abort_dispatch(controller-CONTROLLER_BASE+SIGNAL_BASE,reason)
     }
-    fn commit_signal_abort_dispatch(&mut self,signal:u32,reason:Value)->Result<usize,String>{
+    fn commit_signal_abort_dispatch(&mut self,signal:u32,reason:Value)->Result<Vec<Dispatch>,String>{
         let (record,is_signal)=self.abort_record(signal).ok_or("Unknown native AbortSignal.")?;
-        if !is_signal || !matches!(record.reason,Value::Undefined) || matches!(reason,Value::Undefined){return Err("Invalid native AbortSignal cancellation transition.".into());}
-        let owner=record.owner;
-        // Charge the removal scan before reserving or publishing abort state.
-        // Stable slots let active dispatch snapshots observe these removals.
-        self.state.work(self.state.listeners.len())?;
-        let bytes=retained_storage::value_bytes(&reason);
-        let retained=self.state.retained.checked_add(bytes).filter(|bytes|*bytes<=self.state.retained_limit)
-            .ok_or("AbortSignal reason retention limit reached.")?;
-        self.state.copies(reason.bytes())?;
-        // Hold the reason across Event construction and dispatch preparation;
-        // those reservations must not spend the same remaining allowance.
-        self.state.retained=retained;
-        let result=(|| {
-            let Value::Host(event)=self.construct_base_event(owner,&[Value::String("abort".into())],None)? else {unreachable!()};
-            let token=match self.begin_synthetic_dispatch(signal,&[Value::Host(event)]) {
-                Ok(token)=>token,
-                Err(error)=>{self.rollback_base_event(event)?;return Err(error);}
-            };
-            self.state.abort_signals[(signal-SIGNAL_BASE) as usize].reason=reason;
-            self.state.retained-=self.state.listeners.retain(|listener|listener.options.signal!=Some(signal));
-            let entry=self.created_event_index(event).unwrap();
-            self.state.created_events[entry].trusted=true;
-            Ok(token)
+        if !is_signal||!matches!(record.reason,Value::Undefined)||matches!(reason,Value::Undefined){return Err("Invalid native AbortSignal cancellation transition.".into());}
+        self.state.work(self.state.abort_signals.len())?;
+        let scan=self.state.abort_signals.iter().try_fold(1usize,|sum,record|sum.checked_add(record.sources.len().saturating_add(1))).ok_or("Abort dependency scan overflow.")?;
+        self.state.work(scan.checked_mul(2).ok_or("Abort dependency scan overflow.")?)?;
+        let count=self.state.abort_signals.iter().filter(|record|matches!(record.reason,Value::Undefined)&&record.sources.contains(&signal)).count().checked_add(1).ok_or("Abort batch size overflow.")?;
+        // Every removal scan is admitted before any reason or listener changes.
+        self.state.work(self.state.listeners.len().checked_mul(count.checked_mul(2).ok_or("Abort scan overflow.")?).ok_or("Abort scan overflow.")?)?;
+        let mut steps=Vec::new();self.state.reserve_dispatch_temporary(&mut steps,count,0)?;
+        let metadata=steps.capacity().checked_mul(size_of::<Dispatch>()).ok_or("Abort batch metadata overflow.")?;
+        self.state.copies(count.checked_mul(size_of::<Dispatch>()).ok_or("Abort batch copy overflow.")?)?;
+        steps.push(Dispatch{token:None,signal,event:0,reason:Value::Undefined});
+        for (index,record) in self.state.abort_signals.iter().enumerate(){
+            if matches!(record.reason,Value::Undefined)&&record.sources.contains(&signal){steps.push(Dispatch{token:None,signal:SIGNAL_BASE+index as u32,event:0,reason:Value::Undefined});}
+        }
+        self.state.retained+=metadata;
+        let mut reason_bytes=0usize;
+        let result=(||->Result<(),String>{
+            for step in &mut steps{
+                let owner=self.abort_record(step.signal).unwrap().0.owner;
+                self.window_relationship_access(owner)?;
+                if owner!=WINDOW{self.contains_child_document(owner)?;}
+                if retained_storage::value_bytes(&reason)>self.state.retained_limit.saturating_sub(self.state.retained){return Err("AbortSignal reason retention limit reached.".into());}
+                self.state.copies(reason.bytes())?;
+                let copied=retained_storage::copy_value(&reason)?;let bytes=retained_storage::value_bytes(&copied);
+                let retained=self.state.retained.checked_add(bytes).filter(|bytes|*bytes<=self.state.retained_limit).ok_or("AbortSignal reason retention limit reached.")?;
+                reason_bytes=reason_bytes.checked_add(bytes).ok_or("Abort reason size overflow.")?;
+                self.state.retained=retained;step.reason=copied;
+            }
+            // Prepare in reverse so the original source is at the top of the
+            // checked dispatch stack, followed by dependents in creation order.
+            for step in steps.iter_mut().rev(){
+                let owner=self.abort_record(step.signal).unwrap().0.owner;
+                let Value::Host(event)=self.construct_base_event(owner,&[Value::String("abort".into())],None)? else{unreachable!()};
+                step.event=event;
+                step.token=Some(self.begin_synthetic_dispatch(step.signal,&[Value::Host(event)])?);
+            }
+            Ok(())
         })();
-        if result.is_err(){self.state.retained-=bytes;}
-        result
+        if let Err(error)=result{
+            for step in &steps{
+                if let Some(token)=step.token{self.finish_synthetic_dispatch(token);}
+                if step.event!=0{
+                    let index=self.created_event_index(step.event).unwrap();
+                    self.state.created_events[index].target=None;
+                    self.rollback_base_event(step.event)?;
+                }
+            }
+            self.state.retained-=metadata+reason_bytes;
+            return Err(error);
+        }
+        for step in &mut steps{
+            let record=&mut self.state.abort_signals[(step.signal-SIGNAL_BASE)as usize];
+            record.reason=std::mem::replace(&mut step.reason,Value::Undefined);
+            self.state.retained-=record.sources.capacity()*size_of::<u32>();record.sources=Vec::new();
+            let index=self.created_event_index(step.event).unwrap();self.state.created_events[index].trusted=true;
+        }
+        Ok(steps)
     }
+
 }
 
 #[cfg(test)]
@@ -316,7 +380,7 @@ impl Page{
             }
             let reason=self.runtime.timeout_abort_reason(owner,&mut Bridge{doc,forms,state:&mut self.state})?;
             let token=Bridge{doc,forms,state:&mut self.state}.commit_signal_abort_dispatch(SIGNAL_BASE+index as u32,reason)?;
-            self.runtime.invoke_native_dispatch(token,&mut Bridge{doc,forms,state:&mut self.state})?;
+            self.runtime.invoke_abort_dispatches(token,&mut Bridge{doc,forms,state:&mut self.state})?;
             Ok(())
         })();
         if let Err(error)=result{self.state.clear_abort_timeouts();self.runtime.cancel_microtasks();self.state.error("AbortSignal.timeout",&error);}
