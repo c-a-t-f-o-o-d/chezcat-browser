@@ -3466,6 +3466,8 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn named_units_setter(&self,object:u32)->bool{(DATASET_BASE..EVENT_BASE).contains(&object)}
+    fn named_units_assignment(&mut self,object:u32,units:&[u16])->Result<crate::javascript::NativeNamedAssignment,String>{self.dataset_units_assignment(object,units)}
     fn named_units_deletion(&mut self,object:u32,units:&[u16])->Result<Option<crate::javascript::NativeNamedDeletion>,String>{
         if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
         let Some((node,index))=self.dataset_units_attribute(object,units)? else{return Ok(Some(crate::javascript::NativeNamedDeletion::Absent))};
@@ -12646,3 +12648,7 @@ mod attribute_namespace_presence_tests;
 #[cfg(test)]
 #[path="script_attribute_list_presence_tests.rs"]
 mod attribute_list_presence_tests;
+
+#[cfg(test)]
+#[path="script_dataset_raw_assignment_tests.rs"]
+mod dataset_raw_assignment_tests;

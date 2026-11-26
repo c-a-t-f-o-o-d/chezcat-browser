@@ -7466,3 +7466,7 @@ mod attribute_namespace_presence_tests;
 #[cfg(test)]
 #[path="app_attribute_list_presence_tests.rs"]
 mod attribute_list_presence_tests;
+
+#[cfg(test)]
+#[path="app_dataset_raw_assignment_tests.rs"]
+mod dataset_raw_assignment_tests;

@@ -124,6 +124,22 @@ impl Runtime {
     ) -> Result<(), Fault> {
         Self::require_property_receiver(&receiver)?;
         self.property_name_units(&units)?;
+        if let Value::Host(handle)=&receiver {
+            self.validate_native_access(*handle,host)?;
+            if host.named_units_setter(*handle) {
+                let primitive=self.primitive_with_hint(value,true,host)?;
+                self.work(primitive.bytes())?;
+                let value=self.checked_value(if primitive.is_string(){primitive}else{Value::String(primitive.script_text()?)})?;
+                self.pin_exported_value(&value);
+                self.validate_native_access(*handle,host)?;
+                host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+                match host.named_units_assignment(*handle,&units).map_err(Fault::new)? {
+                    NativeNamedAssignment::SyntaxError=>return Err(Fault::thrown(self.native_dom_exception("SyntaxError","Dataset keys cannot contain a hyphen followed by a lowercase ASCII letter.")?)),
+                    NativeNamedAssignment::InvalidCharacterError=>return Err(Fault::thrown(self.native_dom_exception("InvalidCharacterError","Dataset key is not a valid attribute local name.")?)),
+                    NativeNamedAssignment::Attribute{element,name}=>{self.call_host(element,"setAttribute",&[name,value],host)?;return Ok(());}
+                }
+            }
+        }
         let backing = self.symbol_backing(&receiver, host)?;
         let Some(base) = self.units_lookup_base(&receiver, host)? else {
             return Err(Fault::new("UTF-16 properties require an ordinary object, supported primitive or registered native expando store."));
