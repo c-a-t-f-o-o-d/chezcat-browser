@@ -12281,3 +12281,7 @@ mod text_family_admission_tests;
 #[cfg(test)]
 #[path="script_tree_walker_filter_tests.rs"]
 mod tree_walker_filter_tests;
+
+#[cfg(test)]
+#[path="script_range_clone_contents_tests.rs"]
+mod range_clone_contents_tests;

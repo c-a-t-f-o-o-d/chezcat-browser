@@ -1217,6 +1217,13 @@ or silent input truncation is not an acceptable recovery result.
   CharacterData, Text, AbortController/AbortSignal and the current AbstractRange,
   NodeRange, Range and StaticRange interfaces. Implement actual range extract,
   clone, delete, insert and surround operations and code-unit boundaries.
+  Native cloneContents now copies supported displayed-document selections into
+  independent fragments, including exact CharacterData slices, whole subtrees,
+  partial ancestors and separate template content roots with appropriate owners.
+  Native hierarchy errors, checked joint storage, refusal/recovery and actual App
+  insertion have focused evidence. Inert/child endpoints, native control/handler
+  lifecycles, arbitrary SVG attribute namespace production and complete Range
+  operations/package acceptance remain required; no contract is newly accepted.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
   Native TreeWalker function/object filters now distinguish subtree rejection

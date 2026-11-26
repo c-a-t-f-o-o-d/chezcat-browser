@@ -112,7 +112,7 @@ impl Bridge<'_> {
     pub(super) fn range_owner(&self, handle: u32) -> Option<u32> {
         self.range_record(handle).map(|range| range.owner)
     }
-    fn range_node(&self, handle: u32) -> Result<usize, String> {
+    pub(in crate::scripting) fn range_node(&self, handle: u32) -> Result<usize, String> {
         if handle == DOCUMENT {
             return Ok(0);
         }
@@ -122,7 +122,7 @@ impl Bridge<'_> {
                 "Range endpoints currently require accessible displayed-document nodes.".into()
             })
     }
-    fn range_length(&mut self, handle: u32) -> Result<usize, String> {
+    pub(in crate::scripting) fn range_length(&mut self, handle: u32) -> Result<usize, String> {
         let node = self.range_node(handle)?;
         let item = &self.doc.nodes[node];
         if let Some(text) = item.kind.character_dom_string() {
@@ -132,7 +132,7 @@ impl Bridge<'_> {
             Ok(item.children.len())
         }
     }
-    fn range_parent(&mut self, handle: u32) -> Result<Option<u32>, String> {
+    pub(in crate::scripting) fn range_parent(&mut self, handle: u32) -> Result<Option<u32>, String> {
         let node = self.range_node(handle)?;
         self.state.work(1)?;
         Ok(self
@@ -150,7 +150,7 @@ impl Bridge<'_> {
                 }
             }))
     }
-    fn range_index(&mut self, handle: u32) -> Result<(u32, usize), String> {
+    pub(in crate::scripting) fn range_index(&mut self, handle: u32) -> Result<(u32, usize), String> {
         let parent = self
             .range_parent(handle)?
             .ok_or("InvalidNodeTypeError: Range relative boundary requires a parent.")?;
@@ -165,13 +165,13 @@ impl Bridge<'_> {
             .ok_or("Range parent/child topology is inconsistent.")?;
         Ok((parent, index))
     }
-    fn range_root(&mut self, mut node: u32) -> Result<u32, String> {
+    pub(in crate::scripting) fn range_root(&mut self, mut node: u32) -> Result<u32, String> {
         while let Some(parent) = self.range_parent(node)? {
             node = parent;
         }
         Ok(node)
     }
-    fn range_ancestor_child(
+    pub(in crate::scripting) fn range_ancestor_child(
         &mut self,
         ancestor: u32,
         mut node: u32,
@@ -184,7 +184,7 @@ impl Bridge<'_> {
         }
         Ok(None)
     }
-    fn range_compare(&mut self, a: Point, b: Point) -> Result<Option<Ordering>, String> {
+    pub(in crate::scripting) fn range_compare(&mut self, a: Point, b: Point) -> Result<Option<Ordering>, String> {
         if a.node == b.node {
             return Ok(Some(a.offset.cmp(&b.offset)));
         }
@@ -295,6 +295,7 @@ impl Bridge<'_> {
             }
             STRINGIFY => return self.range_string(record),
             CLONE => return self.copy_range(record),
+            CLONE_CONTENTS => return self.clone_range_contents(record),
             DETACH => return Ok(Value::Undefined),
             COLLAPSE => {
                 if args.first().is_some_and(Value::truthy) {
@@ -428,6 +429,23 @@ impl Bridge<'_> {
                 "A genuine Range receiver is required.".into(),
             ));
         }
+        if method == CLONE_CONTENTS {
+            let record=*self.range_record(receiver).unwrap();
+            self.state.work(self.doc.nodes.len()).map_err(Fatal)?;
+            for index in 0..self.doc.nodes.len() {
+                if !matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_)) {continue;}
+                let handle=node_handle(index);
+                if self.range_parent(handle).map_err(Fatal)?.is_some() {
+                    let (parent,offset)=self.range_index(handle).map_err(Fatal)?;
+                    if self.range_compare(record.start,Point{node:parent,offset}).map_err(Fatal)?==Some(Ordering::Less)
+                        || record.start==(Point{node:parent,offset}) {
+                        if self.range_compare(Point{node:parent,offset:offset+1},record.end).map_err(Fatal)?!=Some(Ordering::Greater) {
+                            return Err(Exception("HierarchyRequestError","Range clone cannot contain a DocumentType.".into()));
+                        }
+                    }
+                }
+            }
+        }
         if node_argument(method) {
             let Some(Value::Host(handle)) = args.first() else {
                 return Err(Exception("TypeError", "A genuine Node is required.".into()));
@@ -443,6 +461,9 @@ impl Bridge<'_> {
             let node = self
                 .range_node(*handle)
                 .map_err(|error| Exception("NotSupportedError", error))?;
+            if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)) {
+                return Err(Exception("InvalidNodeTypeError","A DocumentType cannot be a Range boundary.".into()));
+            }
             if matches!(method, SET_START | SET_END) {
                 let offset = range_offset(args.get(1).unwrap_or(&Value::Undefined))
                     .map_err(|error| Exception("TypeError", error))?;

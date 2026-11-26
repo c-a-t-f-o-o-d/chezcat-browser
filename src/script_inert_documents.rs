@@ -2046,3 +2046,6 @@ pub(super) mod label_control;
 
 #[path="script_inert_control_eligibility.rs"]
 mod control_eligibility;
+
+#[path="script_range_clone_contents.rs"]
+mod range_clone_contents;

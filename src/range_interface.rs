@@ -19,6 +19,7 @@ pub(crate) const END_AFTER: &str = "\0Range.setEndAfter";
 pub(crate) const SELECT_NODE: &str = "\0Range.selectNode";
 pub(crate) const SELECT_CONTENTS: &str = "\0Range.selectNodeContents";
 pub(crate) const COLLAPSE: &str = "\0Range.collapse";
+pub(crate) const CLONE_CONTENTS: &str = "\0Range.cloneContents";
 pub(crate) const CLONE: &str = "\0Range.cloneRange";
 pub(crate) const STRINGIFY: &str = "\0Range.toString";
 pub(crate) const DETACH: &str = "\0Range.detach";
@@ -45,6 +46,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | SELECT_CONTENTS
             | COLLAPSE
             | CLONE
+            | CLONE_CONTENTS
             | DETACH
             | STRINGIFY
     )
@@ -146,6 +148,7 @@ impl Runtime {
                             arity(method),
                         )?;
                     }
+                    self.deferred_host_method(prototype,window,"cloneContents",CLONE_CONTENTS,0)?;
                     for (key, value) in [
                         ("START_TO_START", 0),
                         ("START_TO_END", 1),
