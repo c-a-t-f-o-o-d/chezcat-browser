@@ -401,7 +401,7 @@ impl App {
     }
     pub(super) fn apply_validation_report(&mut self,node:Option<usize>){
         if let Some(node)=node{
-            let message=self.scripting.as_ref().map_or_else(||self.forms.validation_message(&self.document,node),|page|page.control_validation_report_message(&self.document,&self.forms,node));
+            let message=self.scripting.as_ref().map_or_else(||self.forms.validation_message(&self.document,node),|page|page.control_validation_report_message(&self.document,&self.forms,node)).unwrap_or_else(|error|error);
             self.error(message);self.validation_status=Some((self.script_epoch,self.status.clone()));
         }else{
             let owns=self.validation_status.as_ref().is_some_and(|(epoch,message)|*epoch==self.script_epoch&&message==&self.status);

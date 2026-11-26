@@ -27,10 +27,9 @@ impl Bridge<'_>{
         let owner=node_index(object).unwrap();
         // Refuse an unavailable constraint implementation instead of returning
         // a fabricated positive validity result for that candidate.
-        for(&node,c)in &self.forms.controls{
+        for c in self.forms.controls.values(){
             if c.owner!=Some(owner)||c.disabled||matches!(c.kind,Kind::Text|Kind::TextArea)&&c.readonly{continue;}
-            if c.kind==Kind::Unsupported
-                ||c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some(){
+            if c.kind==Kind::Unsupported{
                 return Err(("NotSupportedError","This candidate requires a broader native constraint-validation implementation.".into()));
             }
         }
@@ -54,7 +53,7 @@ impl Bridge<'_>{
             self.state.work(1)?;root=parent;
         }
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
-        let snapshot=self.forms.required_snapshot_with(self.doc,owner,root,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some())?;
+        let snapshot=self.forms.required_snapshot_with_budget(self.doc,owner,root,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some(),&mut self.state.host_work,&mut self.state.copy_work)?;
         self.publish_validation_snapshot(object,report,snapshot,available)
     }
     pub(super) fn publish_validation_snapshot(&mut self,object:u32,report:bool,snapshot:forms::ValidationSnapshot,available:usize)->Result<usize,String>{

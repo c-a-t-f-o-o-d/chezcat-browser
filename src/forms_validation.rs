@@ -99,15 +99,23 @@ impl Forms{
         self.validation_snapshot_with(doc,owner,submitter,available,&mut |_|false)
     }
     pub(crate) fn validation_snapshot_with(&self,doc:&Document,owner:usize,submitter:Option<usize>,available:usize,custom:&mut impl FnMut(usize)->bool)->Result<ValidationSnapshot,String>{
+        let mut work=crate::javascript::limits::BROWSER.regexp_work;let mut copies=usize::MAX;
+        self.validation_snapshot_with_budget(doc,owner,submitter,available,custom,&mut work,&mut copies)
+    }
+    pub(crate) fn validation_snapshot_with_budget(&self,doc:&Document,owner:usize,submitter:Option<usize>,available:usize,custom:&mut impl FnMut(usize)->bool,work:&mut usize,copies:&mut usize)->Result<ValidationSnapshot,String>{
         if !self.validation_enabled(doc,owner,submitter)?{return Ok(ValidationSnapshot{nodes:Vec::new(),peak_bytes:0});}
-        self.required_snapshot_with(doc,owner,0,available,custom)
+        self.required_snapshot_with_budget(doc,owner,0,available,custom,work,copies)
     }
     /// Explicit validation methods ignore novalidate and use the form's actual
     /// tree root, including a retained detached ordinary native form.
     pub(crate) fn required_snapshot(&self,doc:&Document,owner:usize,root:usize,available:usize)->Result<ValidationSnapshot,String>{
         self.required_snapshot_with(doc,owner,root,available,&mut |_|false)
     }
-    pub(crate) fn required_snapshot_with(&self,doc:&Document,owner:usize,root:usize,mut available:usize,custom:&mut impl FnMut(usize)->bool)->Result<ValidationSnapshot,String>{
+    pub(crate) fn required_snapshot_with(&self,doc:&Document,owner:usize,root:usize,available:usize,custom:&mut impl FnMut(usize)->bool)->Result<ValidationSnapshot,String>{
+        let mut work=crate::javascript::limits::BROWSER.regexp_work;let mut copies=usize::MAX;
+        self.required_snapshot_with_budget(doc,owner,root,available,custom,&mut work,&mut copies)
+    }
+    pub(crate) fn required_snapshot_with_budget(&self,doc:&Document,owner:usize,root:usize,mut available:usize,custom:&mut impl FnMut(usize)->bool,work:&mut usize,copies:&mut usize)->Result<ValidationSnapshot,String>{
         self.validation_enabled(doc,owner,None)?;
         if root>=doc.nodes.len(){return Err("Validation tree root is unavailable.".into());}
         let mut nodes=Vec::new();let mut seen=Vec::new();let mut stack=Vec::new();
@@ -118,7 +126,10 @@ impl Forms{
         seen.resize(doc.nodes.len(),false);stack.push((root,false,false));
         while let Some((node,in_datalist,parent_select))=stack.pop(){
             if node>=doc.nodes.len()||seen[node]{return Err("Invalid validation tree topology; nothing was submitted.".into());}seen[node]=true;
-            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&c.owner==Some(owner)&&(self.required_value_missing(owner,c)||{let(long,short)=self.length_validation_flags(doc,node);long||short}||custom(node))){nodes.push(node);}
+            if let Some(c)=self.controls.get(&node){
+                if validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&c.owner==Some(owner)
+                    &&(self.required_value_missing(owner,c)||{let(long,short)=self.length_validation_flags(doc,node);long||short}||custom(node)||self.pattern_mismatch(doc,node,work,copies,available)?){nodes.push(node);}
+            }
             if stack.len().checked_add(doc.nodes[node].children.len()).is_none_or(|n|n>doc.nodes.len()){return Err("Invalid validation traversal size; nothing was submitted.".into());}
             let html=doc.nodes[node].namespace==crate::html::Namespace::Html;
             let barred=in_datalist||html&&tag(doc,node)=="datalist";

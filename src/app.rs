@@ -7268,3 +7268,7 @@ mod candidate_validity_tests;
 #[cfg(test)]
 #[path="app_text_length_validation_tests.rs"]
 mod text_length_validation_tests;
+
+#[cfg(test)]
+#[path="app_pattern_validation_tests.rs"]
+mod pattern_validation_tests;
