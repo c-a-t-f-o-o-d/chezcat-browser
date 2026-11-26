@@ -478,7 +478,7 @@ impl Bridge<'_> {
         self.range_live_access(receiver,method,args)?;
         let record=*self.range_record(receiver).unwrap();
         if matches!(method,CLONE_CONTENTS|EXTRACT_CONTENTS|DELETE_CONTENTS|INSERT_NODE|SURROUND_CONTENTS)
-            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||self.inert_node_type(point.node).is_some()) {
+            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||(method!=CLONE_CONTENTS&&self.inert_node_type(point.node).is_some())) {
             return Err(Exception("NotSupportedError","Child/inert Range content mutation and fragment producers are not implemented.".into()));
         }
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
@@ -486,6 +486,18 @@ impl Bridge<'_> {
         if matches!(method,INSERT_NODE|SURROUND_CONTENTS) {return Ok(());}
         if method == CLONE_CONTENTS {
             let record=*self.range_record(receiver).unwrap();
+            let root=self.range_root(record.start.node).map_err(Fatal)?;
+            if self.inert_node_type(root)==Some(9){
+                let count=self.inert_children(root).ok_or_else(||Fatal("Inert Range document links are unavailable.".into()))?.len();self.state.work(count).map_err(Fatal)?;
+                for offset in 0..count{
+                    let node=self.inert_children(root).unwrap()[offset];
+                    if self.inert_node_type(node)!=Some(10){continue;}
+                    if matches!(self.range_compare(record.start,Point{node:root,offset}).map_err(Fatal)?,Some(Ordering::Less|Ordering::Equal))
+                        && matches!(self.range_compare(Point{node:root,offset:offset+1},record.end).map_err(Fatal)?,Some(Ordering::Less|Ordering::Equal)){
+                        return Err(Exception("HierarchyRequestError","Range clone cannot contain a DocumentType.".into()));
+                    }
+                }
+            }
             self.state.work(self.doc.nodes.len()).map_err(Fatal)?;
             for index in 0..self.doc.nodes.len() {
                 if !matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_)) {continue;}

@@ -12369,3 +12369,7 @@ mod range_child_tests;
 #[cfg(test)]
 #[path="script_range_inert_tests.rs"]
 mod range_inert_tests;
+
+#[cfg(test)]
+#[path="script_range_native_cloning_tests.rs"]
+mod range_native_cloning_tests;
