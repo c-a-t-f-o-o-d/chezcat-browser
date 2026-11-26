@@ -840,6 +840,9 @@ pub trait Host {
     fn begin_abort_dispatch(&mut self, _controller: u32, _reason: Value) -> Result<usize, String> {
         Err("Abort dispatch is not authorized by this host.".into())
     }
+    fn new_timeout_signal(&mut self,_owner:u32,_milliseconds:u64)->Result<u32,String>{
+        Err("AbortSignal timeout scheduling is not authorized by this host.".into())
+    }
     fn new_aborted_signal(&mut self, _owner: u32, _reason: Value) -> Result<u32, String> {
         Err("AbortSignal creation is not authorized by this host.".into())
     }

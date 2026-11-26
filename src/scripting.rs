@@ -596,6 +596,7 @@ struct State {
     xhr:script_xhr::State,
     media_queries: Vec<String>,
     abort_signals: Vec<script_abort::Record>,
+    abort_timeout_deadline: Option<Instant>,
     synthetic_dispatches: Vec<script_dispatch::Dispatch>,
     form_reset_pending: Option<script_form_reset::PendingReset>,
     form_validations:Vec<script_form_validation::Pending>,
@@ -696,6 +697,7 @@ impl State {
             xhr:script_xhr::State::default(),
             media_queries: Vec::new(),
             abort_signals: Vec::new(),
+            abort_timeout_deadline: None,
             synthetic_dispatches: Vec::new(),
             form_reset_pending: None,
             form_validations:Vec::new(),
@@ -1427,6 +1429,7 @@ impl Page {
             .into_iter()
             .chain(self.state.animation_due)
             .chain(self.state.message_channels.next_deadline())
+            .chain(self.state.abort_timeout_deadline)
             .min()
     }
 
@@ -1446,6 +1449,12 @@ impl Page {
             return None;
         }
         let timer_due = self.state.timers.deadline();
+        if self.state.abort_timeout_deadline.is_some_and(|due|due<=now
+            && timer_due.is_none_or(|timer|due<=timer)
+            && self.state.message_channels.next_deadline().is_none_or(|message|due<=message)
+            && self.state.animation_due.is_none_or(|frame|due<=frame)){
+            return Some(self.poll_abort_timeout(doc,forms,now));
+        }
         if self.state.message_channels.next_deadline().is_some_and(|due|
             due <= now && timer_due.is_none_or(|timer| due <= timer)
                 && self.state.animation_due.is_none_or(|frame| due <= frame))
@@ -1516,6 +1525,7 @@ impl Page {
         self.cancel_media_selection();
         self.clear_message_tasks();
         self.state.clear_timers();
+        self.state.clear_abort_timeouts();
         self.state.clear_animation_frames();
         self.state.animation_due = None;
         self.state.error("setTimeout", reason);
@@ -4732,6 +4742,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
+        if method==crate::javascript::abort_interface::TIMEOUT&&self.event_target_interface(object){return &[(0,false)];}
         if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return &[(0,true)];}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
@@ -5208,6 +5219,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==crate::javascript::abort_interface::TIMEOUT&&self.event_target_interface(object){return 1;}
         if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
@@ -6588,6 +6600,9 @@ impl Host for Bridge<'_> {
     fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
     fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<usize, String> {
         self.commit_abort_dispatch(controller, reason)
+    }
+    fn new_timeout_signal(&mut self,owner:u32,milliseconds:u64)->Result<u32,String>{
+        self.create_timeout_signal(owner,milliseconds)
     }
     fn new_aborted_signal(&mut self, owner: u32, reason: Value) -> Result<u32, String> {
         self.create_abort_record(owner, false, reason)
@@ -12460,3 +12475,7 @@ mod event_type_units_tests;
 #[cfg(test)]
 #[path="script_event_child_methods_tests.rs"]
 mod event_child_methods_tests;
+
+#[cfg(test)]
+#[path="script_abort_signal_timeout_tests.rs"]
+mod abort_signal_timeout_tests;

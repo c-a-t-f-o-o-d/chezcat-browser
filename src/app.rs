@@ -7406,3 +7406,7 @@ mod event_type_units_tests;
 #[cfg(test)]
 #[path="app_event_child_methods_tests.rs"]
 mod event_child_methods_tests;
+
+#[cfg(test)]
+#[path="app_abort_signal_timeout_tests.rs"]
+mod abort_signal_timeout_tests;

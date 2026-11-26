@@ -150,6 +150,9 @@ impl Runtime {
                     let method = self.allocate_host_function_with_length(window, STATIC_ABORT, 0).map_err(Fault::new)?;
                     self.store_property(self.function_properties[method.id], "name".into(), Value::String("abort".into()), Some((false, false, true)))?;
                     self.store_property(properties, "abort".into(), Value::Function(method.id), Some((true, true, true)))?;
+                    let method=self.allocate_host_function_with_length(window,TIMEOUT,1).map_err(Fault::new)?;
+                    self.store_property(self.function_properties[method.id],"name".into(),Value::String("timeout".into()),Some((false,false,true)))?;
+                    self.store_property(properties,"timeout".into(),Value::Function(method.id),Some((true,true,true)))?;
                 }
                 self.store_property(properties, "prototype".into(), Value::Object(prototype), Some((false, false, false)))?;
                 self.store_property(prototype, "constructor".into(), constructor.clone(), Some((false, true, true)))?;
