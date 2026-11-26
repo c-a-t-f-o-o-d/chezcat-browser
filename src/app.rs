@@ -7522,3 +7522,7 @@ mod app_noscript_host_retirement_tests;
 #[cfg(test)]
 #[path="app_noscript_host_clone_tests.rs"]
 mod app_noscript_host_clone_tests;
+
+#[cfg(test)]
+#[path="app_noscript_inert_import_tests.rs"]
+mod app_noscript_inert_import_tests;
