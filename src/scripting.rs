@@ -3453,6 +3453,7 @@ impl Host for Bridge<'_> {
         let document=if constructor {if owner==WINDOW {DOCUMENT}else{self.frame_child_node_handle(owner,0)?}}else{receiver};
         self.create_range(owner,document)
     }
+    fn clone_range_in_realm(&mut self,owner:u32,receiver:u32)->Result<Value,String>{self.clone_range_in_native_realm(owner,receiver)}
     fn prepare_range_operation(&mut self,receiver:u32,method:&str,args:&[Value])->Result<(),crate::javascript::range_interface::Error> { self.validate_range_call(receiver,method,args) }
     fn tree_walker_document(&self, document: u32) -> bool {
         document == DOCUMENT || self.inert_node_type(document) == Some(9) || self.active_frame_document(document)
@@ -12385,3 +12386,7 @@ mod range_inert_extraction_tests;
 #[cfg(test)]
 #[path="script_range_inert_wrapping_tests.rs"]
 mod range_inert_wrapping_tests;
+
+#[cfg(test)]
+#[path="script_range_clone_realm_tests.rs"]
+mod range_clone_realm_tests;

@@ -789,6 +789,7 @@ pub trait Host {
     fn collapse_range_delete(&mut self,_receiver:u32,_node:u32,_offset:usize)->Result<(),String>{Err("Native Range deletion is unavailable.".into())}
     fn range_endpoint_access(&mut self,_receiver:u32,_method:&str,_args:&[Value])->Result<(),range_interface::Error>{Ok(())}
     fn create_range_in_realm(&mut self,_owner:u32,_receiver:u32,_constructor:bool)->Result<Value,String>{Err("Native Range factory unavailable.".into())}
+    fn clone_range_in_realm(&mut self,_owner:u32,_receiver:u32)->Result<Value,String>{Err("Native Range cloning unavailable.".into())}
     fn prepare_range_operation(&mut self,_receiver:u32,_method:&str,_args:&[Value]) -> Result<(),range_interface::Error> { Err(range_interface::Error::Exception("NotSupportedError","DOM ranges are unavailable.".into())) }
     fn tree_walker_document(&self, _document: u32) -> bool { false }
     fn tree_walker_node_type(&self, _node: u32) -> Option<u32> { None }
@@ -9440,6 +9441,10 @@ impl Runtime {
                 return Err(Fault::thrown(exception));
             }
             return Err(Fault::exception(kind,message));
+        }
+        if method==range_interface::CLONE {
+            let owner=self.browser_global.map(|(window,_)|window).ok_or_else(||Fault::new("Range cloning requires its native realm."))?;
+            return host.clone_range_in_realm(owner,object).map_err(Fault::new);
         }
         if matches!(method,range_interface::RANGE|range_interface::CREATE) {
             let owner=self.browser_global.map(|(window,_)|window).ok_or_else(||Fault::new("Range factory requires its native realm."))?;
