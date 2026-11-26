@@ -276,6 +276,7 @@ impl Bridge<'_> {
         let mut record = *self
             .range_record(receiver)
             .ok_or("Range operation requires a genuine Range receiver.")?;
+        if comparison(method) {return self.range_comparison(record,method,args);}
         match method {
             START_NODE => return Ok(Value::Host(record.start.node)),
             END_NODE => return Ok(Value::Host(record.end.node)),
@@ -429,6 +430,7 @@ impl Bridge<'_> {
                 "A genuine Range receiver is required.".into(),
             ));
         }
+        if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
         if method == CLONE_CONTENTS {
             let record=*self.range_record(receiver).unwrap();
             self.state.work(self.doc.nodes.len()).map_err(Fatal)?;
@@ -595,3 +597,6 @@ impl Bridge<'_> {
         Ok(Value::String(text))
     }
 }
+
+#[path="script_range_comparisons.rs"]
+mod comparisons;
