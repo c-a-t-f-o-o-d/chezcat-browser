@@ -7534,3 +7534,7 @@ mod app_noscript_text_content_tests;
 #[cfg(test)]
 #[path="app_noscript_character_data_tests.rs"]
 mod app_noscript_character_data_tests;
+
+#[cfg(test)]
+#[path="app_noscript_inner_html_tests.rs"]
+mod app_noscript_inner_html_tests;

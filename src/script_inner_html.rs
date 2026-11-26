@@ -65,7 +65,12 @@ impl Bridge<'_> {
         self.state.rebuild(self.doc)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("innerHTML replacement requires known HTML namespace provenance.".into()); }
         if matches!(tag(self.doc, node), "script" | "style") { return Err("innerHTML replacement of script/style resource contexts is not implemented.".into()); }
-        self.mutation_ancestors(node)?;
+        let passive_noscript = self.doc.scripting_enabled && self.movable_noscript_host(node)?;
+        if passive_noscript {
+            if let Some(parent) = self.state.tree.parents[node] { self.mutation_ancestors(parent)?; }
+        } else {
+            self.mutation_ancestors(node)?;
+        }
         self.state.work(source.len())?;
         self.state.copies(source.len().saturating_mul(2))?;
         if source.len() > self.state.limits.host.string_bytes { return Err("HTML fragment source exceeds the host string limit.".into()); }
@@ -206,3 +211,7 @@ mod noscript_fragment_context_tests {
   p.begin_job();run(&mut d,&mut f,&mut p,"root.innerHTML=markup;var fallback=document.getElementById('fallback');if(old.parentNode!==null||fallback.firstChild.nodeType!==3||fallback.textContent!=='<img id=fake src=missing>&amp;'||document.getElementById('fake')!==null||watch.takeRecords().length!==1)throw 'fragment recovery';");assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
  }
 }
+
+#[cfg(test)]
+#[path="script_noscript_inner_html_tests.rs"]
+mod noscript_inner_html_tests;
