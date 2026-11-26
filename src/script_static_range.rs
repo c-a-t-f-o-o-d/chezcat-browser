@@ -22,7 +22,7 @@ impl Bridge<'_> {
         }
         for name in ["startContainer","endContainer"] {
             let Some((_,Value::Host(node)))=fields.iter().find(|(key,_)|*key==name) else {unreachable!()};
-            self.range_node(*node).map_err(|message|("NotSupportedError",message))?;
+            if self.inert_node_type(*node).is_none() {self.range_node(*node).map_err(|message|("NotSupportedError",message))?;}
         }
         Ok(())
     }
