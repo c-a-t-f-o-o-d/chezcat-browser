@@ -180,6 +180,16 @@ impl Snapshot {
 
 #[test]
 fn checkbox_fragment_later_unsupported_child_context_and_resource_failures_are_atomic() {
+    {
+        let (mut doc, mut forms, mut page) = fixture();
+        eval(&mut doc, &mut forms, &mut page, "host.innerHTML=\"<input id=fallback type=' checkbox ' name=q value=Seed>\";var fallback=host.firstChild;if(fallback.type!=='text'||fallback.getAttribute('type')!==' checkbox '||fallback.value!=='Seed'||fallback.form!==document.getElementById('a'))throw 'invalid type text fallback';fallback.value='Edited';if(fallback.defaultValue!=='Seed')throw 'fallback dirty default';");
+        let fallback = id(&doc, "fallback");
+        assert_eq!(forms.controls[&fallback].kind, Kind::Text);
+        assert!(!forms.controls[&fallback].password);
+        assert!(forms.controls[&fallback].dirty_value);
+        assert!(query(&doc, &forms, "a").contains("q=Edited"));
+        no_resources(&mut page);
+    }
     let (mut doc, mut forms, mut page) = fixture();
     eval(&mut doc, &mut forms, &mut page, "host.innerHTML='<input id=keep-check type=checkbox name=kept value=default checked>';var check=document.getElementById('keep-check');check.checked=false;check.value='edited';");
     page.state.rebuild(&doc).unwrap();
@@ -190,7 +200,7 @@ fn checkbox_fragment_later_unsupported_child_context_and_resource_failures_are_a
         "<input type=checkbox><input type=file>", "<input type=checkbox><select multiple><option>x</select>",
         "<input type=checkbox><link rel=stylesheet href=/never.css>", "<input type=checkbox><iframe></iframe>",
         "<input type=checkbox><span onclick='x=1'>handler</span>", "<input type=checkbox><form></form>",
-        "<input type=checkbox form=a>", "<input type=' checkbox '>", "<input type=checkbox><svg><input></svg>",
+        "<input type=checkbox form=a>", "<input type=checkbox><svg><input></svg>",
     ] {
         let error = Bridge {doc: &mut doc, forms: &mut forms, state: &mut page.state}.set_inner_html(host, source);
         assert!(error.is_err(), "{source}");

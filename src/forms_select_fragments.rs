@@ -32,11 +32,11 @@ fn select_bytes(control: &Control) -> usize {
     })
 }
 
-/// Accepted text INPUT spellings. Forms::kind also recognizes other types.
+/// Single-line text-family states share the parsed INPUT classification.
 pub(crate) fn fragment_text_input(doc: &Document, node: usize) -> bool {
     doc.nodes.get(node).is_some_and(|item| item.namespace == crate::html::Namespace::Html)
         && tag(doc, node) == "input"
-        && doc.attr(node, "type").is_none_or(|value| value.is_empty() || value.eq_ignore_ascii_case("text"))
+        && input_kind(doc.attr(node,"type").unwrap_or("")) == Kind::Text
 }
 
 /// New checkbox admission is separate from the text and hidden INPUT families.
