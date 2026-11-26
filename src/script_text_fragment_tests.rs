@@ -89,7 +89,7 @@ fn text_fragment_unsupported_types_contexts_and_associations_refuse_atomically()
     let original = controls(&forms);
     {
         let mut bridge = Bridge { doc: &mut doc, forms: &mut forms, state: &mut page.state };
-        for source in ["<input type=hidden>", "<input type=radio>", "<input type=search>", "<input type=file>", "<input type=unknown>", "<input type=' text '>", "<input form=a>", "<input onclick='x=1'>", "<svg><input></svg>", "<input><link rel=stylesheet href=x>"] {
+        for source in ["<input type=hidden>", "<input type=radio>", "<input type=file>", "<input form=a>", "<input onclick='x=1'>", "<svg><input></svg>", "<input><link rel=stylesheet href=x>"] {
             assert!(bridge.set_inner_html(host, source).is_err(), "{source}");
             assert_eq!(bridge.doc.nodes.len(), node_count);
             assert_eq!(bridge.doc.nodes[host].children, children);
@@ -152,4 +152,13 @@ fn text_fragment_batch_control_and_value_limits_publish_no_partial_state() {
     assert_eq!(bridge.doc.nodes.len(), nodes);
     assert!(bridge.doc.nodes[host].children.is_empty());
     assert_eq!(controls(bridge.forms), original);
+}
+
+#[test]
+fn text_fragment_existing_text_family_types_are_admitted_as_real_native_editors(){
+ for raw_type in ["search","unknown"," text "]{
+  let(mut doc,mut forms,mut page,result)=fixture("document.getElementById('keep').value='owner edited';");assert_eq!(result.errors,0);let host=id(&doc,"host");let source=format!("<input id=admitted type='{raw_type}' name=query value=Seed>");
+  Bridge{doc:&mut doc,forms:&mut forms,state:&mut page.state}.set_inner_html(host,&source).unwrap();let admitted=id(&doc,"admitted");let control=&forms.controls[&admitted];assert_eq!(control.kind,Kind::Text);assert_eq!(control.owner,Some(id(&doc,"a")));assert_eq!(control.name,"query");assert_eq!(control.value.text(),"Seed");assert!(!control.dirty_value);assert_eq!(doc.attr(admitted,"type"),Some(raw_type));
+  let result=page.console_eval(&mut doc,&mut forms,"var admitted=document.getElementById('admitted');if(admitted.ownerDocument!==document||admitted.parentNode!==document.getElementById('host')||admitted.value!=='Seed'||document.getElementById('keep').value!=='owner edited')throw 'actual native text family';admitted.value='Edited';if(admitted.value!=='Edited')throw 'native fragment editor';");assert_eq!(result.errors,0,"{}",page.report());assert_eq!(forms.controls[&admitted].value.text(),"Edited");assert!(forms.controls[&admitted].dirty_value);assert_eq!(forms.controls[&id(&doc,"keep")].value.text(),"owner edited");
+ }
 }

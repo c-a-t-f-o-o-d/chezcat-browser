@@ -366,7 +366,7 @@ pub(crate) fn parse_inert_html(
 /// callers never create a source wrapper that markup could escape. Unsupported
 /// tree-builder recovery and declaration forms reject explicitly.
 pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
-    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template") {
+    if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template" | "noscript") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
     parse_internal(input, Some(context), scripting, None, None)
@@ -406,7 +406,8 @@ fn parse_internal(
         Cow::Borrowed(input)
     };
     let input = normalized.as_ref();
-    if checked && input.contains('\0') && !context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
+    let text_context = context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") || name == "noscript" && scripting);
+    if checked && input.contains('\0') && !text_context {
         return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
     }
     let mut document = Document {
@@ -432,11 +433,11 @@ fn parse_internal(
             namespace: Namespace::None,
         }],
     };
-    if context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext")) {
+    if text_context {
         let text = if matches!(context, Some("title" | "textarea")) {
             named_references::decode(input, false, loaded.map(|tree| tree.check_cancel))?.replace('\0', "\u{fffd}")
         } else {
-            html_raw_text(input, None)?
+            html_raw_text(input, loaded.map(|tree| tree.check_cancel))?
         };
         if !append_text_value(&mut document, 0, text, node_limit)? { return Err(node_limit_error()); }
         document.scripting_enabled = scripting;
@@ -661,8 +662,7 @@ fn parse_internal(
             }
             if matches!(tag.name.as_str(), "html" | "head" | "body" | "frameset" | "frame" | "caption" | "colgroup" | "col" | "tbody" | "thead" | "tfoot" | "tr" | "td" | "th" | "math" | "picture" | "image" | "xmp" | "noembed" | "noframes" | "plaintext" | "listing")
                 || tag.name == "template" && (!template_svg || svg.root.is_some())
-                || tag.name == "svg" && !(starts_template_svg || inside_template_svg)
-                || tag.name == "noscript" && scripting {
+                || tag.name == "svg" && !(starts_template_svg || inside_template_svg) {
                 return Err(format!("HTML fragment structural, table/select or foreign-content recovery is not implemented (tag {:.32}, closing {}, context {:.32}).",tag.name,tag.closing,context.unwrap_or("#document")));
             }
             if (starts_template_svg || inside_template_svg) && !tag.closing {
@@ -1789,3 +1789,7 @@ mod optgroup_fragment_tests;
 #[cfg(test)]
 #[path="html_noscript_loader_context_tests.rs"]
 mod noscript_loader_context_tests;
+
+#[cfg(test)]
+#[path="html_noscript_fragment_context_tests.rs"]
+mod noscript_fragment_context_tests;

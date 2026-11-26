@@ -117,7 +117,12 @@ fn generic_end_disabled_noscript_is_a_barrier_but_its_own_target_matches_first()
             assert!(!doc.scripting_enabled);
             assert_eq!(tree(&doc, id(&doc, "host")), expected);
         }
-        assert!(parse_fragment(source, "div", true).is_err());
+        let enabled=parse_fragment(source,"div",true).unwrap();
+        let host=element(&enabled,"noscript");
+        let raw=source.split_once("<noscript>").unwrap().1.split_once("</noscript>").unwrap().0;
+        let [child]=enabled.nodes[host].children.as_slice() else{panic!("one literal enabled noscript Text")};
+        assert!(matches!(&enabled.nodes[*child].kind,NodeKind::Text(text)if text==raw));
+        assert!(enabled.scripting_enabled);
     }
 }
 
