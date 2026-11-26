@@ -6765,7 +6765,7 @@ impl Host for Bridge<'_> {
         }
         Ok(())
     }
-    fn validate_dictionary_call(&mut self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==crate::javascript::range_interface::STATIC{return self.validate_static_range_fields(fields);}if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields)).map(|_|());}Ok(())}
+    fn validate_dictionary_call(&mut self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==crate::javascript::range_interface::STATIC{return self.validate_static_range_fields(fields);}if method==DOCUMENT_IMPORT_NODE{self.validate_import_node_kind(args)?;}if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields)).map(|_|());}Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -6777,7 +6777,7 @@ impl Host for Bridge<'_> {
             return self.canvas_context_call(object, operation, args, fields);
         }
         if method==crate::javascript::range_interface::STATIC {return self.create_static_range(object,fields);}
-        if method==DOCUMENT_IMPORT_NODE{if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Node source.".into());};return self.import_into_inert_document(object,*source,script_clone_node::import_subtree(args,fields));}return self.import_node(args,fields);}
+        if method==DOCUMENT_IMPORT_NODE{self.validate_import_node_kind(args).map_err(|(_,message)|message)?;if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Node source.".into());};return self.import_into_inert_document(object,*source,script_clone_node::import_subtree(args,fields));}return self.import_node(args,fields);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
         if method=="CustomEvent"&&self.event_target_interface(object) {return self.construct_custom_event(object,args,fields);}
@@ -12554,3 +12554,7 @@ mod child_node_variadic_tests;
 #[cfg(test)]
 #[path="script_state_preserving_move_tests.rs"]
 mod state_preserving_move_tests;
+
+#[cfg(test)]
+#[path="script_import_node_binding_order_tests.rs"]
+mod import_node_binding_order_tests;

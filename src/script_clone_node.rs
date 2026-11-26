@@ -73,8 +73,10 @@ impl Bridge<'_> {
         let Some(Value::Host(source)) = args.first() else {
             return Err(("TypeError", "importNode requires a genuine Node.".into()));
         };
+        // A Document is a genuine Node. Its algorithm-level rejection follows
+        // conversion of the boolean-or-ImportNodeOptions argument.
         if *source == DOCUMENT || self.inert_document(*source) || self.active_frame_document(*source) {
-            return Err(("NotSupportedError", "importNode cannot import a Document.".into()));
+            return Ok(());
         }
         if self.clone_node_receiver(*source) || self.inert_node_type(*source).is_some() {
             return Ok(());
@@ -82,11 +84,21 @@ impl Bridge<'_> {
         Err(("TypeError", "importNode requires a genuine Node.".into()))
     }
 
+    pub(super) fn validate_import_node_kind(&self,args:&[Value])->Result<(),(&'static str,String)>{
+        self.validate_import_source(args)?;
+        let Some(Value::Host(source))=args.first()else{unreachable!()};
+        if *source==DOCUMENT||self.inert_document(*source)||self.active_frame_document(*source){
+            return Err(("NotSupportedError","importNode cannot import a Document.".into()));
+        }
+        Ok(())
+    }
+
     fn template_import_source(&self,object:u32)->Option<ImportSource<'_>>{
         self.inert_import_source(object).or_else(||{if self.template_receiver(object){let index=node_index(object)?;Some(ImportSource::Parsed{node:self.doc.nodes.get(index)?,unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)})}else{None}})
     }
     fn template_import_children(&self,object:u32)->Option<&[u32]>{if self.template_receiver(object){Some(&[])}else{self.inert_children(object)}}
     pub(super) fn import_node(&mut self, args: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
+        self.validate_import_node_kind(args).map_err(|(_,message)|message)?;
         let Some(Value::Host(source)) = args.first() else { return Err("importNode requires a Node.".into()); };
         let deep=import_subtree(args,fields);
         if self.attr_receiver(*source){return self.clone_attribute_node(*source,Some(DOCUMENT));}
