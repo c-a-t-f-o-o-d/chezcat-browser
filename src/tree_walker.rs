@@ -68,6 +68,30 @@ mod filter_tests {
         assert_eq!(runtime.value_bytes-before.0,std::mem::size_of::<Walker>());
         assert_eq!(runtime.walkers.walkers.len(),before.2+1);
     }
+    #[test]
+    fn tree_walker_filter_denied_native_owner_precedes_callback_and_cursor_change(){
+        struct Guard;
+        impl Host for Guard {
+            fn get(&mut self,id:u32,key:&str)->Result<Value,String>{
+                assert_eq!((id,key),(1,"firstChild"));Ok(Value::Host(2))
+            }
+            fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{panic!("unexpected write")}
+            fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{panic!("unexpected call")}
+            fn tree_walker_document(&self,id:u32)->bool{id==0}
+            fn tree_walker_node_type(&self,_:u32)->Option<u32>{Some(1)}
+            fn native_access_owner(&self,id:u32)->Option<u32>{(id==2).then_some(9)}
+            fn validate_window_access(&self,_:Option<u32>,_:u32)->Result<(),String>{Err("denied native owner".into())}
+        }
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.execute("var calls=0;function filter(){calls++;return 1;}0;",&mut NoHost).unwrap();
+        let filter=runtime.binding_value(runtime.global_environment,"filter").unwrap();
+        let Value::Object(id)=runtime.create_tree_walker(&[Value::Host(1),Value::Number(1.0),filter],Value::Host(0),&mut Guard).unwrap() else {panic!("walker")};
+        let error=runtime.tree_walker_builtin(Op::Next,&[],Value::Object(id),&mut Guard).unwrap_err();
+        assert!(error.display().contains("denied native owner"));
+        assert_eq!(runtime.binding_value(runtime.global_environment,"calls").unwrap().to_number(),0.0);
+        assert_eq!(runtime.walkers.walkers[&id].current,1);
+        assert!(!runtime.walkers.walkers[&id].active);
+    }
 }
 
 impl Op {

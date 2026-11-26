@@ -111,3 +111,17 @@ if(caught!==2||bad.currentNode!==root||Array!==parentArray)throw 'callback error
 
 "#);
 }
+#[test]
+fn tree_walker_filter_inert_template_roots_keep_native_identity_and_exact_units(){
+    let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"
+var parsed=new DOMParser().parseFromString('<body><template id=t><section id=reject><b>Hidden</b></section><section id=skip><span id=inside>Seed</span><template id=n><b>Nested</b></template></section><p id=last>Last</p></template></body>','text/html');
+var content=parsed.getElementById('t').content,owner=content.ownerDocument,inside=content.querySelector('#inside');
+inside.firstChild.nodeValue='\uD800X\uDC00';
+var filter=function(n){if(n.ownerDocument!==owner)throw 'inert owner';return n.nodeType===1?(n.id==='reject'?2:3):1;};
+var walker=document.createTreeWalker(content,4294967295,filter),text=inside.firstChild;
+if(walker.root!==content||walker.nextNode()!==text||text.nodeValue.length!==3||text.nodeValue.charCodeAt(0)!==55296||text.nodeValue.charCodeAt(2)!==56320)throw 'inert exact units';
+if(walker.nextNode().nodeValue!=='Last'||walker.nextNode()!==null)throw 'separate nested content roots';
+walker.currentNode=content;if(walker.firstChild()!==text)throw 'inert skip and reject';
+if(parsed.querySelector('#inside')!==null||content.querySelector('#n').content.textContent!=='Nested'||content.isConnected)throw 'inert tree preserved';
+"#);
+}
