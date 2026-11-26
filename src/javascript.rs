@@ -684,6 +684,21 @@ pub(crate) const TEXTAREA_VALUE_GET: &str = "\0HTMLTextAreaElement.get.value";
 pub(crate) const TEXTAREA_VALUE_SET: &str = "\0HTMLTextAreaElement.set.value";
 pub(crate) const HTML_FORM_SUBMIT: &str = "\0HTMLFormElement.submit";
 pub(crate) const HTML_FORM_RESET: &str = "\0HTMLFormElement.reset";
+pub(crate) const CONTROL_VALIDATION_MEMBERS:&[(&str,&str,&str)]=&[
+    ("HTMLInputElement","validationMessage","\0HTMLInputElement.get.validationMessage"),
+    ("HTMLInputElement","checkValidity","\0HTMLInputElement.checkValidity"),
+    ("HTMLInputElement","reportValidity","\0HTMLInputElement.reportValidity"),
+    ("HTMLButtonElement","validationMessage","\0HTMLButtonElement.get.validationMessage"),
+    ("HTMLButtonElement","checkValidity","\0HTMLButtonElement.checkValidity"),
+    ("HTMLButtonElement","reportValidity","\0HTMLButtonElement.reportValidity"),
+    ("HTMLSelectElement","validationMessage","\0HTMLSelectElement.get.validationMessage"),
+    ("HTMLSelectElement","checkValidity","\0HTMLSelectElement.checkValidity"),
+    ("HTMLSelectElement","reportValidity","\0HTMLSelectElement.reportValidity"),
+    ("HTMLTextAreaElement","validationMessage","\0HTMLTextAreaElement.get.validationMessage"),
+    ("HTMLTextAreaElement","checkValidity","\0HTMLTextAreaElement.checkValidity"),
+    ("HTMLTextAreaElement","reportValidity","\0HTMLTextAreaElement.reportValidity"),
+];
+pub(crate) fn control_validation_operation(method:&str)->Option<(&'static str,&'static str)>{CONTROL_VALIDATION_MEMBERS.iter().find_map(|&(class,key,operation)|(operation==method).then_some((class,key)))}
 pub(crate) const HTML_FORM_CHECK:&str="\0HTMLFormElement.checkValidity";
 pub(crate) const HTML_FORM_REPORT:&str="\0HTMLFormElement.reportValidity";
 pub(crate) const HTML_FORM_REQUEST:&str="\0HTMLFormElement.requestSubmit";
@@ -726,6 +741,7 @@ pub struct NativeAttributeChange {
     pub old_value: Option<Value>,
 }
 
+pub enum NativeControlValidation{Message(Value),Dispatch(usize)}
 pub trait Host {
     /// Opt-in exact native named-property reads; None preserves unsupported receivers.
     fn named_units_property(&mut self,_object:u32,_units:&[u16])->Result<Option<Value>,String>{Ok(None)}
@@ -771,6 +787,7 @@ pub trait Host {
     fn form_request_event(&mut self,_token:usize)->Result<usize,String>{Err("Form submission is unavailable.".into())}
     fn complete_form_request(&mut self,_token:usize)->Result<(),String>{Err("Form submission is unavailable.".into())}
     fn finish_form_request(&mut self,_token:usize){}
+    fn begin_control_validation(&mut self,_object:u32,_report:Option<bool>)->Result<NativeControlValidation,(&'static str,String)>{Err(("NotSupportedError","Control validation is unavailable.".into()))}
     fn begin_form_validation(&mut self,_object:u32,_report:bool)->Result<usize,String>{Err("Form validation is not authorized by this host.".into())}
     fn next_form_validation_event(&mut self,_token:usize)->Result<Option<usize>,String>{Err("Form validation is unavailable.".into())}
     fn form_validation_event_result(&mut self,_token:usize,_accepted:bool)->Result<(),String>{Err("Form validation is unavailable.".into())}
@@ -9476,7 +9493,7 @@ impl Runtime {
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==HTML_FORM_REQUEST&&kind=="NotFoundError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | "\0HTMLInputElement.get.willValidate" | "\0HTMLButtonElement.get.willValidate" | "\0HTMLSelectElement.get.willValidate" | "\0HTMLTextAreaElement.get.willValidate" | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode")
+                && (control_validation_operation(method).is_some()||matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | "\0HTMLInputElement.get.willValidate" | "\0HTMLButtonElement.get.willValidate" | "\0HTMLSelectElement.get.willValidate" | "\0HTMLTextAreaElement.get.willValidate" | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode"))
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));
@@ -9507,10 +9524,21 @@ impl Runtime {
         if method==event_interface::PATH_METHOD {
             return self.event_path_array(object,host);
         }
+        if let Some((_,key))=control_validation_operation(method){
+            let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));host.native_operation_caller(caller);
+            let report=(key!="validationMessage").then_some(key=="reportValidity");
+            let prepared=match host.begin_control_validation(object,report){
+                Ok(value)=>value,
+                Err(("NotSupportedError",message))=>return Err(Fault::thrown(self.native_dom_exception("NotSupportedError",&message)?)),
+                Err((_,message))=>return Err(Fault::new(message)),
+            };
+            return match prepared{NativeControlValidation::Message(value)=>Ok(value),NativeControlValidation::Dispatch(token)=>self.drive_form_validation(token,caller,host).map(Value::Bool)};
+        }
         if matches!(method,HTML_FORM_CHECK|HTML_FORM_REPORT){
             let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
             host.native_operation_caller(caller);
-            let token=host.begin_form_validation(object,method==HTML_FORM_REPORT).map_err(Fault::new)?;
+            let report=method==HTML_FORM_REPORT;
+            let token=host.begin_form_validation(object,report).map_err(Fault::new)?;
             return self.drive_form_validation(token,caller,host).map(Value::Bool);
         }
         if method==HTML_FORM_REQUEST{

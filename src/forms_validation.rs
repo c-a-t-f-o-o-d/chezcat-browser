@@ -38,6 +38,11 @@ pub(crate) struct ValidationSnapshot{
     pub(crate) peak_bytes:usize,
 }
 impl ValidationSnapshot{
+    pub(crate) fn candidate(node:usize,missing:bool,mut available:usize)->Result<Self,String>{
+        let mut nodes=Vec::new();let peak_bytes=reserve(&mut nodes,usize::from(missing),&mut available)?;
+        if missing{nodes.push(node);}
+        Ok(Self{nodes,peak_bytes})
+    }
     pub(crate) fn storage_bytes(&self)->usize{self.nodes.capacity()*std::mem::size_of::<usize>()}
 }
 fn reserve<T>(values:&mut Vec<T>,count:usize,available:&mut usize)->Result<usize,String>{
@@ -62,15 +67,20 @@ impl Forms{
         Ok(doc.attr(owner,"novalidate").is_none()&&!submitter.is_some_and(|node|doc.attr(node,"formnovalidate").is_some()))
     }
     pub(super) fn required_value_missing(&self,owner:usize,control:&Control)->bool{
-        if control.owner!=Some(owner)||control.disabled||matches!(control.kind,Kind::Text|Kind::TextArea)&&control.readonly{return false;}
-        let required=control.required||control.kind==Kind::Radio&&!control.name.is_empty()&&self.controls.values().any(|c|c.owner==Some(owner)&&c.group_root==control.group_root&&c.kind==Kind::Radio&&c.name==control.name&&c.required);
+        if control.owner!=Some(owner){return false;}
+        self.control_value_missing(control)
+    }
+    pub(crate) fn control_value_missing(&self,control:&Control)->bool{
+        let owner=control.owner;
+        if control.disabled||matches!(control.kind,Kind::Text|Kind::TextArea)&&control.readonly{return false;}
+        let required=control.required||control.kind==Kind::Radio&&!control.name.is_empty()&&self.controls.values().any(|c|c.owner==owner&&c.group_root==control.group_root&&c.kind==Kind::Radio&&c.name==control.name&&c.required);
         if !required{return false;}
         match control.kind{
             Kind::Text|Kind::TextArea=>control.value.chars.is_empty(),
             Kind::Select=>control.select.as_ref().and_then(|state|state.selected.and_then(|index|state.options.get(index))).is_none_or(|option|option.placeholder),
             Kind::Checkbox=>!control.checked,
             Kind::Radio if control.name.is_empty()=>!control.checked,
-            Kind::Radio=>!self.controls.values().any(|c|c.owner==Some(owner)&&c.group_root==control.group_root&&c.kind==Kind::Radio&&c.name==control.name&&c.checked),
+            Kind::Radio=>!self.controls.values().any(|c|c.owner==owner&&c.group_root==control.group_root&&c.kind==Kind::Radio&&c.name==control.name&&c.checked),
             _=>false,
         }
     }
