@@ -21,11 +21,11 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn range_extract_plan(&mut self,receiver:u32)->Result<ExtractPlan,Error>{
   use Error::{Exception,Fatal};
   let range=*self.range_record(receiver).filter(|r|!r.fixed).ok_or_else(||Exception("TypeError","A genuine live Range is required.".into()))?;
-  let start=self.range_node(range.start.node).map_err(Fatal)?;let end=self.range_node(range.end.node).map_err(Fatal)?;
   let mut plan=ExtractPlan{steps:Vec::new(),slots:Vec::new(),bytes:0};let mut pending=Vec::new();
   let root=self.extraction_slot(&mut plan,&pending).map_err(Fatal)?;
-  self.extraction_step(&mut plan,&pending,ExtractStep::Fragment{document:DOCUMENT,slot:root}).map_err(Fatal)?;
+  self.extraction_step(&mut plan,&pending,ExtractStep::Fragment{document:self.range_attr_document(range.start.node).unwrap_or(DOCUMENT),slot:root}).map_err(Fatal)?;
   if range.start!=range.end{
+   let start=self.range_node(range.start.node).map_err(Fatal)?;let end=self.range_node(range.end.node).map_err(Fatal)?;
    if start==end&&self.doc.nodes[start].kind.character_dom_string().is_some(){
     let slot=self.extraction_slot(&mut plan,&pending).map_err(Fatal)?;let count=range.end.offset-range.start.offset;
     self.extraction_step(&mut plan,&pending,ExtractStep::Slice{source:range.start.node,slot,offset:range.start.offset,count}).map_err(Fatal)?;

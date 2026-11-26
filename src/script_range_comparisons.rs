@@ -17,12 +17,12 @@ impl Bridge<'_> {
             return Ok(());
         }
         let Some(Value::Host(node))=args.first() else {return Err(Exception("TypeError","A genuine Node is required.".into()));};
-        let index=self.range_node(*node).map_err(|message|Exception("NotSupportedError",message))?;
+        let index=if self.range_attr_document(*node).is_some(){None}else{Some(self.range_node(*node).map_err(|message|Exception("NotSupportedError",message))?)};
         if self.range_root(*node).map_err(Fatal)?!=self.range_root(record.start.node).map_err(Fatal)? {
             return if method==COMPARE_POINT {Err(Exception("WrongDocumentError","Point and Range roots differ.".into()))} else {Ok(())};
         }
         if method!=INTERSECTS_NODE {
-            if matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_)) {return Err(Exception("InvalidNodeTypeError","A DocumentType is not a boundary container.".into()));}
+            if index.is_some_and(|index|matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_))) {return Err(Exception("InvalidNodeTypeError","A DocumentType is not a boundary container.".into()));}
             let offset=range_offset(args.get(1).unwrap_or(&Value::Undefined)).map_err(Fatal)?;
             if offset>self.range_length(*node).map_err(Fatal)? {return Err(Exception("IndexSizeError","Point offset exceeds node length.".into()));}
         }

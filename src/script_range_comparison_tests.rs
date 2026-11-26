@@ -13,7 +13,7 @@ fn range_comparison_native_node_guards_and_same_origin_method_realms(){
  p.set_location(&crate::navigation::address("https://range-query.test/start",&crate::navigation::Location::home()).unwrap());
  run(&mut d,&mut f,&mut p,r#"
 var attr=document.createAttribute('title'),inert=new Document(),node=inert.createElement('div'),seen=0,caught=0;
-try{r.comparePoint(attr,{valueOf:function(){seen++;return 0;}});}catch(e){if(e.name==='NotSupportedError')caught++;}
+try{r.comparePoint(attr,{valueOf:function(){seen++;return 0;}});}catch(e){if(e instanceof DOMException&&e.name==='WrongDocumentError')caught++;}
 try{r.isPointInRange(node,0);}catch(e){if(e.name==='NotSupportedError')caught++;}
 try{r.intersectsNode(node);}catch(e){if(e.name==='NotSupportedError')caught++;}
 if(caught!==3||seen!==1||r.startOffset!==1||r.endOffset!==3)throw 'genuine unsupported node guards';

@@ -19,10 +19,10 @@ impl Bridge<'_> {
     pub(in crate::scripting) fn range_delete_plan(&mut self,receiver:u32)->Result<Vec<DeleteStep>,Error>{
         use Error::{Exception,Fatal};
         let record=*self.range_record(receiver).filter(|record|!record.fixed).ok_or_else(||Exception("TypeError","A genuine live Range is required.".into()))?;
-        let start=self.range_node(record.start.node).map_err(Fatal)?;
-        let end=self.range_node(record.end.node).map_err(Fatal)?;
         let mut plan=Vec::new();let mut pending=Vec::new();
         if record.start==record.end{return Ok(plan);}
+        let start=self.range_node(record.start.node).map_err(Fatal)?;
+        let end=self.range_node(record.end.node).map_err(Fatal)?;
         let start_data=self.doc.nodes[start].kind.character_dom_string().is_some();
         let end_data=self.doc.nodes[end].kind.character_dom_string().is_some();
         if start==end&&start_data{

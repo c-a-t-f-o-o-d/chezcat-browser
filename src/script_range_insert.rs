@@ -7,6 +7,7 @@ impl Bridge<'_>{
   use Error::{Exception,Fatal};
   let range=*self.range_record(receiver).filter(|r|!r.fixed).ok_or_else(||Exception("TypeError","A genuine live Range is required.".into()))?;
   let Some(Value::Host(incoming))=args.first()else{return Err(Exception("TypeError","Range insertion requires a genuine Node.".into()));};let incoming=*incoming;
+  if self.range_attr_document(range.start.node).is_some(){return Err(Exception("HierarchyRequestError","An Attr cannot contain inserted children.".into()));}
   let start=self.range_node(range.start.node).map_err(Fatal)?;
   let split=matches!(self.doc.nodes[start].kind,NodeKind::Text(_)|NodeKind::Cdata(_));
   if incoming==range.start.node||matches!(self.doc.nodes[start].kind,NodeKind::Comment(_)|NodeKind::ProcessingInstruction{..})||split&&self.range_parent(range.start.node).map_err(Fatal)?.is_none(){return Err(Exception("HierarchyRequestError","This Range start cannot receive the inserted Node.".into()));}
