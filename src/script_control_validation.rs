@@ -21,14 +21,13 @@ impl Bridge<'_>{
         if self.state.output_custom_errors.get(&object).is_some(){return Ok(true);}
         let node=self.node(object).map_err(|e|("Error",e))?;
         let c=self.forms.controls.get(&node).ok_or_else(||("NotSupportedError","This candidate requires its admitted native validation state.".into()))?;
-        if c.kind==Kind::Unsupported
-            ||c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some(){
+        if c.kind==Kind::Unsupported{
             return Err(("NotSupportedError","This candidate requires a broader native constraint-validation implementation.".into()));
         }
         let count=self.forms.controls.len();let work=count.checked_mul(2).and_then(|n|n.checked_add(1)).ok_or_else(||("Error","Control validation group work overflow.".into()))?;
         let work=work.checked_add(self.forms.length_validation_work(self.doc,node)).ok_or_else(||("Error","Length validation work overflow.".into()))?;
         self.state.work(work).map_err(|e|("Error",e))?;
-        let(long,short)=self.forms.length_validation_flags(self.doc,node);let missing=self.forms.control_value_missing(&self.forms.controls[&node])||long||short;script_text_content::deadline(self.state).map_err(|e|("Error",e))?;Ok(missing)
+        let(long,short)=self.forms.length_validation_flags(self.doc,node);let missing=self.forms.control_value_missing(&self.forms.controls[&node])||long||short||self.native_pattern_mismatch(object).map_err(|e|("Error",e))?;script_text_content::deadline(self.state).map_err(|e|("Error",e))?;Ok(missing)
     }
     fn native_control_missing(&mut self,object:u32)->Result<bool,String>{self.native_control_missing_typed(object).map_err(|(_,e)|e)}
     pub(super) fn prepare_native_control_validation(&mut self,object:u32,report:Option<bool>)->Result<crate::javascript::NativeControlValidation,(&'static str,String)>{
@@ -50,7 +49,8 @@ impl Bridge<'_>{
             return Self::dom_string_copy(self.state.output_custom_errors.get(&object).unwrap());
         }
         let node=self.node(object)?;self.state.work(self.forms.length_validation_work(self.doc,node))?;
-        let(prefix,name)=self.forms.validation_message_parts(self.doc,node);
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let(prefix,name)=self.forms.validation_message_parts_with_budget(self.doc,node,&mut self.state.host_work,&mut self.state.copy_work,available)?;
         let bytes=prefix.len().checked_add(name.len()).and_then(|n|n.checked_add(1)).ok_or("Control validation message size overflow.")?;
         if bytes>self.state.limits.host.string_bytes{return Err("Control validation message exceeds the DOM string allowance.".into());}
         self.state.copies(bytes)?;script_text_content::deadline(self.state)?;

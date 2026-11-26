@@ -665,6 +665,8 @@ pub(crate) use forms_reset::ResetPlan;
 mod forms_validation;
 #[path="forms_length_validation.rs"]
 mod forms_length_validation;
+#[path="forms_pattern_validation.rs"]
+mod forms_pattern_validation;
 pub(crate) use forms_validation::{ValidationSnapshot,validation_candidate,validation_candidate_attributes,validation_attribute_work};
 
 pub struct Forms {
@@ -1238,7 +1240,7 @@ impl Forms {
     ) -> Result<(), String> {
         if self.validation_enabled(doc, owner, submitter)? {
             let snapshot=self.required_snapshot(doc,owner,0,usize::MAX)?;
-            if let Some(&node)=snapshot.nodes.first(){return Err(self.validation_message(doc,node));}
+            if let Some(&node)=snapshot.nodes.first(){return Err(self.validation_message(doc,node)?);}
         }
         Ok(())
     }

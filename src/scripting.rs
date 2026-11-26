@@ -2038,7 +2038,11 @@ impl Page {
         let work=work.checked_add(script_control_custom_validity::snapshot_work(&self.state,forms.controls.len())?).ok_or("Custom validation work overflow.")?;
         if enabled{self.state.work(work)?;script_text_content::deadline(&self.state)?;}
         let available=if enabled{self.state.retained_limit.saturating_sub(self.state.retained)}else{usize::MAX};
-        let snapshot=forms.validation_snapshot_with(doc,owner,submitter,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some())?;
+        let mut pattern_work=if enabled{self.state.host_work}else{crate::javascript::limits::BROWSER.regexp_work};
+        let mut pattern_copies=if enabled{self.state.copy_work}else{usize::MAX};
+        let snapshot=forms.validation_snapshot_with_budget(doc,owner,submitter,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some(),&mut pattern_work,&mut pattern_copies);
+        if enabled{self.state.host_work=pattern_work;self.state.copy_work=pattern_copies;script_text_content::deadline(&self.state)?;}
+        let snapshot=snapshot?;
         let storage=snapshot.storage_bytes();
         if enabled{self.state.copies(snapshot.peak_bytes)?;script_text_content::deadline(&self.state)?;self.state.replace_storage(0,storage,0)?;}
         let invalid=!snapshot.nodes.is_empty();let mut unhandled=None;
@@ -12257,3 +12261,7 @@ mod script_candidate_validity;
 #[cfg(test)]
 #[path="script_text_length_validation_tests.rs"]
 mod text_length_validation_tests;
+
+#[cfg(test)]
+#[path="script_pattern_validation_tests.rs"]
+mod pattern_validation_tests;

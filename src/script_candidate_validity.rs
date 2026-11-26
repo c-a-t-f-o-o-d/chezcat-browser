@@ -2,13 +2,19 @@
 //! https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#the-constraint-validation-api
 use super::*;
 impl Bridge<'_>{
+    pub(super) fn native_pattern_mismatch(&mut self,object:u32)->Result<bool,String>{
+        script_text_content::deadline(self.state)?;
+        let node=self.node(object)?;let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let mismatch=self.forms.pattern_mismatch(self.doc,node,&mut self.state.host_work,&mut self.state.copy_work,available)?;
+        script_text_content::deadline(self.state)?;Ok(mismatch)
+    }
     pub(super) fn validate_candidate_validity_flag(&self,object:u32,key:&str)->Result<(),(&'static str,String)>{
         self.control_validation_authority(object)?;
         if key=="customError"||key=="valid"&&self.state.output_custom_errors.get(&object).is_some()
             ||self.control_eligibility_class(object)==Some("HTMLButtonElement"){return Ok(());}
         let node=node_index(object).filter(|&n|n<self.doc.nodes.len()).ok_or_else(||("NotSupportedError","This validity flag requires its native control node.".into()))?;
         let c=self.forms.controls.get(&node).ok_or_else(||("NotSupportedError","This validity flag requires its admitted native control state.".into()))?;
-        if c.kind==Kind::Unsupported||matches!(key,"valid"|"patternMismatch")&&c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some(){
+        if c.kind==Kind::Unsupported{
             return Err(("NotSupportedError","This validity flag requires a broader native constraint-validation implementation.".into()));
         }
         Ok(())
@@ -34,6 +40,7 @@ impl Bridge<'_>{
         script_text_content::deadline(self.state)?;
         let(long,short)=self.forms.length_validation_flags(self.doc,node);
         script_text_content::deadline(self.state)?;
-        Ok(Value::Bool(match key{"valueMissing"=>missing,"tooLong"=>long,"tooShort"=>short,"valid"=>!missing&&!long&&!short,_=>false}))
+        let pattern=if matches!(key,"valid"|"patternMismatch"){self.native_pattern_mismatch(object)?}else{false};
+        Ok(Value::Bool(match key{"valueMissing"=>missing,"tooLong"=>long,"tooShort"=>short,"patternMismatch"=>pattern,"valid"=>!missing&&!long&&!short&&!pattern,_=>false}))
     }
 }

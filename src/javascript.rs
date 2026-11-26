@@ -269,6 +269,9 @@ mod prototypes;
 mod legacy_object_prototype_tests;
 #[path = "regexp.rs"]
 mod regexp;
+#[path = "regexp_html_pattern.rs"]
+mod regexp_html_pattern;
+pub(crate) use regexp_html_pattern::html_pattern_matches;
 #[path = "regexp_utf16_values.rs"]
 mod regexp_utf16_values;
 #[cfg(test)]
