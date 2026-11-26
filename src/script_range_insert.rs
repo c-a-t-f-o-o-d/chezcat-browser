@@ -32,7 +32,38 @@ impl Bridge<'_>{
   let values=[Value::Host(incoming),reference.map_or(Value::Null,Value::Host)];
   if self.inert_mutation_receiver(parent){self.validate_inert_mutation(parent,"insertBefore",&values).map_err(|(name,message)|Exception(name,message))?;}
   else{self.dom_validate_call(parent,"insertBefore",&values).map_err(|(name,message)|Exception(name,message))?;}
+  self.range_insert_main_ancestry(parent,incoming).map_err(Fatal)?;
   Ok(InsertInfo{node:incoming,parent,reference,split:split.then_some((range.start.node,range.start.offset))})
+ }
+ // Range insertion may split its start Text and explicitly detach the incoming
+ // Node before the ordinary insert transaction. Check native ancestry first.
+ fn range_insert_main_ancestry(&mut self,parent:u32,incoming:u32)->Result<(),String>{
+  if self.inert_mutation_receiver(parent){return Ok(());}
+  self.state.rebuild(self.doc)?;
+  let parent=self.range_node(parent)?;
+  let mut passive=self.range_native_type(incoming)==Some(3);
+  if let Some(node)=node_index(incoming).filter(|&node|self.dom_accessible(node)){
+   if matches!(self.doc.nodes[node].kind,NodeKind::DocumentFragment){
+    passive=true;
+    for &child in &self.doc.nodes[node].children{
+     self.state.work(1)?;
+     let child=self.doc.nodes.get(child).ok_or("Range insertion fragment child is unavailable.")?;
+     if child.namespace!=crate::html::Namespace::None||!matches!(child.kind,NodeKind::Text(_))||!child.children.is_empty(){passive=false;break;}
+    }
+   }else if passive{
+    passive=self.doc.nodes[node].namespace==crate::html::Namespace::None&&self.doc.nodes[node].children.is_empty();
+   }
+   if let Some(source)=self.state.tree.parents[node]{self.text_child_mutation_ancestors(source,node)?;}
+  }else if self.inert_node_type(incoming)==Some(11){
+   passive=true;
+   let count=self.inert_children(incoming).ok_or("Range insertion inert fragment children are unavailable.")?.len();
+   for index in 0..count{
+    self.state.work(1)?;
+    let child=self.inert_children(incoming).unwrap()[index];
+    if self.inert_node_type(child)!=Some(3){passive=false;break;}
+   }
+  }
+  if passive{self.passive_text_mutation_ancestors(parent)}else{self.mutation_ancestors(parent)}
  }
  pub(in crate::scripting) fn range_insert_reference_node(&mut self,reference:Option<u32>,incoming:u32)->Result<Option<u32>,String>{
   if reference!=Some(incoming){return Ok(reference);}self.state.rebuild(self.doc)?;let(parent,index)=self.range_index(incoming)?;
