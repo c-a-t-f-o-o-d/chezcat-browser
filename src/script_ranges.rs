@@ -608,3 +608,6 @@ mod comparisons;
 
 #[path="script_static_range.rs"]
 mod static_ranges;
+
+#[path="script_range_delete.rs"]
+mod deletion;

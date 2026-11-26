@@ -7334,3 +7334,7 @@ mod child_traversal_tests;
 #[cfg(test)]
 #[path="app_static_range_child_tests.rs"]
 mod static_range_child_tests;
+
+#[cfg(test)]
+#[path="app_range_delete_tests.rs"]
+mod range_delete_tests;
