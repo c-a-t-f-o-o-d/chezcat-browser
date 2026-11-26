@@ -9580,7 +9580,14 @@ impl Runtime {
         }
         host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
         if method==DOCUMENT_IMPORT_NODE{self.validate_native_access(object,host)?;for &index in host.native_reference_arguments(object,method){if let Some(Value::Host(source))=args.get(index){self.validate_native_access(*source,host)?;}}}
-        if let Err((kind,message))=host.validate_dictionary_call(object,method,args,fields.as_deref()){if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}return Err(Fault::exception(kind,message));}
+        if method==range_interface::STATIC {
+            self.validate_native_access(object,host)?;
+            if let Some(fields)=&fields {for (name,value) in fields {if matches!(*name,"startContainer"|"endContainer") {if let Value::Host(node)=value {self.validate_native_access(*node,host)?;}}}}
+        }
+        if let Err((kind,message))=host.validate_dictionary_call(object,method,args,fields.as_deref()){
+            if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError" || method==range_interface::STATIC&&kind!="TypeError" {return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            return Err(Fault::exception(kind,message));
+        }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
         if method==text_split_interface::METHOD{return self.split_native_text(object,args,host);}
         if method==node_normalize_interface::METHOD{return self.normalize_native_node(object,host);}

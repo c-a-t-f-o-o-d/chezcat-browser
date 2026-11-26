@@ -7306,3 +7306,7 @@ mod range_clone_contents_tests;
 #[cfg(test)]
 #[path="app_range_comparison_tests.rs"]
 mod range_comparison_tests;
+
+#[cfg(test)]
+#[path="app_static_range_tests.rs"]
+mod static_range_tests;

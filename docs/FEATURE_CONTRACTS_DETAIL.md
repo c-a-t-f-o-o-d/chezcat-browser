@@ -1602,11 +1602,37 @@ detach does not reclaim or invalidate a live range.
 
 This increment supports accessible displayed-document nodes, including detached
 main-document nodes and fragments. Child/inert construction/endpoints, Attr
-endpoints, StaticRange, geometry, contextual fragments,
+endpoints, geometry, contextual fragments,
 content deletion/extraction/insertion and surrounding remain outside the
 implemented subset. Range identity is not a DOM selection, editor-selection or
 site initialization claim. Original App acceptance uses trusted input, actual
 text runs/pixels and stable neighboring editor/link hit targets.
+
+
+## StaticRange native boundary snapshots
+
+StaticRange extends NodeRange and AbstractRange, with its own canonical constructor
+and class tag. Its required dictionary is read in member-name order: endContainer,
+endOffset, startContainer, startOffset. Each offset undergoes numeric conversion
+immediately after its Get; missing fields and invalid Node brands throw TypeError
+before later fields are read. Captured native containers undergo origin checks
+after dictionary conversion. Attr and DocumentType containers then throw the
+constructor realm's InvalidNodeTypeError. Getter/conversion exceptions retain
+their original identity and completed author effects.
+
+The constructor intentionally does not reject different roots, reversed endpoints
+or offsets exceeding node lengths. Unsigned-long offsets and node identities stay
+fixed through insertion/removal, CharacterData edits, splitText, normalization and
+replacement. Inherited boundary getters accept fixed records; live Range methods
+reject them before argument conversion. Native records share checked Range-domain
+identity and actual retained backing admission, with explicit fixed-record tags
+excluded from live mutation updates. They remain retained until page teardown.
+
+Supported containers currently require accessible displayed-document nodes,
+including detached nodes. Child/inert endpoint representation remains guarded.
+This is a native snapshot producer, with no selection, geometry, resource activation
+or unchanged-browser acceptance claim. Broader Range lifecycle and foundation
+qualification remain required.
 
 
 ## Native Range comparison queries

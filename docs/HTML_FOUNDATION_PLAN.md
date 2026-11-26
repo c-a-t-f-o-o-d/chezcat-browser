@@ -1229,6 +1229,11 @@ or silent input truncation is not an acceptable recovery result.
   intersections. Ordered conversion, root/kind/offset errors, read-only resource
   recovery and an actual App consumer have focused checks. Existing child/inert
   and Attr endpoint guards and complete package acceptance remain open.
+  StaticRange now stores fixed native boundary snapshots after ordered required
+  dictionary conversion. Saved identities and exact offsets do not follow live
+  DOM mutations; invalid root/order/offset snapshots are deliberately permitted,
+  while Attr/DocumentType containers receive typed errors. Child/inert endpoint
+  support and complete Range/package acceptance remain required.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
   Native TreeWalker function/object filters now distinguish subtree rejection

@@ -3689,7 +3689,7 @@ impl Host for Bridge<'_> {
         if self.attr_receiver(object){return Some(crate::javascript::NativeAncestry{window:WINDOW,constructor:Some((WINDOW,"Attr"))});}
         if let Some((window,interface))=self.xhr_interface(object){return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,interface))});}
 
-        if let Some(window)=self.range_owner(object) { return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,"Range"))}); }
+        if let Some(record)=self.range_record(object) { let window=record.owner;return Some(crate::javascript::NativeAncestry {window,constructor:Some((window,if record.fixed {"StaticRange"}else{"Range"}))}); }
         if self.event_target_interface(object) {
             return Some(crate::javascript::NativeAncestry { window: object, constructor: Some((object, "Window")) });
         }
@@ -5996,7 +5996,7 @@ impl Host for Bridge<'_> {
         if let Some(class)=crate::javascript::control_custom_validity_interface(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if let Some((class,_))=crate::javascript::control_validation_operation(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
-        if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
+        if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_record(receiver).is_some_and(|record|!record.fixed||crate::javascript::range_interface::snapshot_getter(method)) }; }
         if matches!(method, MEDIA_QUERY_MATCHES | MEDIA_QUERY_MEDIA) {
             return object==WINDOW && self.media_query_owner(receiver).is_some();
         }
@@ -6548,6 +6548,7 @@ impl Host for Bridge<'_> {
         if method == crate::javascript::canvas_readback::METHOD {
             return Some((4, &["colorSpace", "pixelFormat"]));
         }
+        if method==crate::javascript::range_interface::STATIC && self.event_target_interface(object) {return Some((0,&["endContainer","endOffset","startContainer","startOffset"]));}
         if method == DOCUMENT_IMPORT_NODE { return Some((1, &["customElementRegistry", "selfOnly"])); }
         if method==script_node_root::ROOT_METHOD && self.root_node_receiver(object) {return Some((0,&["composed"]));}
         if method=="Event"&&self.event_target_interface(object) {return Some((1,&["bubbles","cancelable","composed"]));}
@@ -6585,6 +6586,7 @@ impl Host for Bridge<'_> {
     }
 
     fn dictionary_member_conversion(&self,object:u32,method:&str,member:&str)->Option<bool>{
+        if method==crate::javascript::range_interface::STATIC {return matches!(member,"endOffset"|"startOffset").then_some(false);}
         if method == crate::javascript::canvas_readback::METHOD { return Some(true); }
         if CanvasOperation::parse(method) == Some(CanvasOperation::GetContext) {
             return matches!(member, "colorSpace" | "colorType").then_some(true);
@@ -6601,6 +6603,7 @@ impl Host for Bridge<'_> {
             || matches!(method,"MouseEvent"|"WheelEvent")&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method==crate::javascript::range_interface::STATIC {return self.validate_static_range_member(member,value);}
         if method=="WheelEvent"&&self.event_target_interface(object)&&matches!(member,"deltaX"|"deltaY"|"deltaZ")&&!matches!(value,Value::Undefined)&&!matches!(value,Value::Number(n) if n.is_finite()){return Err(("TypeError","WheelEvent deltas require finite doubles.".into()));}
         if method=="AnimationEvent"&&self.event_target_interface(object)&&member=="elapsedTime"&&!matches!(value,Value::Undefined)&&!matches!(value,Value::Number(number) if number.is_finite()) {
             return Err(("TypeError","AnimationEvent elapsedTime requires a finite double.".into()));
@@ -6629,7 +6632,7 @@ impl Host for Bridge<'_> {
         }
         Ok(())
     }
-    fn validate_dictionary_call(&mut self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields)).map(|_|());}Ok(())}
+    fn validate_dictionary_call(&mut self,object:u32,method:&str,args:&[Value],fields:Option<&[(&str,Value)]>)->Result<(),(&'static str,String)>{if method==crate::javascript::range_interface::STATIC{return self.validate_static_range_fields(fields);}if method==DOCUMENT_IMPORT_NODE&&object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err(("TypeError","importNode requires a genuine Node.".into()));};return self.validate_inert_document_import(object,*source,script_clone_node::import_subtree(args,fields)).map(|_|());}Ok(())}
     fn call_with_dictionary(
         &mut self,
         object: u32,
@@ -6640,6 +6643,7 @@ impl Host for Bridge<'_> {
         if let Some(operation) = CanvasOperation::parse(method) {
             return self.canvas_context_call(object, operation, args, fields);
         }
+        if method==crate::javascript::range_interface::STATIC {return self.create_static_range(object,fields);}
         if method==DOCUMENT_IMPORT_NODE{if object!=DOCUMENT{let Some(Value::Host(source))=args.first()else{return Err("importNode requires a genuine Node source.".into());};return self.import_into_inert_document(object,*source,script_clone_node::import_subtree(args,fields));}return self.import_node(args,fields);}
         if method==script_node_root::ROOT_METHOD {return self.get_root_node(object,args,fields);}
         if method=="Event"&&self.event_target_interface(object) {return self.construct_base_event(object,args,fields);}
@@ -12291,3 +12295,7 @@ mod range_clone_contents_tests;
 #[cfg(test)]
 #[path="script_range_comparison_tests.rs"]
 mod range_comparison_tests;
+
+#[cfg(test)]
+#[path="script_static_range_tests.rs"]
+mod static_range_tests;

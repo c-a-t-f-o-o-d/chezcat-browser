@@ -1,5 +1,6 @@
 //! Canonical DOM Range interfaces over the native live-boundary store.
 use super::*;
+pub(crate) const STATIC: &str = "StaticRange";
 pub(crate) const RANGE: &str = "Range";
 pub(crate) const ABSTRACT: &str = "AbstractRange";
 pub(crate) const NODE_RANGE: &str = "NodeRange";
@@ -31,7 +32,7 @@ pub(crate) const DETACH: &str = "\0Range.detach";
 pub(crate) fn operation(method: &str) -> bool {
     matches!(
         method,
-        RANGE
+        RANGE | STATIC
             | ABSTRACT
             | NODE_RANGE
             | CREATE
@@ -71,7 +72,9 @@ pub(crate) fn node_argument(method: &str) -> bool {
             | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
     )
 }
+pub(crate) fn snapshot_getter(method:&str)->bool {matches!(method,START_NODE|END_NODE|START_OFFSET|END_OFFSET|COLLAPSED)}
 pub(crate) fn arity(method: &str) -> usize {
+    if method==STATIC {return 1;}
     if matches!(method, SET_START | SET_END | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE) {
         2
     } else {
@@ -83,9 +86,11 @@ impl Runtime {
         let marker = self.inhibit_transient_collection();
         let result = (|| -> Result<(), Fault> {
             let mut parent: Option<(usize, usize)> = None;
-            for name in [ABSTRACT, NODE_RANGE, RANGE] {
+            let mut node_parent=None;
+            for name in [ABSTRACT, NODE_RANGE, RANGE, STATIC] {
+                if name==STATIC {parent=node_parent;}
                 let function = self
-                    .allocate_host_function_with_length(window, name, 0)
+                    .allocate_host_function_with_length(window, name, usize::from(name==STATIC))
                     .map_err(Fault::new)?;
                 if let Some(Function::Host {
                     constructible,
@@ -94,7 +99,7 @@ impl Runtime {
                 }) = self.functions.get_mut(function.id)
                 {
                     *constructible = true;
-                    *illegal_interface_constructor = name != RANGE;
+                    *illegal_interface_constructor = !matches!(name,RANGE|STATIC);
                 }
                 let prototype = self.new_object(None)?;
                 let properties = self.function_properties[function.id];
@@ -127,6 +132,7 @@ impl Runtime {
                         ("collapsed", COLLAPSED),
                     ],
                     NODE_RANGE => &[("startContainer", START_NODE), ("endContainer", END_NODE)],
+                    STATIC => &[],
                     _ => &[("commonAncestorContainer", COMMON)],
                 };
                 for &(property, method) in getters {
@@ -147,7 +153,7 @@ impl Runtime {
                         ("detach", DETACH),
                         ("toString", STRINGIFY),
                     ] {
-                        self.define_canvas_operation(
+                        self.deferred_host_method(
                             prototype,
                             window,
                             property,
@@ -187,6 +193,7 @@ impl Runtime {
                 self.global_attributes
                     .insert(name.into(), (false, true, true));
                 parent = Some((prototype, function.id));
+                if name==NODE_RANGE {node_parent=parent;}
             }
             let document = self.native_constructor_prototypes[&(window, "Document")];
             self.define_canvas_operation(document, window, CREATE, CREATE, 0)?;

@@ -12,6 +12,7 @@ pub(super) struct Point {
 }
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Record {
+    pub fixed: bool,
     pub owner: u32,
     pub start: Point,
     pub end: Point,
@@ -48,7 +49,7 @@ impl State {
         } else {
             node_handle(parent)
         };
-        for range in &mut self.ranges {
+        for range in self.ranges.iter_mut().filter(|range|!range.fixed) {
             for point in [&mut range.start, &mut range.end] {
                 if node_index(point.node).is_some_and(|node| removed.contains(&node)) {
                     *point = Point {
@@ -70,7 +71,7 @@ impl State {
         self.ranges_insert_handle(parent,index,count);
     }
     pub(super) fn ranges_insert_handle(&mut self, parent:u32, index:usize, count:usize) {
-        for range in &mut self.ranges {
+        for range in self.ranges.iter_mut().filter(|range|!range.fixed) {
             for point in [&mut range.start, &mut range.end] {
                 if point.node == parent && point.offset > index {
                     point.offset += count;
@@ -81,7 +82,7 @@ impl State {
     // Offset/count/result lengths have been admitted before this infallible step.
     pub(super) fn ranges_splice_data(&mut self,node:u32,offset:usize,removed:usize,inserted:usize){
         let end=offset+removed;
-        for range in &mut self.ranges {
+        for range in self.ranges.iter_mut().filter(|range|!range.fixed) {
             for point in [&mut range.start,&mut range.end] {
                 if point.node!=node {continue;}
                 if point.offset>offset&&point.offset<=end {point.offset=offset;}
@@ -89,11 +90,11 @@ impl State {
             }
         }
     }
-    pub(super) fn ranges_split_text(&mut self,source:u32,new_node:u32,offset:usize,parent:Option<(u32,usize)>){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==source&&point.offset>offset{point.node=new_node;point.offset-=offset;}else if parent.is_some_and(|(parent,gap)|point.node==parent&&point.offset==gap){point.offset+=1;}}}}
-    pub(super) fn ranges_normalize_remove(&mut self,parent:u32,node:u32,index:usize){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=parent;point.offset=index;}else if point.node==parent&&point.offset>index{point.offset-=1;}}}}
-    pub(super) fn ranges_normalize_merge(&mut self,parent:u32,node:u32,keeper:u32,index:usize,offset:usize){for range in &mut self.ranges{for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=keeper;point.offset+=offset;}else if point.node==parent{if point.offset==index{point.node=keeper;point.offset=offset;}else if point.offset>index{point.offset-=1;}}}}}
+    pub(super) fn ranges_split_text(&mut self,source:u32,new_node:u32,offset:usize,parent:Option<(u32,usize)>){for range in self.ranges.iter_mut().filter(|range|!range.fixed){for point in [&mut range.start,&mut range.end]{if point.node==source&&point.offset>offset{point.node=new_node;point.offset-=offset;}else if parent.is_some_and(|(parent,gap)|point.node==parent&&point.offset==gap){point.offset+=1;}}}}
+    pub(super) fn ranges_normalize_remove(&mut self,parent:u32,node:u32,index:usize){for range in self.ranges.iter_mut().filter(|range|!range.fixed){for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=parent;point.offset=index;}else if point.node==parent&&point.offset>index{point.offset-=1;}}}}
+    pub(super) fn ranges_normalize_merge(&mut self,parent:u32,node:u32,keeper:u32,index:usize,offset:usize){for range in self.ranges.iter_mut().filter(|range|!range.fixed){for point in [&mut range.start,&mut range.end]{if point.node==node{point.node=keeper;point.offset+=offset;}else if point.node==parent{if point.offset==index{point.node=keeper;point.offset=offset;}else if point.offset>index{point.offset-=1;}}}}}
     pub(super) fn ranges_replace_data(&mut self, node: usize) {
-        for range in &mut self.ranges {
+        for range in self.ranges.iter_mut().filter(|range|!range.fixed) {
             for point in [&mut range.start, &mut range.end] {
                 if point.node == node_handle(node) {
                     point.offset = 0;
@@ -229,6 +230,7 @@ impl Bridge<'_> {
             offset: 0,
         };
         self.copy_range(Record {
+            fixed: false,
             owner,
             start: point,
             end: point,
@@ -277,6 +279,7 @@ impl Bridge<'_> {
             .range_record(receiver)
             .ok_or("Range operation requires a genuine Range receiver.")?;
         if comparison(method) {return self.range_comparison(record,method,args);}
+        if record.fixed && !snapshot_getter(method) {return Err("A live Range receiver is required.".into());}
         match method {
             START_NODE => return Ok(Value::Host(record.start.node)),
             END_NODE => return Ok(Value::Host(record.end.node)),
@@ -404,6 +407,7 @@ impl Bridge<'_> {
                 "Illegal range interface constructor.".into(),
             ));
         }
+        if method==STATIC {return if self.event_target_interface(receiver){Ok(())}else{Err(Exception("TypeError","StaticRange requires a Window constructor.".into()))};}
         if method == RANGE {
             return if receiver == WINDOW {
                 Ok(())
@@ -430,6 +434,7 @@ impl Bridge<'_> {
                 "A genuine Range receiver is required.".into(),
             ));
         }
+        if self.range_record(receiver).is_some_and(|record|record.fixed) && !snapshot_getter(method) {return Err(Exception("TypeError","A live Range receiver is required.".into()));}
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
         if method == CLONE_CONTENTS {
             let record=*self.range_record(receiver).unwrap();
@@ -600,3 +605,6 @@ impl Bridge<'_> {
 
 #[path="script_range_comparisons.rs"]
 mod comparisons;
+
+#[path="script_static_range.rs"]
+mod static_ranges;
