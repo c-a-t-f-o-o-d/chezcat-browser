@@ -191,6 +191,17 @@ impl Runtime {
         Ok(true)
     }
 
+    fn reflect_native_named_set(&mut self,handle:u32,key:PropertyKey,value:&Value,host:&mut dyn Host)->Result<bool,Fault>{
+        self.validate_native_access(handle,host)?;
+        let value=self.copy_value(value)?;
+        match key {
+            PropertyKey::String(name)=>self.host_write(handle,name,value,host)?,
+            PropertyKey::StringUnits(units)=>self.assign_units_property(Value::Host(handle),units,value,host)?,
+            PropertyKey::Symbol(_)=>return Err(Fault::new("Native symbol data receivers are not implemented.")),
+        }
+        Ok(true)
+    }
+
     #[inline(never)]
     pub(super) fn reflect_set(
         &mut self,
@@ -211,15 +222,27 @@ impl Runtime {
         }
         let key = self.copy_value(args.get(1).unwrap_or(&Value::Undefined))?;
         let key = self.property_key(key, host)?;
+        let value = args.get(2).unwrap_or(&Value::Undefined);
+        let receiver = args.get(3).unwrap_or(target);
+        self.reject_foreign_window(receiver, host)?;
         let Some(base) = base else {
             self.reject_foreign_window(target, host)?;
+            if let Value::Host(handle)=target {
+                if host.named_units_setter(*handle) {
+                    // Web IDL's named setter wins only for the same receiver.
+                    // Otherwise its ordinary own descriptor excludes named
+                    // attributes, so continue at the genuine prototype chain.
+                    if matches!(receiver,Value::Host(other) if other==handle)&&!matches!(key,PropertyKey::Symbol(_)) {
+                        return self.reflect_native_named_set(*handle,key,value,host).map(Value::Bool);
+                    }
+                    let prototype=self.native_instance_prototype(*handle,host)?;
+                    return self.reflect_set_key(prototype,key,value,receiver,host).map(Value::Bool);
+                }
+            }
             return Err(Fault::new(
                 "Reflect.set on a native target is not implemented.",
             ));
         };
-        let value = args.get(2).unwrap_or(&Value::Undefined);
-        let receiver = args.get(3).unwrap_or(target);
-        self.reject_foreign_window(receiver, host)?;
         Ok(Value::Bool(self.reflect_set_key(base, key, value, receiver, host)?))
     }
 
@@ -259,7 +282,11 @@ impl Runtime {
             };
             current = parent;
         }
-        if matches!(receiver, Value::Host(_)) {
+        if let Value::Host(handle)=receiver {
+            self.validate_native_access(*handle,host)?;
+            if host.named_units_setter(*handle)&&!matches!(key,PropertyKey::Symbol(_)) {
+                return self.reflect_native_named_set(*handle,key,value,host);
+            }
             return Err(Fault::new(
                 "Reflect.set cannot define data on a native receiver.",
             ));

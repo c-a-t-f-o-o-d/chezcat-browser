@@ -12677,3 +12677,7 @@ mod dataset_inherited_keys_tests;
 #[cfg(test)]
 #[path="script_dataset_bulk_definitions_tests.rs"]
 mod dataset_bulk_definitions_tests;
+
+#[cfg(test)]
+#[path="script_dataset_reflect_set_tests.rs"]
+mod dataset_reflect_set_tests;
