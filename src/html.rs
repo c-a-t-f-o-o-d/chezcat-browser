@@ -147,9 +147,9 @@ pub struct Document {
     pub content_type: String,
     pub(crate) encoding: crate::text_codec::Encoding,
     pub nodes: Vec<Node>,
-    /// Set at commit after resource policy is known. The current tokenizer still
-    /// parses noscript markup; consumers hide/inactivate that subtree when true.
-    /// Full HTML scripting-flag tokenization is not implemented yet.
+    /// Captured parser scripting setting. Enabled loaded HTML tokenizes native
+    /// noscript as raw text; disabled and inert parses retain fallback markup.
+    /// Execution still requires the separate resource and native authority gates.
     pub scripting_enabled: bool,
     /// CSP nonceability needs duplicate-attribute evidence even though normal
     /// HTML attribute lookup keeps only the first occurrence.
@@ -336,10 +336,18 @@ pub(crate) fn parse_loaded_document(
     input: &str,
     check_cancel: &dyn Fn() -> Result<(), String>,
 ) -> Result<Document, String> {
-    parse_internal(input, None, false, Some(LoadedTree {
+    parse_loaded_document_with_scripting(input, false, check_cancel)
+}
+
+pub(crate) fn parse_loaded_document_with_scripting(
+    input: &str, scripting: bool, check_cancel: &dyn Fn() -> Result<(), String>,
+) -> Result<Document, String> {
+    let mut document = parse_internal(input, None, scripting, Some(LoadedTree {
         nodes: MAX_LOADED_DOCUMENT_NODES,
         check_cancel,
-    }), None)
+    }), None)?;
+    document.scripting_enabled = scripting;
+    Ok(document)
 }
 
 /// Inert documents reuse the tokenizer with cancellation and strict capacity
@@ -436,7 +444,7 @@ fn parse_internal(
     }
     let mut stack = vec![0];
     let mut initial_templates = template_initial::InitialTemplates::new(context == Some("template"))?;
-    let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new());
+    let mut structure = loaded.filter(|_| !checked).map(|_|document_structure::Structure::new(scripting));
     let mut tables = table_construction::Tables::default();
     let mut formatting=active_formatting::Formatting::default();
     let mut position = 0;
@@ -809,7 +817,8 @@ fn parse_internal(
         if !template_svg && svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
             svg.root = None;
         }
-        let html_raw = matches!(tag.name.as_str(), "iframe" | "xmp" | "noembed" | "noframes")
+        let html_raw = (matches!(tag.name.as_str(), "iframe" | "xmp" | "noembed" | "noframes")
+            || tag.name == "noscript" && scripting)
             && !uncertain_foreign_recovery && svg.root.is_none()
             && matches!(document.nodes[parent].namespace, Namespace::None | Namespace::Html);
         let raw = html_raw || matches!(tag.name.as_str(), "script" | "style" | "title" | "textarea");
@@ -1776,3 +1785,7 @@ mod comment_scan_tests;
 #[cfg(test)]
 #[path="html_optgroup_fragment_tests.rs"]
 mod optgroup_fragment_tests;
+
+#[cfg(test)]
+#[path="html_noscript_loader_context_tests.rs"]
+mod noscript_loader_context_tests;

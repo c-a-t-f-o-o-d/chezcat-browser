@@ -1003,7 +1003,7 @@ fn load_request_progressively(
     } else {
         &raw
     };
-    let mut document = html::parse_loaded_document(markup, &|| check_cancel(cancel))?;
+    let mut document = html::parse_loaded_document_with_scripting(markup, scripting_blocked.is_none(), &|| check_cancel(cancel))?;
     document.media_environment=options.media_environment;
     let media_node = document_media.as_ref().and_then(|_|document.nodes.iter().enumerate().find_map(|(node,item)|
         (item.namespace==html::Namespace::Html && matches!(&item.kind,NodeKind::Element {tag,..} if tag=="img") && document.attr(node,"id")==Some("media-frame")).then_some(node)));
@@ -4290,6 +4290,31 @@ mod tests {
         assert!(retain_script(&mut scripts,&mut payload,script(),slot+owned).is_err());assert_eq!((scripts.len(),scripts.capacity(),payload),(1,1,owned));
         retain_script(&mut scripts,&mut payload,script(),2*(slot+owned)).unwrap();assert_eq!((scripts.len(),scripts.capacity(),payload),(2,2,2*owned));
     }
+    #[test]
+    fn noscript_loader_context_enabled_raw_fallback_and_disabled_actual_resources() {
+        let folder=Folder::new();
+        folder.file("fallback.js", "window.fallbackExecuted=1;");
+        folder.file("pixel.ppm", "P3\n1 1\n255\n255 0 0\n");
+        let page=folder.page("<head><noscript><script src=fallback.js></script></noscript><script>window.allowed=7;</script></head><body><noscript><img id=fallback src=pixel.ppm><input id=fallback-input value=fallback></noscript><p id=real>Real</p>");
+        let enabled=local(&page).unwrap();
+        assert!(enabled.document.scripting_enabled);assert!(enabled.scripting_blocked.is_none());
+        assert_eq!(enabled.scripts.len(),1);assert_eq!(enabled.scripts[0].source,"window.allowed=7;");assert!(enabled.images.is_empty());
+        assert!(!enabled.document.nodes.iter().enumerate().any(|(n,_)|enabled.document.attr(n,"id")==Some("fallback")||enabled.document.attr(n,"id")==Some("fallback-input")));
+        let disabled=local_with_scripts(&page,false).unwrap();
+        assert!(!disabled.document.scripting_enabled);assert!(disabled.scripts.is_empty());assert_eq!(disabled.images.len(),1);
+        assert!(disabled.scripting_blocked.as_deref().unwrap().contains("by user"));
+        assert!(disabled.document.nodes.iter().enumerate().any(|(n,_)|disabled.document.attr(n,"id")==Some("fallback-input")));
+    }
+
+    #[test]
+    fn noscript_loader_context_raw_head_cannot_publish_csp_or_base() {
+        let folder=Folder::new();folder.file("allowed.js","window.allowed=9;");
+        let page=folder.page("<head><noscript><meta http-equiv=Content-Security-Policy content=\"default-src 'none'\"><base href=missing/><script src=missing.js></script></noscript><script src=allowed.js></script></head><body><p>Real</p>");
+        let loaded=local(&page).unwrap();assert_eq!(loaded.scripts.len(),1);assert_eq!(loaded.scripts[0].source,"window.allowed=9;");
+        assert_eq!(loaded.base.display(),loaded.location.display());assert!(loaded.images.is_empty());
+        assert!(!loaded.events.iter().any(|event|event.contains("Content Security Policy blocked")||event.contains("Cannot resolve file")));
+    }
+
 }
 
 #[cfg(test)]
