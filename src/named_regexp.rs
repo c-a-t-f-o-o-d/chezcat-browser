@@ -120,8 +120,8 @@ if(called||a.groups.entry!=='a'||b!=='b')throw 'inherited setter';'ok';
             "(?<x>a)(?<x>b)",
             "(?<1x>a)",
             "(?<x>a)\\k<missing>",
-            "(?<猫>a)",
-            "(?<__proto__>a)",
+            "(?<😀>a)",
+            "(?<a-b>a)",
         ] {
             let mut runtime = Runtime::for_test();
             runtime.execute("var effect=false;", &mut NoHost).unwrap();

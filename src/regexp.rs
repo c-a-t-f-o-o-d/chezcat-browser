@@ -554,90 +554,61 @@ impl Parser<'_> {
     fn group_name(&mut self) -> Result<String, Error> {
         let mut name = String::new();
         while self.peek() != Some(b'>' as u16) {
-            let mut unit = self
-                .peek()
-                .ok_or(Error::Syntax("Unterminated regexp group name."))?;
+            let unit = self.peek().ok_or(Error::Syntax("Unterminated regexp group name."))?;
             self.at += 1;
-            let escaped = unit == b'\\' as u16;
-            if escaped {
+            let code = if unit == b'\\' as u16 {
                 if !self.eat(b'u' as u16) {
-                    return Err(Error::Syntax(
-                        "A regexp group name allows only Unicode escapes.",
-                    ));
+                    return Err(Error::Syntax("A regexp group name allows only Unicode escapes."));
                 }
-                unit = if self.eat(b'{' as u16) {
-                    let mut value = 0u32;
-                    let mut digits = 0usize;
-                    while self.peek() != Some(b'}' as u16) {
-                        let digit = self
-                            .peek()
-                            .and_then(|u| char::from_u32(u as u32))
-                            .and_then(|c| c.to_digit(16))
-                            .ok_or(Error::Syntax("Invalid regexp group-name Unicode escape."))?;
-                        self.at += 1;
-                        digits += 1;
-                        value = value.saturating_mul(16).saturating_add(digit);
-                        if value > 0x10ffff {
-                            return Err(Error::Syntax("Invalid regexp group-name Unicode scalar."));
+                // Group-name escapes use Unicode semantics for every flag
+                // mode, including classic patterns. Only adjacent four-digit
+                // escapes combine; braced and raw forms remain distinct.
+                if self.eat(b'{' as u16) {
+                    self.braced_unicode_escape()?
+                } else {
+                    let lead = u32::from(self.hex(4)?);
+                    if (0xd800..=0xdbff).contains(&lead) {
+                        if !self.eat(b'\\' as u16) || !self.eat(b'u' as u16) {
+                            return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
                         }
-                    }
-                    self.at += 1;
-                    if digits == 0 {
-                        return Err(Error::Syntax("Empty regexp group-name Unicode escape."));
-                    }
-                    if (0xd800..=0xdfff).contains(&value) {
-                        return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
-                    }
-                    if value > 127 {
-                        return Err(Error::Unsupported(
-                            "Non-ASCII regexp group names are not implemented.",
-                        ));
-                    }
-                    value as u16
-                } else {
-                    self.hex(4)?
-                };
-            }
-            if (0xd800..=0xdbff).contains(&unit) {
-                // A source code point consists of consecutive literal units.
-                // A four-digit UnicodeEscapeSequence can pair only with another
-                // such escape, never with a raw unit or braced escape.
-                let paired = if escaped {
-                    self.eat(b'\\' as u16) && self.eat(b'u' as u16)
-                        && (0xdc00..=0xdfff).contains(&self.hex(4)?)
-                } else {
-                    self.peek().is_some_and(|low| (0xdc00..=0xdfff).contains(&low))
-                };
-                if !paired {
-                    return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
+                        let trail = u32::from(self.hex(4)?);
+                        if !(0xdc00..=0xdfff).contains(&trail) {
+                            return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
+                        }
+                        0x10000 + ((lead - 0xd800) << 10) + trail - 0xdc00
+                    } else { lead }
                 }
-            } else if (0xdc00..=0xdfff).contains(&unit) {
-                return Err(Error::Syntax("Unpaired surrogate in regexp group name."));
-            }
-            if unit >= 128 {
-                return Err(Error::Unsupported(
-                    "Non-ASCII regexp group names are not implemented.",
-                ));
-            }
-            let valid = matches!(unit, 36 | 95 | 65..=90 | 97..=122)
-                || !name.is_empty() && matches!(unit, 48..=57);
-            if !valid {
-                return Err(Error::Syntax("Invalid regexp group name."));
-            }
-            if name.len() == MAX_GROUP_NAME_BYTES {
+            } else if (0xd800..=0xdbff).contains(&unit) {
+                let trail = self.peek().filter(|trail| (0xdc00..=0xdfff).contains(trail))
+                    .ok_or(Error::Syntax("Unpaired surrogate in regexp group name."))?;
+                self.at += 1;
+                0x10000 + ((u32::from(unit) - 0xd800) << 10) + u32::from(trail) - 0xdc00
+            } else { u32::from(unit) };
+            let character = char::from_u32(code).ok_or(Error::Syntax("Unpaired surrogate in regexp group name."))?;
+            // Two binary searches over scalar ranges fit within this charged
+            // upper bound; ASCII classification needs only constant work.
+            spend(self.budget, if character.is_ascii() { 1 } else { 2 * u32::BITS as usize })?;
+            let valid = if name.is_empty() { super::identifier_names::start(character) }
+                else { super::identifier_names::part(character) };
+            if !valid { return Err(Error::Syntax("Invalid regexp group name.")); }
+            let needed = name.len().checked_add(character.len_utf8())
+                .ok_or(Error::Limit("Regexp group-name storage overflow."))?;
+            if needed > MAX_GROUP_NAME_BYTES {
                 return Err(Error::Limit("Regexp group-name limit reached (256 bytes)."));
             }
-            name.push(unit as u8 as char);
+            if needed > name.capacity() {
+                // Charge copying the existing name and the new allocation
+                // before requesting storage. Decoded names remain included
+                // in the existing bytecode retention charge.
+                spend(self.budget, needed)?;
+                name.try_reserve_exact(character.len_utf8())
+                    .map_err(|_| Error::Limit("Regexp group-name storage is unavailable."))?;
+                spend(self.budget, name.capacity().saturating_sub(needed))?;
+            }
+            name.push(character);
         }
         self.at += 1;
-        if name.is_empty() {
-            return Err(Error::Syntax("A regexp group name cannot be empty."));
-        }
-        if name == "__proto__" {
-            return Err(Error::Unsupported(
-                "Protected regexp group names are not implemented.",
-            ));
-        }
+        if name.is_empty() { return Err(Error::Syntax("A regexp group name cannot be empty.")); }
         Ok(name)
     }
     fn raw_character(&mut self) -> u32 {
@@ -1759,7 +1730,7 @@ mod tests {
                 "{pattern}"
             );
         }
-        for pattern in [r"(?<猫>a)", r"(?<__proto__>a)", r"(a)\2"] {
+        for pattern in [r"(a)\2"] {
             assert!(
                 matches!(
                     Regex::compile(pattern, "", &mut budget),

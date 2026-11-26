@@ -62,7 +62,7 @@ fn utf16_regexp_raw_and_scalar_compilation_keep_sources_costs_and_invalid_gramma
 }
 
 #[test]
-fn utf16_regexp_group_names_reject_isolated_surrogates_but_keep_astral_names_unsupported() {
+fn utf16_regexp_group_names_reject_isolated_surrogates_and_accept_unicode_names() {
     let units = |s: &str| s.encode_utf16().collect::<Vec<_>>();
     // U+10428 is an astral letter. Raw pairs and consecutive four-digit
     // escapes can designate it; mixing those two forms cannot.
@@ -92,7 +92,7 @@ fn utf16_regexp_group_names_reject_isolated_surrogates_but_keep_astral_names_uns
             assert!(matches!(compile(&name), Err(Error::Syntax(_))), "{name:x?}");
         }
         for name in [vec![high, low], units(r"\uD801\uDC28"), units(r"\u{10428}"), units("é")] {
-            assert!(matches!(compile(&name), Err(Error::Unsupported(_))), "{name:x?}");
+            assert!(compile(&name).is_ok(), "{name:x?}");
         }
     }
 }
@@ -271,7 +271,7 @@ fn unicode_group_reference_grammar_syntax_and_work_refusal_preserve_recovery() {
     }
     assert!(Regex::compile(r"(?=a)?a","",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
     assert!(matches!(Regex::compile(r"\1","",&mut 100_000),Err(Error::Unsupported(_))));
-    for (pattern,flags) in [("(?<é>a)","u"),(".","iu"),(".","d")] {
+    for (pattern,flags) in [(".","iu"),(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
     let pattern=r"(?<=(.))\1";assert!(matches!(Regex::compile(pattern,"u",&mut 0),Err(Error::Limit(_))));
@@ -473,4 +473,37 @@ fn unicode_emoji_properties_work_syntax_and_fresh_recovery_are_real() {
     let re=Regex::compile(r"\p{RGI_Emoji}","v",&mut 20_000_000).unwrap();
     assert!(matches!(re.find(&[0xd83d,0xde00],0,false,&mut 0),Err(Error::Limit(_))));
     assert_eq!(re.find(&[0xd83d,0xde00],0,false,&mut 20_000_000).unwrap().unwrap().captures[0],Some((0,2)));
+}
+#[test]
+fn unicode_capture_names_decode_identifiers_and_reference_identity() {
+    for flags in ["","u","v"] {
+        for (spelling,name) in [("猫","猫"),("é","é"),("e\u{301}","e\u{301}"),("a\u{200c}","a\u{200c}"),("a\u{200d}","a\u{200d}"),("𐐨","𐐨"),(r"\uD801\uDC28","𐐨"),(r"\u{10428}","𐐨"),(r"\u00e9","é"),("__proto__","__proto__")] {
+            let re=Regex::compile(&format!(r"^(?<{spelling}>a)\k<{name}>$"),flags,&mut 100_000).unwrap();
+            assert_eq!(re.find(&[97,97],0,false,&mut 100_000).unwrap().unwrap().named_captures,vec![(name.into(),Some((0,1)))]);
+        }
+    }
+}
+
+#[test]
+fn unicode_capture_names_duplicates_forward_reverse_and_no_normalization() {
+    for flags in ["","u","v"] {
+        let re=Regex::compile(r"^(?:(?<猫>a)|(?<\u732b>b))\k<猫>$",flags,&mut 100_000).unwrap();
+        for input in [[97,97],[98,98]] {assert!(re.find(&input,0,false,&mut 100_000).unwrap().is_some());}
+        let re=Regex::compile(r"^\k<é>(?<\u00e9>a)$",flags,&mut 100_000).unwrap();assert!(re.find(&[97],0,false,&mut 100_000).unwrap().is_some());
+        let re=Regex::compile(r"(?<=(?<猫>a))\k<\u732b>",flags,&mut 100_000).unwrap();assert_eq!(re.find(&[97,97],0,false,&mut 100_000).unwrap().unwrap().named_captures,vec![("猫".into(),Some((0,1)))]);
+        assert!(matches!(Regex::compile(r"(?<é>a)(?<\u00e9>b)",flags,&mut 100_000),Err(Error::Syntax(_))));
+        assert!(matches!(Regex::compile("(?<é>a)\\k<e\u{301}>",flags,&mut 100_000),Err(Error::Syntax(_))));
+        assert!(Regex::compile("(?<é>a)(?<e\u{301}>b)",flags,&mut 100_000).is_ok());
+    }
+}
+
+#[test]
+fn unicode_capture_names_invalid_scalars_grammar_work_and_fresh_recovery() {
+    for flags in ["","u","v"] {
+        for name in ["😀","1猫","\u{301}x","\u{200c}x",r"\u{d800}",r"\uD801\u{DC28}",r"\u{110000}",r"\x61",r"\u{}",r"\uD801",r"\uDC28",r"\u{3e}"] {
+            assert!(matches!(Regex::compile(&format!("(?<{name}>a)"),flags,&mut 100_000),Err(Error::Syntax(_))),"{name}");
+        }
+    }
+    assert!(matches!(Regex::compile("(?<猫>a)","v",&mut 30),Err(Error::Limit(_))));
+    let re=Regex::compile("(?<猫>a)","v",&mut 100_000).unwrap();assert!(matches!(re.find(&[97],0,false,&mut 0),Err(Error::Limit(_))));assert!(re.find(&[97],0,false,&mut 100_000).unwrap().is_some());
 }
