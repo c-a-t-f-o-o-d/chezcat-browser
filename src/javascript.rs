@@ -837,9 +837,17 @@ pub trait Host {
     /// Unconditional pending-plan cleanup, including exhausted job allowances.
     fn finish_form_reset(&mut self,_object:u32){}
     fn synchronous_event_dispatch(&self,_object:u32,_method:&str)->bool {false}
-    fn begin_abort_dispatch(&mut self, _controller: u32, _reason: Value) -> Result<usize, String> {
+    fn begin_abort_dispatch(&mut self, _controller: u32, _reason: Value) -> Result<Vec<abort_interface::Dispatch>, String> {
         Err("Abort dispatch is not authorized by this host.".into())
     }
+    fn abort_signal_argument(&mut self,_value:&Value)->Result<u32,abort_interface::ArgumentError>{
+        Err(abort_interface::ArgumentError::TypeError("A genuine AbortSignal is required.".into()))
+    }
+    fn new_dependent_signal(&mut self,_owner:u32,_signals:&[u32])->Result<u32,String>{
+        Err("Dependent AbortSignal creation is not authorized by this host.".into())
+    }
+    fn abort_dispatch_step(&mut self,_signal:u32,_event:u32){}
+    fn finish_abort_dispatches(&mut self,_steps:Vec<abort_interface::Dispatch>){}
     fn new_timeout_signal(&mut self,_owner:u32,_milliseconds:u64)->Result<u32,String>{
         Err("AbortSignal timeout scheduling is not authorized by this host.".into())
     }

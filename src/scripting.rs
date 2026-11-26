@@ -5219,7 +5219,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if method==crate::javascript::abort_interface::TIMEOUT&&self.event_target_interface(object){return 1;}
+        if matches!(method,crate::javascript::abort_interface::TIMEOUT|crate::javascript::abort_interface::ANY)&&self.event_target_interface(object){return 1;}
         if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
@@ -6598,8 +6598,23 @@ impl Host for Bridge<'_> {
     fn complete_form_reset(&mut self,object:u32)->Result<(),String>{self.complete_native_form_reset(object)}
     fn finish_form_reset(&mut self,object:u32){self.finish_native_form_reset(object);}
     fn synchronous_event_dispatch(&self,object:u32,method:&str)->bool {method=="dispatchEvent"&&self.dispatch_receiver(object)}
-    fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<usize, String> {
+    fn begin_abort_dispatch(&mut self, controller: u32, reason: Value) -> Result<Vec<crate::javascript::abort_interface::Dispatch>, String> {
         self.commit_abort_dispatch(controller, reason)
+    }
+    fn abort_signal_argument(&mut self,value:&Value)->Result<u32,crate::javascript::abort_interface::ArgumentError>{
+        self.validate_abort_signal_argument(value)
+    }
+    fn new_dependent_signal(&mut self,owner:u32,signals:&[u32])->Result<u32,String>{self.create_dependent_signal(owner,signals)}
+    fn abort_dispatch_step(&mut self,signal:u32,event:u32){
+        self.remove_aborted_signal_listeners(signal);
+        let index=self.created_event_index(event).expect("Admitted native abort Event");
+        let owner=self.state.created_events[index].owner;
+        let timestamp=self.event_timestamp(owner,Instant::now()).expect("Admitted native abort Event owner");
+        self.state.created_events[index].timestamp=timestamp;
+    }
+    fn finish_abort_dispatches(&mut self,steps:Vec<crate::javascript::abort_interface::Dispatch>){
+        for step in &steps{self.remove_aborted_signal_listeners(step.signal);}
+        self.state.retained-=steps.capacity()*size_of::<crate::javascript::abort_interface::Dispatch>();
     }
     fn new_timeout_signal(&mut self,owner:u32,milliseconds:u64)->Result<u32,String>{
         self.create_timeout_signal(owner,milliseconds)
@@ -12479,3 +12494,7 @@ mod event_child_methods_tests;
 #[cfg(test)]
 #[path="script_abort_signal_timeout_tests.rs"]
 mod abort_signal_timeout_tests;
+
+#[cfg(test)]
+#[path="script_abort_signal_any_tests.rs"]
+mod abort_signal_any_tests;

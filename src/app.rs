@@ -7410,3 +7410,7 @@ mod event_child_methods_tests;
 #[cfg(test)]
 #[path="app_abort_signal_timeout_tests.rs"]
 mod abort_signal_timeout_tests;
+
+#[cfg(test)]
+#[path="app_abort_signal_any_tests.rs"]
+mod abort_signal_any_tests;
