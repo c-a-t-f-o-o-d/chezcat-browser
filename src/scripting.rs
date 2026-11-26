@@ -3466,6 +3466,10 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn named_units_presence(&mut self,object:u32,units:&[u16])->Result<Option<bool>,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
+        self.dataset_units_attribute(object,units).map(|attribute|Some(attribute.is_some()))
+    }
     fn named_units_property(&mut self,object:u32,units:&[u16])->Result<Option<Value>,String>{
         if (DATASET_BASE..EVENT_BASE).contains(&object){return self.dataset_units_get(object,units).map(Some);}
         if self.concrete_html_interface(object)!=Some("HTMLFormElement"){return Ok(None);}
@@ -12617,3 +12621,7 @@ mod dataset_native_accessors_tests;
 #[cfg(test)]
 #[path="script_dataset_raw_named_read_tests.rs"]
 mod dataset_raw_named_read_tests;
+
+#[cfg(test)]
+#[path="script_dataset_raw_inspection_tests.rs"]
+mod dataset_raw_inspection_tests;

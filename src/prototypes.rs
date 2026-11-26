@@ -1816,6 +1816,23 @@ impl Runtime {
                 }
                 let key = match key {
                     PropertyKey::StringUnits(units) => {
+                        if method=="getOwnPropertyDescriptor" {
+                            if let Value::Host(handle)=first {
+                                self.validate_native_access(*handle,host)?;
+                                if let Some(present)=host.named_units_presence(*handle,&units).map_err(Fault::new)? {
+                                    if !present{return Ok(Value::Undefined);}
+                                    let value=match host.named_units_property(*handle,&units).map_err(Fault::new)? {
+                                        Some(value) if !matches!(value,Value::Undefined)=>value,
+                                        _=>return Err(Fault::new("Native named property changed during descriptor inspection.")),
+                                    };
+                                    let descriptor=self.new_object(None)?;
+                                    for(name,value)in [("value",value),("writable",Value::Bool(true)),("enumerable",Value::Bool(true)),("configurable",Value::Bool(true))]{
+                                        self.set_property(descriptor,name.into(),value)?;
+                                    }
+                                    return Ok(Value::Object(descriptor));
+                                }
+                            }
+                        }
                         let object = self.symbol_backing(first, host)?;
                         if method == "getOwnPropertyDescriptor" {
                             return if let Some(object) = object {
@@ -2297,6 +2314,12 @@ impl Runtime {
         }
         let key = match key {
             PropertyKey::StringUnits(units) => {
+                if let Value::Host(handle)=&this {
+                    self.validate_native_access(*handle,host)?;
+                    if let Some(present)=host.named_units_presence(*handle,&units).map_err(Fault::new)? {
+                        return Ok(Value::Bool(present));
+                    }
+                }
                 let owned = if let Some(object) = self.symbol_backing(&this, host)? {
                     let id = self.ordinary_id(object)?;
                     if method == "propertyIsEnumerable" {

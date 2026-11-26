@@ -777,6 +777,11 @@ pub trait Host {
     fn finish_pi_operation(&mut self,_object:u32,_committed:bool){}
     /// Opt-in exact native named-property reads; None preserves unsupported receivers.
     fn named_units_property(&mut self,_object:u32,_units:&[u16])->Result<Option<Value>,String>{Ok(None)}
+    /// Presence for writable, enumerable, configurable native named data.
+    /// The companion named_units_property supplies the actual descriptor value.
+    /// Presence never materializes values or invokes author getters.
+    /// None leaves the existing ordinary/opaque-key behavior authoritative.
+    fn named_units_presence(&mut self,_object:u32,_units:&[u16])->Result<Option<bool>,String>{Ok(None)}
     /// Opt-in, native console printer. The runtime may describe genuine Error
     /// identities without invoking author getters or coercions. No object arena
     /// access is granted to the host; unrelated native calls keep original args.
@@ -6888,7 +6893,15 @@ impl Runtime {
         if let Some(ordinary) = Ordinary::from_value(&object) {
             return self.has_ordinary_key(ordinary, &name, host).map(Value::Bool);
         }
-        if let PropertyKey::StringUnits(_) = &name {
+        if let PropertyKey::StringUnits(units) = &name {
+            if let Value::Host(handle)=&object {
+                self.validate_native_access(*handle,host)?;
+                if let Some(present)=host.named_units_presence(*handle,units).map_err(Fault::new)? {
+                    if present{return Ok(Value::Bool(true));}
+                    let prototype=self.native_instance_prototype(*handle,host)?;
+                    return self.has_ordinary_key(prototype,&name,host).map(Value::Bool);
+                }
+            }
             let base = self.units_lookup_base(&object, host)?.ok_or_else(||
                 Fault::new("UTF-16 properties of this native object are not implemented."))?;
             return self.has_ordinary_key(base, &name, host).map(Value::Bool);

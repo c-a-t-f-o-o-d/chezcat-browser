@@ -7450,3 +7450,7 @@ mod dataset_native_accessors_tests;
 #[cfg(test)]
 #[path="app_dataset_raw_named_read_tests.rs"]
 mod dataset_raw_named_read_tests;
+
+#[cfg(test)]
+#[path="app_dataset_raw_inspection_tests.rs"]
+mod dataset_raw_inspection_tests;
