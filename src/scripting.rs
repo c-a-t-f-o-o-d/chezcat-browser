@@ -4995,7 +4995,7 @@ impl Host for Bridge<'_> {
             return Some(object);
         }
         if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
-        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
+        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"hasAttributes"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -6168,7 +6168,7 @@ impl Host for Bridge<'_> {
             }
         }
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver) || method=="createDocumentFragment" && receiver==DOCUMENT; }
-        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") {
+        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"hasAttributes"|"\0Element.getAttributeNames") {
             return (self.event_target_interface(object) || self.attr_element_receiver(object))
                 && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
         }
@@ -8272,6 +8272,7 @@ impl Host for Bridge<'_> {
         if object == WINDOW && method == "ProcessingInstruction" {
             return self.create_processing_instruction(DOCUMENT, args);
         }
+        if method=="hasAttributes" {return self.native_has_attributes(object);}
         if method=="hasAttributeNS" {return self.has_attribute_ns(object,args);}
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
         if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
@@ -12641,3 +12642,7 @@ mod dataset_raw_deletion_tests;
 #[cfg(test)]
 #[path="script_attribute_namespace_presence_tests.rs"]
 mod attribute_namespace_presence_tests;
+
+#[cfg(test)]
+#[path="script_attribute_list_presence_tests.rs"]
+mod attribute_list_presence_tests;

@@ -7462,3 +7462,7 @@ mod dataset_raw_deletion_tests;
 #[cfg(test)]
 #[path="app_attribute_namespace_presence_tests.rs"]
 mod attribute_namespace_presence_tests;
+
+#[cfg(test)]
+#[path="app_attribute_list_presence_tests.rs"]
+mod attribute_list_presence_tests;
