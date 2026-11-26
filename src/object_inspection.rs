@@ -92,14 +92,7 @@ impl Runtime {
                     }
                 }
                 StringKey::Units(units) => {
-                    if let Some(object) = self.symbol_backing(value, host)? {
-                        let id = self.ordinary_id(object)?;
-                        self.owns_units_property(id, units)?
-                            && self.objects[id].properties.get_units(units)
-                                .is_some_and(|property| property.enumerable)
-                    } else {
-                        false
-                    }
+                    self.own_units_enumerable_value(value,units,host)?
                 }
             };
             if !enumerable {

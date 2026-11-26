@@ -742,6 +742,9 @@ pub(crate) enum NativePromiseFailure {
     Fatal(String),
 }
 
+/// An owned native named-key snapshot preserves authoritative string identity.
+pub enum NativeNamedKey { String(String), Units(Vec<u16>) }
+
 /// Native DOMStringMap key validation precedes its existing Element mutation.
 pub enum NativeNamedAssignment {
     SyntaxError,
@@ -986,6 +989,9 @@ pub trait Host {
     /// A native attribute can require a genuine DOMException for a specific
     /// validation result. Existing non-DOM setter failures keep their brands.
     fn setter_dom_exception(&self, _object:u32, _property:&str, _kind:&str)->bool {false}
+    /// None retains the original key policy. This supplies only native own names,
+    /// without author getters, inherited properties or synthetic expando storage.
+    fn named_own_keys(&mut self,_object:u32)->Result<Option<Vec<NativeNamedKey>>,String>{Ok(None)}
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())
     }

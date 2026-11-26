@@ -3466,6 +3466,10 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn named_own_keys(&mut self,object:u32)->Result<Option<Vec<crate::javascript::NativeNamedKey>>,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
+        self.dataset_own_key_snapshot(object).map(Some)
+    }
     fn named_units_setter(&self,object:u32)->bool{(DATASET_BASE..EVENT_BASE).contains(&object)}
     fn named_units_assignment(&mut self,object:u32,units:&[u16])->Result<crate::javascript::NativeNamedAssignment,String>{self.dataset_units_assignment(object,units)}
     fn named_units_deletion(&mut self,object:u32,units:&[u16])->Result<Option<crate::javascript::NativeNamedDeletion>,String>{
@@ -12656,3 +12660,7 @@ mod dataset_raw_assignment_tests;
 #[cfg(test)]
 #[path="script_dataset_native_definitions_tests.rs"]
 mod dataset_native_definitions_tests;
+
+#[cfg(test)]
+#[path="script_dataset_own_key_snapshot_tests.rs"]
+mod dataset_own_key_snapshot_tests;
