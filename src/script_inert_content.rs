@@ -10,8 +10,11 @@ impl Bridge<'_> {
             && match self.inert_import_source(object) {
                 Some(ImportSource::Element(_)) => true,
                 Some(ImportSource::Parsed { node, .. }) => {
-                    node.namespace == crate::html::Namespace::Html
-                        && matches!(node.kind, NodeKind::Element { .. })
+                    match &node.kind {
+                        NodeKind::Element{expanded_name,..}=>node.namespace==crate::html::Namespace::Html
+                            || expanded_name.first().is_some_and(|name|matches!(&name.namespace,crate::html::ElementNamespaceValue::Null)),
+                        _=>false,
+                    }
                 }
                 _ => false,
             }

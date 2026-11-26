@@ -3,8 +3,7 @@
 use super::*;
 impl Bridge<'_>{
  pub(in crate::scripting) fn range_surround_append_parent(&mut self,parent:u32)->Result<(),Error>{
-  let node=self.range_node(parent).map_err(Error::Fatal)?;
-  if !matches!(self.doc.nodes[node].kind,NodeKind::Element{..}|NodeKind::DocumentFragment){return Err(Error::Exception("HierarchyRequestError","The surrounding Node cannot contain the extracted fragment.".into()));}Ok(())
+  if !matches!(self.range_native_type(parent),Some(1|11)){return Err(Error::Exception("HierarchyRequestError","The surrounding Node cannot contain the extracted fragment.".into()));}Ok(())
  }
  pub(in crate::scripting) fn range_surround_parent(&mut self,receiver:u32,args:&[Value])->Result<u32,Error>{
   use Error::{Exception,Fatal};
@@ -14,8 +13,7 @@ impl Bridge<'_>{
   while common!=range.end.node&&self.range_ancestor_child(common,range.end.node).map_err(Fatal)?.is_none(){common=self.range_parent(common).map_err(Fatal)?.ok_or_else(||Fatal("Range surrounding has no common ancestor.".into()))?;}
   for mut node in [range.start.node,range.end.node]{
    while node!=common{
-    let index=self.range_node(node).map_err(Fatal)?;
-    if !matches!(self.doc.nodes[index].kind,NodeKind::Text(_)|NodeKind::Cdata(_)){return Err(Exception("InvalidStateError","A non-Text Node is partially contained in this Range.".into()));}
+    if !matches!(self.range_native_type(node),Some(3|4)){return Err(Exception("InvalidStateError","A non-Text Node is partially contained in this Range.".into()));}
     node=self.range_parent(node).map_err(Fatal)?.ok_or_else(||Fatal("Range surrounding boundary ancestry disappeared.".into()))?;
    }
   }

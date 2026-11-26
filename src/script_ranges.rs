@@ -135,6 +135,12 @@ impl Bridge<'_> {
         if node_argument(method) {if let Some(Value::Host(node))=args.first(){self.native_node_access(*node).map_err(|(kind,message)|Error::Exception(kind,message))?;}}
         Ok(())
     }
+    pub(in crate::scripting) fn range_native_type(&self,handle:u32)->Option<u32>{
+        if handle==DOCUMENT{return Some(9);}if self.attr_receiver(handle){return Some(2);}
+        if let Some(kind)=self.inert_node_type(handle){return Some(kind);}if let Some(kind)=self.frame_traversal_node_type(handle){return Some(kind);}
+        let node=node_index(handle).filter(|&node|self.dom_accessible(node))?;
+        Some(match self.doc.nodes[node].kind{NodeKind::Element{..}=>1,NodeKind::Text(_)=>3,NodeKind::Cdata(_)=>4,NodeKind::ProcessingInstruction{..}=>7,NodeKind::Comment(_)=>8,NodeKind::DocumentType(_)=>10,NodeKind::DocumentFragment=>11})
+    }
     pub(in crate::scripting) fn range_node(&self, handle: u32) -> Result<usize, String> {
         if handle == DOCUMENT {
             return Ok(0);
@@ -478,8 +484,8 @@ impl Bridge<'_> {
         self.range_live_access(receiver,method,args)?;
         let record=*self.range_record(receiver).unwrap();
         if matches!(method,CLONE_CONTENTS|EXTRACT_CONTENTS|DELETE_CONTENTS|INSERT_NODE|SURROUND_CONTENTS)
-            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||(!matches!(method,CLONE_CONTENTS|DELETE_CONTENTS|EXTRACT_CONTENTS)&&self.inert_node_type(point.node).is_some())) {
-            return Err(Exception("NotSupportedError","Child/inert Range content mutation and fragment producers are not implemented.".into()));
+            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()) {
+            return Err(Exception("NotSupportedError","Child Range content mutation and fragment producers are not implemented.".into()));
         }
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
         // The insertion transaction checks hierarchy before any Text split.
