@@ -159,6 +159,9 @@ impl Runtime {
             key
         };
         self.symbol_to_string_tag = Some(key);
+        let unscopables=if let Some(key)=self.symbol_unscopables{key}else{let Value::Symbol(key)=self.new_symbol(Some("Symbol.unscopables".into()),false)? else{unreachable!()};key};
+        self.symbol_unscopables=Some(unscopables);
+        self.store_property(owner,"unscopables".into(),Value::Symbol(unscopables),Some((false,false,false)))?;
         self.store_property(owner, "toStringTag".into(), Value::Symbol(key), Some((false, false, false)))?;
         let key = if let Some(key) = self.symbol_species { key } else {
             let Value::Symbol(key) = self.new_symbol(Some("Symbol.species".into()), false)? else { unreachable!() };

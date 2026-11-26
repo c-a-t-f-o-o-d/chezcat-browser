@@ -158,6 +158,7 @@ mod script_ranges;
 mod script_abort;
 #[path = "script_pi_attributes.rs"]
 mod script_pi_attributes;
+use crate::javascript::parent_node_interface;
 use crate::javascript::processing_instruction_interface;
 #[path = "script_message_channel.rs"]
 mod script_message_channel;
@@ -5131,6 +5132,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
         if self.event_target_interface(object)&&processing_instruction_interface::operation(method).is_some(){return Some(object);}
+        if self.event_target_interface(object)&&parent_node_interface::operation(method){return Some(object);}
         if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -5163,6 +5165,15 @@ impl Host for Bridge<'_> {
         self.ordinary_event_owner(result)
     }
     fn rollback_unpublished_base_event(&mut self,event:u32)->Result<(),String>{self.rollback_base_event(event)}
+    fn genuine_node_argument(&self,object:u32)->bool{self.get_root_receiver(object)}
+    fn parent_insertion_validity(&self,parent:u32,node:u32)->Result<(),(&'static str,String)>{
+        self.native_node_access(parent)?;self.native_node_access(node)?;
+        if !matches!(self.tree_walker_node_type(node),Some(1|3|4|7|8|11))&&!(self.inert_document_children_receiver(parent)&&self.tree_walker_node_type(node)==Some(10)){return Err(("HierarchyRequestError","This Node cannot be inserted into this parent.".into()));}
+        if self.inert_mutation_receiver(parent){return self.parent_inert_insertion_cycle(parent,node);}
+        let mut ancestor=node_index(parent);
+        for _ in 0..=self.doc.nodes.len(){let Some(at)=ancestor else{break;};if node_handle(at)==node{return Err(("HierarchyRequestError","Insertion would create a cycle.".into()));}ancestor=self.state.tree.parents.get(at).copied().flatten();}
+        Ok(())
+    }
     fn prepare_pi_operation(&mut self,object:u32,method:&str,args:&[Value])->Result<processing_instruction_interface::Prepared,String>{self.prepare_pi(object,method,args)}
     fn finish_pi_operation(&mut self,object:u32,committed:bool){self.finish_pi(object,committed);}
     fn attribute_name_snapshot(&mut self,object:u32)->Result<Vec<DomString>,String>{self.attribute_names(object)}
@@ -5341,6 +5352,8 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if method==parent_node_interface::REPLACE_ALL{return self.validate_parent_replace_all(object,args);}
+        if parent_node_interface::operation(method){return if self.parent_node_receiver(object){self.native_node_access(object)}else{Err(("TypeError","ParentNode method requires a genuine parent.".into()))};}
         if let Some(operation)=script_class_list::operation(method){return self.class_list_validate(object,operation,args);}
         if script_attr::node_method(method){if !(self.attr_element_receiver(object)||self.inert_node_type(object)==Some(1)){return Err(("TypeError","Attribute-node method requires a genuine Element.".into()));}return match method{"setAttributeNode"|"setAttributeNodeNS"=>self.validate_attr_attachment(object,args),"removeAttributeNode"=>self.validate_attr_removal(object,args),_=>Ok(())};}
         if script_attr::member_operation(method).is_some(){return if self.attr_receiver(object){Ok(())}else{Err(("TypeError","Attr operation requires a genuine Attr.".into()))};}
@@ -6337,7 +6350,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
         }
-        if self.event_target_interface(object) && parent_children::operation(method).is_some() {
+        if self.event_target_interface(object) && (parent_children::operation(method).is_some()||parent_node_interface::operation(method)) {
             return self.parent_node_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected"|"\0Node.get.baseURI") {
@@ -8124,6 +8137,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method==parent_node_interface::REPLACE_ALL{return self.parent_replace_all(object,args);}
         if let Some(operation)=script_class_list::operation(method){
             return match operation {
                 "get length"=>self.class_list_get(object,"length"),
@@ -12517,3 +12531,7 @@ mod abort_signal_any_tests;
 #[cfg(test)]
 #[path="script_pi_pseudo_attributes_tests.rs"]
 mod pi_pseudo_attributes_tests;
+
+#[cfg(test)]
+#[path="script_parent_node_variadic_tests.rs"]
+mod parent_node_variadic_tests;

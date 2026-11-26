@@ -7418,3 +7418,7 @@ mod abort_signal_any_tests;
 #[cfg(test)]
 #[path="app_pi_pseudo_attributes_tests.rs"]
 mod pi_pseudo_attributes_tests;
+
+#[cfg(test)]
+#[path="app_parent_node_variadic_tests.rs"]
+mod parent_node_variadic_tests;

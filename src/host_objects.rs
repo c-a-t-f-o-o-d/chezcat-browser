@@ -371,6 +371,7 @@ impl Runtime {
                     self.define_host_attribute(prototype,window,"className","\0Element.get.className",Some("\0Element.set.className"))?;
                     self.define_host_attribute(prototype,window,"classList","\0Element.get.classList",Some("\0Element.set.classList"))?;
                     for &(key,_,get,set) in aria_reflection_interface::ATTRIBUTES {self.define_host_attribute(prototype,window,key,get,Some(set))?;}
+                    self.define_parent_node_methods(prototype,window)?;
                     for (property,operation) in PARENT_NODE_GETTERS {
                         self.define_readonly_node_getter(prototype,window,property,operation)?;
                     }
@@ -476,6 +477,7 @@ impl Runtime {
                 self.store_property(prototype,"constructor".into(),constructor.clone(),Some((false,true,true)))?;
                 self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(prototype),Some((false,false,false)))?;
                 self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String(name.into()),Some((false,false,true)))?;
+                self.define_parent_node_methods(prototype,window)?;
                 for (property,operation) in PARENT_NODE_GETTERS {
                     self.define_readonly_node_getter(prototype,window,property,operation)?;
                 }
