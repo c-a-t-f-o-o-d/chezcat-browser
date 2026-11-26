@@ -36,7 +36,8 @@ impl Runtime {
   self.global_attributes.insert("NodeIterator".into(),(false,true,true));
   self.constructor_prototype("NodeIterator",Value::Object(prototype))?;
   self.store_symbol_property(prototype,self.symbol_to_string_tag.unwrap(),Value::String("NodeIterator".into()),Some((false,false,true)))?;
-  self.node_iterators.prototype=Some(prototype);
+  self.native_constructor_prototypes.insert((window,"NodeIterator"),prototype);
+  if self.node_iterators.prototype.is_none(){self.node_iterators.prototype=Some(prototype);}
   for (name,op) in [("root",Op::Root),("referenceNode",Op::Reference),("pointerBeforeReferenceNode",Op::Before),("whatToShow",Op::Mask),("filter",Op::Filter)] {
    let Value::Function(get)=self.native_function(Builtin::NodeIterator(op),&format!("get {name}"))? else {unreachable!()};
    self.store_accessor_property(prototype,name.into(),Accessors{get:Some(get),set:None},(true,true))?;
@@ -90,7 +91,8 @@ impl Runtime {
   self.work(bytes)?;
   self.node_iterators.states.try_reserve(1).map_err(|_|Fault::new("Cannot reserve NodeIterator state."))?;
   let id=self.new_object(None)?;
-  self.objects[id].prototype=self.node_iterators.prototype.map(Ordinary::Object);
+  let prototype=if let Some((window,_))=self.browser_global{self.native_constructor_prototypes.get(&(window,"NodeIterator")).copied()}else{self.node_iterators.prototype};
+  self.objects[id].prototype=prototype.map(Ordinary::Object);
   self.node_iterators.states.insert(id,IteratorState{root,reference:Pointer{node:root,before:true},candidate:None,active:false,mask,filter});self.value_bytes=retained;
   Ok(Value::Object(id))
  }

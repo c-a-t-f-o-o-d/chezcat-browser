@@ -136,6 +136,17 @@ impl Bridge<'_> {
         crate::javascript::ordinary_html_interface(tag(&frame.document, node))
     }
 
+    // Only the genuinely represented, connected initial child tree is admitted.
+    // Callers retain the native owner/origin check before using this metadata.
+    pub(super) fn frame_traversal_node_type(&self, handle:u32)->Option<u32> {
+        let (index, offset) = frame_handle(handle)?;
+        let frame = self.state.blank_frames.get(index).filter(|frame| frame.connected)?;
+        let node = match offset { 1 => 0, 4..=6 => (offset - 3) as usize, _ => return None };
+        let item = frame.document.nodes.get(node)?;
+        if node == 0 { Some(9) }
+        else { matches!(item.kind, NodeKind::Element { .. }).then_some(1) }
+    }
+
     pub(super) fn active_frame_document(&self,handle:u32)->bool {
         frame_handle(handle).is_some_and(|(index,offset)| offset==1
             && self.state.blank_frames.get(index).is_some_and(|frame|frame.connected))

@@ -7326,3 +7326,7 @@ mod node_iterator_live_tests;
 #[cfg(test)]
 #[path="app_inert_traversal_factory_tests.rs"]
 mod inert_traversal_factory_tests;
+
+#[cfg(test)]
+#[path="app_child_traversal_tests.rs"]
+mod child_traversal_tests;
