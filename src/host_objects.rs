@@ -392,6 +392,7 @@ impl Runtime {
                     self.define_element_sibling_getters(prototype,window,"Element")?;
                     self.define_readonly_node_getter(prototype, window, "assignedSlot", "\0Element.get.assignedSlot")?;
                     self.deferred_host_method(prototype,window,"hasAttributeNS","hasAttributeNS",2)?;
+                    self.deferred_host_method(prototype,window,"hasAttributes","hasAttributes",0)?;
                     for (key, operation) in [
                         ("querySelector", "\0Element.querySelector"),
                         ("querySelectorAll", "\0Element.querySelectorAll"),

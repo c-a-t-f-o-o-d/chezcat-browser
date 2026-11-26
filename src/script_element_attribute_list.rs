@@ -5,7 +5,7 @@ impl Bridge<'_> {
         self.attribute_method_member(object,property)&&!self.form_named_control(object,property)
     }
     pub(super) fn attribute_method_member(&self,object:u32,property:&str)->bool{
-        matches!(property,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"getAttributeNames"|"hasAttribute"|"removeAttribute"|"setAttribute")&&self.attribute_names_receiver(object)
+        matches!(property,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"getAttributeNames"|"hasAttributes"|"hasAttribute"|"removeAttribute"|"setAttribute")&&self.attribute_names_receiver(object)
     }
     pub(super) fn attribute_names_receiver(&self,object:u32)->bool {
         self.inert_node_type(object)==Some(1)||self.attr_element_receiver(object)
@@ -15,6 +15,16 @@ impl Bridge<'_> {
         let node=self.doc.nodes.get(node_index(object)?)?;
         if let NodeKind::Element{attrs,..}=&node.kind{Some(attrs)}else{None}
     }
+    pub(super) fn native_has_attributes(&mut self,object:u32)->Result<Value,String>{
+        if !self.attribute_names_receiver(object){return Err("hasAttributes requires a genuine Element.".into());}
+        self.native_node_access(object).map_err(|(_,message)|message)?;
+        script_text_content::deadline(self.state)?;
+        self.state.work(1)?;
+        let present=!self.element_attribute_source(object).ok_or("Element attributes are unavailable.")?.is_empty();
+        script_text_content::deadline(self.state)?;
+        Ok(Value::Bool(present))
+    }
+
     pub(super) fn attribute_names(&mut self,object:u32)->Result<Vec<DomString>,String>{
         if !self.attribute_names_receiver(object){return Err("getAttributeNames requires a genuine Element.".into());}
         let attrs=self.element_attribute_source(object).ok_or("Element attribute storage is unavailable.")?;
