@@ -7314,3 +7314,7 @@ mod static_range_tests;
 #[cfg(test)]
 #[path="app_static_range_inert_tests.rs"]
 mod static_range_inert_tests;
+
+#[cfg(test)]
+#[path="app_node_iterator_state_tests.rs"]
+mod node_iterator_state_tests;

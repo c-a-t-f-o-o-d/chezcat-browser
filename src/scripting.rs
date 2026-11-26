@@ -1332,6 +1332,7 @@ impl Page {
         runtime.define_range_interfaces(WINDOW).expect("fixed range interfaces");
         runtime.define_mutation_observers().expect("fixed mutation observer interfaces");
         runtime.define_tree_walker(WINDOW).expect("fixed tree traversal interfaces");
+        runtime.define_node_iterator(WINDOW).expect("fixed node iterator interface");
         runtime.define_inert_document_interfaces(WINDOW)
             .expect("fixed inert document interfaces");
         runtime.define_media_interfaces(WINDOW).expect("fixed media interfaces");
@@ -12303,3 +12304,7 @@ mod static_range_tests;
 #[cfg(test)]
 #[path="script_static_range_inert_tests.rs"]
 mod static_range_inert_tests;
+
+#[cfg(test)]
+#[path="script_node_iterator_state_tests.rs"]
+mod node_iterator_state_tests;

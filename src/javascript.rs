@@ -161,6 +161,8 @@ mod dom_exception;
 mod mutation_observers;
 #[path = "tree_walker.rs"]
 mod tree_walker;
+#[path = "node_iterator.rs"]
+mod node_iterator;
 #[path = "expression_parser.rs"]
 mod expression_parser;
 #[path = "identifier_names.rs"]
@@ -4039,6 +4041,7 @@ enum Builtin {
     DomException(dom_exception::Op),
     MutationObserver(mutation_observers::Op),
     TreeWalker(tree_walker::Op),
+    NodeIterator(node_iterator::Op),
     Eval,
     JsonParse,
     JsonStringify,
@@ -4306,6 +4309,7 @@ pub struct Runtime {
     promises: promises::Arena,
     mutations: mutation_observers::Arena,
     walkers: tree_walker::Arena,
+    node_iterators: node_iterator::Arena,
     binary_roots: binary_data::Roots,
     retained_binary: usize,
     collection_roots: collections::Roots,
@@ -4470,6 +4474,7 @@ impl Runtime {
             promises: promises::Arena::default(),
             mutations: mutation_observers::Arena::default(),
             walkers: tree_walker::Arena::default(),
+            node_iterators: node_iterator::Arena::default(),
             binary_roots: binary_data::Roots::default(),
             retained_binary: 0,
             collection_roots: collections::Roots::default(),
@@ -9968,6 +9973,9 @@ impl Runtime {
             Some(Function::Native(Builtin::MutationObserver(operation))) => {
                 return self.mutation_observer_builtin(*operation, args, this, host);
             }
+            Some(Function::Native(Builtin::NodeIterator(operation))) => {
+                return self.node_iterator_builtin(*operation, args, this, host);
+            }
             Some(Function::Native(Builtin::TreeWalker(operation))) => {
                 return self.tree_walker_builtin(*operation, args, this, host);
             }
@@ -10667,6 +10675,7 @@ impl Runtime {
             | Builtin::DomException(_)
             | Builtin::MutationObserver(_)
             | Builtin::TreeWalker(_)
+            | Builtin::NodeIterator(_)
             | Builtin::Binary(_)
             | Builtin::Collection(_)
             | Builtin::Iterator(_)

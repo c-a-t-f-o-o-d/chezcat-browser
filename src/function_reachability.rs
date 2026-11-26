@@ -504,6 +504,10 @@ impl Runtime {
             meter.charge(1)?;
             graph.add(Edge::Object(prototype));
         }
+        if let Some(prototype) = self.node_iterators.prototype {
+            meter.charge(1)?;
+            graph.add(Edge::Object(prototype));
+        }
         self.reachability_intrinsic_edges(&mut |edge| graph.add(edge));
         loop {
             self.trace_strong_edges(&mut graph, meter)?;
@@ -556,6 +560,10 @@ impl Runtime {
                         + object.generator.as_ref().map_or(0, generator_functions::State::reachability_cost)
                         + if object.proxy.is_some() { 2 } else { 0 })?;
                     if let Some(filter) = self.walkers.filter_value(id) {
+                        meter.charge(1)?;
+                        Edge::value(&filter, &mut add);
+                    }
+                    if let Some(filter) = self.node_iterators.filter_value(id) {
                         meter.charge(1)?;
                         Edge::value(&filter, &mut add);
                     }
