@@ -7390,3 +7390,7 @@ mod event_inert_paths_tests;
 #[cfg(test)]
 #[path="app_event_listener_signal_tests.rs"]
 mod event_listener_signal_tests;
+
+#[cfg(test)]
+#[path="app_event_default_passive_tests.rs"]
+mod event_default_passive_tests;

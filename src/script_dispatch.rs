@@ -328,6 +328,10 @@ impl Bridge<'_> {
         self.state.retained+=added;
         Ok(Value::Host(handle))
     }
+    pub(super) fn listener_receiver(&self,object:u32)->bool {
+        self.dispatch_receiver(object)||self.event_target_interface(object)||self.frame_contains_node(object).is_some()
+    }
+
     pub(super) fn dispatch_receiver(&self, object: u32) -> bool {
         self.standalone_target_owner(object).is_some() || self.abort_signal_owner(object).is_some() || object==WINDOW || !self.is_frame_handle(object) && self.namespace_receiver(object)
     }
