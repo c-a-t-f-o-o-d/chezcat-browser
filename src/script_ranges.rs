@@ -786,3 +786,7 @@ mod insertion;
 
 #[path="script_range_surround.rs"]
 mod surrounding;
+
+#[cfg(test)]
+#[path="script_noscript_text_ranges_tests.rs"]
+mod noscript_text_ranges_tests;
