@@ -742,6 +742,12 @@ pub(crate) enum NativePromiseFailure {
     Fatal(String),
 }
 
+/// A proven native named deletion uses existing Element attribute removal.
+pub enum NativeNamedDeletion {
+    Absent,
+    Attribute { element:u32, name:Value },
+}
+
 pub struct NativeChildListChange {
     pub target: u32,
     pub added: Vec<u32>,
@@ -996,6 +1002,8 @@ pub trait Host {
     /// A supported named property backed by a native attribute removes that
     /// attribute through the existing checked, observed native operation.
     fn named_attribute_deletion(&mut self, _object:u32, _property:&str)->Result<Option<(u32,String)>,String>{Ok(None)}
+    /// None keeps unsupported raw-key receivers on their original path.
+    fn named_units_deletion(&mut self,_object:u32,_units:&[u16])->Result<Option<NativeNamedDeletion>,String>{Ok(None)}
     fn delete(&mut self, _object: u32, _property: &str) -> Result<bool, String> {
         Err("Deleting this native host property is not implemented.".into())
     }
@@ -9035,6 +9043,16 @@ impl Runtime {
             Reference::UnitsProperty(object, units) => {
                 Self::require_property_receiver(&object)?;
                 self.property_name_units(&units)?;
+                if let Value::Host(handle)=&object {
+                    self.validate_native_access(*handle,host)?;
+                    host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
+                    if let Some(deletion)=host.named_units_deletion(*handle,&units).map_err(Fault::new)? {
+                        if let NativeNamedDeletion::Attribute{element,name}=deletion {
+                            self.call_host(element,"removeAttribute",&[name],host)?;
+                        }
+                        return Ok(Value::Bool(true));
+                    }
+                }
                 if let Some(backing) = self.symbol_backing(&object, host)? {
                     let id = self.ordinary_id(backing)?;
                     self.reject_unsupported_proxy_operation(id, "deleteProperty")?;
