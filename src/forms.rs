@@ -656,7 +656,7 @@ pub(crate) use forms_reset::ResetPlan;
 
 #[path="forms_validation.rs"]
 mod forms_validation;
-pub(crate) use forms_validation::{ValidationSnapshot,validation_candidate,validation_attribute_work};
+pub(crate) use forms_validation::{ValidationSnapshot,validation_candidate,validation_candidate_attributes,validation_attribute_work};
 
 pub struct Forms {
     pub controls: BTreeMap<usize, Control>,

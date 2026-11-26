@@ -2043,3 +2043,6 @@ mod owned_name_traversal;
 
 #[path="script_label_control.rs"]
 pub(super) mod label_control;
+
+#[path="script_inert_control_eligibility.rs"]
+mod control_eligibility;
