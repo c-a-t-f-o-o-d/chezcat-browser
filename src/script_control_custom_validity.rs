@@ -5,8 +5,8 @@ pub(super) fn snapshot_work(state:&State,controls:usize)->Result<usize,String>{
     controls.checked_mul(state.output_custom_errors.lookup_work()).ok_or("Custom validation lookup work overflow.".into())
 }
 impl Page{
-    pub(crate) fn control_validation_report_message(&self,forms:&Forms,node:usize)->String{
-        self.state.output_custom_errors.get(&node_handle(node)).map_or_else(||forms.required_message(node),|message|message.render_projection().to_owned())
+    pub(crate) fn control_validation_report_message(&self,doc:&Document,forms:&Forms,node:usize)->String{
+        self.state.output_custom_errors.get(&node_handle(node)).map_or_else(||forms.validation_message(doc,node),|message|message.render_projection().to_owned())
     }
 }
 impl Bridge<'_>{

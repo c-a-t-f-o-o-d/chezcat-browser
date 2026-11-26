@@ -12253,3 +12253,7 @@ mod candidate_validity_tests;
 
 #[path="script_candidate_validity.rs"]
 mod script_candidate_validity;
+
+#[cfg(test)]
+#[path="script_text_length_validation_tests.rs"]
+mod text_length_validation_tests;

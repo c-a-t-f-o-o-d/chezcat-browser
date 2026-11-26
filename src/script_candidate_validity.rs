@@ -8,9 +8,7 @@ impl Bridge<'_>{
             ||self.control_eligibility_class(object)==Some("HTMLButtonElement"){return Ok(());}
         let node=node_index(object).filter(|&n|n<self.doc.nodes.len()).ok_or_else(||("NotSupportedError","This validity flag requires its native control node.".into()))?;
         let c=self.forms.controls.get(&node).ok_or_else(||("NotSupportedError","This validity flag requires its admitted native control state.".into()))?;
-        if c.kind==Kind::Unsupported||key!="valueMissing"&&matches!(c.kind,Kind::Text|Kind::TextArea)
-            &&(self.doc.attr(node,"minlength").is_some()||self.doc.attr(node,"maxlength").is_some()
-                ||c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some()){
+        if c.kind==Kind::Unsupported||matches!(key,"valid"|"patternMismatch")&&c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some(){
             return Err(("NotSupportedError","This validity flag requires a broader native constraint-validation implementation.".into()));
         }
         Ok(())
@@ -26,7 +24,7 @@ impl Bridge<'_>{
         if key=="customError"{return Ok(Value::Bool(custom));}
         if key=="valid"&&custom{return Ok(Value::Bool(false));}
         self.state.rebuild(self.doc)?;let node=self.node(object)?;
-        self.state.work(forms::validation_attribute_work(self.doc,node)?)?;
+        self.state.work(forms::validation_attribute_work(self.doc,node)?.checked_add(self.forms.length_validation_work(self.doc,node)).ok_or("Length validation work overflow.")?)?;
         if self.control_eligibility_class(object)==Some("HTMLButtonElement"){
             return Ok(Value::Bool(key=="valid"));
         }
@@ -34,6 +32,8 @@ impl Bridge<'_>{
         self.state.work(count.checked_mul(2).and_then(|n|n.checked_add(1)).ok_or("Validity group work overflow.")?)?;
         let missing=self.forms.constraint_value_missing(&self.forms.controls[&node]);
         script_text_content::deadline(self.state)?;
-        Ok(Value::Bool(match key{"valueMissing"=>missing,"valid"=>!missing,_=>false}))
+        let(long,short)=self.forms.length_validation_flags(self.doc,node);
+        script_text_content::deadline(self.state)?;
+        Ok(Value::Bool(match key{"valueMissing"=>missing,"tooLong"=>long,"tooShort"=>short,"valid"=>!missing&&!long&&!short,_=>false}))
     }
 }

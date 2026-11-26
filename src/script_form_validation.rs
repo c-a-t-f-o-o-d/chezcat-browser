@@ -30,7 +30,6 @@ impl Bridge<'_>{
         for(&node,c)in &self.forms.controls{
             if c.owner!=Some(owner)||c.disabled||matches!(c.kind,Kind::Text|Kind::TextArea)&&c.readonly{continue;}
             if c.kind==Kind::Unsupported
-                ||matches!(c.kind,Kind::Text|Kind::TextArea)&&(self.doc.attr(node,"minlength").is_some()||self.doc.attr(node,"maxlength").is_some())
                 ||c.kind==Kind::Text&&self.doc.attr(node,"pattern").is_some(){
                 return Err(("NotSupportedError","This candidate requires a broader native constraint-validation implementation.".into()));
             }

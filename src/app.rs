@@ -2835,7 +2835,7 @@ impl App {
                 .is_some_and(|c| c.value.text() != previous)
             {
                 if let Some(control) = self.forms.controls.get_mut(&node) {
-                    control.mark_value_dirty();
+                    control.mark_user_value_change();
                 }
                 self.script_begin_job();
                 self.invalidate_script_geometry();
@@ -7261,3 +7261,7 @@ mod control_custom_validity_tests;
 #[cfg(test)]
 #[path="app_candidate_validity_tests.rs"]
 mod candidate_validity_tests;
+
+#[cfg(test)]
+#[path="app_text_length_validation_tests.rs"]
+mod text_length_validation_tests;
