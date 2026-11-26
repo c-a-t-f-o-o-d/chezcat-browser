@@ -7454,3 +7454,7 @@ mod dataset_raw_named_read_tests;
 #[cfg(test)]
 #[path="app_dataset_raw_inspection_tests.rs"]
 mod dataset_raw_inspection_tests;
+
+#[cfg(test)]
+#[path="app_dataset_raw_deletion_tests.rs"]
+mod dataset_raw_deletion_tests;

@@ -3466,6 +3466,13 @@ impl Bridge<'_> {
 }
 
 impl Host for Bridge<'_> {
+    fn named_units_deletion(&mut self,object:u32,units:&[u16])->Result<Option<crate::javascript::NativeNamedDeletion>,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
+        let Some((node,index))=self.dataset_units_attribute(object,units)? else{return Ok(Some(crate::javascript::NativeNamedDeletion::Absent))};
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        let name=Self::dom_string_value(self.state,&attrs[index].name.qualified)?;
+        Ok(Some(crate::javascript::NativeNamedDeletion::Attribute{element:node_handle(node),name}))
+    }
     fn named_units_presence(&mut self,object:u32,units:&[u16])->Result<Option<bool>,String>{
         if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
         self.dataset_units_attribute(object,units).map(|attribute|Some(attribute.is_some()))
@@ -12625,3 +12632,7 @@ mod dataset_raw_named_read_tests;
 #[cfg(test)]
 #[path="script_dataset_raw_inspection_tests.rs"]
 mod dataset_raw_inspection_tests;
+
+#[cfg(test)]
+#[path="script_dataset_raw_deletion_tests.rs"]
+mod dataset_raw_deletion_tests;
