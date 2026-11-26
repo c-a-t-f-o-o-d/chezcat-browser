@@ -555,6 +555,10 @@ impl Runtime {
                         + object.promise.as_ref().map_or(0, promises::Data::reachability_cost)
                         + object.generator.as_ref().map_or(0, generator_functions::State::reachability_cost)
                         + if object.proxy.is_some() { 2 } else { 0 })?;
+                    if let Some(filter) = self.walkers.filter_value(id) {
+                        meter.charge(1)?;
+                        Edge::value(&filter, &mut add);
+                    }
                     if let Some(proxy) = object.proxy {
                         add(Edge::Object(proxy.target));
                         add(Edge::Object(proxy.handler));

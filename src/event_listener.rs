@@ -67,7 +67,7 @@ impl Runtime {
             if current_target.bytes() > self.limits.capacity.string_bytes {
                 return Err(self.string_limit_fault());
             }
-            let realm = self.event_listener_object_realm(&callback, host)?;
+            let realm = self.callback_interface_object_realm(&callback, host)?;
             self.with_intrinsic_realm(realm, |runtime| {
                 // This is an ordinary effective read, including inherited
                 // accessors, supported Proxy traps and checked native access.
@@ -79,7 +79,7 @@ impl Runtime {
         result
     }
 
-    fn event_listener_object_realm(
+    pub(super) fn callback_interface_object_realm(
         &mut self,
         callback: &Value,
         host: &mut dyn Host,
@@ -109,7 +109,7 @@ impl Runtime {
                     Ok(self.object(id)?.realm)
                 } else {
                     Err(Fault::new(
-                        "Native event listener callback realm is unavailable.",
+                        "Native callback object realm is unavailable.",
                     ))
                 }
             }

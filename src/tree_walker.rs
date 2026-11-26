@@ -1,4 +1,4 @@
-//! Live TreeWalker traversal with NodeFilter masks.
+//! Live TreeWalker traversal with native NodeFilter callbacks and masks.
 //! https://dom.spec.whatwg.org/#interface-treewalker
 use super::*;
 use std::collections::HashMap;
@@ -29,9 +29,82 @@ pub(super) enum Op {
     Next,
 }
 
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+    struct NoHost;
+    impl Host for NoHost {
+        fn get(&mut self,_:u32,_:&str)->Result<Value,String>{panic!("unexpected native read")}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{panic!("unexpected native write")}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{panic!("unexpected native call")}
+        fn tree_walker_document(&self,id:u32)->bool{id==0}
+        fn tree_walker_node_type(&self,id:u32)->Option<u32>{(id==1).then_some(1)}
+    }
+    #[test]
+    fn tree_walker_filter_reachability_follows_only_reachable_walker_identity(){
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.execute("function make(n){var box={};box.fn=function(){return n;};return box.fn;}var filter=make(29);0;",&mut NoHost).unwrap();
+        let Value::Function(filter)=runtime.binding_value(runtime.global_environment,"filter").unwrap() else {panic!("function filter")};
+        let held=runtime.create_tree_walker(&[Value::Host(1),Value::Number(1.0),Value::Function(filter)],Value::Host(0),&mut NoHost).unwrap();
+        runtime.put_binding(runtime.global_environment,"held".into(),Some(held),Declaration::Var,true).unwrap();
+        runtime.execute("filter=null;0;",&mut NoHost).unwrap();
+        let refusal=runtime.retire_proven_inactive_candidate(filter).unwrap_err();
+        assert!(refusal.display().contains("reachable"));
+        runtime.execute("held=null;0;",&mut NoHost).unwrap();
+        runtime.retire_proven_inactive_candidate(filter).unwrap();
+        assert!(!runtime.function_is_occupied(filter));
+    }
+    #[test]
+    fn tree_walker_filter_state_storage_refusal_precedes_identity_publication(){
+        let mut runtime=Runtime::for_capacity_test();
+        let before=(runtime.value_bytes,runtime.objects.len(),runtime.walkers.walkers.len());
+        let limit=runtime.limits.heap.retained_values;
+        runtime.limits.heap.retained_values=runtime.value_bytes;
+        let result=runtime.create_tree_walker(&[Value::Host(1)],Value::Host(0),&mut NoHost);
+        assert!(result.unwrap_err().display().contains("Retained value limit"));
+        assert_eq!((runtime.value_bytes,runtime.objects.len(),runtime.walkers.walkers.len()),before);
+        runtime.limits.heap.retained_values=limit;
+        runtime.create_tree_walker(&[Value::Host(1)],Value::Host(0),&mut NoHost).unwrap();
+        assert_eq!(runtime.value_bytes-before.0,std::mem::size_of::<Walker>());
+        assert_eq!(runtime.walkers.walkers.len(),before.2+1);
+    }
+    #[test]
+    fn tree_walker_filter_denied_native_owner_precedes_callback_and_cursor_change(){
+        struct Guard;
+        impl Host for Guard {
+            fn get(&mut self,id:u32,key:&str)->Result<Value,String>{
+                assert_eq!((id,key),(1,"firstChild"));Ok(Value::Host(2))
+            }
+            fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{panic!("unexpected write")}
+            fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{panic!("unexpected call")}
+            fn tree_walker_document(&self,id:u32)->bool{id==0}
+            fn tree_walker_node_type(&self,_:u32)->Option<u32>{Some(1)}
+            fn native_access_owner(&self,id:u32)->Option<u32>{(id==2).then_some(9)}
+            fn validate_window_access(&self,_:Option<u32>,_:u32)->Result<(),String>{Err("denied native owner".into())}
+        }
+        let mut runtime=Runtime::for_capacity_test();
+        runtime.execute("var calls=0;function filter(){calls++;return 1;}0;",&mut NoHost).unwrap();
+        let filter=runtime.binding_value(runtime.global_environment,"filter").unwrap();
+        let Value::Object(id)=runtime.create_tree_walker(&[Value::Host(1),Value::Number(1.0),filter],Value::Host(0),&mut Guard).unwrap() else {panic!("walker")};
+        let error=runtime.tree_walker_builtin(Op::Next,&[],Value::Object(id),&mut Guard).unwrap_err();
+        assert!(error.display().contains("denied native owner"));
+        assert_eq!(runtime.binding_value(runtime.global_environment,"calls").unwrap().to_number(),0.0);
+        assert_eq!(runtime.walkers.walkers[&id].current,1);
+        assert!(!runtime.walkers.walkers[&id].active);
+    }
+}
+
 impl Op {
     pub(super) fn arity(self) -> usize {
         usize::from(matches!(self, Self::Create | Self::SetCurrentNode))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Filter { Object(usize), Function(usize), Host(u32) }
+impl Filter {
+    fn value(self) -> Value {
+        match self { Self::Object(id)=>Value::Object(id),Self::Function(id)=>Value::Function(id),Self::Host(id)=>Value::Host(id) }
     }
 }
 
@@ -40,12 +113,20 @@ struct Walker {
     root: u32,
     current: u32,
     mask: u32,
+    filter: Option<Filter>,
+    active: bool,
 }
 
 #[derive(Default)]
 pub(super) struct Arena {
     pub(super) prototype: Option<usize>,
     walkers: HashMap<usize, Walker>,
+}
+
+impl Arena {
+    pub(super) fn filter_value(&self, id: usize) -> Option<Value> {
+        self.walkers.get(&id).and_then(|walker| walker.filter).map(Filter::value)
+    }
 }
 
 impl Runtime {
@@ -116,7 +197,7 @@ impl Runtime {
         match op {
             Op::Root => Ok(Value::Host(walker.root)),
             Op::Mask => Ok(Value::Number(f64::from(walker.mask))),
-            Op::Filter => Ok(Value::Null),
+            Op::Filter => Ok(walker.filter.map_or(Value::Null, Filter::value)),
             Op::CurrentNode => {
                 self.validate_native_access(walker.current, host)?;
                 Ok(Value::Host(walker.current))
@@ -127,7 +208,7 @@ impl Runtime {
                 Ok(Value::Undefined)
             }
             _ => {
-                let node = self.traverse_tree_walker(walker, op, host)?;
+                let node = self.traverse_tree_walker(id, walker, op, host)?;
                 if let Some(node) = node {
                     self.walkers.walkers.get_mut(&id).unwrap().current = node;
                     Ok(Value::Host(node))
@@ -164,20 +245,26 @@ impl Runtime {
             let value = self.copy_value(mask)?;
             int32(self.primitive_with_hint(value, false, host)?.script_number()?) as u32
         } else { u32::MAX };
-        if let Some(filter) = args.get(2).filter(|value| !matches!(value, Value::Null | Value::Undefined)) {
-            if !matches!(filter, Value::Host(_) | Value::Object(_) | Value::Function(_)) {
-                return Err(Fault::exception("TypeError", "TreeWalker filter must be an object or null."));
-            }
-            let error = self.native_dom_exception("NotSupportedError", "TreeWalker callback filters are unavailable.")?;
-            return Err(Fault::thrown(error));
-        }
+        let filter = match args.get(2) {
+            None | Some(Value::Null | Value::Undefined) => None,
+            Some(Value::Object(id)) => Some(Filter::Object(*id)),
+            Some(Value::Function(id)) => Some(Filter::Function(*id)),
+            Some(Value::Host(id)) => Some(Filter::Host(*id)),
+            _ => return Err(Fault::exception("TypeError", "TreeWalker filter must be an object or null.")),
+        };
         if self.walkers.walkers.len() >= MAX_TREE_WALKERS {
             return Err(Fault::new("TreeWalker identity limit reached."));
         }
+        let bytes = std::mem::size_of::<Walker>();
+        let retained = self.value_bytes.checked_add(bytes)
+            .filter(|&total| total <= self.limits.heap.retained_values)
+            .ok_or_else(|| Fault::new("Retained value limit reached for TreeWalker state."))?;
+        self.work(bytes)?;
         self.walkers.walkers.try_reserve(1).map_err(|_| Fault::new("Cannot reserve TreeWalker state."))?;
         let id = self.new_object(None)?;
         self.objects[id].prototype = self.walkers.prototype.map(Ordinary::Object);
-        self.walkers.walkers.insert(id, Walker { root, current: root, mask });
+        self.walkers.walkers.insert(id, Walker { root, current: root, mask, filter, active: false });
+        self.value_bytes = retained;
         Ok(Value::Object(id))
     }
 
@@ -190,60 +277,91 @@ impl Runtime {
         }
     }
 
-    fn tree_walker_accepts(&self, walker: Walker, node: u32, host: &dyn Host) -> Result<bool, Fault> {
+    // DOM filtering keeps the active guard across operation lookup, invocation
+    // and Web IDL unsigned-short conversion, including all abrupt completions.
+    fn filter_tree_walker(&mut self, id: usize, node: u32, host: &mut dyn Host) -> Result<u16, Fault> {
+        let walker = self.walkers.walkers[&id];
+        if walker.active {
+            return Err(Fault::thrown(self.native_dom_exception("InvalidStateError", "TreeWalker filter is already active.")?));
+        }
         self.validate_native_access(node, host)?;
-        let Some(kind) = host.tree_walker_node_type(node) else {
-            return Err(Fault::new("TreeWalker encountered an inaccessible node."));
-        };
+        let kind = host.tree_walker_node_type(node)
+            .ok_or_else(|| Fault::new("TreeWalker encountered an inaccessible node."))?;
         let bit = kind.checked_sub(1).and_then(|shift| 1u32.checked_shl(shift))
             .ok_or_else(|| Fault::new("TreeWalker node type exceeds the mask representation."))?;
-        Ok(walker.mask & bit != 0)
+        if walker.mask & bit == 0 { return Ok(3); }
+        let Some(filter) = walker.filter else { return Ok(1); };
+        self.walkers.walkers.get_mut(&id).unwrap().active = true;
+        let result = (|| {
+            let callback = filter.value();
+            let realm = if let Value::Function(function) = callback {
+                self.function_realms.get(function).copied().unwrap_or(self.active_realm)
+            } else { self.callback_interface_object_realm(&callback, host)? };
+            self.with_intrinsic_realm(realm, |runtime| {
+                let (function, this) = if matches!(callback, Value::Function(_)) {
+                    (callback, Value::Undefined)
+                } else {
+                    (runtime.read_property(&callback, "acceptNode", host)?, callback)
+                };
+                let result = runtime.call_value(function, &[Value::Host(node)], this, host)?;
+                Ok(int32(runtime.primitive_with_hint(result, false, host)?.script_number()?) as u16)
+            })
+        })();
+        self.walkers.walkers.get_mut(&id).unwrap().active = false;
+        result
     }
 
-    fn traverse_tree_walker(&mut self, walker: Walker, op: Op, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
-        if walker.mask == 0 {
-            return Ok(None);
-        }
+    fn traverse_tree_walker(&mut self, id: usize, walker: Walker, op: Op, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
         let mut node = walker.current;
         match op {
             Op::Parent => {
                 while node != walker.root {
                     let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { break };
-                    if self.tree_walker_accepts(walker, parent, host)? { return Ok(Some(parent)); }
                     node = parent;
+                    if self.filter_tree_walker(id, node, host)? == 1 { return Ok(Some(node)); }
                 }
                 Ok(None)
             }
-            Op::Child(forward) => self.tree_walker_child(walker, forward, host),
-            Op::Sibling(forward) => self.tree_walker_sibling(walker, forward, host),
+            Op::Child(forward) => self.tree_walker_child(id, walker, forward, host),
+            Op::Sibling(forward) => self.tree_walker_sibling(id, walker, forward, host),
             Op::Next => {
+                let mut result = 1;
                 loop {
-                    let next = if let Some(child) = self.tree_walker_link(node, "firstChild", host)? {
-                        child
-                    } else {
-                        loop {
-                            if node == walker.root { return Ok(None); }
-                            if let Some(sibling) = self.tree_walker_link(node, "nextSibling", host)? {
-                                break sibling;
-                            }
-                            let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { return Ok(None) };
-                            node = parent;
-                        }
+                    while result != 2 {
+                        let Some(child) = self.tree_walker_link(node, "firstChild", host)? else { break };
+                        node = child;
+                        result = self.filter_tree_walker(id, node, host)?;
+                        if result == 1 { return Ok(Some(node)); }
+                    }
+                    let mut temporary = node;
+                    node = loop {
+                        if temporary == walker.root { return Ok(None); }
+                        if let Some(sibling) = self.tree_walker_link(temporary, "nextSibling", host)? { break sibling; }
+                        let Some(parent) = self.tree_walker_link(temporary, "parentNode", host)? else { return Ok(None) };
+                        temporary = parent;
                     };
-                    if self.tree_walker_accepts(walker, next, host)? { return Ok(Some(next)); }
-                    node = next;
+                    result = self.filter_tree_walker(id, node, host)?;
+                    if result == 1 { return Ok(Some(node)); }
                 }
             }
             Op::Previous => {
                 while node != walker.root {
-                    if let Some(sibling) = self.tree_walker_link(node, "previousSibling", host)? {
-                        node = sibling;
-                        while let Some(child) = self.tree_walker_link(node, "lastChild", host)? { node = child; }
-                    } else {
-                        let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { break };
-                        node = parent;
+                    let mut sibling = self.tree_walker_link(node, "previousSibling", host)?;
+                    while let Some(peer) = sibling {
+                        node = peer;
+                        let mut result = self.filter_tree_walker(id, node, host)?;
+                        while result != 2 {
+                            let Some(child) = self.tree_walker_link(node, "lastChild", host)? else { break };
+                            node = child;
+                            result = self.filter_tree_walker(id, node, host)?;
+                        }
+                        if result == 1 { return Ok(Some(node)); }
+                        sibling = self.tree_walker_link(node, "previousSibling", host)?;
                     }
-                    if self.tree_walker_accepts(walker, node, host)? { return Ok(Some(node)); }
+                    if node == walker.root { return Ok(None); }
+                    let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { return Ok(None) };
+                    node = parent;
+                    if self.filter_tree_walker(id, node, host)? == 1 { return Ok(Some(node)); }
                 }
                 Ok(None)
             }
@@ -251,44 +369,44 @@ impl Runtime {
         }
     }
 
-    fn tree_walker_child(&mut self, walker: Walker, forward: bool, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
+    fn tree_walker_child(&mut self, id: usize, walker: Walker, forward: bool, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
         let (child, sibling) = if forward { ("firstChild", "nextSibling") } else { ("lastChild", "previousSibling") };
         let Some(mut node) = self.tree_walker_link(walker.current, child, host)? else { return Ok(None) };
         loop {
-            if self.tree_walker_accepts(walker, node, host)? { return Ok(Some(node)); }
-            if let Some(descendant) = self.tree_walker_link(node, child, host)? {
-                node = descendant;
-                continue;
+            let result = self.filter_tree_walker(id, node, host)?;
+            if result == 1 { return Ok(Some(node)); }
+            if result == 3 {
+                if let Some(descendant) = self.tree_walker_link(node, child, host)? {
+                    node = descendant;
+                    continue;
+                }
             }
             loop {
-                if let Some(peer) = self.tree_walker_link(node, sibling, host)? {
-                    node = peer;
-                    break;
-                }
+                if let Some(peer) = self.tree_walker_link(node, sibling, host)? { node = peer; break; }
                 let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { return Ok(None) };
-                if parent == walker.root || parent == walker.current { return Ok(None); }
+                // Author callbacks may have changed the public cursor.
+                if parent == walker.root || parent == self.walkers.walkers[&id].current { return Ok(None); }
                 node = parent;
             }
         }
     }
 
-    fn tree_walker_sibling(&mut self, walker: Walker, forward: bool, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
+    fn tree_walker_sibling(&mut self, id: usize, walker: Walker, forward: bool, host: &mut dyn Host) -> Result<Option<u32>, Fault> {
         let (child, sibling) = if forward { ("firstChild", "nextSibling") } else { ("lastChild", "previousSibling") };
         let mut node = walker.current;
-        while node != walker.root {
+        if node == walker.root { return Ok(None); }
+        loop {
             let mut next = self.tree_walker_link(node, sibling, host)?;
             while let Some(peer) = next {
                 node = peer;
-                if self.tree_walker_accepts(walker, node, host)? { return Ok(Some(node)); }
-                next = match self.tree_walker_link(node, child, host)? {
-                    Some(child) => Some(child),
-                    None => self.tree_walker_link(node, sibling, host)?,
-                };
+                let result = self.filter_tree_walker(id, node, host)?;
+                if result == 1 { return Ok(Some(node)); }
+                next = self.tree_walker_link(node, child, host)?;
+                if result == 2 || next.is_none() { next = self.tree_walker_link(node, sibling, host)?; }
             }
-            let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { break };
-            if parent == walker.root || self.tree_walker_accepts(walker, parent, host)? { break; }
+            let Some(parent) = self.tree_walker_link(node, "parentNode", host)? else { return Ok(None) };
             node = parent;
+            if node == walker.root || self.filter_tree_walker(id, node, host)? == 1 { return Ok(None); }
         }
-        Ok(None)
     }
 }

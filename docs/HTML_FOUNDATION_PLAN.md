@@ -1219,6 +1219,11 @@ or silent input truncation is not an acceptable recovery result.
   clone, delete, insert and surround operations and code-unit boundaries.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
+  Native TreeWalker function/object filters now distinguish subtree rejection
+  from skipping across all seven movements, preserve live cursor/tree changes,
+  route supported same-origin callback realms, and unwind active-filter state
+  after exceptions or resource refusal. NodeIterator and complete traversal
+  entry-path and package acceptance remain required.
 - Complete base EventTarget dispatch: propagation, cancellation, passive/once/
   signal listeners, removal/reentrancy, exception reporting and real native
   event brands. F10–F12 extend activation, UI and shadow behavior.
