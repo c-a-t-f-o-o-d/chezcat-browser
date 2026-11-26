@@ -358,11 +358,10 @@ mod listener_storage_tests;
 #[path = "script_event_target_storage_tests.rs"]
 mod event_target_storage_tests;
 
-#[derive(Clone)]
 struct Listener {
     serial: usize,
     target: u32,
-    event: String,
+    event: DomString,
     callback: Value,
     property: bool,
     options: ListenerOptions,
@@ -1135,19 +1134,22 @@ impl State {
         property: bool,
         options: ListenerOptions,
     ) -> Result<(), String> {
+        self.add_listener_type(target,crate::dom_string::DomStringRef::Scalar(event),callback,property,options)
+    }
+    fn add_listener_type(&mut self,target:u32,event:crate::dom_string::DomStringRef<'_>,callback:Value,property:bool,options:ListenerOptions)->Result<(),String>{
         self.work(self.listeners.len())?;
         if property {
             if let Some(old) = self
                 .listeners
                 .iter_mut()
-                .find(|l| l.target == target && l.event == event && l.property)
+                .find(|l| l.target == target && l.event.view().same_units(event) && l.property)
             {
                 old.callback = callback;
                 return Ok(());
             }
         } else if self.listeners.iter().any(|l| {
             l.target == target
-                && l.event == event
+                && l.event.view().same_units(event)
                 && !l.property
                 && l.options.capture == options.capture
                 && same_event_listener(&l.callback, &callback)
@@ -1158,10 +1160,9 @@ impl State {
             return Err("Event listener limit reached (64 per document).".into());
         }
         let available=self.retained_limit.saturating_sub(self.retained);
-        if event.len()>available{return Err("DOM retained listener name allowance exhausted.".into());}
-        let mut name=String::new();
-        name.try_reserve_exact(event.len()).map_err(|_|"Could not reserve event listener name.")?;
-        name.push_str(event);
+        let bytes=event.copy_bytes()?;
+        if bytes>available{return Err("DOM retained listener name allowance exhausted.".into());}
+        let name=event.try_owned()?;
         let available=available.checked_sub(name.capacity()).ok_or("DOM retained listener name allocation exceeds allowance.")?;
         let growth=self.listeners.prepare(available,self.event.is_none()&&self.synthetic_dispatches.is_empty())?;
         self.copies(name.capacity().saturating_add(growth.copies))?;
@@ -2943,10 +2944,10 @@ impl Bridge<'_> {
         Ok(())
     }
 
-    fn listener_target(&mut self, handle: u32, event: &str) -> Result<(), String> {
+    fn listener_target(&mut self, handle: u32, event: crate::dom_string::DomStringRef<'_>) -> Result<(), String> {
         // Event types are case-sensitive DOM strings, including custom and
         // empty names. Registering one does not create a native event source.
-        if self.state.event_type_refused(event.len()) {
+        if self.state.event_type_refused(event.logical_bytes()) {
             return Err(format!("Event type exceeds the {}-byte limit.",self.state.event_type_allowance()));
         }
         if !self.listener_receiver(handle) {return Err("Listener receiver is not a supported EventTarget.".into());}
@@ -2972,7 +2973,7 @@ impl Bridge<'_> {
         if !allowed {
             return Err(format!("Event {event:?} is not supported on this target."));
         }
-        self.listener_target(handle, event)
+        self.listener_target(handle, crate::dom_string::DomStringRef::Scalar(event))
     }
 
     fn handler(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
@@ -3020,8 +3021,8 @@ impl Bridge<'_> {
         }
     }
 
-    fn default_listener_passive(&mut self,target:u32,event:&str)->Result<bool,String>{
-        if !matches!(event,"touchstart"|"touchmove"|"wheel"|"mousewheel"){return Ok(false);}
+    fn default_listener_passive(&mut self,target:u32,event:crate::dom_string::DomStringRef<'_>)->Result<bool,String>{
+        if !["touchstart","touchmove","wheel","mousewheel"].iter().any(|name|event.equals(name)){return Ok(false);}
         if self.event_target_interface(target)||target==DOCUMENT{return Ok(true);}
         if let Some(kind)=self.inert_node_type(target){
             if kind==9{return Ok(true);}
@@ -3081,8 +3082,8 @@ impl Bridge<'_> {
             }
             options.capture = value.truthy();
         }
-        let event = self.text(&args[0])?;
-        self.listener_target(object, &event)?;
+        let event = self.dom_text(&args[0])?;
+        self.listener_target(object, event.view())?;
         if let Some(owner)=self.native_access_owner(object){self.window_relationship_access(owner)?;}
         if options.signal.is_some_and(|signal|self.listener_signal_aborted(signal)) {return Ok(Value::Undefined);}
         if matches!(args[1], Value::Null | Value::Undefined) {
@@ -3092,9 +3093,9 @@ impl Bridge<'_> {
             return Err("An EventListener callback must be an object or null.".into());
         }
         if method == "addEventListener" {
-            if !passive_present{options.passive=self.default_listener_passive(object,&event)?;}
+            if !passive_present{options.passive=self.default_listener_passive(object,event.view())?;}
             self.state
-                .add_listener(object, &event, args[1].clone(), false, options)?;
+                .add_listener_type(object, event.view(), args[1].clone(), false, options)?;
         } else {
             self.state.retain_listeners(|l| {
                 !(l.target == object
@@ -4576,6 +4577,9 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if index==0&&(self.listener_receiver(object)&&matches!(method,"addEventListener"|"removeEventListener")
+            ||self.event_target_interface(object)&&matches!(method,"Event"|"CustomEvent"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent")
+            ||self.event_receiver(object)&&matches!(method,"initEvent"|"initCustomEvent"|"initUIEvent"|"initMouseEvent")){return true;}
         if index==0&&(crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET)){return true;}
         if index==0&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
@@ -12448,3 +12452,7 @@ mod event_default_passive_tests;
 #[cfg(test)]
 #[path="script_event_child_paths_tests.rs"]
 mod event_child_paths_tests;
+
+#[cfg(test)]
+#[path="script_event_type_units_tests.rs"]
+mod event_type_units_tests;
