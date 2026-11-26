@@ -12652,3 +12652,7 @@ mod attribute_list_presence_tests;
 #[cfg(test)]
 #[path="script_dataset_raw_assignment_tests.rs"]
 mod dataset_raw_assignment_tests;
+
+#[cfg(test)]
+#[path="script_dataset_native_definitions_tests.rs"]
+mod dataset_native_definitions_tests;
