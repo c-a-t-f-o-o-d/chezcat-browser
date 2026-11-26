@@ -90,6 +90,7 @@ impl Runtime {
             Builtin::DomException(operation) => operation.arity(),
             Builtin::MutationObserver(operation) => operation.arity(),
             Builtin::TreeWalker(operation) => operation.arity(),
+            Builtin::NodeIterator(operation) => operation.arity(),
             Builtin::EmptyFunction | Builtin::ThrowTypeError => 0,
             Builtin::Proxy | Builtin::RegExp | Builtin::ParseInt | Builtin::JsonParse | Builtin::ReflectGet => 2,
             Builtin::JsonStringify | Builtin::ReflectSet => 3,

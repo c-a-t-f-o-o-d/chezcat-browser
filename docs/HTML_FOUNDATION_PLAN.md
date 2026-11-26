@@ -1240,6 +1240,10 @@ or silent input truncation is not an acceptable recovery result.
   acceptance remain required.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
+  Native NodeIterator creation now retains canonical initial root/reference,
+  pointer, mask and filter state for supported roots with checked publication and
+  a no-op detach. Navigation explicitly refuses pending live cursor/candidate and
+  synchronous removal adjustment; state creation does not close those gates.
   Native TreeWalker function/object filters now distinguish subtree rejection
   from skipping across all seven movements, preserve live cursor/tree changes,
   route supported same-origin callback realms, and unwind active-filter state
