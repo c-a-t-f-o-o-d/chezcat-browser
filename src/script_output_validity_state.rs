@@ -47,6 +47,9 @@ impl Bridge<'_>{
    return Ok(Value::Bool(match key{"customError"=>custom,"valid"=>!custom,_=>false}));
   }
   if !matches!(method,SET|FIELD_SET){return Err("Unknown native validity operation.".into());}
+  self.write_control_custom_error(object,args)
+ }
+ pub(super) fn write_control_custom_error(&mut self,object:u32,args:&[Value])->Result<Value,String>{
   let value=args.first().ok_or("Custom validity requires one DOMString argument.")?;
   self.state.rebuild(self.doc)?;
   let source=retained_storage::value_bytes(value);

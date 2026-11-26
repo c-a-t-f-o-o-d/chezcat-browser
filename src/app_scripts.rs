@@ -399,9 +399,15 @@ impl App {
         if let Some(report)=report{self.apply_validation_report(report);}
         focus.is_some()||report.is_some()
     }
-    fn apply_validation_report(&mut self,node:Option<usize>){
-        if let Some(node)=node{self.error(self.forms.required_message(node));}
-        else if self.status.starts_with("Complete the required field: "){self.status.clear();self.failed=false;}
+    pub(super) fn apply_validation_report(&mut self,node:Option<usize>){
+        if let Some(node)=node{
+            let message=self.scripting.as_ref().map_or_else(||self.forms.required_message(node),|page|page.control_validation_report_message(&self.forms,node));
+            self.error(message);self.validation_status=Some((self.script_epoch,self.status.clone()));
+        }else{
+            let owns=self.validation_status.as_ref().is_some_and(|(epoch,message)|*epoch==self.script_epoch&&message==&self.status);
+            if owns{self.status.clear();self.failed=false;}
+            self.validation_status=None;
+        }
     }
     pub(super) fn process_script_requests(&mut self) -> bool {
         self.apply_media_pause();

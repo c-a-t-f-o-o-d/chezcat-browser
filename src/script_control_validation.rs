@@ -17,6 +17,8 @@ impl Bridge<'_>{
     fn native_control_missing_typed(&mut self,object:u32)->Result<bool,(&'static str,String)>{
         self.control_validation_authority(object)?;
         if !matches!(self.control_eligibility_get(object).map_err(|e|("Error",e))?,Value::Bool(true)){return Ok(false);}
+        self.state.work(self.state.output_custom_errors.lookup_work()).map_err(|e|("Error",e))?;
+        if self.state.output_custom_errors.get(&object).is_some(){return Ok(true);}
         let node=self.node(object).map_err(|e|("Error",e))?;
         let c=self.forms.controls.get(&node).ok_or_else(||("NotSupportedError","This candidate requires its admitted native validation state.".into()))?;
         if c.kind==Kind::Unsupported
@@ -41,6 +43,12 @@ impl Bridge<'_>{
     }
     fn control_validation_message_value(&mut self,object:u32,missing:bool)->Result<Value,String>{
         if !missing{return self.string("");}
+        self.state.work(self.state.output_custom_errors.lookup_work())?;
+        if let Some(text)=self.state.output_custom_errors.get(&object){
+            let bytes=text.logical_bytes();if bytes>self.state.limits.host.string_bytes{return Err("Custom validation message exceeds the DOM string allowance.".into());}
+            self.state.copies(bytes)?;script_text_content::deadline(self.state)?;
+            return Self::dom_string_copy(self.state.output_custom_errors.get(&object).unwrap());
+        }
         let node=self.node(object)?;let name=self.forms.controls.get(&node).map(|c|c.name.as_str()).filter(|s|!s.is_empty()).unwrap_or("unnamed field");
         let prefix="Complete the required field: ";let bytes=prefix.len().checked_add(name.len()).and_then(|n|n.checked_add(1)).ok_or("Control validation message size overflow.")?;
         if bytes>self.state.limits.host.string_bytes{return Err("Control validation message exceeds the DOM string allowance.".into());}

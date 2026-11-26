@@ -203,6 +203,7 @@ pub struct App {
     pub scroll: i32,
     pub source: Option<PathBuf>,
     pub status: String,
+    validation_status:Option<(u64,String)>,
     pub failed: bool,
     location: Location,
     current_request: crate::http::Request,
@@ -342,6 +343,7 @@ impl App {
             scroll: 0,
             source: None,
             status: String::new(),
+            validation_status:None,
             failed: false,
             location: location.clone(),
             current_request: crate::http::Request::Get,
@@ -488,6 +490,7 @@ impl App {
         }
     }
     fn error(&mut self, error: String) {
+        self.validation_status=None;
         self.status = error;
         self.failed = true;
     }
@@ -2262,7 +2265,7 @@ impl App {
         if invalid{
             if let Some(node)=unhandled{
                 self.focus_control(node);
-                self.error(self.forms.required_message(node));
+                self.apply_validation_report(Some(node));
             }
             return;
         }
@@ -7250,3 +7253,7 @@ mod inert_control_eligibility_tests;
 #[cfg(test)]
 #[path="app_control_validation_tests.rs"]
 mod control_validation_tests;
+
+#[cfg(test)]
+#[path="app_control_custom_validity_tests.rs"]
+mod control_custom_validity_tests;
