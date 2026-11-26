@@ -2084,3 +2084,6 @@ impl State {
         }}
     }
 }
+
+#[path="script_state_preserving_move.rs"]
+mod state_preserving_move;

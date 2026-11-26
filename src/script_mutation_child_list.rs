@@ -14,6 +14,7 @@ impl Bridge<'_> {
     pub(super) fn child_list_change_plan(&mut self, receiver: u32, method: &str, args: &[Value])
         -> Result<Vec<NativeChildListChange>, String>
     {
+        if method==parent_node_interface::MOVE{let adjusted=self.state_move_arguments(args)?;return self.child_list_change_plan(receiver,"insertBefore",&adjusted);}
         if method==parent_node_interface::REPLACE_ALL{return self.parent_replace_all_changes(receiver,args);}
         if method==xml_documents::CREATE{return self.xml_doctype_adoption_changes(args);}
         if method==DOCUMENT_ADOPT_NODE{return self.adoption_changes(args);}

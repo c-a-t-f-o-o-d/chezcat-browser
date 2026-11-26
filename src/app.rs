@@ -7426,3 +7426,7 @@ mod parent_node_variadic_tests;
 #[cfg(test)]
 #[path="app_child_node_variadic_tests.rs"]
 mod child_node_variadic_tests;
+
+#[cfg(test)]
+#[path="app_state_preserving_move_tests.rs"]
+mod state_preserving_move_tests;

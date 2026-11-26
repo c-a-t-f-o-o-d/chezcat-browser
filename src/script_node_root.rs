@@ -17,7 +17,7 @@ impl Bridge<'_> {
     }
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
-            "append"|"prepend"|"replaceChildren"=>self.parent_node_receiver(object),
+            "append"|"prepend"|"replaceChildren"|"moveBefore"=>self.parent_node_receiver(object),
             "before"|"after"|"replaceWith"=>self.child_node_variadic_receiver(object),
             "getRootNode" => self.get_root_receiver(object),
             "getElementById"=>self.identifier_lookup_receiver(object,None),
