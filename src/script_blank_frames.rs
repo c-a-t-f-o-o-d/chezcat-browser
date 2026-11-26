@@ -284,7 +284,10 @@ impl Bridge<'_> {
     }
 
     pub(super) fn frame_native_property(&self, handle: u32, name: &str) -> bool {
-        self.frame_context(handle).is_some() && (self.owns_global_property(name)
+        // EventTarget methods belong to the child's canonical prototype chain.
+        // Keep ordinary replacement/deletion observable after owner validation.
+        self.frame_context(handle).is_some() && !matches!(name,"addEventListener"|"removeEventListener"|"dispatchEvent")
+            && (self.owns_global_property(name)
             || matches!(name, "parent" | "top" | "frameElement" | "closed" | "length" | "origin"
                 | "setTimeout" | "clearTimeout" | "fetch" | "frames"))
     }
