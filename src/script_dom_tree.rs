@@ -1040,8 +1040,10 @@ impl Bridge<'_> {
             let nonce = self.doc.attr(node, "nonce").unwrap_or("").to_owned();
             return self.string(&nonce).map(Some);
         }
-        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent")
-            || self.created_html_style(node) && property == "textContent" {
+        if tag(self.doc, node) == "script" && matches!(property, "text" | "textContent") {
+            return self.script_child_text(node).map(|text| Some(Self::dom_string_owned(text)));
+        }
+        if self.created_html_style(node) && property == "textContent" {
             return self
                 .raw_child_text(node)
                 .map(|text| Some(Value::String(text)));
@@ -1602,6 +1604,27 @@ impl Bridge<'_> {
         Ok(Value::Host(node_handle(child)))
     }
 
+    fn script_child_text(&mut self, node: usize) -> Result<DomString, String> {
+        script_text_content::deadline(self.state)?;
+        let mut parts = Vec::new();
+        for &child in &self.doc.nodes[node].children {
+            self.state.work(1)?;
+            if let NodeKind::Text(text) | NodeKind::Cdata(text) = &self.doc.nodes[child].kind {
+                script_text_replacement::push_values(self.state, &mut parts, text, 0)?;
+            }
+        }
+        self.state.work(parts.len().checked_mul(6).ok_or("Script child text work overflow.")?)?;
+        let inspected = parts.iter().try_fold(0usize, |bytes, part| bytes.checked_add(part.used_bytes()).ok_or("Script child text source work overflow."))?;
+        self.state.copies(inspected)?;
+        let available = script_text_content::available(self.state, script_text_replacement::bytes(&[&parts], 0)?)?;
+        let (copies, budget, raw) = script_text_content::plan(&parts, self.state.limits.host.string_bytes, available)?;
+        self.state.copies(copies.saturating_sub(inspected))?;
+        script_text_content::deadline(self.state)?;
+        let text = DomString::concat_with_scratch(&parts, budget, raw)?;
+        script_text_content::deadline(self.state)?;
+        Ok(text)
+    }
+
     fn raw_child_text(&mut self, node: usize) -> Result<String, String> {
         let mut text = String::new();
         for &child in &self.doc.nodes[node].children {
@@ -1621,9 +1644,9 @@ impl Bridge<'_> {
 
     fn set_script_text(&mut self, node: usize, value: &Value) -> Result<(), String> {
         let text = if matches!(value, Value::Null) {
-            String::new()
+            DomString::new()
         } else {
-            self.text(value)?
+            self.dom_text(value)?
         };
         self.state.work(self.doc.nodes[node].children.len())?;
         let (child_growth, added) = if text.is_empty() { (None, 0) } else {
@@ -1640,7 +1663,7 @@ impl Bridge<'_> {
         let new_child = if text.is_empty() {
             None
         } else {
-            let created = match self.create_dom_node(NodeKind::Text(text.into())) {
+            let created = match self.create_dom_node(NodeKind::Text(text)) {
                 Ok(value) => value,
                 Err(error) => { self.state.retained -= added; return Err(error); }
             };

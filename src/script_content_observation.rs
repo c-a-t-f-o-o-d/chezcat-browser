@@ -25,6 +25,10 @@ impl Bridge<'_> {
             self.state.work(self.state.output_defaults.lookup_work())?;
             return Ok((property=="value"||!self.state.output_defaults.contains_key(&object)).then_some(object));
         }
+        if matches!(property, "text" | "textContent")
+            && node_index(object).is_some_and(|node| self.dom_accessible(node) && self.dom_script(node)) {
+            return Ok(Some(object));
+        }
         if !matches!(property, "innerHTML" | "textContent") {
             return Ok(None);
         }
@@ -101,6 +105,7 @@ impl Bridge<'_> {
             }
         } else if match value {
             Value::String(text)=>!text.is_empty(),Value::StringUnits(units)=>!units.is_empty(),
+            Value::Undefined if node_index(target).is_some_and(|node| self.dom_script(node))=>true,
             Value::Null|Value::Undefined=>false,_=>!self.text(value)?.is_empty(),
         } {
             added

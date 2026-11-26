@@ -7502,3 +7502,7 @@ mod dataset_symbol_properties_tests;
 #[cfg(test)]
 #[path="app_dataset_reflect_get_tests.rs"]
 mod dataset_reflect_get_tests;
+
+#[cfg(test)]
+#[path="app_script_data_block_tree_tests.rs"]
+mod script_data_block_tree_tests;
