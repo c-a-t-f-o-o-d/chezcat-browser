@@ -20,11 +20,13 @@ with exact feature coverage across parsing, cascade, APIs, layout, painting,
 interaction and dynamic updates. Preserve the substantial original implementation
 already present. Expand its finite contracts through the packages below.
 
-The saved YouTube shell, search/results, watch/Back and playback milestones remain
-product integration targets. Each requires its actual CSS and platform dependency
-closure plus a measured journey. Unrelated speech, printing, worklets or forward
-drafts are not blanket prerequisites for those journeys. CSS program acceptance
-has its own coverage boundary and cannot be inferred from one successful site.
+The P1–P6 DOM/component, layout/input, request, history, resource and media
+capabilities remain product integration targets. Each requires its actual CSS and
+platform dependency closure plus connected App evidence. Representative pages,
+including YouTube, are compatibility tests with their own measured outcomes.
+Unrelated speech, printing, worklets or forward drafts are not blanket
+prerequisites for those integration checks. CSS program acceptance has its own
+coverage boundary and cannot be inferred from one successful site.
 
 The original source audit remains a static baseline. Later finite implementation
 and native results are recorded separately below and in the coverage register.

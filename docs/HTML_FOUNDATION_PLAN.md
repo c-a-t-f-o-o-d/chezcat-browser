@@ -12,9 +12,10 @@
 
 ## Decision and objective
 
-The HTML/XHTML document foundation precedes the saved YouTube shell, search,
-navigation and playback milestones. Required parser and DOM behavior is selected
-from the [coverage register](HTML_FOUNDATION_COVERAGE.json).
+The HTML/XHTML document foundation supplies the shared parsing, DOM and native
+behavior required by later layout, input, request, history and media capabilities.
+Required parser and DOM behavior is selected from the
+[coverage register](HTML_FOUNDATION_COVERAGE.json).
 The broader [CSS foundation program](CSS_FOUNDATION_PLAN.md) is planned after
 F14 acceptance. CSS required to close an included HTML/default-presentation
 contract remains a prerequisite here; product journeys retain their own
@@ -55,7 +56,8 @@ visible. An external dependency needed by an included contract is a **blocker**
 until implemented; it is not a reason to report that contract complete.
 
 The final review must distinguish **document foundation complete**, **HTML
-Standard coverage still open**, and **YouTube journey still unverified**. Changes
+Standard coverage still open**, and **representative site results separately
+measured**. Changes
 to the agreed scope require an explicit owner decision. Required failed or
 blocked contracts remain visible in the acceptance register.
 
@@ -1507,10 +1509,11 @@ Its broader CSS work is mapped in the [CSS plan](CSS_FOUNDATION_PLAN.md) and
 5. Reconcile CAPABILITIES, the coverage register, compatibility source-review
    records and roadmap. Keep historical results historical. Record remaining
    whole-HTML, CSS, ECMAScript, media and platform work.
-6. Record which YouTube shell/search/navigation/playback requirements the
-   completed foundation satisfies and which need further CSS, JavaScript, data
-   or media implementation. Site milestones and wider standards programs retain
-   their separate scope and acceptance evidence.
+6. Reconcile the shared P1–P6 DOM/component, layout/input, request, history,
+   resource and media contracts against the completed foundation. Record remaining
+   CSS, JavaScript, data and media dependencies and the next ready capability.
+   Representative sites such as YouTube remain test cases with separate measured
+   outcomes; wider standards programs retain their own acceptance evidence.
 
 The final report must say exactly which baseline was completed and which wider
 areas remain. It must not say that all websites, all HTML, or YouTube now work
@@ -1518,8 +1521,9 @@ without the corresponding evidence.
 
 After this gate, activate C00 in the [CSS plan](CSS_FOUNDATION_PLAN.md): reconcile
 new source progress, lock the selected standards and tests, and begin the next
-remaining shared syntax/property contract. Preserve the saved YouTube milestones
-as product consumers; unrelated CSS extensions do not become blanket site gates.
+remaining shared syntax/property contract. Preserve P1–P6 as shared capability
+consumers with explicit dependencies. Retain saved site observations as test
+evidence; unrelated CSS extensions do not become blanket integration gates.
 
 ## Testing protocol and progress accounting
 

@@ -123,11 +123,13 @@ traversal fixture; a usable YouTube homepage or playback has not been demonstrat
 
 | Now | Product work retained | Wider programs |
 | :--- | :--- | :--- |
-| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Verify the YouTube shell → search/results → watch/Back → playback sequence after foundation acceptance. | Complete CSS/JavaScript coverage can be planned next; media, isolation and GPU work retain their explicit contracts. |
+| Execute the [HTML/XHTML foundation plan](docs/HTML_FOUNDATION_PLAN.md): standard parsing, XML, DOM, elements, forms, editing, lifecycle and native components, with real integration. | Qualify shared DOM/components, layout/input, requests, history, resources/scrolling and original media through the [P1–P6 capability packages](docs/ROADMAP.md#current-product-sequence). | The [CSS program C00–C32](docs/CSS_FOUNDATION_PLAN.md) follows F14. Full JavaScript coverage and wider media, isolation and GPU work remain incomplete and retain their own contracts. |
 
-The [coverage register](docs/HTML_FOUNDATION_COVERAGE.json) inventories requirements,
-not a conformance score. The foundation follows dependency order, with focused
-development checks and connected App checks at package gates. Required
+Milestone completion follows the documented capability contracts and integration
+gates. Representative pages, including YouTube, provide source-bound compatibility
+evidence. The [coverage register](docs/HTML_FOUNDATION_COVERAGE.json) inventories
+requirements, not a conformance score. The foundation follows dependency order,
+with focused development checks and connected App checks at package gates. Required
 dependencies stay open until verified. Completing this baseline will not imply
 that all HTML platform APIs, all websites or YouTube playback work.
 
