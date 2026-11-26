@@ -2078,8 +2078,12 @@ impl Runtime {
     ) -> Result<(), Fault> {
         self.reject_foreign_window(target, host)?;
         if let Value::Host(handle)=target {self.ensure_native_expando(*handle,host,true)?;}
+        let named_target=if let Value::Host(handle)=target {
+            self.validate_native_access(*handle,host)?;
+            host.named_units_setter(*handle).then_some(*handle)
+        }else{None};
         // Reject an invalid target even when the descriptor list is empty.
-        if !matches!(target, Value::Host(handle) if self.is_browser_global(*handle) || self.host_objects.contains_key(handle))
+        if named_target.is_none() && !matches!(target, Value::Host(handle) if self.is_browser_global(*handle) || self.host_objects.contains_key(handle))
         {
             self.ordinary_required(target)?;
         }
@@ -2151,6 +2155,22 @@ impl Runtime {
             entries.push((key, descriptor));
         }
         for (key, descriptor) in entries {
+            if let Some(handle)=named_target {
+                if !matches!(key,PropertyKey::Symbol(_)) {
+                    // Collection above finishes before the first native write.
+                    // Apply each named descriptor through the same native setter
+                    // as a single definition; prior committed entries survive a
+                    // later rejection or abrupt Web IDL value conversion.
+                    if !descriptor.is_data(){return Err(Fault::exception("TypeError","Native named setters require a data descriptor."));}
+                    let value=descriptor.value.unwrap_or(Value::Undefined);
+                    match key {
+                        PropertyKey::String(name)=>self.host_write(handle,name,value,host)?,
+                        PropertyKey::StringUnits(units)=>self.assign_units_property(Value::Host(handle),units,value,host)?,
+                        PropertyKey::Symbol(_)=>unreachable!(),
+                    }
+                    continue;
+                }
+            }
             match key {
                 PropertyKey::String(key) => {
                     let target = self.descriptor_target(target, &key, host)?;
