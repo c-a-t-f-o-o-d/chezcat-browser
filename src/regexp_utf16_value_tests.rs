@@ -462,3 +462,20 @@ fn unicode_capture_names_native_syntax_is_atomic_and_fresh_execution_works() {
     assert!(error.contains("Regular-expression work limit"),"{error}");assert_eq!(runtime.retained_regexp,retained);
     runtime.begin_job();assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'v').exec('a').groups.猫==='a';",&mut NoHost).unwrap().to_text(),"true");
 }
+#[test]
+fn unicode_case_folding_native_metadata_and_string_consumers_are_exact() {
+    assert_eq!(Runtime::new().execute(r#"
+var r=/(?<x>𐐀)/giu,m=r.exec('!𐐨');if(!r.ignoreCase||!r.unicode||r.unicodeSets||r.flags!=='giu'||m.index!==1||m.groups.x!=='𐐨'||r.lastIndex!==3)throw 'fold result';
+if('Kſ'.replace(/[a-z]/giu,'!')!=='!!'||'aΣb'.split(/(σ)/iu).join()!=='a,Σ,b'||'!ς'.search(/Σ/iv)!==1)throw 'fold consumers';
+if(!/\P{Lowercase_Letter}/iu.test('a')||/\P{Lowercase_Letter}/iv.test('a')||!/^\b\w\b$/iv.test('ſ')||/^\W$/iu.test('K'))throw 'fold property word';
+if(!/^[\q{AB|cd}&&\q{ab}]$/iv.test('aB')||/^[^[a]]$/iv.test('A'))throw 'fold algebra';
+'ok';
+"#,&mut NoHost).unwrap().to_text(),"ok");
+}
+
+#[test]
+fn unicode_case_folding_native_work_refusal_is_fatal_and_fresh_job_recovers() {
+    let mut runtime=Runtime::for_test();runtime.execute(r"var pattern='[\\p{Lu}]',finished=false;",&mut NoHost).unwrap();let retained=runtime.retained_regexp;runtime.regexp_work=100;
+    let error=runtime.execute("try{new RegExp(pattern,'iv');}catch(e){finished=true;}finally{finished=true;}",&mut NoHost).unwrap_err();assert!(error.contains("Regular-expression work limit"),"{error}");assert_eq!(runtime.retained_regexp,retained);
+    runtime.begin_job();assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'iv').test('K');",&mut NoHost).unwrap().to_text(),"true");
+}

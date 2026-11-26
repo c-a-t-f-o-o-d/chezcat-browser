@@ -166,7 +166,7 @@ fn unicode_character_sets_work_refusal_preserves_compiled_recovery() {
     for pattern in [r"[^\d-q]", r"[q-\D]", r"\q", "[z-a]"] {
         assert!(matches!(Regex::compile(pattern,"u",&mut 100_000),Err(Error::Syntax(_))));
     }
-    for (pattern, flags) in [(".","iu"),(".","d")] {
+    for (pattern, flags) in [(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
 }
@@ -271,7 +271,7 @@ fn unicode_group_reference_grammar_syntax_and_work_refusal_preserve_recovery() {
     }
     assert!(Regex::compile(r"(?=a)?a","",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
     assert!(matches!(Regex::compile(r"\1","",&mut 100_000),Err(Error::Unsupported(_))));
-    for (pattern,flags) in [(".","iu"),(".","d")] {
+    for (pattern,flags) in [(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
     let pattern=r"(?<=(.))\1";assert!(matches!(Regex::compile(pattern,"u",&mut 0),Err(Error::Limit(_))));
@@ -304,7 +304,7 @@ fn unicode_set_algebra_grammar_flags_and_classic_boundaries_are_preserved() {
         assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
     }
     for flags in ["uv","vu","vv"] {assert!(matches!(Regex::compile("a",flags,&mut 100_000),Err(Error::Syntax(_))),"{flags}");}
-    assert!(matches!(Regex::compile("a","iv",&mut 100_000),Err(Error::Unsupported(_))));
+    assert!(Regex::compile("a","iv",&mut 100_000).unwrap().find(&[65],0,false,&mut 100_000).unwrap().is_some());
     let re=Regex::compile(r"^[\&\-\!\#\%\,\:\;\<\=\>\@\`\~\(\)\[\]\{\}\/\|]$","v",&mut 100_000).unwrap();
     for unit in b"&-!#%,:;<=>@`~()[]{}/|" {assert!(re.find(&[u16::from(*unit)],0,false,&mut 100_000).unwrap().is_some());}
     let strings=Regex::compile(r"^[\q{ab|cd}]$","v",&mut 100_000).unwrap();
@@ -384,7 +384,7 @@ fn unicode_string_set_syntax_work_refusal_and_fresh_recovery_are_preserved() {
     for pattern in [r"[^\q{ab}]",r"[^\q{}]",r"[^\q{ab}--\q{ab}]",r"[^\q{ab}&&\q{ab}]",r"[\q{a}-z]",r"[a-\q{z}]",r"[\q{a-b}]",r"[\q{\d}]",r"[\q{a]",r"[\q]",r"[\q{!!}]"] {
         assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
     }
-    for (pattern,flags) in [(r"[\q{ab}]","iv"),(".","d")] {assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));}
+    for (pattern,flags) in [(".","d")] {assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));}
     assert!(matches!(Regex::compile(r"[\q{ab}]","u",&mut 100_000),Err(Error::Syntax(_))));
     let pattern=format!(r"[\q{{{}}}]",["abcdef";64].join("|"));assert!(matches!(Regex::compile(&pattern,"v",&mut 1_000),Err(Error::Limit(_))));
     let re=Regex::compile(&pattern,"v",&mut 100_000).unwrap();assert!(matches!(re.find(&[97,98,99,100,101,102],0,false,&mut 0),Err(Error::Limit(_))));
@@ -506,4 +506,41 @@ fn unicode_capture_names_invalid_scalars_grammar_work_and_fresh_recovery() {
     }
     assert!(matches!(Regex::compile("(?<猫>a)","v",&mut 30),Err(Error::Limit(_))));
     let re=Regex::compile("(?<猫>a)","v",&mut 100_000).unwrap();assert!(matches!(re.find(&[97],0,false,&mut 0),Err(Error::Limit(_))));assert!(re.find(&[97],0,false,&mut 100_000).unwrap().is_some());
+}
+#[test]
+fn unicode_case_folding_literals_ranges_and_simple_mapping_are_exact() {
+    for flags in ["iu","iv"] {
+        for (pattern,text,yes) in [("^É$","é",true),("^Σ$","ς",true),("^σ$","Σ",true),("^K$","K",true),("^s$","ſ",true),("^ẞ$","ß",true),("^𐐀$","𐐨",true),("^ß$","ss",false),("^İ$","i",false),("^I$","ı",false),("^[A-Z]$","K",true),("^[A-Z]$","ſ",true),("^[A-z]$","_",true),("^[A-z]$","[",true),("^[Ā-č]$","Ă",true),("^[^k]$","K",false)] {
+            let re=Regex::compile(pattern,flags,&mut 20_000_000).unwrap();assert_eq!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_some(),yes,"{pattern} {flags} {text}");
+        }
+    }
+}
+
+#[test]
+fn unicode_case_folding_property_complements_and_v_algebra_keep_order() {
+    for (pattern,flags,text,yes) in [(r"^\P{Lowercase_Letter}$","iu","a",true),(r"^\P{Lowercase_Letter}$","iv","a",false),(r"^\P{Lowercase_Letter}$","iv","A",false),(r"^\P{ASCII}$","iu","k",true),(r"^\P{ASCII}$","iv","k",false),(r"^[\p{Lu}&&[a-z]]$","iv","K",true),(r"^[[A-Z]--k]$","iv","K",false),(r"^[[A-Z]--k]$","iv","ſ",true),(r"^[^[a]]$","iv","A",false),(r"^[[^a]&&[A-Z]]$","iv","a",false),(r"^[[^a]&&[A-Z]]$","iv","B",true),(r"^[\q{ab|AB|a}]$","iv","Ab",true),(r"^[\q{AB|cd}]&&\q{ab}]$","iv","ab",false),(r"^[\q{AB|cd}&&\q{ab}]$","iv","aB",true)] {
+        let result=Regex::compile(pattern,flags,&mut 20_000_000);if pattern==r"^[\q{AB|cd}]&&\q{ab}]$" {assert!(matches!(result,Err(Error::Syntax(_))));continue;}
+        assert_eq!(result.unwrap().find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_some(),yes,"{pattern} {flags}");
+    }
+}
+
+#[test]
+fn unicode_case_folding_word_boundaries_references_and_captures_are_exact() {
+    for flags in ["iu","iv"] {
+        for text in ["K","ſ","K","s"] {
+            assert!(Regex::compile(r"^\b\w\b$",flags,&mut 20_000_000).unwrap().find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_some());
+            assert!(Regex::compile(r"^\W$",flags,&mut 20_000_000).unwrap().find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_none());
+        }
+        let re=Regex::compile(r"^(?<x>𐐀)\k<x>$",flags,&mut 20_000_000).unwrap();assert_eq!(re.find(&"𐐨𐐀".encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().unwrap().captures,vec![Some((0,4)),Some((0,2))]);
+        assert!(Regex::compile(r"(?<=(𐐀))\1",flags,&mut 20_000_000).unwrap().find(&"𐐀𐐨".encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_some());
+        let re=Regex::compile(r"^([\q{a|ab|AB}])b$","iv",&mut 20_000_000).unwrap();assert_eq!(re.find(&[65,66],0,false,&mut 20_000_000).unwrap().unwrap().captures[1],Some((0,1)));
+    }
+}
+
+#[test]
+fn unicode_case_folding_compile_match_refusal_and_fresh_recovery_are_real() {
+    assert!(matches!(Regex::compile(r"[\p{Lu}]","iv",&mut 100),Err(Error::Limit(_))));
+    let re=Regex::compile(r"^\p{Lu}+$","iv",&mut 20_000_000).unwrap();assert!(matches!(re.find(&[0x212a],0,false,&mut 0),Err(Error::Limit(_))));assert!(re.find(&[0x212a],0,false,&mut 20_000_000).unwrap().is_some());
+    assert!(matches!(Regex::compile("é","i",&mut 20_000_000),Err(Error::Unsupported(_))));
+    assert!(Regex::compile(r"^\uD800$","iu",&mut 20_000_000).unwrap().find(&[0xd800],0,false,&mut 20_000_000).unwrap().is_some());
 }
