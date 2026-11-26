@@ -43,8 +43,11 @@ pub(super) fn dataset_key(attribute:&str,available:usize)->Result<Option<String>
     Ok(Some(key))
 }
 
-pub(super) fn dataset_attribute(name: &str) -> String {
-    let mut attribute = String::from("data-");
+pub(super) fn dataset_attribute(name: &str) -> Result<String,String> {
+    let length=name.len().checked_add(name.bytes().filter(u8::is_ascii_uppercase).count()).and_then(|n|n.checked_add(5)).ok_or("Dataset attribute name size overflow.")?;
+    let mut attribute = String::new();
+    attribute.try_reserve_exact(length).map_err(|_|"Cannot reserve dataset attribute name.")?;
+    attribute.push_str("data-");
     for ch in name.chars() {
         if ch.is_ascii_uppercase() {
             attribute.push('-');
@@ -53,7 +56,7 @@ pub(super) fn dataset_attribute(name: &str) -> String {
             attribute.push(ch);
         }
     }
-    attribute
+    Ok(attribute)
 }
 
 pub(super) fn url_copy_cost(
@@ -218,7 +221,7 @@ impl Bridge<'_> {
         {
             return Ok(Value::Undefined);
         }
-        let attribute = dataset_attribute(name);
+        let attribute = dataset_attribute(name)?;
         self.state.copies(attribute.len())?;
         if let NodeKind::Element { attrs, .. } = &self.doc.nodes[node].kind {
             self.state.work(attrs.len())?;

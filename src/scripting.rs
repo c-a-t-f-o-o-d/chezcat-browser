@@ -4070,6 +4070,7 @@ impl Host for Bridge<'_> {
         else {self.ordinary_lookup_tail(object)}
     }
     fn native_access_owner(&self, object: u32) -> Option<u32> {
+        if (DATASET_BASE..EVENT_BASE).contains(&object){return Some(WINDOW);}
         if self.validity_receiver(object){return Some(WINDOW);}
         if self.class_list_receiver(object){return Some(WINDOW);}
         if self.inert_interface(object).is_some() { return Some(WINDOW); }
@@ -4631,6 +4632,7 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        if (DATASET_BASE..EVENT_BASE).contains(&object){return true;}
         if self.html_label_for_member(object,property){return true;}
         if self.time_datetime_member(object,property){return true;}
         if self.area_alt_member(object,property){return true;}
@@ -5802,6 +5804,18 @@ impl Host for Bridge<'_> {
         property: &str,
         value: &Value,
     ) -> Result<(), (&'static str, String)> {
+        if (DATASET_BASE..EVENT_BASE).contains(&object){
+            // Web IDL value conversion has completed before the named setter.
+            if property.as_bytes().windows(2).any(|p|p[0]==b'-'&&p[1].is_ascii_lowercase()){
+                return Err(("SyntaxError","Dataset property contains a hyphen followed by an ASCII lowercase letter.".into()));
+            }
+            // The fixed prefix and ASCII uppercase expansion add no forbidden
+            // local-name units; the empty property produces the valid data-.
+            if !property.is_empty()&&!script_attribute_names::valid_attribute_name(property){
+                return Err(("InvalidCharacterError","Dataset property produces an invalid attribute local name.".into()));
+            }
+            return Ok(());
+        }
         if self.time_datetime_member(object,property){return self.validate_time_datetime(object);}
         if self.area_alt_member(object,property){return self.validate_area_alt(object);}
         if self.optgroup_label_member(object,property){return self.validate_optgroup_label(object);}
@@ -5972,6 +5986,7 @@ impl Host for Bridge<'_> {
     }
 
     fn setter_dom_exception(&self,object:u32,property:&str,kind:&str)->bool {
+        if (DATASET_BASE..EVENT_BASE).contains(&object)&&matches!(kind,"SyntaxError"|"InvalidCharacterError"){return true;}
         if self.textarea_min_length_member(object,property)&&kind=="IndexSizeError"{return true;}
         if self.input_min_length_member(object,property)&&kind=="IndexSizeError"{return true;}
         if self.textarea_max_length_member(object,property)&&kind=="IndexSizeError"{return true;}
@@ -6572,6 +6587,16 @@ impl Host for Bridge<'_> {
         Err(unsupported_own_property(object,property))
     }
 
+    fn named_attribute_deletion(&mut self,object:u32,property:&str)->Result<Option<(u32,String)>,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
+        let node=self.dataset_node(object)?;
+        if property.as_bytes().windows(2).any(|p|p[0]==b'-'&&p[1].is_ascii_lowercase()){return Ok(None);}
+        let attribute=dataset_attribute(property)?;
+        self.state.copies(attribute.len())?;
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        self.state.work(attrs.len())?;
+        Ok(attrs.iter().any(|a|a.name.html_is(&attribute)).then_some((node_handle(node),attribute)))
+    }
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
         if self.form_request_member(object,property){self.state.work(1)?;return Ok(true);}
         if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(true);}
@@ -6608,7 +6633,7 @@ impl Host for Bridge<'_> {
         if (DATASET_BASE..EVENT_BASE).contains(&object) {
             if !matches!(self.dataset_get(object, property)?, Value::Undefined) {
                 let node = self.dataset_node(object)?;
-                self.attribute(node, &dataset_attribute(property), None)?;
+                self.attribute(node, &dataset_attribute(property)?, None)?;
             }
             return Ok(true);
         }
@@ -7926,8 +7951,10 @@ impl Host for Bridge<'_> {
         }
         if (DATASET_BASE..EVENT_BASE).contains(&object) {
             let node = self.dataset_node(object)?;
-            let value = self.text(&value)?;
-            return self.attribute(node, &dataset_attribute(property), Some(value));
+            let value = self.dom_text(&value)?;
+            let attribute=dataset_attribute(property)?;
+            self.state.copies(attribute.len())?;
+            return self.public_dom_attribute(node,crate::html::AttributeName::unqualified(attribute),Some(value),script_attr::InputPreparation::Pending);
         }
         if matches!(object,PERFORMANCE|PERFORMANCE_TIMING) {
             return Err("Performance is read-only in this subset.".into());
@@ -12558,3 +12585,7 @@ mod state_preserving_move_tests;
 #[cfg(test)]
 #[path="script_import_node_binding_order_tests.rs"]
 mod import_node_binding_order_tests;
+
+#[cfg(test)]
+#[path="script_dataset_native_writes_tests.rs"]
+mod dataset_native_writes_tests;

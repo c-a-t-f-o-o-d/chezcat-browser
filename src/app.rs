@@ -7434,3 +7434,7 @@ mod state_preserving_move_tests;
 #[cfg(test)]
 #[path="app_import_node_binding_order_tests.rs"]
 mod import_node_binding_order_tests;
+
+#[cfg(test)]
+#[path="app_dataset_native_writes_tests.rs"]
+mod dataset_native_writes_tests;
