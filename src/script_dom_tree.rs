@@ -1120,6 +1120,10 @@ impl Bridge<'_> {
     // No mutation may invalidate a loaded resource, native form value, form
     // ownership, button caption or disabled fieldset's first-legend relation.
     pub(super) fn mutation_ancestors(&mut self, node: usize) -> Result<(), String> {
+        self.checked_mutation_ancestors(node, false)
+    }
+
+    fn checked_mutation_ancestors(&mut self, node: usize, passive_text: bool) -> Result<(), String> {
         let mut current = Some(node);
         while let Some(index) = current {
             self.state.work(1)?;
@@ -1140,6 +1144,7 @@ impl Bridge<'_> {
                 )
                 || tag(self.doc, index) == "optgroup" && self.doc.nodes[index].namespace != crate::html::Namespace::Html
                 || tag(self.doc, index) == "noscript" && self.doc.scripting_enabled
+                    && (!passive_text || !self.movable_noscript_host(index)?)
             {
                 return Err("Changing native control contents or inert resource subtrees is not implemented.".into());
             }
@@ -1748,7 +1753,7 @@ impl Bridge<'_> {
             }
             self.state.prepare_pi_invalidation()?;
             let renders_text = matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_));
-            self.mutation_ancestors(node)?;
+            self.checked_mutation_ancestors(node, true)?;
             let text = if matches!(value, Value::Null) && property != "data" {
                 DomString::new()
             } else {
@@ -2141,7 +2146,8 @@ mod noscript_host_retirement_tests {
  #[test]
  fn noscript_host_retirement_interior_and_nontext_fallback_guards_remain_atomic(){
   let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),text=host.firstChild,blocker=document.createTextNode('blocked'),watch=new MutationObserver(function(){});watch.observe(host,{childList:true,characterData:true,subtree:true});");p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
-  for code in ["host.appendChild(blocker);","text.data='changed';","host.innerHTML='<b>changed</b>'; "]{p.begin_job();let error=p.runtime.execute(code,&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(watch.takeRecords().length||blocker.parentNode!==null||host.firstChild!==text)throw 'interior unchanged';");}
+  for code in ["host.appendChild(blocker);","host.innerHTML='<b>changed</b>'; "]{p.begin_job();let error=p.runtime.execute(code,&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(watch.takeRecords().length||blocker.parentNode!==null||host.firstChild!==text)throw 'interior unchanged';");}
+  p.begin_job();run(&mut d,&mut f,&mut p,"text.data='changed';var changed=watch.takeRecords();if(host.firstChild!==text||text.parentNode!==host||text.data!=='changed'||host.textContent!=='changed'||blocker.parentNode!==null||changed.length!==1||changed[0].type!=='characterData'||changed[0].target!==text)throw 'actual direct Text edit replaces former refusal';");
   let(mut d,mut f,mut p)=fixture(false);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),to=document.getElementById('to');");let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;p.begin_job();let error=p.runtime.execute("to.appendChild(host);",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("loaded resources"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(host.parentNode!==document.getElementById('from')||to.childNodes.length||document.getElementById('fake')!==null)throw 'nontext guarded';document.getElementById('out').textContent='Recovered';");
  }
  #[test]
@@ -2151,3 +2157,7 @@ mod noscript_host_retirement_tests {
   p.begin_job();run(&mut d,&mut f,&mut p,"to.appendChild(host);if(host.parentNode!==to||host.firstChild!==text||watch.takeRecords().length!==2||window.bad!==undefined)throw 'fresh move recovery';");assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
  }
 }
+
+#[cfg(test)]
+#[path="script_noscript_character_data_tests.rs"]
+mod noscript_character_data_tests;
