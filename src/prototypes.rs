@@ -1719,6 +1719,18 @@ impl Runtime {
                 Ok(Value::Bool(same_value(first, second)))
             }
             "preventExtensions" | "seal" | "freeze" | "isExtensible" | "isSealed" | "isFrozen" => {
+                if let Value::Host(handle)=first {
+                    self.validate_native_access(*handle,host)?;
+                    if host.unpreventable_extensions(*handle).map_err(Fault::new)? {
+                        // Legacy platform [[PreventExtensions]] returns false;
+                        // these objects remain extensible even with no names.
+                        return match method {
+                            "isExtensible"=>Ok(Value::Bool(true)),
+                            "isSealed"|"isFrozen"=>Ok(Value::Bool(false)),
+                            _=>Err(Fault::exception("TypeError","This native object must remain extensible.")),
+                        };
+                    }
+                }
                 self.object_integrity(method, first)
             }
             "keys" => self.object_keys(first, host),

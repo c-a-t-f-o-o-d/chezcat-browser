@@ -3470,6 +3470,15 @@ impl Host for Bridge<'_> {
         if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
         self.dataset_own_key_snapshot(object).map(Some)
     }
+    fn unpreventable_extensions(&mut self,object:u32)->Result<bool,String>{
+        if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(false);}
+        script_text_content::deadline(self.state)?;
+        self.state.work(1)?;
+        let node=self.dataset_node(object)?;
+        self.native_node_access(node_handle(node)).map_err(|(_,message)|message)?;
+        if !matches!(&self.doc.nodes[node].kind,NodeKind::Element{..}){return Err("Dataset integrity requires an Element.".into());}
+        Ok(true)
+    }
     fn named_key_prototype_enumeration(&self,object:u32)->bool{(DATASET_BASE..EVENT_BASE).contains(&object)}
     fn named_scalar_presence(&mut self,object:u32,name:&str)->Result<Option<bool>,String>{
         if !(DATASET_BASE..EVENT_BASE).contains(&object){return Ok(None);}
@@ -12681,3 +12690,7 @@ mod dataset_bulk_definitions_tests;
 #[cfg(test)]
 #[path="script_dataset_reflect_set_tests.rs"]
 mod dataset_reflect_set_tests;
+
+#[cfg(test)]
+#[path="script_dataset_integrity_tests.rs"]
+mod dataset_integrity_tests;
