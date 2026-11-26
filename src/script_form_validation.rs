@@ -46,6 +46,7 @@ impl Bridge<'_>{
         let count=self.forms.controls.len();
         let work=count.checked_mul(count).and_then(|n|self.doc.nodes.len().checked_mul(2).and_then(|m|n.checked_add(m))).ok_or("Form validation work overflow.")?;
         let work=work.checked_add(self.forms.validation_metadata_work(self.doc)?).ok_or("Validation metadata work overflow.")?;
+        let work=work.checked_add(script_control_custom_validity::snapshot_work(self.state,count)?).ok_or("Custom validation work overflow.")?;
         self.state.work(work)?;script_text_content::deadline(self.state)?;
         self.state.rebuild(self.doc)?;
         let owner=self.node(object)?;let mut root=owner;let mut walked=0usize;
@@ -54,7 +55,7 @@ impl Bridge<'_>{
             self.state.work(1)?;root=parent;
         }
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
-        let snapshot=self.forms.required_snapshot(self.doc,owner,root,available)?;
+        let snapshot=self.forms.required_snapshot_with(self.doc,owner,root,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some())?;
         self.publish_validation_snapshot(object,report,snapshot,available)
     }
     pub(super) fn publish_validation_snapshot(&mut self,object:u32,report:bool,snapshot:forms::ValidationSnapshot,available:usize)->Result<usize,String>{

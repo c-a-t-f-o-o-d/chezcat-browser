@@ -2035,9 +2035,10 @@ impl Page {
         }
         let work=doc.nodes.len().checked_mul(2).and_then(|n|forms.controls.len().checked_mul(forms.controls.len()).and_then(|m|n.checked_add(m))).ok_or("Validation work overflow.")?;
         let work=work.checked_add(forms.validation_metadata_work(doc)?).ok_or("Validation metadata work overflow.")?;
+        let work=work.checked_add(script_control_custom_validity::snapshot_work(&self.state,forms.controls.len())?).ok_or("Custom validation work overflow.")?;
         if enabled{self.state.work(work)?;script_text_content::deadline(&self.state)?;}
         let available=if enabled{self.state.retained_limit.saturating_sub(self.state.retained)}else{usize::MAX};
-        let snapshot=forms.validation_snapshot(doc,owner,submitter,available)?;
+        let snapshot=forms.validation_snapshot_with(doc,owner,submitter,available,&mut |node|self.state.output_custom_errors.get(&node_handle(node)).is_some())?;
         let storage=snapshot.storage_bytes();
         if enabled{self.state.copies(snapshot.peak_bytes)?;script_text_content::deadline(&self.state)?;self.state.replace_storage(0,storage,0)?;}
         let invalid=!snapshot.nodes.is_empty();let mut unhandled=None;
@@ -3362,7 +3363,7 @@ impl Bridge<'_> {
         if self.fieldset_member(object,property){return true;}
         if self.control_form_member(object,property){return true;}
         if self.output_metadata_member(object,property){return true;}
-        if self.control_validation_member(object,property){return true;}
+        if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property){return true;}
         if self.control_eligibility_member(object,property){return true;}
         if self.fieldset_validation_member(object,property){return true;}
         if self.output_validation_member(object,property){return true;}
@@ -3915,7 +3916,7 @@ impl Host for Bridge<'_> {
         if self.fieldset_member(object,property){return false;}
         if self.control_form_member(object,property){return false;}
         if self.output_metadata_member(object,property){return false;}
-        if self.control_validation_member(object,property){return false;}
+        if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property){return false;}
         if self.control_eligibility_member(object,property){return false;}
         if self.fieldset_validation_member(object,property){return false;}
         if self.output_validation_member(object,property){return false;}
@@ -3931,7 +3932,7 @@ impl Host for Bridge<'_> {
         if self.xhr_index(object).is_some(){return false;}
 
         if self.form_request_member(object,property){return false;}
-        if self.control_validation_member(object,property)||self.form_validation_member(object,property){return false;}
+        if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property)||self.form_validation_member(object,property){return false;}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {return false;}
         if property=="submit" && self.form_submit_method(object).is_some() {return false;}
         if self.range_owner(object).is_some() {return false;}
@@ -4518,7 +4519,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
-        if index==0&&matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return true;}
+        if index==0&&(crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET)){return true;}
         if index==0&&method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME{return true;}
         if index==0&&self.collection_receiver(object)&&matches!(method,"\0HTMLCollection.namedItem"|"namedItem"){return true;}
         let method=script_class_list::operation(method).unwrap_or(method);
@@ -4670,7 +4671,7 @@ impl Host for Bridge<'_> {
             ||property=="textContent"&&!self.attr_receiver(object)&&self.text_content_receiver(object)
     }
     fn argument_conversions(&self, object: u32, method: &str, args: &[Value]) -> &'static [(usize, bool)] {
-        if matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return &[(0,true)];}
+        if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return &[(0,true)];}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return &[(0,true)];}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return &[(0,true)];}
@@ -4865,6 +4866,7 @@ impl Host for Bridge<'_> {
 
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return Some(object);}
+        if crate::javascript::control_custom_validity_interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if crate::javascript::control_validation_operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if matches!(method,crate::javascript::HTML_FORM_SUBMIT|crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT|crate::javascript::HTML_FORM_REQUEST) && self.event_target_interface(object) {return Some(object);}
         if self.event_target_interface(object) && crate::javascript::range_interface::operation(method) { return Some(object); }
@@ -5141,7 +5143,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
-        if matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
+        if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
         if self.class_list_receiver(object)&&method=="set value"{return 1;}
         if method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some(){return 1;}
@@ -5271,6 +5273,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
 
+        if let Some(class)=crate::javascript::control_custom_validity_interface(method){return self.validate_control_custom_validity(object,class);}
         if let Some((class,_))=crate::javascript::control_validation_operation(method){return self.validate_control_validation(object,class);}
         if method==crate::javascript::HTML_FORM_REQUEST{return self.validate_form_request(object,args).map(|_|());}
         if matches!(method,crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT){return self.validate_form_validation(object);}
@@ -5984,6 +5987,7 @@ impl Host for Bridge<'_> {
         if script_iframe_sandbox::accessor(method).is_some() && self.event_target_interface(object) {return self.iframe_sandbox_receiver(receiver)||self.inert_interface(receiver)==Some("HTMLIFrameElement");}
         if script_textarea_interface::accessor(method).is_some() && self.event_target_interface(object) {return self.textarea_value_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLTextAreaElement");}
         if matches!(method,crate::javascript::HTML_FORM_RESET|crate::javascript::HTML_FORM_CHECK|crate::javascript::HTML_FORM_REPORT|crate::javascript::HTML_FORM_REQUEST){return self.form_length_receiver(receiver);}
+        if let Some(class)=crate::javascript::control_custom_validity_interface(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if let Some((class,_))=crate::javascript::control_validation_operation(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if method==crate::javascript::HTML_FORM_SUBMIT {return self.form_receiver(receiver)&&self.class_list_element_receiver(receiver) || self.inert_interface(receiver)==Some("HTMLFormElement");}
         if crate::javascript::range_interface::operation(method) { return if method==crate::javascript::range_interface::CREATE { self.document_interface_receiver(receiver) } else { self.range_owner(receiver).is_some() }; }
@@ -6393,7 +6397,7 @@ impl Host for Bridge<'_> {
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
         if self.form_request_member(object,property){self.state.work(1)?;return Ok(None);}
-        if self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(None);}
+        if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(None);}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(None);}
         if script_inline_style::handle(object) {
             let node = self.style_node(object)?;
@@ -6452,7 +6456,7 @@ impl Host for Bridge<'_> {
 
     fn delete(&mut self, object: u32, property: &str) -> Result<bool, String> {
         if self.form_request_member(object,property){self.state.work(1)?;return Ok(true);}
-        if self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(true);}
+        if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(true);}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(true);}
         if script_inline_style::handle(object) { return Ok(self.own_data(object, property)?.is_none()); }
         if self.canvas_context_receiver(object) {self.state.work(1)?;return Ok(true);}
@@ -8326,6 +8330,7 @@ impl Host for Bridge<'_> {
         if script_control_eligibility::interface(method).is_some(){return self.control_eligibility_get(object);}
         if script_fieldset_validation::operation(method){return self.fieldset_validation(object,method);}
         if script_output_validation::operation(method){return self.output_validation(object,method);}
+        if crate::javascript::control_custom_validity_interface(method).is_some(){return self.control_custom_validity_call(object,args);}
         if crate::javascript::control_validation_operation(method).is_some(){return self.control_validation_message(object);}
         if script_output_validity_state::operation(method){return self.output_validity_call(object,method,args);}
         if method==script_output_metadata::TYPE_GET{return self.output_metadata_get(object,"type");}
@@ -12233,3 +12238,10 @@ mod control_validation_tests;
 
 #[path="script_control_validation.rs"]
 mod script_control_validation;
+
+#[cfg(test)]
+#[path="script_control_custom_validity_tests.rs"]
+mod control_custom_validity_tests;
+
+#[path="script_control_custom_validity.rs"]
+mod script_control_custom_validity;

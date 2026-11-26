@@ -90,12 +90,18 @@ impl Forms{
     /// Snapshot actual connected tree order before the first invalid listener.
     /// All scratch and result capacities coexist inside the caller's allowance.
     pub(crate) fn validation_snapshot(&self,doc:&Document,owner:usize,submitter:Option<usize>,available:usize)->Result<ValidationSnapshot,String>{
+        self.validation_snapshot_with(doc,owner,submitter,available,&mut |_|false)
+    }
+    pub(crate) fn validation_snapshot_with(&self,doc:&Document,owner:usize,submitter:Option<usize>,available:usize,custom:&mut impl FnMut(usize)->bool)->Result<ValidationSnapshot,String>{
         if !self.validation_enabled(doc,owner,submitter)?{return Ok(ValidationSnapshot{nodes:Vec::new(),peak_bytes:0});}
-        self.required_snapshot(doc,owner,0,available)
+        self.required_snapshot_with(doc,owner,0,available,custom)
     }
     /// Explicit validation methods ignore novalidate and use the form's actual
     /// tree root, including a retained detached ordinary native form.
-    pub(crate) fn required_snapshot(&self,doc:&Document,owner:usize,root:usize,mut available:usize)->Result<ValidationSnapshot,String>{
+    pub(crate) fn required_snapshot(&self,doc:&Document,owner:usize,root:usize,available:usize)->Result<ValidationSnapshot,String>{
+        self.required_snapshot_with(doc,owner,root,available,&mut |_|false)
+    }
+    pub(crate) fn required_snapshot_with(&self,doc:&Document,owner:usize,root:usize,mut available:usize,custom:&mut impl FnMut(usize)->bool)->Result<ValidationSnapshot,String>{
         self.validation_enabled(doc,owner,None)?;
         if root>=doc.nodes.len(){return Err("Validation tree root is unavailable.".into());}
         let mut nodes=Vec::new();let mut seen=Vec::new();let mut stack=Vec::new();
@@ -106,7 +112,7 @@ impl Forms{
         seen.resize(doc.nodes.len(),false);stack.push((root,false,false));
         while let Some((node,in_datalist,parent_select))=stack.pop(){
             if node>=doc.nodes.len()||seen[node]{return Err("Invalid validation tree topology; nothing was submitted.".into());}seen[node]=true;
-            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&self.required_value_missing(owner,c)){nodes.push(node);}
+            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&c.owner==Some(owner)&&(self.required_value_missing(owner,c)||custom(node))){nodes.push(node);}
             if stack.len().checked_add(doc.nodes[node].children.len()).is_none_or(|n|n>doc.nodes.len()){return Err("Invalid validation traversal size; nothing was submitted.".into());}
             let html=doc.nodes[node].namespace==crate::html::Namespace::Html;
             let barred=in_datalist||html&&tag(doc,node)=="datalist";
