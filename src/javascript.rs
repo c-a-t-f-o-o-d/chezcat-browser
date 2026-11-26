@@ -742,6 +742,13 @@ pub(crate) enum NativePromiseFailure {
     Fatal(String),
 }
 
+/// Native DOMStringMap key validation precedes its existing Element mutation.
+pub enum NativeNamedAssignment {
+    SyntaxError,
+    InvalidCharacterError,
+    Attribute { element:u32, name:Value },
+}
+
 /// A proven native named deletion uses existing Element attribute removal.
 pub enum NativeNamedDeletion {
     Absent,
@@ -1002,6 +1009,10 @@ pub trait Host {
     /// A supported named property backed by a native attribute removes that
     /// attribute through the existing checked, observed native operation.
     fn named_attribute_deletion(&mut self, _object:u32, _property:&str)->Result<Option<(u32,String)>,String>{Ok(None)}
+    /// Opt in only genuine native named setters, before author value conversion.
+    fn named_units_setter(&self,_object:u32)->bool{false}
+    /// Called after DOMString value binding and renewed native authority checks.
+    fn named_units_assignment(&mut self,_object:u32,_units:&[u16])->Result<NativeNamedAssignment,String>{Err("Native UTF-16 named assignment is unavailable.".into())}
     /// None keeps unsupported raw-key receivers on their original path.
     fn named_units_deletion(&mut self,_object:u32,_units:&[u16])->Result<Option<NativeNamedDeletion>,String>{Ok(None)}
     fn delete(&mut self, _object: u32, _property: &str) -> Result<bool, String> {

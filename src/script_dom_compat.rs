@@ -233,6 +233,28 @@ impl Bridge<'_> {
         Ok(keys)
     }
 
+    pub(super) fn dataset_units_assignment(&mut self,handle:u32,key:&[u16])->Result<crate::javascript::NativeNamedAssignment,String>{
+        use crate::javascript::NativeNamedAssignment;
+        script_text_content::deadline(self.state)?;
+        self.state.work(key.len().checked_mul(4).and_then(|n|n.checked_add(1)).ok_or("Dataset raw key work overflow.")?)?;
+        let node=self.dataset_node(handle)?;
+        self.native_node_access(node_handle(node)).map_err(|(_,message)|message)?;
+        if !matches!(&self.doc.nodes[node].kind,NodeKind::Element{..}){return Err("Dataset requires an Element.".into());}
+        if key.windows(2).any(|pair|pair[0]==45&&(97..=122).contains(&pair[1])){return Ok(NativeNamedAssignment::SyntaxError);}
+        // The data- prefix makes the result nonempty. ASCII upper alpha expansion
+        // introduces only valid name units, so validate the borrowed suffix.
+        if !super::script_attribute_names::valid_attribute_name_dom(crate::dom_string::DomStringRef::Raw(key))&&!key.is_empty(){return Ok(NativeNamedAssignment::InvalidCharacterError);}
+        let length=key.len().checked_add(key.iter().filter(|unit|(65..=90).contains(*unit)).count()).and_then(|n|n.checked_add(5)).ok_or("Dataset raw attribute size overflow.")?;
+        let bytes=length.checked_mul(size_of::<u16>()).ok_or("Dataset raw attribute bytes overflow.")?;
+        if bytes>self.state.limits.host.string_bytes{return Err("Dataset attribute exceeds the host string allowance.".into());}
+        self.state.copies(bytes)?;
+        let mut name=Vec::new();name.try_reserve_exact(length).map_err(|_|"Cannot reserve dataset raw attribute name.")?;
+        name.extend_from_slice(&[100,97,116,97,45]);
+        for &unit in key{if (65..=90).contains(&unit){name.push(45);name.push(unit+32);}else{name.push(unit);}}
+        script_text_content::deadline(self.state)?;
+        Ok(NativeNamedAssignment::Attribute{element:node_handle(node),name:Value::StringUnits(name)})
+    }
+
     /// Borrow the original name; display projections cannot identify a key.
     pub(super) fn dataset_units_attribute(&mut self,handle:u32,key:&[u16])->Result<Option<(usize,usize)>,String>{
         script_text_content::deadline(self.state)?;
