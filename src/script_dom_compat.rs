@@ -22,6 +22,8 @@ pub(super) fn navigator_readonly(name: &str) -> bool {
     )
 }
 
+pub(super) fn dataset_accessor(method:&str)->Option<bool>{match method{"\0HTMLElement.get.dataset"=>Some(false),"\0SVGElement.get.dataset"=>Some(true),_=>None}}
+
 pub(super) fn dataset_suffix(attribute:&str)->Option<&str>{
     let suffix=attribute.strip_prefix("data-")?;
     (!suffix.bytes().any(|byte|byte.is_ascii_uppercase())).then_some(suffix)
@@ -164,6 +166,27 @@ impl Bridge<'_> {
         let value = timer_integer(value)? as u32;
         let value = if value > i32::MAX as u32 { 0 } else { value };
         self.attribute(node, name, Some(value.to_string()))
+    }
+
+    pub(super) fn dataset_accessor_receiver(&self,object:u32,svg:bool)->bool{
+        if svg{self.style_interface_receiver(object,true)||self.frame_node_interface(object)==Some("SVGElement")}
+        else{self.html_reflection_receiver(object)}
+    }
+    pub(super) fn dataset_accessor_member(&self,object:u32,property:&str)->bool{
+        property=="dataset"&&!self.form_named_control(object,property)
+            &&(self.dataset_accessor_receiver(object,false)||self.dataset_accessor_receiver(object,true))
+    }
+    pub(super) fn validate_dataset_accessor(&self,object:u32,svg:bool)->Result<(),(&'static str,String)>{
+        if !self.dataset_accessor_receiver(object,svg){return Err(("TypeError","Dataset accessor requires its genuine HTML or SVG interface receiver.".into()));}
+        self.native_node_access(object)?;
+        if self.is_frame_handle(object)||self.inert_node_type(object).is_some(){return Err(("NotSupportedError","Dataset backing on child or inert document elements is unavailable.".into()));}
+        Ok(())
+    }
+    pub(super) fn dataset_accessor_get(&mut self,object:u32,svg:bool)->Result<Value,String>{
+        self.validate_dataset_accessor(object,svg).map_err(|(_,message)|message)?;
+        self.state.work(1)?;
+        let node=self.node(object)?;
+        Ok(Value::Host(DATASET_BASE+node as u32))
     }
 
     pub(super) fn dataset_node(&mut self, handle: u32) -> Result<usize, String> {

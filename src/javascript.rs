@@ -9468,6 +9468,9 @@ impl Runtime {
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==HTML_FORM_REQUEST&&kind=="NotFoundError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if matches!(method,"\0HTMLElement.get.dataset"|"\0SVGElement.get.dataset")&&matches!(kind,"NotSupportedError"|"SecurityError") {
+                return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));
+            }
             if kind == "NotSupportedError"
                 && (control_validity_interface(method).is_some()||validity_state_operation(method)||control_custom_validity_interface(method).is_some()||control_validation_operation(method).is_some()||matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | "\0HTMLInputElement.get.willValidate" | "\0HTMLButtonElement.get.willValidate" | "\0HTMLSelectElement.get.willValidate" | "\0HTMLTextAreaElement.get.willValidate" | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode"))
             {
