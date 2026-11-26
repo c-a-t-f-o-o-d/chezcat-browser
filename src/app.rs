@@ -7338,3 +7338,7 @@ mod static_range_child_tests;
 #[cfg(test)]
 #[path="app_range_delete_tests.rs"]
 mod range_delete_tests;
+
+#[cfg(test)]
+#[path="app_range_extract_tests.rs"]
+mod range_extract_tests;

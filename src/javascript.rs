@@ -776,6 +776,8 @@ pub trait Host {
     fn begin_request_notification(&mut self,_notification:xhr_interface::Notification)->Result<Option<usize>,String>{Ok(None)}
     fn finish_request_abort(&mut self,_target:u32,_generation:u64){}
     fn cancel_request_work(&mut self){}
+    fn prepare_range_extract(&mut self,_receiver:u32)->Result<range_interface::ExtractPlan,range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range extraction is unavailable.".into()))}
+    fn finish_range_extract(&mut self,_bytes:usize){}
     fn prepare_range_delete(&mut self,_receiver:u32)->Result<Vec<range_interface::DeleteStep>,range_interface::Error>{Err(range_interface::Error::Exception("NotSupportedError","Native Range deletion is unavailable.".into()))}
     fn finish_range_delete(&mut self,_bytes:usize){}
     fn collapse_range_delete(&mut self,_receiver:u32,_node:u32,_offset:usize)->Result<(),String>{Err("Native Range deletion is unavailable.".into())}
@@ -9597,6 +9599,7 @@ impl Runtime {
             return Err(Fault::exception(kind,message));
         }
         if let Some(fields) = &fields { for (_, value) in fields { self.pin_exported_value(value); } }
+        if method==range_interface::EXTRACT_CONTENTS{return self.extract_native_range(object,host);}
         if method==range_interface::DELETE_CONTENTS{return self.delete_native_range(object,host);}
         if method==text_split_interface::METHOD{return self.split_native_text(object,args,host);}
         if method==node_normalize_interface::METHOD{return self.normalize_native_node(object,host);}

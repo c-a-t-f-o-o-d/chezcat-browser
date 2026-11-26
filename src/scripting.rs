@@ -3437,6 +3437,8 @@ impl Host for Bridge<'_> {
     fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
     fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
     fn cancel_request_work(&mut self){self.xhr_cancel_all();}
+    fn prepare_range_extract(&mut self,receiver:u32)->Result<crate::javascript::range_interface::ExtractPlan,crate::javascript::range_interface::Error>{self.range_extract_plan(receiver)}
+    fn finish_range_extract(&mut self,bytes:usize){self.state.retained-=bytes;}
     fn prepare_range_delete(&mut self,receiver:u32)->Result<Vec<crate::javascript::range_interface::DeleteStep>,crate::javascript::range_interface::Error>{self.range_delete_plan(receiver)}
     fn finish_range_delete(&mut self,bytes:usize){self.state.retained-=bytes;}
     fn collapse_range_delete(&mut self,receiver:u32,node:u32,offset:usize)->Result<(),String>{self.range_delete_collapse(receiver,node,offset)}
@@ -12332,3 +12334,7 @@ mod static_range_child_tests;
 #[cfg(test)]
 #[path="script_range_delete_tests.rs"]
 mod range_delete_tests;
+
+#[cfg(test)]
+#[path="script_range_extract_tests.rs"]
+mod range_extract_tests;

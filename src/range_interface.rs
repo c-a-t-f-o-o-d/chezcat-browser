@@ -25,6 +25,7 @@ pub(crate) const COMPARE_POINT: &str = "\0Range.comparePoint";
 pub(crate) const POINT_IN_RANGE: &str = "\0Range.isPointInRange";
 pub(crate) const INTERSECTS_NODE: &str = "\0Range.intersectsNode";
 pub(crate) fn comparison(method:&str)->bool {matches!(method,COMPARE_BOUNDARIES|COMPARE_POINT|POINT_IN_RANGE|INTERSECTS_NODE)}
+pub(crate) const EXTRACT_CONTENTS: &str = "\0Range.extractContents";
 pub(crate) const DELETE_CONTENTS: &str = "\0Range.deleteContents";
 pub(crate) const CLONE_CONTENTS: &str = "\0Range.cloneContents";
 pub(crate) const CLONE: &str = "\0Range.cloneRange";
@@ -53,7 +54,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | SELECT_CONTENTS
             | COLLAPSE
             | CLONE
-            | CLONE_CONTENTS | DELETE_CONTENTS
+            | CLONE_CONTENTS | DELETE_CONTENTS | EXTRACT_CONTENTS
             | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
             | DETACH
             | STRINGIFY
@@ -164,6 +165,7 @@ impl Runtime {
                     }
                     self.deferred_host_method(prototype,window,"cloneContents",CLONE_CONTENTS,0)?;
                     self.deferred_host_method(prototype,window,"deleteContents",DELETE_CONTENTS,0)?;
+                    self.deferred_host_method(prototype,window,"extractContents",EXTRACT_CONTENTS,0)?;
                     for (property,method) in [("compareBoundaryPoints",COMPARE_BOUNDARIES),("comparePoint",COMPARE_POINT),("isPointInRange",POINT_IN_RANGE),("intersectsNode",INTERSECTS_NODE)] {
                         self.deferred_host_method(prototype,window,property,method,arity(method))?;
                     }
@@ -244,5 +246,55 @@ impl Runtime {
         Ok(Value::Undefined)
         })();
         host.finish_range_delete(bytes);result
+    }
+}
+
+pub enum ExtractStep {
+    Fragment{document:u32,slot:usize},
+    Clone{source:u32,slot:usize},
+    Slice{source:u32,slot:usize,offset:usize,count:usize},
+    Append{parent:usize,child:usize},
+    Move{parent:usize,node:u32},
+    Collapse{node:u32,offset:usize},
+    Data{node:u32,offset:usize,count:usize},
+}
+pub struct ExtractPlan {
+    pub steps:Vec<ExtractStep>,
+    pub slots:Vec<Option<u32>>,
+    pub bytes:usize,
+}
+impl Runtime {
+    pub(super) fn extract_native_range(&mut self,receiver:u32,host:&mut dyn Host)->Result<Value,Fault>{
+        let plan=host.prepare_range_extract(receiver).map_err(|error|match error{
+            Error::Fatal(message)=>Fault::new(message),
+            Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+            Error::Exception(kind,message)=>match self.native_dom_exception(kind,&message){Ok(value)=>Fault::thrown(value),Err(error)=>error},
+        })?;
+        let bytes=plan.bytes;
+        let result=(||->Result<Value,Fault>{
+            self.work(plan.steps.len())?;
+            let mut slots=plan.slots;
+            let get=|slots:&[Option<u32>],slot:usize|slots.get(slot).copied().flatten().ok_or_else(||Fault::new("Native extraction slot has not been produced."));
+            for step in plan.steps {
+                match step {
+                    ExtractStep::Fragment{document,slot}=>{
+                        let Value::Host(node)=self.call_host(document,"createDocumentFragment",&[],host)? else{return Err(Fault::new("Native extraction requires a fragment."));};slots[slot]=Some(node);
+                    },
+                    ExtractStep::Clone{source,slot}=>{
+                        let Value::Host(node)=self.call_host(source,"\0Node.cloneNode",&[Value::Bool(false)],host)? else{return Err(Fault::new("Native extraction requires a cloned Node."));};slots[slot]=Some(node);
+                    },
+                    ExtractStep::Slice{source,slot,offset,count}=>{
+                        let Value::Host(node)=self.call_host(source,"\0Node.cloneNode",&[Value::Bool(false)],host)? else{return Err(Fault::new("Native extraction requires a CharacterData clone."));};
+                        let value=self.call_host(source,"\0CharacterData.substringData",&[Value::Number(offset as f64),Value::Number(count as f64)],host)?;
+                        self.host_set_native(node,"data",value,host)?;slots[slot]=Some(node);
+                    },
+                    ExtractStep::Append{parent,child}=>{self.call_host(get(&slots,parent)?,"appendChild",&[Value::Host(get(&slots,child)?)],host)?;},
+                    ExtractStep::Move{parent,node}=>{self.call_host(get(&slots,parent)?,"appendChild",&[Value::Host(node)],host)?;},
+                    ExtractStep::Collapse{node,offset}=>{self.validate_native_access(node,host)?;host.collapse_range_delete(receiver,node,offset).map_err(Fault::new)?;},
+                    ExtractStep::Data{node,offset,count}=>{self.call_host(node,"\0CharacterData.deleteData",&[Value::Number(offset as f64),Value::Number(count as f64)],host)?;},
+                }
+            }
+            Ok(Value::Host(get(&slots,0)?))
+        })();host.finish_range_extract(bytes);result
     }
 }
