@@ -22,10 +22,10 @@ var fixed=new StaticRange({startContainer:first,startOffset:1,endContainer:last,
 var copy=host.cloneNode(true),imported=document.importNode(host,true);first.nodeValue='Changed';
 if(fixed.startContainer!==first||fixed.endContainer!==last||fixed.startOffset!==1||fixed.endOffset!==2||first.ownerDocument!==owner||last.ownerDocument!==owner||whole.startContainer!==content||whole.endContainer!==parsed||whole.endOffset!==9)throw 'appropriate owners and separate native roots';
 if(copy.content.firstChild.textContent!=='Saved'||imported.content.firstChild.textContent!=='Saved'||copy.content.firstChild.firstChild===first||imported.content.ownerDocument===owner||imported.ownerDocument!==document||content.ownerDocument!==owner)throw 'independent copies and snapshot source aliases';
-var caught=0,live=document.createRange();try{live.setStart(first,0);}catch(e){if(e.name==='NotSupportedError')caught++;}
+var caught=0,live=document.createRange();live.setStart(first,0);if(live.startContainer!==first||live.endContainer!==first||live.startOffset||live.endOffset||!live.collapsed)throw 'genuine live inert boundary identity';
 var attr=owner.createAttribute('title');try{new StaticRange({startContainer:first,startOffset:0,endContainer:attr,endOffset:0});}catch(e){if(e.name==='InvalidNodeTypeError')caught++;}
 if(parsed.doctype.nodeType!==10)throw 'genuine inert doctype producer';try{new StaticRange({startContainer:first,startOffset:0,endContainer:parsed.doctype,endOffset:0});}catch(e){if(e instanceof DOMException&&e.name==='InvalidNodeTypeError')caught++;}
-if(caught!==3||fixed.startContainer!==first||first.nodeValue!=='Changed')throw 'live and invalid endpoint guards';
+if(caught!==2||fixed.startContainer!==first||first.nodeValue!=='Changed')throw 'fixed invalid endpoint guards remain separate';
 "#);
 }
 #[test]

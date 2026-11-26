@@ -3,11 +3,14 @@ use super::*;
 use crate::javascript::{NativeAttributeChange, NativeChildListChange};
 
 impl Bridge<'_> {
-    pub(in crate::scripting) fn write_inert_character_data(
-        &mut self,
-        object: u32,
-        text: DomString,
+    pub(in crate::scripting) fn write_inert_character_data(&mut self,object:u32,text:DomString)->Result<(),String>{
+        let removed=self.character_data_source(object).ok_or("Inert CharacterData receiver is unavailable.")?.utf16_len();let inserted=text.utf16_len();
+        self.write_inert_character_splice(object,text,0,removed,inserted)
+    }
+    pub(in crate::scripting) fn write_inert_character_splice(
+        &mut self,object:u32,text:DomString,offset:usize,removed:usize,inserted:usize,
     ) -> Result<(), String> {
+        self.state.prepare_range_changes(1,0)?;
         if !matches!(self.inert_node_type(object), Some(3 | 4 | 7 | 8)) {
             return Err("Inert CharacterData receiver is unavailable.".into());
         }
@@ -73,6 +76,7 @@ impl Bridge<'_> {
                 initial_template,
             };
         }
+        self.state.ranges_splice_data(object,offset,removed,inserted);
         self.state.dom_committed();
         Ok(())
     }

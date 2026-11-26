@@ -723,7 +723,7 @@ impl Bridge<'_> {
                 self.state.copies(self.state.dom.inert_child_lists.movement_bytes(shifted))?;
             }
             let attr_changes=if source_owner!=DOCUMENT{let lookup=(usize::BITS-indices.len().leading_zeros()) as usize+1;self.prepare_attr_document_rebind(|owner|node_index(owner).is_some_and(|index|indices.binary_search(&index).is_ok()),lookup,DOCUMENT)?}else{Vec::new()};
-            self.state.prepare_range_changes(1,0)?;
+            self.state.prepare_inert_range_changes(3)?;
             self.state.replace_storage(released, retained, retained)?;
             Ok::<_, String>((inline,attr_changes))
         })();
@@ -737,6 +737,8 @@ impl Bridge<'_> {
                 return Err(error);
             }
         };
+        if !single{self.state.ranges_remove_inert(source,0,count);}
+        if let Some(old)=old_parent{self.state.ranges_remove_inert(old,old_slot.unwrap(),1);}
         self.state.ranges_insert(parent,position,roots.len());
         self.state.dom.child_lists.commit(child_map);
         if let Some(mut children) = destination_children {
@@ -875,7 +877,9 @@ impl Bridge<'_> {
         let copies = (moved + 1).checked_mul(size_of::<u32>()).ok_or("Template child-link copy work overflow.")?;
         let (index_growth, index_bytes) = self.prepare_adopted_index(std::iter::once(child), available - added)?;
         let attr_changes=if owner!=DOCUMENT{self.prepare_attr_document_rebind(|candidate|candidate==child,1,owner)?}else{Vec::new()};
+        self.state.prepare_inert_range_changes(1)?;
         self.state.replace_storage(0, added + index_bytes, copies)?;
+        let gap=self.inert_children(fragment).unwrap().len();self.state.ranges_insert_handle(fragment,gap,1);
         let arena = &mut self.state.inert_documents;
         arena.adopted.commit(index_growth);
         if let Some(mut next) = replacement {
@@ -1204,9 +1208,12 @@ impl Bridge<'_> {
             available.checked_sub(node_minimum).ok_or("Parked main-node backing allowance exhausted.")?)?;
         let (node_growth, node_bytes) = self.prepare_main_nodes(parked, available-index_bytes)?;
         let metadata = index_bytes.checked_add(content_bytes).and_then(|bytes|bytes.checked_add(node_bytes)).ok_or("Parked native/main backing overflow.")?;
+        self.state.prepare_inert_range_changes(2)?;
         let committed = self.reserve_inert_storage(entries.len(), payload, generated.len(), released, metadata)?;
         debug_assert_eq!(committed, first);
         self.commit_main_nodes(node_growth);
+        let old_count=self.inert_children(fragment).unwrap().len();self.state.ranges_remove_inert(fragment,0,old_count);
+        self.state.ranges_insert_handle(fragment,0,root_children.len());
         let arena = &mut self.state.inert_documents;
         let Entry::Node(root) = &mut arena.entries[fragment_index] else { unreachable!() };
         let old = std::mem::replace(&mut root.children, root_children);
@@ -2049,3 +2056,28 @@ mod control_eligibility;
 
 #[path="script_range_clone_contents.rs"]
 mod range_clone_contents;
+
+impl State {
+    // Preflight charges the native topology walk before any fallible producer
+    // commits. This phase uses only existing links and publishes no allocation.
+    pub(super) fn prepare_inert_range_changes(&mut self,operations:usize)->Result<(),String>{
+        let nodes=self.inert_documents.entries.len().checked_add(self.inert_documents.adopted.len()).ok_or("Inert Range topology work overflow.")?;
+        let lookup=self.inert_documents.adopted.lookup_work().checked_add(2).ok_or("Inert Range lookup work overflow.")?;
+        self.prepare_range_changes(operations,nodes.checked_mul(lookup).ok_or("Inert Range topology lookup work overflow.")?)
+    }
+    pub(super) fn ranges_remove_inert(&mut self,parent:u32,index:usize,count:usize){
+        if count==0{return;}
+        let arena=&self.inert_documents;
+        let roots=&arena.node(parent).expect("prepared inert Range parent").children[index..index+count];
+        for range in self.ranges.iter_mut().filter(|range|!range.fixed){for point in [&mut range.start,&mut range.end]{
+            let mut node=point.node;let mut removed=false;
+            while let Some(item)=arena.node(node){
+                let Some(ancestor)=item.parent else{break;};
+                if ancestor==parent{removed=roots.contains(&node);break;}
+                node=ancestor;
+            }
+            if removed{*point=script_ranges::Point{node:parent,offset:index};}
+            else if point.node==parent&&point.offset>index{point.offset-=count.min(point.offset-index);}
+        }}
+    }
+}

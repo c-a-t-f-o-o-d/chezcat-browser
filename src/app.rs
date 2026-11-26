@@ -7358,3 +7358,7 @@ mod range_attr_tests;
 #[cfg(test)]
 #[path="app_range_child_tests.rs"]
 mod range_child_tests;
+
+#[cfg(test)]
+#[path="app_range_inert_tests.rs"]
+mod range_inert_tests;

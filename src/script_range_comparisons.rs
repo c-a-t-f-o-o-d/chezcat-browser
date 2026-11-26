@@ -22,7 +22,7 @@ impl Bridge<'_> {
             return if method==COMPARE_POINT {Err(Exception("WrongDocumentError","Point and Range roots differ.".into()))} else {Ok(())};
         }
         if method!=INTERSECTS_NODE {
-            if index.is_some_and(|index|matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_))) {return Err(Exception("InvalidNodeTypeError","A DocumentType is not a boundary container.".into()));}
+            if self.inert_node_type(*node)==Some(10)||index.is_some_and(|index|matches!(self.doc.nodes[index].kind,NodeKind::DocumentType(_))) {return Err(Exception("InvalidNodeTypeError","A DocumentType is not a boundary container.".into()));}
             let offset=range_offset(args.get(1).unwrap_or(&Value::Undefined)).map_err(Fatal)?;
             if offset>self.range_length(*node).map_err(Fatal)? {return Err(Exception("IndexSizeError","Point offset exceeds node length.".into()));}
         }
