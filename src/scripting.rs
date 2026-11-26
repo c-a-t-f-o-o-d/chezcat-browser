@@ -12701,3 +12701,7 @@ mod dataset_integrity_tests;
 #[cfg(test)]
 #[path="script_dataset_symbol_properties_tests.rs"]
 mod dataset_symbol_properties_tests;
+
+#[cfg(test)]
+#[path="script_dataset_reflect_get_tests.rs"]
+mod dataset_reflect_get_tests;

@@ -85,6 +85,35 @@ impl Runtime {
             // Author key conversion can change a document's access state.
             self.validate_native_access(*handle, host)?;
             if !strict_equal(target, receiver) {
+                if host.named_units_setter(*handle) {
+                    // Native named data retains its value regardless of the
+                    // receiver. Inherited accessors use the actual receiver.
+                    self.reject_foreign_window(receiver,host)?;
+                    return match key {
+                        PropertyKey::String(name)=>{
+                            self.property_name(&name)?;
+                            let present=host.named_scalar_presence(*handle,&name).map_err(Fault::new)?
+                                .ok_or_else(||Fault::new("Native named presence is unavailable."))?;
+                            if present {self.read_property(target,&name,host)} else {
+                                let prototype=self.native_instance_prototype(*handle,host)?;
+                                self.get_ordinary_property_with_receiver(prototype,&name,receiver,host)
+                            }
+                        }
+                        PropertyKey::StringUnits(units)=>{
+                            self.property_name_units(&units)?;
+                            let present=host.named_units_presence(*handle,&units).map_err(Fault::new)?
+                                .ok_or_else(||Fault::new("Native raw named presence is unavailable."))?;
+                            if present {self.read_units_property(target,&units,host)} else {
+                                let prototype=self.native_instance_prototype(*handle,host)?;
+                                self.get_units_property_with_receiver(prototype,&units,receiver,host)
+                            }
+                        }
+                        PropertyKey::Symbol(key)=>{
+                            let backing=self.symbol_backing(target,host)?.ok_or_else(||Fault::new("Native Symbol backing is unavailable."))?;
+                            self.reflect_get_symbol(backing,key,receiver,host)
+                        }
+                    };
+                }
                 // Opaque native slots do not yet expose descriptor/receiver
                 // metadata. Never silently substitute target for receiver.
                 return Err(Fault::new(
@@ -323,3 +352,37 @@ impl Runtime {
 #[cfg(test)]
 #[path = "reflect_own_keys_tests.rs"]
 mod own_keys_tests;
+
+#[cfg(test)]
+mod dataset_reflect_get_security_tests {
+    use super::*;
+    struct NativeNamed { window:super::tests::WindowReceiverHost, probes:usize, gets:usize }
+    impl Host for NativeNamed {
+        fn native_access_owner(&self,handle:u32)->Option<u32>{
+            if handle==42 {Some(77)} else {self.window.native_access_owner(handle)}
+        }
+        fn window_context(&self,handle:u32)->Option<WindowContext>{self.window.window_context(handle)}
+        fn validate_window_access(&self,caller:Option<u32>,window:u32)->Result<(),String>{self.window.validate_window_access(caller,window)}
+        fn named_units_setter(&self,handle:u32)->bool{handle==42}
+        fn named_scalar_presence(&mut self,handle:u32,_:&str)->Result<Option<bool>,String>{assert_eq!(handle,42);self.probes+=1;Ok(Some(true))}
+        fn named_units_presence(&mut self,handle:u32,_:&[u16])->Result<Option<bool>,String>{assert_eq!(handle,42);self.probes+=1;Ok(Some(true))}
+        fn get(&mut self,handle:u32,name:&str)->Result<Value,String>{assert_eq!((handle,name),(42,"value"));self.gets+=1;Ok(Value::Number(37.0))}
+        fn set(&mut self,_:u32,_:&str,_:Value)->Result<(),String>{panic!("unexpected native write")}
+        fn call(&mut self,_:u32,_:&str,_:&[Value])->Result<Value,String>{panic!("unexpected native call")}
+    }
+    #[test]
+    fn dataset_reflect_get_foreign_receiver_guards_precede_named_data_and_symbol_store(){
+        let mut r=Runtime::for_test();r.bind_browser_global(77).unwrap();
+        let mut h=NativeNamed{window:super::tests::WindowReceiverHost{same_origin:true},probes:0,gets:0};
+        let symbol=r.execute("Symbol('receiver')",&mut h).unwrap();
+        for same_origin in [true,false]{h.window.same_origin=same_origin;
+            for key in [Value::String("value".into()),Value::StringUnits(vec![120,0xd800]),symbol.clone()]{
+                let stores=r.native_symbol_backings.len();r.begin_job();
+                let error=r.reflect_get(&[Value::Host(42),key,Value::Host(88)],&mut h).unwrap_err();
+                assert!(error.message.contains(if same_origin{"foreign Window operation is not implemented"}else{"same-origin"}),"{}",error.message);
+                assert_eq!((h.probes,h.gets),(0,0));assert_eq!(r.native_symbol_backings.len(),stores);assert!(r.transient_registration_is_empty());
+            }
+        }
+        r.begin_job();assert_eq!(r.reflect_get(&[Value::Host(42),Value::String("value".into()),Value::Number(3.0)],&mut h).unwrap().to_number(),37.0);assert_eq!((h.probes,h.gets),(1,1));
+    }
+}
