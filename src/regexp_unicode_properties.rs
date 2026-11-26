@@ -4,6 +4,9 @@ use super::*;
 #[path = "regexp_unicode_property_data.rs"]
 mod data;
 
+#[path = "regexp_unicode_emoji_data.rs"]
+mod emoji;
+
 pub(super) fn contains(ranges: &[(u32,u32)], character: u32) -> bool {
     let after = ranges.partition_point(|&(low, _)| low <= character);
     after != 0 && character <= ranges[after - 1].1
@@ -30,11 +33,12 @@ impl Parser<'_> {
         name.try_reserve_exact(length).map_err(|_| Error::Limit("Unicode regexp property storage is unavailable."))?;
         spend(self.budget, name.capacity())?;
         for &unit in &self.units[start..end] { name.push(unit as u8 as char); }
-        if matches!(name.as_str(), "Basic_Emoji" | "Emoji_Keycap_Sequence" | "RGI_Emoji_Modifier_Sequence" | "RGI_Emoji_Flag_Sequence" | "RGI_Emoji_Tag_Sequence" | "RGI_Emoji_ZWJ_Sequence" | "RGI_Emoji") {
+        spend(self.budget, name.len().checked_mul(3).ok_or(Error::Limit("Unicode regexp property work overflow."))?)?;
+        if let Ok(index) = emoji::PROPERTIES.binary_search_by_key(&name.as_str(), |entry| entry.0) {
             if !self.unicode_sets || inverted {
                 return Err(Error::Syntax("A Unicode string property requires v and cannot be complemented."));
             }
-            return Err(Error::Unsupported("Unicode regexp emoji string properties are not implemented."));
+            return Ok(ClassPart::StringProperty(emoji::PROPERTIES[index].1));
         }
         let ranges = if let Some((property, value)) = name.split_once('=') {
             let group = match property {
@@ -57,6 +61,25 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unicode_emoji_properties_static_sequences_and_union_are_exact() {
+        assert_eq!(emoji::MEMBERS.len(),3953);
+        for pair in emoji::MEMBERS.windows(2) { assert!(pair[0] < pair[1]); }
+        for value in emoji::MEMBERS {
+            assert!(!value.is_empty());
+            assert!(value.iter().all(|&code| char::from_u32(code).is_some()));
+        }
+        let mut union=std::collections::BTreeSet::new();
+        let mut rgi=None;
+        for &(name,values) in emoji::PROPERTIES {
+            for pair in values.windows(2) { assert!(pair[0] < pair[1]); }
+            for value in values { assert!(emoji::MEMBERS.binary_search(value).is_ok()); }
+            if name=="RGI_Emoji" {rgi=Some(values);} else {union.extend(values.iter().copied());}
+        }
+        assert_eq!(emoji::PROPERTIES.len(),7);
+        assert_eq!(union.into_iter().collect::<Vec<_>>(),rgi.unwrap());
+        for pair in emoji::PROPERTIES.windows(2) {assert!(pair[0].0<pair[1].0);}
+    }
     #[test]
     fn unicode_property_tables_are_ordered_and_match_existing_identifier_data() {
         for table in data::TABLES {

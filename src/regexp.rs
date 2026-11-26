@@ -130,6 +130,7 @@ enum ClassPart {
     Word(bool),
     Space(bool),
     Property(&'static [(u32,u32)], bool),
+    StringProperty(&'static [&'static [u32]]),
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +160,9 @@ impl Class {
     fn matches(&self, unit: u32, insensitive: bool, budget: &mut usize) -> Result<bool, Error> {
         spend(budget, self.parts.len().max(1))?;
         for part in &self.parts {
+            if matches!(part, ClassPart::StringProperty(_)) {
+                return Err(Error::Syntax("A string property must lower to regexp sequences."));
+            }
             if let ClassPart::Property(ranges, _) = part {
                 spend(budget, (usize::BITS - ranges.len().leading_zeros()).max(1) as usize)?;
             }
@@ -175,6 +179,7 @@ impl Class {
             ClassPart::Word(invert) => word(unit) != invert,
             ClassPart::Space(invert) => space(unit) != invert,
             ClassPart::Property(ranges, invert) => unicode_properties::contains(ranges, unit) != invert,
+            ClassPart::StringProperty(_) => false, // Rejected before character matching.
         });
         Ok(found != self.inverted)
     }
@@ -494,6 +499,7 @@ impl Parser<'_> {
                 let part = self.escape(false)?;
                 match part {
                     ClassPart::Range(low, high) if low == high => self.character(low),
+                    ClassPart::StringProperty(members) => self.unicode_property_node(members),
                     other => self.push(Node::Class(Class {
                         inverted: false,
                         parts: vec![other],
@@ -1027,7 +1033,7 @@ impl Compiler<'_> {
                     Node::Class(class) if !self.unicode || !class.inverted && class.parts.iter().all(|part| match *part {
                         ClassPart::Range(low, high) => high <= 0xffff && (high < 0xd800 || low > 0xdfff),
                         ClassPart::Digit(inverted) | ClassPart::Word(inverted) | ClassPart::Space(inverted) => !inverted,
-                        ClassPart::Property(_, _) => false,
+                        ClassPart::Property(_, _) | ClassPart::StringProperty(_) => false,
                     }) => {
                         spend(
                             self.budget,
