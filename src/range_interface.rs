@@ -25,6 +25,7 @@ pub(crate) const COMPARE_POINT: &str = "\0Range.comparePoint";
 pub(crate) const POINT_IN_RANGE: &str = "\0Range.isPointInRange";
 pub(crate) const INTERSECTS_NODE: &str = "\0Range.intersectsNode";
 pub(crate) fn comparison(method:&str)->bool {matches!(method,COMPARE_BOUNDARIES|COMPARE_POINT|POINT_IN_RANGE|INTERSECTS_NODE)}
+pub(crate) const SURROUND_CONTENTS: &str = "\0Range.surroundContents";
 pub(crate) const INSERT_NODE: &str = "\0Range.insertNode";
 pub(crate) const EXTRACT_CONTENTS: &str = "\0Range.extractContents";
 pub(crate) const DELETE_CONTENTS: &str = "\0Range.deleteContents";
@@ -55,7 +56,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | SELECT_CONTENTS
             | COLLAPSE
             | CLONE
-            | CLONE_CONTENTS | DELETE_CONTENTS | EXTRACT_CONTENTS | INSERT_NODE
+            | CLONE_CONTENTS | DELETE_CONTENTS | EXTRACT_CONTENTS | INSERT_NODE | SURROUND_CONTENTS
             | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
             | DETACH
             | STRINGIFY
@@ -72,7 +73,7 @@ pub(crate) fn node_argument(method: &str) -> bool {
             | END_AFTER
             | SELECT_NODE
             | SELECT_CONTENTS
-            | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE | INSERT_NODE
+            | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE | INSERT_NODE | SURROUND_CONTENTS
     )
 }
 pub(crate) fn snapshot_getter(method:&str)->bool {matches!(method,START_NODE|END_NODE|START_OFFSET|END_OFFSET|COLLAPSED)}
@@ -168,6 +169,7 @@ impl Runtime {
                     self.deferred_host_method(prototype,window,"deleteContents",DELETE_CONTENTS,0)?;
                     self.deferred_host_method(prototype,window,"extractContents",EXTRACT_CONTENTS,0)?;
                     self.deferred_host_method(prototype,window,"insertNode",INSERT_NODE,1)?;
+                    self.deferred_host_method(prototype,window,"surroundContents",SURROUND_CONTENTS,1)?;
                     for (property,method) in [("compareBoundaryPoints",COMPARE_BOUNDARIES),("comparePoint",COMPARE_POINT),("isPointInRange",POINT_IN_RANGE),("intersectsNode",INTERSECTS_NODE)] {
                         self.deferred_host_method(prototype,window,property,method,arity(method))?;
                     }
@@ -323,5 +325,28 @@ impl Runtime{
         let offset=host.range_insert_position(info.parent,reference,info.node).map_err(Fault::new)?;
         self.call_host(info.parent,"insertBefore",&[Value::Host(info.node),reference.map_or(Value::Null,Value::Host)],host)?;
         host.finish_range_insert(receiver,info.parent,offset).map_err(Fault::new)?;Ok(Value::Undefined)
+    }
+}
+
+impl Runtime{
+    pub(super) fn surround_native_range(&mut self,receiver:u32,args:&[Value],host:&mut dyn Host)->Result<Value,Fault>{
+        let parent=host.prepare_range_surround(receiver,args).map_err(|error|match error{
+            Error::Fatal(message)=>Fault::new(message),
+            Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+            Error::Exception(kind,message)=>match self.native_dom_exception(kind,&message){Ok(value)=>Fault::thrown(value),Err(error)=>error},
+        })?;
+        let fragment=self.call_host(receiver,EXTRACT_CONTENTS,&[],host)?;
+        if matches!(self.call_host(parent,NODE_HAS_CHILDREN,&[],host)?,Value::Bool(true)){
+            self.call_host(parent,NODE_TEXT_CONTENT_SET,&[Value::Null],host)?;
+        }
+        self.call_host(receiver,INSERT_NODE,&[Value::Host(parent)],host)?;
+        host.validate_range_surround_append(parent).map_err(|error|match error{
+            Error::Fatal(message)=>Fault::new(message),
+            Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+            Error::Exception(kind,message)=>match self.native_dom_exception(kind,&message){Ok(value)=>Fault::thrown(value),Err(error)=>error},
+        })?;
+        self.call_host(parent,"appendChild",&[fragment],host)?;
+        self.call_host(receiver,SELECT_NODE,&[Value::Host(parent)],host)?;
+        Ok(Value::Undefined)
     }
 }

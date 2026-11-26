@@ -3437,6 +3437,8 @@ impl Host for Bridge<'_> {
     fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
     fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
     fn cancel_request_work(&mut self){self.xhr_cancel_all();}
+    fn prepare_range_surround(&mut self,receiver:u32,args:&[Value])->Result<u32,crate::javascript::range_interface::Error>{self.range_surround_parent(receiver,args)}
+    fn validate_range_surround_append(&mut self,parent:u32)->Result<(),crate::javascript::range_interface::Error>{self.range_surround_append_parent(parent)}
     fn prepare_range_insert(&mut self,receiver:u32,args:&[Value])->Result<crate::javascript::range_interface::InsertInfo,crate::javascript::range_interface::Error>{self.range_insert_plan(receiver,args)}
     fn range_insert_reference(&mut self,reference:Option<u32>,node:u32)->Result<Option<u32>,String>{self.range_insert_reference_node(reference,node)}
     fn range_insert_position(&mut self,parent:u32,reference:Option<u32>,node:u32)->Result<usize,String>{self.range_insert_new_offset(parent,reference,node)}
@@ -12346,3 +12348,7 @@ mod range_extract_tests;
 #[cfg(test)]
 #[path="script_range_insert_tests.rs"]
 mod range_insert_tests;
+
+#[cfg(test)]
+#[path="script_range_surround_tests.rs"]
+mod range_surround_tests;
