@@ -315,6 +315,9 @@ impl Bridge<'_> {
 
     /// Borrow the original name; display projections cannot identify a key.
     pub(super) fn dataset_units_attribute(&mut self,handle:u32,key:&[u16])->Result<Option<(usize,usize)>,String>{
+        self.dataset_key_attribute(handle,key.iter().copied())
+    }
+    pub(super) fn dataset_key_attribute<I:Iterator<Item=u16>+Clone>(&mut self,handle:u32,key:I)->Result<Option<(usize,usize)>,String>{
         script_text_content::deadline(self.state)?;
         self.state.work(1)?;
         let node=self.dataset_node(handle)?;
@@ -335,7 +338,7 @@ impl Bridge<'_> {
                     Some(suffix.next().unwrap()-32)
                 }else{Some(unit)}
             });
-            if !converted.eq(key.iter().copied()){continue;}
+            if !converted.eq(key.clone()){continue;}
             return Ok(Some((node,index)));
         }
         script_text_content::deadline(self.state)?;

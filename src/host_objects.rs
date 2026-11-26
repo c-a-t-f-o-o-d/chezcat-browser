@@ -1703,7 +1703,7 @@ impl Runtime {
         if inherited && host.expando_owner(handle).is_some() && !host.ordinary_inherited_enumeration(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
-        let named=if inherited{None}else{
+        let named=if inherited&&!host.named_key_prototype_enumeration(handle){None}else{
             self.validate_native_access(handle,host)?;
             host.named_own_keys(handle).map_err(Fault::new)?
         };
@@ -1712,6 +1712,16 @@ impl Runtime {
             self.work(named.len().checked_mul(std::mem::size_of::<StringKey>()).ok_or_else(||Fault::new("Native key snapshot work overflow."))?)?;
             let mut keys=Vec::new();keys.try_reserve_exact(named.len()).map_err(|_|Fault::new("Cannot reserve native own key snapshot."))?;
             for key in named{keys.push(match key{super::NativeNamedKey::String(name)=>StringKey::Scalar(name),super::NativeNamedKey::Units(units)=>StringKey::Units(units)});}
+            if inherited {
+                let prototype=self.native_instance_prototype(handle,host)?;
+                for key in self.inherited_keys(prototype)? {
+                    self.work_as(keys.len().checked_mul(key.byte_len().checked_add(std::mem::size_of::<StringKey>()).ok_or_else(||Fault::new("Native inherited key work overflow."))?).ok_or_else(||Fault::new("Native inherited key work overflow."))?,super::WorkKind::PropertyEnumeration)?;
+                    if keys.contains(&key){continue;}
+                    if keys.len()==self.limits.heap.object_properties{return Err(Fault::new(format!("for-in enumeration limit reached ({} keys).",self.limits.heap.object_properties)));}
+                    keys.try_reserve(1).map_err(|_|Fault::new("Cannot reserve native inherited key snapshot."))?;
+                    keys.push(key);
+                }
+            }
             keys
         } else if let Some(&id) = self.host_objects.get(&handle) {
             if inherited {
@@ -1735,6 +1745,24 @@ impl Runtime {
             }
         }
         Ok(keys)
+    }
+
+    /// Recheck a named snapshot without reading values or invoking accessors.
+    /// Native supported names override the actual ordinary prototype chain.
+    pub(super) fn host_named_enumeration_member(&mut self,handle:u32,key:&StringKey,host:&mut dyn Host)->Result<Option<bool>,Fault>{
+        if !host.named_key_prototype_enumeration(handle){return Ok(None);}
+        self.validate_native_access(handle,host)?;
+        let present=match key{StringKey::Scalar(name)=>host.named_scalar_presence(handle,name),StringKey::Units(units)=>host.named_units_presence(handle,units)}.map_err(Fault::new)?;
+        if present.ok_or_else(||Fault::new("Native named enumeration presence is unavailable."))?{return Ok(Some(true));}
+        let prototype=self.native_instance_prototype(handle,host)?;
+        let enumerable=match key{
+            StringKey::Scalar(name)=>if let Some(owner)=self.property_owner(prototype,name)?{self.own_enumerable(owner,name)?}else{false},
+            StringKey::Units(units)=>{
+                let owner=self.units_dispatch_owner(prototype,units)?;
+                if let Some(owner)=self.ordinary_descriptor_owner(owner)?{self.owns_units_property(owner,units)?&&self.objects[owner].properties.get_units(units).is_some_and(|property|property.enumerable)}else{false}
+            }
+        };
+        Ok(Some(enumerable))
     }
 
     /// Only the approved indexed family merges native own slots and its real
