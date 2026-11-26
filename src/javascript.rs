@@ -994,6 +994,9 @@ pub trait Host {
     fn named_own_keys(&mut self,_object:u32)->Result<Option<Vec<NativeNamedKey>>,String>{Ok(None)}
     /// Explicit opt-in joins native named keys to the genuine ordinary chain.
     fn named_key_prototype_enumeration(&self,_object:u32)->bool{false}
+    /// An explicitly validated legacy platform object must stay extensible.
+    /// False preserves the original integrity policy for other native families.
+    fn unpreventable_extensions(&mut self,_object:u32)->Result<bool,String>{Ok(false)}
     fn named_scalar_presence(&mut self,_object:u32,_name:&str)->Result<Option<bool>,String>{Ok(None)}
     fn own_keys(&mut self, _object: u32) -> Result<Vec<String>, String> {
         Err("Enumerating this native host object is not implemented.".into())

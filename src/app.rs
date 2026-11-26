@@ -7490,3 +7490,7 @@ mod dataset_bulk_definitions_tests;
 #[cfg(test)]
 #[path="app_dataset_reflect_set_tests.rs"]
 mod dataset_reflect_set_tests;
+
+#[cfg(test)]
+#[path="app_dataset_integrity_tests.rs"]
+mod dataset_integrity_tests;
