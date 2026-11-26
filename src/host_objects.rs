@@ -44,7 +44,7 @@ impl Runtime {
                     if let Value::Function(parent_constructor) = self.objects[parent].properties["constructor"].value.as_value()? {
                         self.objects[self.function_properties[allocation.id]].prototype = Some(Ordinary::Function(*parent_constructor));
                     }
-                    if name=="DocumentType"{self.define_canvas_operation(prototype,window,"remove",super::DOCTYPE_REMOVE,0)?;}
+                    if name=="DocumentType"{self.define_canvas_operation(prototype,window,"remove",super::DOCTYPE_REMOVE,0)?;self.define_child_node_methods(prototype,window)?;}
                     if name=="DocumentType"{for &(name,method) in super::DOCUMENT_TYPE_GETTERS {self.define_readonly_node_getter(prototype,window,name,method)?;}}
                 } else {
                     for (name, operation,length) in [("createHTMLDocument", super::DOM_IMPLEMENTATION_CREATE_HTML_DOCUMENT,0), ("hasFeature", super::DOM_IMPLEMENTATION_HAS_FEATURE,0),("createDocumentType",super::DOM_IMPLEMENTATION_CREATE_DOCTYPE,3),("createDocument",super::DOM_IMPLEMENTATION_CREATE_DOCUMENT,2)] {
@@ -378,6 +378,7 @@ impl Runtime {
                 }
                 if name=="Element" {
                     self.define_canvas_operation(prototype,window,"remove",super::ELEMENT_REMOVE,0)?;
+                    self.define_child_node_methods(prototype,window)?;
                     self.define_canvas_operation(prototype,window,"insertAdjacentText",super::adjacent_interface::TEXT,2)?;
                     self.define_canvas_operation(prototype,window,"insertAdjacentElement",super::adjacent_interface::ELEMENT,2)?;
                     self.define_host_attribute(prototype, window, "innerHTML",
@@ -450,6 +451,7 @@ impl Runtime {
             self.store_property(self.function_properties[allocation.id],"prototype".into(),Value::Object(character),Some((false,false,false)))?;
             self.store_symbol_property(character,self.symbol_to_string_tag.unwrap(),Value::String("CharacterData".into()),Some((false,false,true)))?;
             self.define_canvas_operation(character,window,"remove",super::CHARACTER_REMOVE,0)?;
+            self.define_child_node_methods(character,window)?;
             self.define_element_sibling_getters(character,window,"CharacterData")?;
             let substring=self.allocate_host_function_with_length(window,"\0CharacterData.substringData",2).map_err(Fault::new)?;
             if let Some(Function::Host{receiver_required,..})=self.functions.get_mut(substring.id){*receiver_required=true;}

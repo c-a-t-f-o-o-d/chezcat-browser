@@ -12,9 +12,13 @@ use super::*;
 pub(super) const ROOT_METHOD: &str = "\0Node.getRootNode";
 
 impl Bridge<'_> {
+    pub(super) fn child_node_variadic_receiver(&self,object:u32)->bool{
+        self.collection_interface_receiver(object)==Some(false)||self.character_data_receiver(object)||self.doctype_receiver(object)
+    }
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
             "append"|"prepend"|"replaceChildren"=>self.parent_node_receiver(object),
+            "before"|"after"|"replaceWith"=>self.child_node_variadic_receiver(object),
             "getRootNode" => self.get_root_receiver(object),
             "getElementById"=>self.identifier_lookup_receiver(object,None),
             "normalize"=>self.normalize_receiver(object),
