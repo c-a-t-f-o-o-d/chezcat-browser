@@ -277,6 +277,8 @@ impl Runtime {
                     runtime.define_inert_document_interfaces(handle).map_err(Fault::new)?;
                     runtime.define_media_interfaces(handle).map_err(Fault::new)?;
                     runtime.define_range_interfaces(handle).map_err(Fault::new)?;
+                    runtime.define_tree_walker(handle).map_err(Fault::new)?;
+                    runtime.define_node_iterator(handle).map_err(Fault::new)?;
                 }
                 Ok(())
             });

@@ -154,7 +154,8 @@ impl Runtime {
         self.constructor_prototype("TreeWalker", Value::Object(prototype))?;
         self.store_symbol_property(prototype, self.symbol_to_string_tag.unwrap(),
             Value::String("TreeWalker".into()), Some((false, false, true)))?;
-        self.walkers.prototype = Some(prototype);
+        self.native_constructor_prototypes.insert((window, "TreeWalker"), prototype);
+        if self.walkers.prototype.is_none() { self.walkers.prototype = Some(prototype); }
 
         for (name, op) in [("root", Op::Root), ("whatToShow", Op::Mask),
             ("filter", Op::Filter), ("currentNode", Op::CurrentNode)]
@@ -173,13 +174,11 @@ impl Runtime {
             ("lastChild", Op::Child(false)), ("nextSibling", Op::Sibling(true)),
             ("previousSibling", Op::Sibling(false)), ("previousNode", Op::Previous), ("nextNode", Op::Next)]
         {
-            let method = self.native_function(Builtin::TreeWalker(op), name)?;
-            self.store_property(prototype, name.into(), method, Some((true, true, true)))?;
+            self.deferred_native_method(prototype, name, Builtin::TreeWalker(op))?;
         }
         let document = *self.native_constructor_prototypes.get(&(window, "Document"))
             .ok_or_else(|| Fault::new("Document must precede TreeWalker."))?;
-        let create = self.native_function(Builtin::TreeWalker(Op::Create), "createTreeWalker")?;
-        self.store_property(document, "createTreeWalker".into(), create, Some((true, true, true)))?;
+        self.deferred_native_method(document, "createTreeWalker", Builtin::TreeWalker(Op::Create))?;
         Ok(())
     }
 
@@ -269,7 +268,10 @@ impl Runtime {
         self.work(bytes)?;
         self.walkers.walkers.try_reserve(1).map_err(|_| Fault::new("Cannot reserve TreeWalker state."))?;
         let id = self.new_object(None)?;
-        self.objects[id].prototype = self.walkers.prototype.map(Ordinary::Object);
+        let prototype = if let Some((window, _)) = self.browser_global {
+            self.native_constructor_prototypes.get(&(window, "TreeWalker")).copied()
+        } else { self.walkers.prototype };
+        self.objects[id].prototype = prototype.map(Ordinary::Object);
         self.walkers.walkers.insert(id, Walker { root, current: root, mask, filter, active: false });
         self.value_bytes = retained;
         Ok(Value::Object(id))

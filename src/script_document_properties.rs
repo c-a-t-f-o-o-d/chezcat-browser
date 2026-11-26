@@ -12,14 +12,16 @@ impl Bridge<'_> {
         if matches!(name, "createCDATASection" | "createProcessingInstruction") {
             return object == DOCUMENT || self.inert_document(object);
         }
-        object==DOCUMENT && matches!(name, "createTreeWalker" | "implementation") || self.document_interface_receiver(object)
+        self.document_interface_receiver(object) && matches!(name, "createTreeWalker" | "createNodeIterator")
+            || object==DOCUMENT && name=="implementation" || self.document_interface_receiver(object)
             && (matches!(name, "documentElement" | "currentScript" | "activeElement" | "characterSet" | "charset" | "inputEncoding") || script_element_properties::ordinary_interface_member(name))
     }
 
     pub(super) fn frame_document_prototype_lookup(&self, object:u32, name:&str)->bool {
         // Read author properties on the actual prototype without granting the
         // immutable child an own store, enumeration or definition capability.
-        self.active_frame_document(object) && !self.document_native_property(name)
+        self.active_frame_document(object)
+            && (matches!(name, "createTreeWalker" | "createNodeIterator") || !self.document_native_property(name))
     }
 
     pub(super) fn document_native_property(&self, name: &str) -> bool {
