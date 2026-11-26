@@ -85,6 +85,19 @@ impl Flags {
         Ok(flags)
     }
 
+    // Only these three settings can change inside a pattern. Unicode mode,
+    // global/sticky behavior and public metadata remain properties of Regex.
+    fn modifiers(self) -> u8 {
+        u8::from(self.insensitive) | u8::from(self.multiline) << 1 | u8::from(self.dot_all) << 2
+    }
+
+    fn with_modifiers(mut self, modifiers: u8) -> Self {
+        self.insensitive = modifiers & 1 != 0;
+        self.multiline = modifiers & 2 != 0;
+        self.dot_all = modifiers & 4 != 0;
+        self
+    }
+
     pub fn text(self) -> String {
         [
             (self.global, 'g'),
@@ -202,6 +215,7 @@ enum Node {
     Group {
         body: usize,
         capture: Option<usize>,
+        modifiers: Option<u8>,
         first: usize,
         end: usize,
     },
@@ -241,6 +255,7 @@ struct Parser<'a> {
     groups: usize,
     depth: usize,
     insensitive: bool,
+    modifiers: u8,
     unicode: bool,
     unicode_sets: bool,
     budget: &'a mut usize,
@@ -270,6 +285,39 @@ impl Parser<'_> {
             false
         }
     }
+    fn group_modifiers(&mut self) -> Result<u8, Error> {
+        let mut add = 0u8;
+        let mut remove = 0u8;
+        let mut minus = false;
+        loop {
+            spend(self.budget, 1)?;
+            let bit = match self.peek() {
+                Some(105) => 1, // i
+                Some(109) => 2, // m
+                Some(115) => 4, // s
+                Some(45) if !minus => {
+                    minus = true;
+                    self.at += 1;
+                    continue;
+                }
+                Some(58) => {
+                    if minus && (add | remove) == 0 {
+                        return Err(Error::Syntax("A regexp modifier group cannot remove an empty set of flags without adding any."));
+                    }
+                    self.at += 1;
+                    return Ok((self.modifiers | add) & !remove);
+                }
+                _ => return Err(Error::Syntax("Invalid regular-expression modifier group.")),
+            };
+            // A repeated flag, including a flag on both sides of '-', is invalid.
+            if (add | remove) & bit != 0 {
+                return Err(Error::Syntax("Duplicate or conflicting regular-expression modifier."));
+            }
+            if minus { remove |= bit; } else { add |= bit; }
+            self.at += 1;
+        }
+    }
+
     fn alternate(&mut self) -> Result<usize, Error> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
@@ -420,6 +468,8 @@ impl Parser<'_> {
             40 => {
                 let first = self.groups + 1;
                 let mut assertion = None;
+                let mut modifiers = None;
+                let enclosing_modifiers = self.modifiers;
                 let capture = if self.eat(b'?' as u16) {
                     if self.eat(b':' as u16) {
                         None
@@ -441,14 +491,18 @@ impl Parser<'_> {
                             Some(self.capture(Some(name))?)
                         }
                     } else {
-                        return Err(Error::Unsupported(
-                            "Regexp inline modifiers or this group extension are not implemented.",
-                        ));
+                        let local = self.group_modifiers()?;
+                        modifiers = Some(local);
+                        self.modifiers = local;
+                        self.insensitive = local & 1 != 0;
+                        None
                     }
                 } else {
                     Some(self.capture(None)?)
                 };
                 let body = self.alternate()?;
+                self.modifiers = enclosing_modifiers;
+                self.insensitive = enclosing_modifiers & 1 != 0;
                 if !self.eat(b')' as u16) {
                     return Err(Error::Syntax("Unterminated regular-expression group."));
                 }
@@ -464,6 +518,7 @@ impl Parser<'_> {
                     self.push(Node::Group {
                         body,
                         capture,
+                        modifiers,
                         first,
                         end: self.groups + 1,
                     })
@@ -832,6 +887,7 @@ enum Instruction {
     End,
     Boundary(bool),
     Reference(Vec<usize>),
+    Modifiers(u8),
     Save(usize),
     Clear(usize, usize),
     Mark(usize),
@@ -860,6 +916,7 @@ struct Compiler<'a> {
     names: &'a [NamedCapture],
     groups: usize,
     unicode: bool,
+    modifiers: u8,
 }
 impl Compiler<'_> {
     fn emit(&mut self, instruction: Instruction) -> Result<usize, Error> {
@@ -961,9 +1018,15 @@ impl Compiler<'_> {
             Node::Group {
                 body,
                 capture,
+                modifiers,
                 first,
                 end,
             } => {
+                let enclosing_modifiers = self.modifiers;
+                if let Some(local) = modifiers {
+                    self.emit(Instruction::Modifiers(*local))?;
+                    self.modifiers = *local;
+                }
                 if first < end {
                     self.emit(Instruction::Clear(first * 2, end * 2))?;
                 }
@@ -973,6 +1036,10 @@ impl Compiler<'_> {
                 self.node(nodes, *body, backwards)?;
                 if let Some(capture) = capture {
                     self.emit(Instruction::Save(capture * 2 + usize::from(!backwards)))?;
+                }
+                if modifiers.is_some() {
+                    self.emit(Instruction::Modifiers(enclosing_modifiers))?;
+                    self.modifiers = enclosing_modifiers;
                 }
             }
             Node::Look {
@@ -1084,6 +1151,7 @@ pub struct Regex {
 struct State {
     pc: usize,
     position: usize,
+    modifiers: u8,
     captures: Vec<Option<usize>>,
     marks: Vec<Option<usize>>,
 }
@@ -1216,6 +1284,7 @@ impl Regex {
             groups: 0,
             depth: 0,
             insensitive: flags.insensitive,
+            modifiers: flags.modifiers(),
             unicode: flags.unicode,
             unicode_sets: flags.unicode_sets,
             budget,
@@ -1237,6 +1306,7 @@ impl Regex {
             names: &parser.names,
             groups: parser.groups,
             unicode: flags.unicode,
+            modifiers: flags.modifiers(),
         };
         compiler.emit(Instruction::Save(0))?;
         compiler.node(&parser.nodes, root, false)?;
@@ -1330,6 +1400,7 @@ impl Regex {
             let state = State {
                 pc: 0,
                 position: beginning,
+                modifiers: self.flags.modifiers(),
                 captures: vec![None; (self.groups + 1) * 2],
                 marks: vec![None; self.marks],
             };
@@ -1389,9 +1460,10 @@ impl Regex {
         let mut alternatives = Vec::new();
         loop {
             spend(budget, 1)?;
+            let flags = self.flags.with_modifiers(state.modifiers);
             let following = input.get(state.position).copied().map(u32::from);
             let at = if backwards {
-                if self.flags.unicode && state.position >= 2 && starts_surrogate_pair(input, state.position - 2) {
+                if flags.unicode && state.position >= 2 && starts_surrogate_pair(input, state.position - 2) {
                     Some(state.position - 2)
                 } else {
                     state.position.checked_sub(1)
@@ -1399,32 +1471,32 @@ impl Regex {
             } else {
                 Some(state.position)
             };
-            let decoded = at.and_then(|index| character_at(input, index, self.flags.unicode));
+            let decoded = at.and_then(|index| character_at(input, index, flags.unicode));
             let current = decoded.map(|(character, _)| character);
             let next = &self.code[state.pc];
             let succeeded = match next {
-                Instruction::Character(unit) => if let Some(actual)=current {folding::equal(actual,*unit,self.flags,budget)?}else{false},
+                Instruction::Character(unit) => if let Some(actual)=current {folding::equal(actual,*unit,flags,budget)?}else{false},
                 Instruction::Class(class) => {
                     if let Some(unit) = current {
-                        class.matches(unit, self.flags, budget)?
+                        class.matches(unit, flags, budget)?
                     } else {
                         false
                     }
                 }
-                Instruction::Any => current.is_some_and(|unit| self.flags.dot_all || !line(unit)),
+                Instruction::Any => current.is_some_and(|unit| flags.dot_all || !line(unit)),
                 Instruction::Start => {
                     state.position == 0
-                        || self.flags.multiline
+                        || flags.multiline
                             && state.position > 0
                             && line(u32::from(input[state.position - 1]))
                 }
                 Instruction::End => {
                     state.position == input.len()
-                        || self.flags.multiline && following.is_some_and(line)
+                        || flags.multiline && following.is_some_and(line)
                 }
                 Instruction::Boundary(inverted) => {
-                    let before = folding::word_character(state.position.checked_sub(1).map(|at|u32::from(input[at])),self.flags,budget)?;
-                    let after = folding::word_character(following,self.flags,budget)?;
+                    let before = folding::word_character(state.position.checked_sub(1).map(|at|u32::from(input[at])),flags,budget)?;
+                    let after = folding::word_character(following,flags,budget)?;
                     (before != after) != *inverted
                 }
                 Instruction::Reference(indices) => {
@@ -1446,7 +1518,7 @@ impl Regex {
                         };
                         if let Some(target) = target {
                             spend(budget, length.saturating_mul(2))?;
-                            if self.flags.insensitive && !self.flags.unicode
+                            if flags.insensitive && !flags.unicode
                                 && input[start..end]
                                     .iter()
                                     .chain(&input[target..target + length])
@@ -1457,10 +1529,10 @@ impl Regex {
                             // Backreferences compare whole Unicode input characters,
                             // including isolated surrogates; a captured lone unit
                             // cannot match one half of a later surrogate pair.
-                            let boundaries = !self.flags.unicode
+                            let boundaries = !flags.unicode
                                 || !(target > 0 && starts_surrogate_pair(input, target - 1))
                                     && !(target + length > 0 && starts_surrogate_pair(input, target + length - 1));
-                            let matched = boundaries && folding::same_units(&input[start..end],&input[target..target+length],self.flags,budget)?;
+                            let matched = boundaries && folding::same_units(&input[start..end],&input[target..target+length],flags,budget)?;
                             if matched {
                                 state.position = if backwards { target } else { target + length };
                             }
@@ -1471,6 +1543,10 @@ impl Regex {
                     } else {
                         true
                     }
+                }
+                Instruction::Modifiers(modifiers) => {
+                    state.modifiers = *modifiers;
+                    true
                 }
                 Instruction::Save(slot) => {
                     state.captures[*slot] = Some(state.position);
@@ -1506,7 +1582,7 @@ impl Regex {
                         } else {
                             start + matched
                         };
-                        if !atom.matches(u32::from(input[index]), self.flags, budget)? {
+                        if !atom.matches(u32::from(input[index]), flags, budget)? {
                             break;
                         }
                         matched += 1;
