@@ -18,31 +18,34 @@ pub(super) const FLAGS:&[(&str,&str)]=&[
  ("valid","\0ValidityState.get.valid")];
 const MAIN:u32=0xc500_0000;
 const INERT:u32=0xc600_0000;
-fn owner(handle:u32)->Option<u32>{
+pub(super) fn owner(handle:u32)->Option<u32>{
  if (MAIN..MAIN+NODE_HANDLES).contains(&handle){return Some(node_handle((handle-MAIN)as usize));}
  let count=script_inert_documents::ENTRY_END-script_inert_documents::MAIN_IMPLEMENTATION;
  if (INERT+1..INERT+count).contains(&handle){return Some(script_inert_documents::MAIN_IMPLEMENTATION+(handle-INERT));}
  None
 }
-fn handle(object:u32)->u32{if node_index(object).is_some(){MAIN+(object-NODE_BASE)}else{INERT+(object-script_inert_documents::MAIN_IMPLEMENTATION)}}
+pub(super) fn handle(object:u32)->u32{if node_index(object).is_some(){MAIN+(object-NODE_BASE)}else{INERT+(object-script_inert_documents::MAIN_IMPLEMENTATION)}}
 pub(super) fn flag(method:&str)->Option<&'static str>{FLAGS.iter().find_map(|&(key,op)|(op==method).then_some(key))}
-pub(super) fn operation(method:&str)->bool{matches!(method,GET|SET|FIELD_GET|FIELD_SET)||flag(method).is_some()}
+pub(super) fn operation(method:&str)->bool{matches!(method,GET|SET|FIELD_GET|FIELD_SET)||crate::javascript::control_validity_interface(method).is_some()||flag(method).is_some()}
 impl Bridge<'_>{
- pub(super) fn validity_receiver(&self,object:u32)->bool{owner(object).is_some_and(|o|self.html_output_receiver(o)||self.fieldset_receiver(o))}
- pub(super) fn output_validity_member(&self,object:u32,property:&str)->bool{matches!(property,"validity"|"setCustomValidity")&&(self.html_output_receiver(object)||self.fieldset_receiver(object))}
+ pub(super) fn validity_receiver(&self,object:u32)->bool{owner(object).is_some_and(|o|self.html_output_receiver(o)||self.fieldset_receiver(o)||self.control_eligibility_class(o).is_some())}
+ pub(super) fn output_validity_member(&self,object:u32,property:&str)->bool{matches!(property,"validity"|"setCustomValidity")&&(self.html_output_receiver(object)||self.fieldset_receiver(object)||self.control_eligibility_class(object).is_some())}
  pub(super) fn validity_member(&self,object:u32,property:&str)->bool{self.validity_receiver(object)&&FLAGS.iter().any(|&(key,_)|key==property)}
  pub(super) fn validate_output_validity(&self,object:u32,method:&str)->Result<(),(&'static str,String)>{
   if flag(method).is_some(){
-   let native=owner(object).filter(|&o|self.html_output_receiver(o)||self.fieldset_receiver(o)).ok_or_else(||("TypeError","ValidityState requires a genuine native validity object.".into()))?;
+   let native=owner(object).filter(|&o|self.html_output_receiver(o)||self.fieldset_receiver(o)||self.control_eligibility_class(o).is_some()).ok_or_else(||("TypeError","ValidityState requires a genuine native validity object.".into()))?;
+   if self.control_eligibility_class(native).is_some(){return self.validate_candidate_validity_flag(native,flag(method).unwrap());}
    if self.fieldset_receiver(native){self.validate_fieldset(native)}else{self.validate_output_metadata(native)}
-  }else if matches!(method,FIELD_GET|FIELD_SET){self.validate_fieldset(object)}else{self.validate_output_metadata(object)}
+  }else if let Some(class)=crate::javascript::control_validity_interface(method){self.validate_control_validation(object,class)}else if matches!(method,FIELD_GET|FIELD_SET){self.validate_fieldset(object)}else{self.validate_output_metadata(object)}
  }
  pub(super) fn output_validity_call(&mut self,object:u32,method:&str,args:&[Value])->Result<Value,String>{
   self.validate_output_validity(object,method).map_err(|(_,s)|s)?;
   self.state.work(1)?;script_text_content::deadline(self.state)?;
-  if matches!(method,GET|FIELD_GET){return Ok(Value::Host(handle(object)));}
+  if matches!(method,GET|FIELD_GET)||crate::javascript::control_validity_interface(method).is_some(){return Ok(Value::Host(handle(object)));}
   if let Some(key)=flag(method){
-   let output=owner(object).unwrap();self.state.work(self.state.output_custom_errors.lookup_work())?;
+   let output=owner(object).unwrap();
+   if self.control_eligibility_class(output).is_some(){return self.candidate_validity_flag(output,key);}
+   self.state.work(self.state.output_custom_errors.lookup_work())?;
    let custom=self.state.output_custom_errors.get(&output).is_some();
    return Ok(Value::Bool(match key{"customError"=>custom,"valid"=>!custom,_=>false}));
   }

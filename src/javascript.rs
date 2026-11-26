@@ -684,6 +684,14 @@ pub(crate) const TEXTAREA_VALUE_GET: &str = "\0HTMLTextAreaElement.get.value";
 pub(crate) const TEXTAREA_VALUE_SET: &str = "\0HTMLTextAreaElement.set.value";
 pub(crate) const HTML_FORM_SUBMIT: &str = "\0HTMLFormElement.submit";
 pub(crate) const HTML_FORM_RESET: &str = "\0HTMLFormElement.reset";
+pub(crate) const CONTROL_VALIDITY_MEMBERS:&[(&str,&str)]=&[
+    ("HTMLInputElement","\0HTMLInputElement.get.validity"),
+    ("HTMLButtonElement","\0HTMLButtonElement.get.validity"),
+    ("HTMLSelectElement","\0HTMLSelectElement.get.validity"),
+    ("HTMLTextAreaElement","\0HTMLTextAreaElement.get.validity"),
+];
+pub(crate) fn control_validity_interface(method:&str)->Option<&'static str>{CONTROL_VALIDITY_MEMBERS.iter().find_map(|&(class,op)|(op==method).then_some(class))}
+pub(crate) fn validity_state_operation(method:&str)->bool{method.strip_prefix("\0ValidityState.get.").is_some_and(|key|matches!(key,"valueMissing"|"typeMismatch"|"patternMismatch"|"tooLong"|"tooShort"|"rangeUnderflow"|"rangeOverflow"|"stepMismatch"|"badInput"|"customError"|"valid"))}
 pub(crate) const CONTROL_CUSTOM_VALIDITY_MEMBERS:&[(&str,&str)]=&[
     ("HTMLInputElement","\0HTMLInputElement.setCustomValidity"),
     ("HTMLButtonElement","\0HTMLButtonElement.setCustomValidity"),
@@ -9500,7 +9508,7 @@ impl Runtime {
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==HTML_FORM_REQUEST&&kind=="NotFoundError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if kind == "NotSupportedError"
-                && (control_custom_validity_interface(method).is_some()||control_validation_operation(method).is_some()||matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | "\0HTMLInputElement.get.willValidate" | "\0HTMLButtonElement.get.willValidate" | "\0HTMLSelectElement.get.willValidate" | "\0HTMLTextAreaElement.get.willValidate" | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode"))
+                && (control_validity_interface(method).is_some()||validity_state_operation(method)||control_custom_validity_interface(method).is_some()||control_validation_operation(method).is_some()||matches!(method, DOCUMENT_IMPORT_NODE | HTML_FORM_SUBMIT | HTML_FORM_RESET | HTML_FORM_CHECK | HTML_FORM_REPORT | HTML_FORM_REQUEST | "\0HTMLInputElement.get.willValidate" | "\0HTMLButtonElement.get.willValidate" | "\0HTMLSelectElement.get.willValidate" | "\0HTMLTextAreaElement.get.willValidate" | TEXTAREA_VALUE_GET | TEXTAREA_VALUE_SET | "\0Media.load" | "\0Media.pause" | "\0Node.cloneNode"))
             {
                 let exception=self.native_dom_exception(kind,&message)?;
                 return Err(Fault::thrown(exception));
