@@ -63,14 +63,16 @@ and identifies files still missing a terminal report.
 
 | Question | Read next |
 | :--- | :--- |
-| **What should become usable next?** | The active [HTML/XHTML foundation](HTML_FOUNDATION_PLAN.md), then the [CSS program](CSS_FOUNDATION_PLAN.md). YouTube shell/search/navigation/playback remain product targets with their own required dependencies and measured journeys. |
+| **What should become usable next?** | The active [HTML/XHTML foundation](HTML_FOUNDATION_PLAN.md), then the [CSS program C00–C32](CSS_FOUNDATION_PLAN.md). The [P1–P6 capability packages](ROADMAP.md#current-product-sequence) cover shared DOM/components, layout/input, requests, history, resources/scrolling and original media, with explicit dependencies and acceptance evidence. |
 | **What has changed in the engine?** | [Capabilities](CAPABILITIES.md) for current contracts and limits; the [changelog](../CHANGELOG.md#0820-alpha4) for the release-line summary. |
 | **What has actually worked on a page?** | The [latest recorded homepage checkpoint](COMPATIBILITY.md#latest-reviewed-signed-out-homepage-checkpoint), [recorded original fixtures](COMPATIBILITY.md#recent-shared-increments) and [source-bound framework scorecard](COMPATIBILITY.md#current-scorecard). |
 | **Which build should I run?** | [Build instructions](BUILDING.md) for local development; the [current release record](RELEASING.md#current-verified-release) for verified downloads and exact source identity. |
 
-The latest recorded YouTube observation remains a skeleton on its measured
-source. Merged engine changes and passing original fixtures are useful progress,
-but they do not establish a working homepage, search journey or playback.
+Named sites are representative compatibility tests; product milestones follow the
+shared capability contracts and integration gates. The latest recorded YouTube
+observation remains a skeleton on its measured source. Merged engine changes and
+passing original fixtures are useful progress, but they do not establish a working
+homepage, search journey or playback.
 
 Fully accepted milestones proceed through the checks in the
 [release procedure](RELEASING.md).
