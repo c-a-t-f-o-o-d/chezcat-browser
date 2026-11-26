@@ -7438,3 +7438,7 @@ mod import_node_binding_order_tests;
 #[cfg(test)]
 #[path="app_dataset_native_writes_tests.rs"]
 mod dataset_native_writes_tests;
+
+#[cfg(test)]
+#[path="app_dataset_native_interface_tests.rs"]
+mod dataset_native_interface_tests;
