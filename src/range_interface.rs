@@ -25,6 +25,7 @@ pub(crate) const COMPARE_POINT: &str = "\0Range.comparePoint";
 pub(crate) const POINT_IN_RANGE: &str = "\0Range.isPointInRange";
 pub(crate) const INTERSECTS_NODE: &str = "\0Range.intersectsNode";
 pub(crate) fn comparison(method:&str)->bool {matches!(method,COMPARE_BOUNDARIES|COMPARE_POINT|POINT_IN_RANGE|INTERSECTS_NODE)}
+pub(crate) const DELETE_CONTENTS: &str = "\0Range.deleteContents";
 pub(crate) const CLONE_CONTENTS: &str = "\0Range.cloneContents";
 pub(crate) const CLONE: &str = "\0Range.cloneRange";
 pub(crate) const STRINGIFY: &str = "\0Range.toString";
@@ -52,7 +53,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | SELECT_CONTENTS
             | COLLAPSE
             | CLONE
-            | CLONE_CONTENTS
+            | CLONE_CONTENTS | DELETE_CONTENTS
             | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
             | DETACH
             | STRINGIFY
@@ -162,6 +163,7 @@ impl Runtime {
                         )?;
                     }
                     self.deferred_host_method(prototype,window,"cloneContents",CLONE_CONTENTS,0)?;
+                    self.deferred_host_method(prototype,window,"deleteContents",DELETE_CONTENTS,0)?;
                     for (property,method) in [("compareBoundaryPoints",COMPARE_BOUNDARIES),("comparePoint",COMPARE_POINT),("isPointInRange",POINT_IN_RANGE),("intersectsNode",INTERSECTS_NODE)] {
                         self.deferred_host_method(prototype,window,property,method,arity(method))?;
                     }
@@ -207,4 +209,40 @@ impl Runtime {
 pub(crate) enum Error {
     Exception(&'static str, String),
     Fatal(String),
+}
+
+/// Native identities and scalar offsets only; no author callables are retained.
+pub enum DeleteStep {
+    Collapse { node:u32, offset:usize },
+    Data { node:u32, offset:usize, count:usize },
+    Remove { parent:u32, node:u32 },
+}
+impl Runtime {
+    pub(super) fn delete_native_range(&mut self,receiver:u32,host:&mut dyn Host)->Result<Value,Fault>{
+        let plan=host.prepare_range_delete(receiver).map_err(|error|match error{
+            Error::Fatal(message)=>Fault::new(message),
+            Error::Exception("TypeError",message)=>Fault::exception("TypeError",message),
+            Error::Exception(kind,message)=>match self.native_dom_exception(kind,&message){Ok(value)=>Fault::thrown(value),Err(error)=>error},
+        })?;
+        let bytes=plan.capacity()*std::mem::size_of::<DeleteStep>();
+        let result=(||->Result<Value,Fault>{
+        self.work(plan.len())?;
+        for step in plan {
+            match step {
+                DeleteStep::Collapse{node,offset}=>{
+                    self.validate_native_access(node,host)?;
+                    host.collapse_range_delete(receiver,node,offset).map_err(Fault::new)?;
+                },
+                DeleteStep::Data{node,offset,count}=>{
+                    self.call_host(node,"\0CharacterData.deleteData",&[Value::Number(offset as f64),Value::Number(count as f64)],host)?;
+                },
+                DeleteStep::Remove{parent,node}=>{
+                    self.call_host(parent,"removeChild",&[Value::Host(node)],host)?;
+                },
+            }
+        }
+        Ok(Value::Undefined)
+        })();
+        host.finish_range_delete(bytes);result
+    }
 }
