@@ -10,6 +10,7 @@ pub(crate) const ABORTED: &str = "\0AbortSignal.aborted";
 pub(crate) const REASON: &str = "\0AbortSignal.reason";
 pub(crate) const THROW: &str = "\0AbortSignal.throwIfAborted";
 pub(crate) const STATIC_ABORT: &str = "\0AbortSignal.static.abort";
+pub(crate) const TIMEOUT: &str = "\0AbortSignal.static.timeout";
 pub(crate) const ON_ABORT: &str = "\0AbortSignal.onabort";
 pub(crate) const SET_ON_ABORT: &str = "\0AbortSignal.set.onabort";
 
@@ -24,6 +25,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | REASON
             | THROW
             | STATIC_ABORT
+            | TIMEOUT
             | ON_ABORT
             | SET_ON_ABORT
     )
@@ -47,7 +49,7 @@ impl Runtime {
         args: &[Value],
         host: &mut dyn Host,
     ) -> Option<Result<Value, Fault>> {
-        if !matches!(method, ABORT | THROW | STATIC_ABORT) {
+        if !matches!(method, ABORT | THROW | STATIC_ABORT | TIMEOUT) {
             return None;
         }
         Some((|| match method {
@@ -79,6 +81,14 @@ impl Runtime {
                     Err(Fault::thrown(reason))
                 }
             }
+            TIMEOUT => {
+                let number=args.first().unwrap_or(&Value::Undefined).script_number()?;
+                let integer=number.trunc();
+                if !number.is_finite() || integer<0.0 || integer>9007199254740991.0 {
+                    return Err(Fault::exception("TypeError","Timeout requires a nonnegative safe integer millisecond count."));
+                }
+                host.new_timeout_signal(receiver,integer as u64).map(Value::Host).map_err(Fault::new)
+            }
             STATIC_ABORT => {
                 let reason = self.signal_abort_reason(args.first())?;
                 self.pin_exported_value(&reason);
@@ -88,5 +98,15 @@ impl Runtime {
             }
             _ => unreachable!(),
         })())
+    }
+}
+
+impl Runtime {
+    pub(crate) fn timeout_abort_reason(&mut self,owner:u32,host:&mut dyn Host)->Result<Value,String>{
+        let realm=self.ensure_window_realm(owner,host).map_err(Fault::display)?;
+        self.with_intrinsic_realm(realm,|runtime|{
+            let reason=runtime.native_dom_exception("TimeoutError","The operation timed out")?;
+            runtime.pin_exported_value(&reason);Ok(reason)
+        }).map_err(Fault::display)
     }
 }

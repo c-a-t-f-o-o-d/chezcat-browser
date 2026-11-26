@@ -6,10 +6,13 @@ const CONTROLLER_BASE: u32 = 0x8700_0000;
 const SIGNAL_BASE: u32 = 0x8800_0000;
 const ARENA: u32 = SIGNAL_BASE - CONTROLLER_BASE;
 
+struct Timeout {due:Option<Instant>}
+
 pub(super) struct Record {
     owner: u32,
     controller: bool,
     reason: Value,
+    timeout: Option<Timeout>,
 }
 
 impl Bridge<'_> {
@@ -78,7 +81,7 @@ impl Bridge<'_> {
             self.state.copies(self.state.abort_signals.len()*size_of::<Record>())?;
             signals.append(&mut self.state.abort_signals);self.state.abort_signals=signals;
         }
-        self.state.abort_signals.push(Record{owner,controller,reason});
+        self.state.abort_signals.push(Record{owner,controller,reason,timeout:None});
         self.state.retained+=bytes+added;
         Ok(index
             + if controller {
@@ -133,14 +136,13 @@ impl Bridge<'_> {
         let (record, is_signal) = self
             .abort_record(controller)
             .ok_or("Unknown AbortController.")?;
-        if is_signal
-            || !matches!(record.reason, Value::Undefined)
-            || matches!(reason, Value::Undefined)
-        {
-            return Err("Invalid AbortController cancellation transition.".into());
-        }
-        let owner = record.owner;
-        let signal = controller - CONTROLLER_BASE + SIGNAL_BASE;
+        if is_signal || !matches!(record.reason,Value::Undefined) {return Err("Invalid AbortController cancellation transition.".into());}
+        self.commit_signal_abort_dispatch(controller-CONTROLLER_BASE+SIGNAL_BASE,reason)
+    }
+    fn commit_signal_abort_dispatch(&mut self,signal:u32,reason:Value)->Result<usize,String>{
+        let (record,is_signal)=self.abort_record(signal).ok_or("Unknown native AbortSignal.")?;
+        if !is_signal || !matches!(record.reason,Value::Undefined) || matches!(reason,Value::Undefined){return Err("Invalid native AbortSignal cancellation transition.".into());}
+        let owner=record.owner;
         // Charge the removal scan before reserving or publishing abort state.
         // Stable slots let active dispatch snapshots observe these removals.
         self.state.work(self.state.listeners.len())?;
@@ -157,7 +159,7 @@ impl Bridge<'_> {
                 Ok(token)=>token,
                 Err(error)=>{self.rollback_base_event(event)?;return Err(error);}
             };
-            self.state.abort_signals[(controller-CONTROLLER_BASE) as usize].reason=reason;
+            self.state.abort_signals[(signal-SIGNAL_BASE) as usize].reason=reason;
             self.state.retained-=self.state.listeners.retain(|listener|listener.options.signal!=Some(signal));
             let entry=self.created_event_index(event).unwrap();
             self.state.created_events[entry].trusted=true;
@@ -270,5 +272,55 @@ document.title='abort-recovered';
         );
         assert_eq!(outcome.errors, 0, "{}", page.report());
         assert_eq!(doc.title, "abort-recovered");
+    }
+}
+
+impl Bridge<'_>{
+    pub(super) fn create_timeout_signal(&mut self,owner:u32,milliseconds:u64)->Result<u32,String>{
+        self.window_relationship_access(owner)?;
+        if owner!=WINDOW{self.contains_child_document(owner)?;}
+        let signal=self.create_abort_record(owner,false,Value::Undefined)?;
+        // A valid IDL duration beyond the platform clock remains pending until
+        // this native document lifetime ends; it must not wrap or fire early.
+        let due=Instant::now().checked_add(std::time::Duration::from_millis(milliseconds));
+        self.state.abort_signals[(signal-SIGNAL_BASE)as usize].timeout=Some(Timeout{due});
+        if let Some(due)=due{self.state.abort_timeout_deadline=Some(self.state.abort_timeout_deadline.map_or(due,|old|old.min(due)));}
+        Ok(signal)
+    }
+}
+impl State{
+    fn refresh_abort_timeout_deadline(&mut self){
+        self.abort_timeout_deadline=self.abort_signals.iter().filter_map(|record|record.timeout.as_ref().and_then(|timeout|timeout.due)).min();
+    }
+    pub(super) fn clear_abort_timeouts(&mut self){
+        for record in &mut self.abort_signals{record.timeout=None;}
+        self.abort_timeout_deadline=None;
+    }
+}
+impl Page{
+    #[inline(never)]
+    pub(super) fn poll_abort_timeout(&mut self,doc:&mut Document,forms:&mut Forms,now:Instant)->Outcome{
+        self.begin_job();let before=self.state.errors;
+        let result=(||->Result<(),String>{
+            self.state.work(self.state.abort_signals.len().saturating_mul(3).saturating_add(1))?;
+            let selected=self.state.abort_signals.iter().enumerate().filter_map(|(index,record)|record.timeout.as_ref().and_then(|timeout|timeout.due).filter(|due|*due<=now).map(|due|(due,index))).min();
+            let Some((_,index))=selected else{self.state.refresh_abort_timeout_deadline();return Ok(());};
+            let owner=self.state.abort_signals[index].owner;
+            self.state.abort_signals[index].timeout=None;
+            self.state.refresh_abort_timeout_deadline();
+            if owner!=WINDOW{
+                let mut bridge=Bridge{doc,forms,state:&mut self.state};
+                let closed=bridge.frame_get_with_caller(Some(WINDOW),owner,"closed").ok_or("Timeout owner Window is unavailable.")??;
+                if matches!(closed,Value::Bool(true)){return Ok(());}
+                bridge.contains_child_document(owner)?;
+            }
+            let reason=self.runtime.timeout_abort_reason(owner,&mut Bridge{doc,forms,state:&mut self.state})?;
+            let token=Bridge{doc,forms,state:&mut self.state}.commit_signal_abort_dispatch(SIGNAL_BASE+index as u32,reason)?;
+            self.runtime.invoke_native_dispatch(token,&mut Bridge{doc,forms,state:&mut self.state})?;
+            Ok(())
+        })();
+        if let Err(error)=result{self.state.clear_abort_timeouts();self.runtime.cancel_microtasks();self.state.error("AbortSignal.timeout",&error);}
+        self.microtask_checkpoint(doc,forms);
+        Outcome{prevented:false,layout_changed:std::mem::take(&mut self.state.changed),errors:self.state.errors.saturating_sub(before)}
     }
 }
