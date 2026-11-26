@@ -1628,8 +1628,15 @@ reject them before argument conversion. Native records share checked Range-domai
 identity and actual retained backing admission, with explicit fixed-record tags
 excluded from live mutation updates. They remain retained until page teardown.
 
-Supported containers currently require accessible displayed-document nodes,
-including detached nodes. Child/inert endpoint representation remains guarded.
+Supported containers include displayed-document and detached native nodes, plus
+genuine inert Documents, fragments, elements, Text, CDATA, Comment and processing
+instructions. Template content keeps its appropriate inert owner and separate
+root. Fixed snapshots retain source identities across clone/import consumers;
+copied nodes remain independent. Mixed owners/roots and invalid offsets remain
+permitted metadata. Existing retained admission, native authority, Attr/DocumentType
+errors and refusal/recovery apply to these endpoints. Actual App checks derive
+native text and paint from saved inert points. Child-document endpoints and live
+Range inert operations retain their separate guards.
 This is a native snapshot producer, with no selection, geometry, resource activation
 or unchanged-browser acceptance claim. Broader Range lifecycle and foundation
 qualification remain required.

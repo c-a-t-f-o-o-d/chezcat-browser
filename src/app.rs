@@ -7310,3 +7310,7 @@ mod range_comparison_tests;
 #[cfg(test)]
 #[path="app_static_range_tests.rs"]
 mod static_range_tests;
+
+#[cfg(test)]
+#[path="app_static_range_inert_tests.rs"]
+mod static_range_inert_tests;

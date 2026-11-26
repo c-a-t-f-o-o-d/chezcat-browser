@@ -12299,3 +12299,7 @@ mod range_comparison_tests;
 #[cfg(test)]
 #[path="script_static_range_tests.rs"]
 mod static_range_tests;
+
+#[cfg(test)]
+#[path="script_static_range_inert_tests.rs"]
+mod static_range_inert_tests;

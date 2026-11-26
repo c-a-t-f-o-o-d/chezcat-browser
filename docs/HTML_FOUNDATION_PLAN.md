@@ -1232,8 +1232,12 @@ or silent input truncation is not an acceptable recovery result.
   StaticRange now stores fixed native boundary snapshots after ordered required
   dictionary conversion. Saved identities and exact offsets do not follow live
   DOM mutations; invalid root/order/offset snapshots are deliberately permitted,
-  while Attr/DocumentType containers receive typed errors. Child/inert endpoint
-  support and complete Range/package acceptance remain required.
+  while Attr/DocumentType containers receive typed errors. Supported inert
+  document, fragment, element, CharacterData and template endpoints now preserve
+  their native identities/appropriate owners across mutations and copy/import
+  consumers; mixed main/inert snapshots reuse checked storage and authority paths.
+  Child-document endpoints, live Range inert operations and complete Range/package
+  acceptance remain required.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
   Native TreeWalker function/object filters now distinguish subtree rejection
