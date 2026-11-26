@@ -20,6 +20,9 @@ mod unicode_properties;
 #[path = "regexp_unicode_sets.rs"]
 mod unicode_sets;
 
+#[path = "regexp_unicode_folding.rs"]
+mod folding;
+
 #[cfg(test)]
 #[path = "regexp_utf16_tests.rs"]
 mod utf16_tests;
@@ -79,9 +82,6 @@ impl Flags {
             return Err(Error::Syntax("Unicode regexp flags u and v are mutually exclusive."));
         }
         flags.unicode |= flags.unicode_sets;
-        if flags.unicode && flags.insensitive {
-            return Err(Error::Unsupported("Unicode regexp case folding is not implemented."));
-        }
         Ok(flags)
     }
 
@@ -157,7 +157,9 @@ fn ascii_fold(unit: u32) -> u32 {
 }
 
 impl Class {
-    fn matches(&self, unit: u32, insensitive: bool, budget: &mut usize) -> Result<bool, Error> {
+    fn matches(&self, unit: u32, flags: Flags, budget: &mut usize) -> Result<bool, Error> {
+        let unit=if flags.unicode&&flags.insensitive {folding::canonicalize(unit,budget)?}else{unit};
+        let insensitive=flags.insensitive&&!flags.unicode;
         spend(budget, self.parts.len().max(1))?;
         for part in &self.parts {
             if matches!(part, ClassPart::StringProperty(_)) {
@@ -500,10 +502,13 @@ impl Parser<'_> {
                 match part {
                     ClassPart::Range(low, high) if low == high => self.character(low),
                     ClassPart::StringProperty(members) => self.unicode_property_node(members),
-                    other => self.push(Node::Class(Class {
-                        inverted: false,
-                        parts: vec![other],
-                    })),
+                    other => {
+                        let class=Class {inverted:false,parts:vec![other]};
+                        let class=if self.unicode&&self.insensitive {
+                            unicode_sets::fold_class(class,self.unicode_sets,self.budget)?
+                        } else {class};
+                        self.push(Node::Class(class))
+                    },
                 }
             }
             // Complete braced quantifiers without a preceding atom are invalid.
@@ -618,7 +623,7 @@ impl Parser<'_> {
     }
 
     fn character(&mut self, unit: u32) -> Result<usize, Error> {
-        if self.insensitive && unit >= 128 {
+        if self.insensitive && !self.unicode && unit >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
             ));
@@ -741,7 +746,7 @@ impl Parser<'_> {
                 return Err(Error::Syntax("Invalid Unicode regexp identity escape.")),
             _ => u32::from(unit),
         };
-        if self.insensitive && literal >= 128 {
+        if self.insensitive && !self.unicode && literal >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
             ));
@@ -757,7 +762,7 @@ impl Parser<'_> {
             self.escape(true)
         } else {
             let unit = self.raw_character();
-            if self.insensitive && unit >= 128 {
+            if self.insensitive && !self.unicode && unit >= 128 {
                 return Err(Error::Unsupported(
                     "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
                 ));
@@ -796,7 +801,8 @@ impl Parser<'_> {
             }
         }
         self.at += 1;
-        Ok(Class { inverted, parts })
+        let class=Class {inverted,parts};
+        if self.unicode&&self.insensitive {unicode_sets::fold_class(class,false,self.budget)}else{Ok(class)}
     }
 }
 
@@ -810,11 +816,8 @@ impl Atom {
     fn matches(&self, unit: u32, flags: Flags, budget: &mut usize) -> Result<bool, Error> {
         spend(budget, 1)?;
         match self {
-            Self::Character(expected) => {
-                Ok(unit == *expected
-                    || flags.insensitive && ascii_fold(unit) == ascii_fold(*expected))
-            }
-            Self::Class(class) => class.matches(unit, flags.insensitive, budget),
+            Self::Character(expected) => folding::equal(unit,*expected,flags,budget),
+            Self::Class(class) => class.matches(unit, flags, budget),
             Self::Any => Ok(flags.dot_all || !line(unit)),
         }
     }
@@ -1400,13 +1403,10 @@ impl Regex {
             let current = decoded.map(|(character, _)| character);
             let next = &self.code[state.pc];
             let succeeded = match next {
-                Instruction::Character(unit) => current.is_some_and(|actual| {
-                    actual == *unit
-                        || self.flags.insensitive && ascii_fold(actual) == ascii_fold(*unit)
-                }),
+                Instruction::Character(unit) => if let Some(actual)=current {folding::equal(actual,*unit,self.flags,budget)?}else{false},
                 Instruction::Class(class) => {
                     if let Some(unit) = current {
-                        class.matches(unit, self.flags.insensitive, budget)?
+                        class.matches(unit, self.flags, budget)?
                     } else {
                         false
                     }
@@ -1423,8 +1423,8 @@ impl Regex {
                         || self.flags.multiline && following.is_some_and(line)
                 }
                 Instruction::Boundary(inverted) => {
-                    let before = state.position > 0 && word(u32::from(input[state.position - 1]));
-                    let after = following.is_some_and(word);
+                    let before = folding::word_character(state.position.checked_sub(1).map(|at|u32::from(input[at])),self.flags,budget)?;
+                    let after = folding::word_character(following,self.flags,budget)?;
                     (before != after) != *inverted
                 }
                 Instruction::Reference(indices) => {
@@ -1446,7 +1446,7 @@ impl Regex {
                         };
                         if let Some(target) = target {
                             spend(budget, length.saturating_mul(2))?;
-                            if self.flags.insensitive
+                            if self.flags.insensitive && !self.flags.unicode
                                 && input[start..end]
                                     .iter()
                                     .chain(&input[target..target + length])
@@ -1460,14 +1460,7 @@ impl Regex {
                             let boundaries = !self.flags.unicode
                                 || !(target > 0 && starts_surrogate_pair(input, target - 1))
                                     && !(target + length > 0 && starts_surrogate_pair(input, target + length - 1));
-                            let matched = boundaries && input[start..end]
-                                .iter()
-                                .zip(&input[target..target + length])
-                                .all(|(a, b)| {
-                                    a == b
-                                        || self.flags.insensitive
-                                            && ascii_fold(u32::from(*a)) == ascii_fold(u32::from(*b))
-                                });
+                            let matched = boundaries && folding::same_units(&input[start..end],&input[target..target+length],self.flags,budget)?;
                             if matched {
                                 state.position = if backwards { target } else { target + length };
                             }

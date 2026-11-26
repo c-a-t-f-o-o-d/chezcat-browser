@@ -89,10 +89,63 @@ fn subtraction(left: &Ranges, right: &Ranges, budget: &mut usize) -> Result<Rang
     Ok(out)
 }
 
-fn part_ranges(part: ClassPart, budget: &mut usize) -> Result<Ranges, Error> {
+// Map finite changed-codepoint entries while retaining unchanged intervals.
+// Complemented v sets remove changed sources without mapping them back in.
+fn fold_ranges(values: &Ranges, map_changed: bool, budget: &mut usize) -> Result<Ranges, Error> {
+    let mappings=folding::mappings();
+    let factor=(usize::BITS-mappings.len().leading_zeros()).max(1) as usize;
+    let mut out=Vec::new();
+    for &(low,high) in values {
+        spend(budget,factor*2)?;
+        let begin=mappings.partition_point(|&(source,_)|source<low);
+        let end=mappings.partition_point(|&(source,_)|source<=high);
+        spend(budget,end-begin)?;
+        let mut next=low;
+        for &(source,target) in &mappings[begin..end] {
+            if next<source {push(&mut out,next,source-1,budget)?;}
+            if map_changed {push(&mut out,target,target,budget)?;}
+            next=source+1;
+        }
+        if next<=high {push(&mut out,next,high,budget)?;}
+    }
+    normalize(&mut out,budget)?;
+    Ok(out)
+}
+
+fn canonical_complement(values: &Ranges, budget: &mut usize) -> Result<Ranges, Error> {
+    fold_ranges(&complement(values,budget)?,false,budget)
+}
+
+pub(super) fn fold_class(class: Class, unicode_sets: bool, budget: &mut usize) -> Result<Class, Error> {
+    let mut ranges=Vec::new();
+    for part in class.parts {
+        let mut next=part_ranges(part,true,unicode_sets,budget)?;
+        reserve(&mut ranges,next.len(),budget)?;
+        spend(budget,next.len())?;
+        ranges.append(&mut next);
+    }
+    normalize(&mut ranges,budget)?;
+    let mut parts=Vec::new();reserve(&mut parts,ranges.len(),budget)?;
+    for (low,high) in ranges {parts.push(ClassPart::Range(low,high));}
+    Ok(Class {inverted:class.inverted,parts})
+}
+
+fn fold_set(mut set: Set, budget: &mut usize) -> Result<Set, Error> {
+    set.ranges=fold_ranges(&set.ranges,true,budget)?;
+    for value in &mut set.strings {
+        for character in value {*character=folding::canonicalize(*character,budget)?;}
+    }
+    normalize_strings(&mut set.strings,budget)?;
+    set.strings.dedup();
+    Ok(set)
+}
+
+fn part_ranges(part: ClassPart, fold: bool, unicode_sets: bool, budget: &mut usize) -> Result<Ranges, Error> {
+    let complement_first=fold&&!unicode_sets&&matches!(part,ClassPart::Property(_,true));
     let (parts, inverted): (&[(u32,u32)], bool) = match &part {
         ClassPart::Range(low, high) => {
-            let mut out = Vec::new();push(&mut out, *low, *high, budget)?;return Ok(out);
+            let mut out = Vec::new();push(&mut out, *low, *high, budget)?;
+            return if fold {fold_ranges(&out,true,budget)}else{Ok(out)};
         }
         ClassPart::Property(ranges, inverted) => (*ranges, *inverted),
         ClassPart::StringProperty(_) => return Err(Error::Syntax("A string property requires string-set lowering.")),
@@ -102,7 +155,11 @@ fn part_ranges(part: ClassPart, budget: &mut usize) -> Result<Ranges, Error> {
     };
     let mut out = Vec::new();
     for &(low,high) in parts { push(&mut out, low, high, budget)?; }
-    if inverted { complement(&out, budget) } else { Ok(out) }
+    if complement_first {out=complement(&out,budget)?;}
+    if fold {out=fold_ranges(&out,true,budget)?;}
+    if inverted&&!complement_first {
+        if fold {canonical_complement(&out,budget)}else{complement(&out,budget)}
+    } else {Ok(out)}
 }
 
 #[derive(Default)]
@@ -181,7 +238,7 @@ impl Parser<'_> {
         }
         normalize(&mut set.ranges,self.budget)?;
         // Generated members are strictly lexicographically ordered and unique.
-        Ok(set)
+        if self.insensitive {fold_set(set,self.budget)}else{Ok(set)}
     }
 
     pub(super) fn unicode_property_node(&mut self, members: &'static [&'static [u32]]) -> Result<usize, Error> {
@@ -254,14 +311,15 @@ impl Parser<'_> {
             && self.units.get(self.at + 2) == Some(&123)
         {
             self.at += 3;
-            return Ok((self.string_disjunction()?, false));
+            let set=self.string_disjunction()?;
+            return Ok((if self.insensitive {fold_set(set,self.budget)?}else{set}, false));
         }
         let part = self.set_character()?;
         if let ClassPart::StringProperty(members) = part {
             return Ok((self.property_set(members)?,false));
         }
         let character = matches!(part, ClassPart::Range(_, _));
-        Ok((Set { ranges: part_ranges(part, self.budget)?, ..Set::default() }, character))
+        Ok((Set { ranges: part_ranges(part,self.insensitive&&!character,true,self.budget)?, ..Set::default() }, character))
     }
 
     fn set_union_term(&mut self) -> Result<(Set, bool), Error> {
@@ -273,8 +331,10 @@ impl Parser<'_> {
                 return Err(Error::Syntax("Unicode set ranges require ordered character endpoints."));
             }
             set.ranges[0].1 = end.ranges[0].0;
+            if self.insensitive {set=fold_set(set,self.budget)?;}
             return Ok((set, true));
         }
+        if character&&self.insensitive {set=fold_set(set,self.budget)?;}
         Ok((set, false))
     }
 
@@ -292,7 +352,8 @@ impl Parser<'_> {
                 if range { return Err(Error::Syntax("A Unicode set operation requires class operands.")); }
                 while self.set_operator() == Some(operator) {
                     self.at += 2;
-                    let (right, _) = self.set_operand()?;
+                    let (mut right, character) = self.set_operand()?;
+                    if character&&self.insensitive {right=fold_set(right,self.budget)?;}
                     set = operate(set, right, operator, self.budget)?;
                 }
             } else {
@@ -313,7 +374,7 @@ impl Parser<'_> {
             if set.may_strings {
                 return Err(Error::Syntax("A negated Unicode regexp class may not contain strings."));
             }
-            set.ranges = complement(&set.ranges, self.budget)?;
+            set.ranges = if self.insensitive {canonical_complement(&set.ranges,self.budget)?}else{complement(&set.ranges, self.budget)?};
         }
         self.depth -= 1;
         Ok(set)
