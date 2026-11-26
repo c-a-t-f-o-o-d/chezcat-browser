@@ -4,20 +4,26 @@ use super::*;
 /// Callers supply actual tree context and the native disabled/first-legend rule.
 pub(crate) fn validation_candidate(doc:&Document,node:usize,disabled:bool,in_datalist:bool,parent_select:bool)->bool{
     if disabled||in_datalist||doc.nodes.get(node).is_none_or(|n|n.namespace!=crate::html::Namespace::Html){return false;}
-    let state=doc.attr(node,"type").unwrap_or("");
-    match tag(doc,node){
+    let NodeKind::Element{attrs,..}=&doc.nodes[node].kind else{return false};
+    validation_candidate_attributes(tag(doc,node),attrs,disabled,in_datalist,parent_select)
+}
+pub(crate) fn validation_candidate_attributes(name:&str,attrs:&[crate::html::Attribute],disabled:bool,in_datalist:bool,parent_select:bool)->bool{
+    if disabled||in_datalist{return false;}
+    let attr=|key:&str|attrs.iter().find(|a|a.name.html_is(key)).map(|a|a.value.as_str());
+    let state=attr("type").unwrap_or("");
+    match name{
         "input"=>{
             if ["hidden","reset","button"].iter().any(|s|state.eq_ignore_ascii_case(s)){return false;}
             let readonly_applies=!["checkbox","radio","file","range","color","image","submit"].iter().any(|s|state.eq_ignore_ascii_case(s));
-            !readonly_applies||doc.attr(node,"readonly").is_none()
+            !readonly_applies||attr("readonly").is_none()
         }
         "button"=>{
             if state.eq_ignore_ascii_case("submit"){true}
             else if state.eq_ignore_ascii_case("reset")||state.eq_ignore_ascii_case("button"){false}
-            else{!parent_select&&doc.attr(node,"command").is_none()&&doc.attr(node,"commandfor").is_none()}
+            else{!parent_select&&attr("command").is_none()&&attr("commandfor").is_none()}
         }
         "select"=>true,
-        "textarea"=>doc.attr(node,"readonly").is_none(),
+        "textarea"=>attr("readonly").is_none(),
         _=>false,
     }
 }

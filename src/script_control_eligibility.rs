@@ -15,13 +15,14 @@ impl Bridge<'_>{
     pub(super) fn validate_control_eligibility(&self,object:u32,class:&str)->Result<(),(&'static str,String)>{
         if self.control_eligibility_class(object)!=Some(class){return Err(("TypeError","Candidate eligibility requires its genuine control interface.".into()));}
         self.native_node_access(object)?;
-        if self.is_frame_handle(object)||self.inert_interface(object).is_some(){return Err(("NotSupportedError","This control requires its native eligibility and tree lifecycle backend.".into()));}
+        if self.is_frame_handle(object){return Err(("NotSupportedError","This control requires its native eligibility and tree lifecycle backend.".into()));}
         Ok(())
     }
     pub(super) fn control_eligibility_get(&mut self,object:u32)->Result<Value,String>{
         let class=self.control_eligibility_class(object).ok_or("Candidate eligibility receiver is unavailable.")?;
         self.validate_control_eligibility(object,class).map_err(|(_,e)|e)?;
         self.state.work(1)?;script_text_content::deadline(self.state)?;
+        if self.inert_node_type(object)==Some(1){return self.inert_control_eligibility_get(object,class);}
         self.state.rebuild(self.doc)?;let node=self.node(object)?;
         self.state.work(forms::validation_attribute_work(self.doc,node)?)?;
         let mut remaining=self.state.host_work;

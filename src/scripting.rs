@@ -12213,3 +12213,7 @@ mod form_request_tests;
 #[cfg(test)]
 #[path="script_control_eligibility_tests.rs"]
 mod control_eligibility_tests;
+
+#[cfg(test)]
+#[path="script_inert_control_eligibility_tests.rs"]
+mod inert_control_eligibility_tests;
