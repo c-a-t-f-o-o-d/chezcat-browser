@@ -37,6 +37,10 @@ impl Bridge<'_> {
         signal.then_some(record.owner)
     }
 
+    pub(super) fn listener_signal_aborted(&self,signal:u32)->bool {
+        self.abort_record(signal).is_some_and(|(record,is_signal)|is_signal&&!matches!(record.reason,Value::Undefined))
+    }
+
     pub(super) fn matches_abort_receiver(&self, receiver: u32, method: &str) -> bool {
         let Some((_, interface)) = self.abort_instance(receiver) else {
             return false;
@@ -137,6 +141,9 @@ impl Bridge<'_> {
         }
         let owner = record.owner;
         let signal = controller - CONTROLLER_BASE + SIGNAL_BASE;
+        // Charge the removal scan before reserving or publishing abort state.
+        // Stable slots let active dispatch snapshots observe these removals.
+        self.state.work(self.state.listeners.len())?;
         let bytes=retained_storage::value_bytes(&reason);
         let retained=self.state.retained.checked_add(bytes).filter(|bytes|*bytes<=self.state.retained_limit)
             .ok_or("AbortSignal reason retention limit reached.")?;
@@ -151,6 +158,7 @@ impl Bridge<'_> {
                 Err(error)=>{self.rollback_base_event(event)?;return Err(error);}
             };
             self.state.abort_signals[(controller-CONTROLLER_BASE) as usize].reason=reason;
+            self.state.retained-=self.state.listeners.retain(|listener|listener.options.signal!=Some(signal));
             let entry=self.created_event_index(event).unwrap();
             self.state.created_events[entry].trusted=true;
             Ok(token)

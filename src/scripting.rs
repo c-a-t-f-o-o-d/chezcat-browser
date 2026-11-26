@@ -373,6 +373,7 @@ struct ListenerOptions {
     capture: bool,
     once: bool,
     passive: bool,
+    signal: Option<u32>,
 }
 
 #[path = "script_timer_queue.rs"]
@@ -3035,8 +3036,11 @@ impl Bridge<'_> {
                     "capture" => options.capture = value.truthy(),
                     "once" => options.once = value.truthy(),
                     "passive" => options.passive = value.truthy(),
-                    "signal" if !matches!(value, Value::Null | Value::Undefined) => {
-                        return Err("AbortSignal listener options are not implemented.".into())
+                    "signal" if !matches!(value, Value::Undefined) => {
+                        let Value::Host(signal)=value else {return Err("Listener signal requires a genuine AbortSignal.".into());};
+                        let owner=self.abort_signal_owner(*signal).ok_or("Listener signal requires a genuine AbortSignal.")?;
+                        self.window_relationship_access(owner)?;
+                        options.signal=Some(*signal);
                     }
                     _ => {}
                 }
@@ -3052,6 +3056,8 @@ impl Bridge<'_> {
         }
         let event = self.text(&args[0])?;
         self.listener_target(object, &event)?;
+        if let Some(owner)=self.native_access_owner(object){self.window_relationship_access(owner)?;}
+        if options.signal.is_some_and(|signal|self.listener_signal_aborted(signal)) {return Ok(Value::Undefined);}
         if matches!(args[1], Value::Null | Value::Undefined) {
             return Ok(Value::Undefined);
         }
@@ -4876,7 +4882,7 @@ impl Host for Bridge<'_> {
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
-        if self.event_target_interface(object)&&method=="dispatchEvent"{return Some(object);}
+        if self.event_target_interface(object)&&matches!(method,"dispatchEvent"|"addEventListener"|"removeEventListener"){return Some(object);}
         if script_class_list::operation(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if self.event_target_interface(object)&&(method==crate::javascript::DOCUMENT_GET_ELEMENTS_NAME||script_inert_documents::identifier_lookup::operation(method).is_some()){return Some(object);}
         if self.event_target_interface(object)&&method==script_position::METHOD{return Some(object);}
@@ -6623,6 +6629,9 @@ impl Host for Bridge<'_> {
             || matches!(method,"MouseEvent"|"WheelEvent")&&matches!(member,"button"|"buttons"|"clientX"|"clientY"|"screenX"|"screenY"))).then_some(false)
     }
     fn validate_dictionary_member(&self,object:u32,method:&str,member:&str,value:&Value)->Result<(),(&'static str,String)>{
+        if method=="addEventListener"&&member=="signal"&&!matches!(value,Value::Undefined) {
+            if !matches!(value,Value::Host(signal) if self.abort_signal_owner(*signal).is_some()) {return Err(("TypeError","Listener signal requires a genuine AbortSignal.".into()));}
+        }
         if method==crate::javascript::range_interface::STATIC {return self.validate_static_range_member(member,value);}
         if method=="WheelEvent"&&self.event_target_interface(object)&&matches!(member,"deltaX"|"deltaY"|"deltaZ")&&!matches!(value,Value::Undefined)&&!matches!(value,Value::Number(n) if n.is_finite()){return Err(("TypeError","WheelEvent deltas require finite doubles.".into()));}
         if method=="AnimationEvent"&&self.event_target_interface(object)&&member=="elapsedTime"&&!matches!(value,Value::Undefined)&&!matches!(value,Value::Number(number) if number.is_finite()) {
@@ -12395,3 +12404,7 @@ mod range_clone_realm_tests;
 #[cfg(test)]
 #[path="script_event_inert_paths_tests.rs"]
 mod event_inert_paths_tests;
+
+#[cfg(test)]
+#[path="script_event_listener_signal_tests.rs"]
+mod event_listener_signal_tests;
