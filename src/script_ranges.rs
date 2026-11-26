@@ -436,6 +436,8 @@ impl Bridge<'_> {
         }
         if self.range_record(receiver).is_some_and(|record|record.fixed) && !snapshot_getter(method) {return Err(Exception("TypeError","A live Range receiver is required.".into()));}
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
+        // The insertion transaction checks hierarchy before any Text split.
+        if method==INSERT_NODE {return Ok(());}
         if method == CLONE_CONTENTS {
             let record=*self.range_record(receiver).unwrap();
             self.state.work(self.doc.nodes.len()).map_err(Fatal)?;
@@ -614,3 +616,6 @@ mod deletion;
 
 #[path="script_range_extract.rs"]
 mod extraction;
+
+#[path="script_range_insert.rs"]
+mod insertion;

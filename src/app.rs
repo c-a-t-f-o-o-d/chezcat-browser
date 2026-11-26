@@ -7342,3 +7342,7 @@ mod range_delete_tests;
 #[cfg(test)]
 #[path="app_range_extract_tests.rs"]
 mod range_extract_tests;
+
+#[cfg(test)]
+#[path="app_range_insert_tests.rs"]
+mod range_insert_tests;

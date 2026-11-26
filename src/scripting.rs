@@ -3437,6 +3437,10 @@ impl Host for Bridge<'_> {
     fn begin_request_notification(&mut self,notification:crate::javascript::xhr_interface::Notification)->Result<Option<usize>,String>{self.xhr_notification(notification)}
     fn finish_request_abort(&mut self,target:u32,generation:u64){self.xhr_finish_abort(target,generation);}
     fn cancel_request_work(&mut self){self.xhr_cancel_all();}
+    fn prepare_range_insert(&mut self,receiver:u32,args:&[Value])->Result<crate::javascript::range_interface::InsertInfo,crate::javascript::range_interface::Error>{self.range_insert_plan(receiver,args)}
+    fn range_insert_reference(&mut self,reference:Option<u32>,node:u32)->Result<Option<u32>,String>{self.range_insert_reference_node(reference,node)}
+    fn range_insert_position(&mut self,parent:u32,reference:Option<u32>,node:u32)->Result<usize,String>{self.range_insert_new_offset(parent,reference,node)}
+    fn finish_range_insert(&mut self,receiver:u32,parent:u32,offset:usize)->Result<(),String>{self.range_insert_end(receiver,parent,offset)}
     fn prepare_range_extract(&mut self,receiver:u32)->Result<crate::javascript::range_interface::ExtractPlan,crate::javascript::range_interface::Error>{self.range_extract_plan(receiver)}
     fn finish_range_extract(&mut self,bytes:usize){self.state.retained-=bytes;}
     fn prepare_range_delete(&mut self,receiver:u32)->Result<Vec<crate::javascript::range_interface::DeleteStep>,crate::javascript::range_interface::Error>{self.range_delete_plan(receiver)}
@@ -12338,3 +12342,7 @@ mod range_delete_tests;
 #[cfg(test)]
 #[path="script_range_extract_tests.rs"]
 mod range_extract_tests;
+
+#[cfg(test)]
+#[path="script_range_insert_tests.rs"]
+mod range_insert_tests;
