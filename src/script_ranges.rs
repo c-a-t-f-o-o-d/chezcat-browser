@@ -611,3 +611,6 @@ mod static_ranges;
 
 #[path="script_range_delete.rs"]
 mod deletion;
+
+#[path="script_range_extract.rs"]
+mod extraction;
