@@ -1054,6 +1054,14 @@ impl Runtime {
         Ok(Value::Object(descriptor))
     }
 
+    pub(super) fn own_units_enumerable_value(&mut self,value:&Value,units:&[u16],host:&mut dyn Host)->Result<bool,Fault>{
+        if let Value::Host(handle)=value {
+            self.validate_native_access(*handle,host)?;
+            if let Some(present)=host.named_units_presence(*handle,units).map_err(Fault::new)?{return Ok(present);}
+        }
+        if let Some(object)=self.symbol_backing(value,host)?{let id=self.ordinary_id(object)?;self.own_units_enumerable(id,units)}else{Ok(false)}
+    }
+
     pub(super) fn own_units_enumerable(&mut self, id: usize, units: &[u16]) -> Result<bool, Fault> {
         self.property_name_units(units)?;
         self.owns_units_property(id, units)?;
@@ -2014,12 +2022,7 @@ impl Runtime {
                                 }
                             }
                             StringKey::Units(units) => {
-                                if let Some(object) = self.symbol_backing(source, host)? {
-                                    let id = self.ordinary_id(object)?;
-                                    self.own_units_enumerable(id, units)?
-                                } else {
-                                    false
-                                }
+                                self.own_units_enumerable_value(source,units,host)?
                             }
                         };
                         if !enumerable {

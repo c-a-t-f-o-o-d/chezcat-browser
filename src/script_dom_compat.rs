@@ -45,6 +45,28 @@ pub(super) fn dataset_key(attribute:&str,available:usize)->Result<Option<String>
     Ok(Some(key))
 }
 
+fn dataset_own_key_bytes(name:&DomString)->Result<Option<usize>,String>{
+    if let Some(units)=name.raw_units(){
+        let Some(suffix)=units.strip_prefix(&[100,97,116,97,45])else{return Ok(None)};
+        if suffix.iter().any(|unit|(65..=90).contains(unit)){return Ok(None);}
+        let length=suffix.len()-suffix.windows(2).filter(|pair|pair[0]==45&&(97..=122).contains(&pair[1])).count();
+        return length.checked_mul(size_of::<u16>()).map(Some).ok_or("Dataset raw key payload overflow.".into());
+    }
+    Ok(dataset_suffix(name.scalar()?).map(dataset_key_size))
+}
+fn dataset_own_key(name:&DomString,available:usize)->Result<Option<crate::javascript::NativeNamedKey>,String>{
+    use crate::javascript::NativeNamedKey;
+    let Some(bytes)=dataset_own_key_bytes(name)?else{return Ok(None)};
+    if bytes>available{return Err("DOM retained dataset key text allowance exhausted.".into());}
+    if let Some(units)=name.raw_units(){
+        let mut key=Vec::new();key.try_reserve_exact(bytes/size_of::<u16>()).map_err(|_|"Cannot reserve raw dataset key text.")?;
+        key.capacity().checked_mul(size_of::<u16>()).filter(|n|*n<=available).ok_or("DOM retained raw dataset key allocation exceeds allowance.")?;
+        let mut suffix=units[5..].iter().copied().peekable();
+        while let Some(unit)=suffix.next(){if unit==45&&suffix.peek().is_some_and(|next|(97..=122).contains(next)){key.push(suffix.next().unwrap()-32);}else{key.push(unit);}}
+        Ok(Some(NativeNamedKey::Units(key)))
+    }else{dataset_key(name.scalar()?,available).map(|key|key.map(NativeNamedKey::String))}
+}
+
 pub(super) fn dataset_attribute(name: &str) -> Result<String,String> {
     let length=name.len().checked_add(name.bytes().filter(u8::is_ascii_uppercase).count()).and_then(|n|n.checked_add(5)).ok_or("Dataset attribute name size overflow.")?;
     let mut attribute = String::new();
@@ -194,6 +216,42 @@ impl Bridge<'_> {
             return Err("Invalid dataset handle.".into());
         }
         self.node(node_handle((handle - DATASET_BASE) as usize))
+    }
+
+    pub(super) fn dataset_own_key_snapshot(&mut self,handle:u32)->Result<Vec<crate::javascript::NativeNamedKey>,String>{
+        use crate::javascript::NativeNamedKey;
+        script_text_content::deadline(self.state)?;
+        let node=self.dataset_node(handle)?;
+        self.native_node_access(node_handle(node)).map_err(|(_,message)|message)?;
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        #[cfg(test)]
+        if self.state.limits.test_entry_arenas&&attrs.len()>self.state.limits.host.element_attributes{return Err(format!("Dataset enumeration limit reached ({} attributes).",self.state.limits.host.element_attributes));}
+        self.state.work(attrs.len())?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        let(mut count,mut payload)=(0usize,0usize);
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_empty()){
+            script_text_content::deadline(self.state)?;
+            self.state.work(attr.name.qualified.logical_bytes().checked_mul(8).ok_or("Dataset key snapshot work overflow.")?)?;
+            let Some(bytes)=dataset_own_key_bytes(&attr.name.qualified)?else{continue};
+            count=count.checked_add(1).ok_or("Dataset key count overflow.")?;
+            payload=payload.checked_add(bytes).ok_or("Dataset key payload overflow.")?;
+            count.checked_mul(size_of::<NativeNamedKey>()).and_then(|n|n.checked_add(payload)).filter(|n|*n<=available).ok_or("DOM retained dataset key allowance exhausted.")?;
+        }
+        let work=count.checked_mul(size_of::<NativeNamedKey>()).and_then(|n|n.checked_add(payload)).ok_or("Dataset key snapshot copy work overflow.")?;
+        self.state.copies(work)?;
+        let mut keys=Vec::new();keys.try_reserve_exact(count).map_err(|_|"Cannot reserve dataset own key records.")?;
+        let mut bytes=keys.capacity().checked_mul(size_of::<NativeNamedKey>()).filter(|n|n.checked_add(payload).is_some_and(|sum|sum<=available)).ok_or("DOM retained dataset key record allowance exhausted.")?;
+        let mut remaining=payload;
+        for attr in attrs.iter().filter(|attr|attr.name.namespace.is_empty()){
+            script_text_content::deadline(self.state)?;
+            let Some(size)=dataset_own_key_bytes(&attr.name.qualified)?else{continue};remaining-=size;
+            let spare=available.checked_sub(bytes).and_then(|n|n.checked_sub(remaining)).ok_or("DOM retained dataset key allowance exhausted.")?;
+            let key=dataset_own_key(&attr.name.qualified,spare)?.ok_or("Dataset key membership changed during snapshot.")?;
+            let capacity=match &key{NativeNamedKey::String(s)=>s.capacity(),NativeNamedKey::Units(units)=>units.capacity().checked_mul(size_of::<u16>()).ok_or("Dataset raw key allocation overflow.")?};
+            bytes=bytes.checked_add(capacity).ok_or("Dataset key allocation overflow.")?;keys.push(key);
+        }
+        script_text_content::deadline(self.state)?;
+        Ok(keys)
     }
 
     pub(super) fn dataset_keys(&mut self,handle:u32)->Result<Vec<String>,String>{

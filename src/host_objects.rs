@@ -1703,7 +1703,17 @@ impl Runtime {
         if inherited && host.expando_owner(handle).is_some() && !host.ordinary_inherited_enumeration(handle) {
             return Err(Fault::new("Inherited native Element enumeration is not implemented."));
         }
-        let keys = if let Some(&id) = self.host_objects.get(&handle) {
+        let named=if inherited{None}else{
+            self.validate_native_access(handle,host)?;
+            host.named_own_keys(handle).map_err(Fault::new)?
+        };
+        let keys = if let Some(named)=named {
+            if named.len()>self.limits.heap.object_properties{return Err(Fault::new(format!("Property enumeration limit reached ({} keys).",self.limits.heap.object_properties)));}
+            self.work(named.len().checked_mul(std::mem::size_of::<StringKey>()).ok_or_else(||Fault::new("Native key snapshot work overflow."))?)?;
+            let mut keys=Vec::new();keys.try_reserve_exact(named.len()).map_err(|_|Fault::new("Cannot reserve native own key snapshot."))?;
+            for key in named{keys.push(match key{super::NativeNamedKey::String(name)=>StringKey::Scalar(name),super::NativeNamedKey::Units(units)=>StringKey::Units(units)});}
+            keys
+        } else if let Some(&id) = self.host_objects.get(&handle) {
             if inherited {
                 self.inherited_keys(Ordinary::Object(id))?
             } else {
