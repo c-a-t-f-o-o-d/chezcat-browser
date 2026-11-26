@@ -7570,3 +7570,7 @@ mod app_noscript_text_move_before_tests;
 #[cfg(test)]
 #[path="app_noscript_text_ranges_tests.rs"]
 mod app_noscript_text_ranges_tests;
+
+#[cfg(test)]
+#[path="app_select_hr_construction_tests.rs"]
+mod app_select_hr_construction_tests;
