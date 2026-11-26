@@ -26,13 +26,19 @@ def original_icon(image=None):
 
 
 class PublicationControls(unittest.TestCase):
-    def test_css_planning_documents_have_exact_public_paths(self):
-        self.assertTrue(publication.check_tree(['docs/CSS_FOUNDATION_PLAN.md',
-            'docs/CSS_FOUNDATION_COVERAGE.json','docs/CSS_STANDARDS_INVENTORY.json']))
-        for path in ['docs/CSS_RESEARCH_NOTES.md','docs/CSS_FOUNDATION_RESULTS.json',
-                     'docs/css-plan/local.json']:
+    def test_retired_planning_documents_only_allowed_in_history(self):
+        retired=['docs/CSS_FOUNDATION_PLAN.md','docs/CSS_FOUNDATION_COVERAGE.json',
+                 'docs/CSS_STANDARDS_INVENTORY.json','docs/HTML_FOUNDATION_PLAN.md',
+                 'docs/FEATURE_CONTRACTS_DETAIL.md']
+        self.assertTrue(publication.check_tree(retired,historical=True))
+        for path in retired:
             with self.subTest(path=path),self.assertRaises(ValueError):
                 publication.check_tree([path])
+        for path in ['docs/CSS_RESEARCH_NOTES.md','docs/CSS_FOUNDATION_RESULTS.json',
+                     'docs/css-plan/local.json']:
+            for historical in [False,True]:
+                with self.subTest(path=path,historical=historical),self.assertRaises(ValueError):
+                    publication.check_tree([path],historical=historical)
     def test_unreviewed_record_and_output_categories_rejected(self):
         for path in ['LOCAL_NOTES.md','docs/LOCAL_NOTES.md','docs/drafts/note.md',
                      'tools/run-output.json','tools/output/run.json','outputs/run.json',
@@ -64,12 +70,14 @@ class PublicationControls(unittest.TestCase):
             subprocess.run(['git','init','-q'],cwd=root,check=True,capture_output=True)
             admitted=['README.md','src/new_feature.rs','tools/check_new_feature.py',
                       'tools/reference/example/input.json','docs/ROADMAP.md',
-                      'docs/CSS_FOUNDATION_PLAN.md','docs/CSS_FOUNDATION_COVERAGE.json',
-                      'docs/CSS_STANDARDS_INVENTORY.json',
+                      'docs/HTML_FOUNDATION_COVERAGE.json','docs/CAPABILITIES.md',
                       '.github/workflows/check.yml','.github/ISSUE_TEMPLATE/bug.md',
                       'resources/chezcat-x64.o','assets/chezcat.ico']
             excluded=['LOCAL_NOTES.md','docs/LOCAL_NOTES.md','tools/run-output.json',
-                      'outputs/run.json','.local/settings.json','src/__pycache__/compiled.pyc']
+                      'outputs/run.json','.local/settings.json','src/__pycache__/compiled.pyc',
+                      'docs/CSS_FOUNDATION_PLAN.md','docs/CSS_FOUNDATION_COVERAGE.json',
+                      'docs/CSS_STANDARDS_INVENTORY.json','docs/HTML_FOUNDATION_PLAN.md',
+                      'docs/FEATURE_CONTRACTS_DETAIL.md']
             for name in admitted+excluded:
                 path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'Owned path fixture.')
             result=subprocess.run(['git','check-ignore','--no-index','-z','--stdin'],cwd=root,
@@ -77,6 +85,35 @@ class PublicationControls(unittest.TestCase):
             self.assertEqual(result.returncode,0)
             self.assertEqual({name.decode('utf-8') for name in result.stdout.split(b'\0') if name},set(excluded))
             self.assertTrue(publication.check_tree(admitted))
+
+    def test_full_history_preserves_retired_docs_without_current_reintroduction(self):
+        with tempfile.TemporaryDirectory(prefix='chezcat-retired-docs-') as folder:
+            root=Path(folder);(root/'docs').mkdir()
+            (root/'LICENSE_SCOPE.md').write_text('# Fixture scope\n\nScope: containing-source-revision\n',encoding='utf-8')
+            (root/'SOURCE_REVISION').write_text('$Format:%H$\n',encoding='utf-8')
+            (root/'README.md').write_text('Original public fixture.\n',encoding='utf-8')
+            retired=root/'docs/HTML_FOUNDATION_PLAN.md'
+            env=dict(os.environ,GIT_AUTHOR_NAME='Controlled fixture',GIT_COMMITTER_NAME='Controlled fixture',
+                     GIT_AUTHOR_EMAIL='fixture@example.test',GIT_COMMITTER_EMAIL='fixture@example.test')
+            subprocess.run(['git','init','-q'],cwd=root,env=env,check=True,capture_output=True)
+            def commit():
+                for args in [('add','.'),('-c','commit.gpgsign=false','commit','-qm','Owned documentation fixture')]:
+                    subprocess.run(['git',*args],cwd=root,env=env,check=True,capture_output=True)
+                return subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+            no_retired_history=commit()
+            retired.write_text('Original historical fixture.\n',encoding='utf-8');baseline=commit()
+            retired.unlink();accepted=commit()
+            retired.write_text('Original reintroduction fixture.\n',encoding='utf-8');reintroduced=commit()
+            retired.unlink();removed_again=commit()
+            with patch.object(publication,'ROOT',root):
+                with patch.object(publication,'RETIRED_DOC_HISTORY_REVISION',baseline):
+                    self.assertTrue(publication.check(accepted))
+                    for ref in [baseline,reintroduced,removed_again]:
+                        with self.subTest(ref=ref),self.assertRaises(ValueError):publication.check(ref)
+                with patch.object(publication,'RETIRED_DOC_HISTORY_REVISION','0'*40):
+                    self.assertTrue(publication.check(no_retired_history))
+                    with self.assertRaisesRegex(ValueError,'Cannot verify retired-document ancestry'):
+                        publication.check(accepted)
 
     def test_mailmap_cannot_conceal_raw_owner_metadata(self):
         with tempfile.TemporaryDirectory(prefix='chezcat-owner-object-') as folder:

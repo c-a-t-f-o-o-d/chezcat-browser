@@ -1,9 +1,8 @@
 {
-  "schema": 1,
-  "scope": "Finite source and local browser-workflow assessment, not full conformance or whole-family compatibility",
-  "release_candidate": {
+  "schema": 2,
+  "scope": "Selected source-bound application and website measurements. Each result retains its actual source, inputs and available provenance; this catalogue is not a new run on the published release or current development source.",
+  "published_release": {
     "version": "0.82.0-alpha.4",
-    "integrated_through": "7e0d347a3ef177d6487bc7feae451e4cc20a1c71",
     "tag": "v0.82.0-alpha.4",
     "tag_source": "122d0b7de5988493481dc4bed168d01969eef488",
     "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45105047981",
@@ -13,144 +12,37 @@
     "verified_downloadable_baseline": "v0.82.0-alpha.4",
     "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.4"
   },
-  "previous_release_candidates": [
-    {
-      "version": "0.82.0-alpha.2",
-      "integrated_through": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-      "tag": "v0.82.0-alpha.2",
-      "tag_source": "14134aba8ac2ab001c8ec13db77f68fa220b1400",
-      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44971512445",
-      "status": "Immutable candidate failed normal Windows qualification; packaging and publication were not reached, and no alpha.2 release assets were published",
-      "qualification_status": "failed",
-      "failure_stage": "normal native tests",
-      "diagnostic_boundary": "The failure-summary step also rejected its relative output path; failing native test identities and root cause are not established by the public output.",
-      "publication_status": "not_published",
-      "verified_downloadable_baseline": "v0.82.0-alpha.1",
-      "measurement_scope": "Existing source-bound workflow records retain their original revisions and are not alpha.2 runtime results",
-      "latest_reported_homepage_checkpoint": {
-        "source_commit": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
-        "integrated_via_pr": 429,
-        "visible_result": "Skeleton remains; usable header, guide and search field are not established",
-        "execution_result": "DOM walker reached its 30-second deadline",
-        "later_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-        "later_source_note": "PR #430 is integrated, but no post-PR #430 live acceptance result is recorded",
-        "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
-      }
+  "reference": {
+    "language": "ECMAScript 2025, edition 16",
+    "language_url": "https://262.ecma-international.org/16.0/",
+    "dom_url": "https://dom.spec.whatwg.org/",
+    "dom_source_commit": "e4f4f4f0ace83fe6c52ab68e047351ce7f2dcd69",
+    "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
+  },
+  "modern_fixture_inputs": {
+    "input_manifest": "tools/fixtures/compatibility-modern/inputs.json",
+    "input_manifest_sha256": "61261579acf07352274a03be6562d206b0eda27474a00da7fab16dd949eb1bae",
+    "versions": {
+      "jquery": "4.0.0",
+      "bootstrap": "5.3.9",
+      "popper": "2.11.8"
     },
-    {
-      "version": "0.82.0-alpha.3",
-      "tag": "v0.82.0-alpha.3",
-      "tag_source": "ff5740d3dba4f549c854996c32e28adb592a8959",
-      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/45091960420",
-      "qualification_status": "failed",
-      "publication_status": "not_published",
-      "normal": {
-        "passed": 4445,
-        "failed": 4,
-        "ignored": 1
-      },
-      "serial_diagnostic": {
-        "passed": 4449,
-        "failed": 0,
-        "ignored": 1
-      }
-    }
+    "fixture_revision": 2,
+    "fixture_manifest": "tools/fixtures/compatibility-modern/fixtures.json",
+    "fixture_manifest_sha256": "41c67b054991d7d786758a172ac347ee918e08d7376878145a9f3756b84569ab"
+  },
+  "measurement_boundaries": [
+    "Source inventory is not an executed assertion",
+    "Model tests are not App/input/render evidence",
+    "Initial reference captures are not interaction passes",
+    "Unavailable test hosts are not language assertion failures",
+    "Cascades are separated from the first root",
+    "No public service or whole-family outcome inferred",
+    "Dirty development-build HEAD, executable digest and source-map hash remain explicit; later committed source is not substituted as the compiled identity"
   ],
-  "recent_original_fixtures": {
-    "record_scope": "Reported original-fixture evidence from the linked integrated PRs; not new executions by this documentation review or actual-site acceptance.",
-    "selected_component_path": {
-      "pull_request": 416,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416",
-      "integrated_source": "cd0b372521244a30a687c46955710517fecebf67",
-      "result": "Original App composition exercises nested inert ownership, attribute preparation/import, styles, author/native ARIA forwarding, observer/Promise jobs, icons, events, focus, typing and a native link.",
-      "boundary": "Models selected noPatch calls without running the matching deployed polyfill; not full native Custom Elements or Shadow DOM."
-    },
-    "native_base_uri": {
-      "pull_request": 429,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429",
-      "integrated_source": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
-      "result": "Original loopback App checks admitted/CSP-blocked bases, real relative-image requests and pixels, edited input preservation and native link activation.",
-      "boundary": "Existing HTTP(S) URL projection and 16 KiB bounds remain; general scheme expansion and live main-document base mutation are outside the slice."
-    },
-    "passive_custom_host_content": {
-      "pull_request": 433,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/433",
-      "integrated_source": "ce464a4710fa764ad9e6199f14898ad07280bf82",
-      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
-      "result": "The PR records 49 focused affected checks, including an original App click/Promise/observer/Range/pixel update, production compilation and publication controls.",
-      "boundary": "Newly created inert-leaf promotion was incomplete at this revision; the later PR #434 Text increment is recorded separately. No new actual-site result is claimed."
-    },
-    "depth_16_traversal": {
-      "pull_request": 430,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/430",
-      "integrated_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
-      "input_scope": "Original depth-16 fixture with a pinned unmodified development polyfill and identical HTML bytes.",
-      "constructors_and_connections": 17,
-      "script_entries": 2033391,
-      "development_timing_pair_seconds": {
-        "baseline": 24.583,
-        "candidate": 22.595
-      },
-      "boundary": "One preliminary timing pair, not a performance guarantee or actual-site fix. Production budgets, upstream code and page configuration were unchanged."
-    },
-    "new_inert_text_identity": {
-      "pull_request": 434,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/434",
-      "integrated_source": "117bbb58eef717edae53a556b4a98b4808a06572",
-      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
-      "result": "The PR records 8 focused checks for direct App activation, storage/copy refusal and recovery, observers, Range, pixels and neighboring editor/link behavior. The affected selection has 75 unchanged passes plus the corrected 70,000-identity check; production compilation and publication controls pass.",
-      "boundary": "Native quota exhaustion keeps inert staging and atomic direct-promotion refusal. General inert element construction and subtree cloning remain outside this increment. No actual-site usability is claimed."
-    },
-    "constructed_inert_element_identity": {
-      "pull_request": 435,
-      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/435",
-      "integrated_source": "ad58c9a2a527fbd140110fb94f1ad5844320deea",
-      "release_scope": "Development source after the immutable alpha.2 tag; excluded from that candidate.",
-      "result": "The PR records 84 focused affected checks, including created HTML/style/SVG App activation, pixels, Promise-driven trusted click, preserved editor/link interaction, refusal/recovery, production compilation and publication controls.",
-      "boundary": "General inert subtree cloning remains incomplete. Protected controls, late inline handlers, storage admission and final resource checks retain their boundaries. No new actual-site result is claimed."
-    }
-  },
-  "current_priority": {
-    "source_commit": "7e0d347a3ef177d6487bc7feae451e4cc20a1c71",
-    "milestone": "F00 verified methodology; F01, F02 and F04 partial",
-    "implementation_scope": "Complete the dependency-ordered HTML/XHTML foundation, then resume the established product roadmap.",
-    "validation_scope": "Keep source-bound native, unchanged browser, connected App, live-site and tagged delivery evidence separate.",
-    "acceptance": "Each package retains its required entry, integration and negative/recovery checks. F00 acceptance covers the fixed inventory, licensed inputs and classified baseline.",
-    "later_stages": [
-      "Real query and results",
-      "Watch navigation and Back",
-      "Advancing decoded video and audio"
-    ],
-    "historical_next_scope": "The earlier P1 and legacy framework backlog remains in previous_p1_priority and the source-bound historical records."
-  },
-  "previous_p1_priority": {
-    "source_commit": "ad58c9a2a527fbd140110fb94f1ad5844320deea",
-    "milestone": "P1: template preparation and stamping toward the first usable signed-out shell",
-    "implementation_scope": "Complete known shared template/import, stable identity and ownership, mutation/observation, styling and input contracts in dependency order.",
-    "validation_scope": "Focused affected checks during implementation, connected original App checks at package boundaries, and actual-site checks at milestone readiness or for a specific unresolved runtime question.",
-    "acceptance": "Connected original App behavior must preserve genuine controls, icons, identity, input, focus, observation and resource policy. The overall usable signed-out header/guide/search checkpoint also needs P2 layout and interaction; the latest recorded homepage check does not establish it.",
-    "later_stages": [
-      "Real query and results",
-      "Watch navigation and Back",
-      "Advancing decoded video and audio"
-    ],
-    "historical_next_scope": "The legacy jQuery/React tasks in the top-level next array retain the earlier alpha.1 workflow backlog; they are not the active P1 ordering."
-  },
-  "source_baseline": {
-    "scope": "Historical source-bound workflow results for the alpha.1 integrated baseline. Earlier workflow and pack objects retain the build, stage and denominator of each original measurement.",
-    "integrated_source": "60895467068d87ed49a045751b20e47309a0ab58",
-    "previous_tag": "v0.81.0-alpha.3",
-    "previous_tag_source": "57cc1d53db3860012b229530d8b7695e3f007f63",
-    "verified_publication": {
-      "tag": "v0.82.0-alpha.1",
-      "tag_source": "f2e1823266a7c08c89bce7293572d801da62053c",
-      "release_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/releases/tag/v0.82.0-alpha.1",
-      "workflow_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/actions/runs/44400222193",
-      "downloaded_and_verified": ["ChezCat-windows-x64.zip", "ChezCat-source.zip", "publication.json", "SHA256SUMS"],
-      "packaged_executable_sha256": "73784aa0c64166888b95c3859d0b8a3cdb555149934b5df09bd58f6e505aebfe",
-      "packaged_runtime_checks": "Startup, original App journey, version, wire User-Agent and About identity passed."
-    },
-    "combined_app_recheck": {
+  "application_results": {
+    "combined_framework_run": {
+      "historical_integration_baseline": "60895467068d87ed49a045751b20e47309a0ab58",
       "measured_source": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
       "executable_sha256": "b843f2624082d27f35cd4b3b9f6a7c0234b87c865794afbe1b8ddd273fa89910",
       "vue_3_5_45": {
@@ -200,9 +92,12 @@
         "result": "Two 160 by 40 links in one implicit column. A trusted click changed the gap from 8 to 16 pixels. The second link received its trusted click."
       }
     },
-    "legacy_w2": {
+    "legacy_jquery_bootstrap": {
+      "versions": {
+        "jquery": "1.12.4",
+        "bootstrap": "3.4.1"
+      },
       "measured_source": "7608f4c5b2cbe093b236a409afeb11f753366b11",
-      "integrated_via_pr": 115,
       "executable_sha256": "804abb7fd895580467329497dde862a0d9a1758c8f88a79884de0608b7de1ec0",
       "viewport": [
         1280,
@@ -222,9 +117,12 @@
         "async": "blocked"
       }
     },
-    "react_18_3_1": {
+    "react": {
+      "versions": {
+        "react": "18.3.1",
+        "react_dom": "18.3.1"
+      },
       "measured_source": "2f9fa8dfd69a454e74d1b0051fd875718b82434f",
-      "integrated_via_pr": 114,
       "executable_sha256": "b5dc57721b14e9131b7fb9742082e1d8a87707bbdd36b33de1d479736b77237a",
       "viewport": [
         1280,
@@ -253,324 +151,33 @@
       "tagged_source": {
         "measured_source": "f2e1823266a7c08c89bce7293572d801da62053c",
         "build_kind": "development",
-        "legacy_w2_first_failure": {"script": "jquery-1.12.4.js", "line": 4743, "column": 4, "operation": "DIV.setAttribute for the raw onfocusin attribute during initialization"},
-        "react_18_3_1_first_failure": {"script": "react-dom.production.min.js", "line": 58, "column": 228, "operation": "Read activeElement.contentEditable before component mount"}
+        "legacy_w2_first_failure": {
+          "script": "jquery-1.12.4.js",
+          "line": 4743,
+          "column": 4,
+          "operation": "DIV.setAttribute for the raw onfocusin attribute during initialization"
+        },
+        "react_18_3_1_first_failure": {
+          "script": "react-dom.production.min.js",
+          "line": 58,
+          "column": 228,
+          "operation": "Read activeElement.contentEditable before component mount"
+        }
       }
-    }
-  },
-  "reference": {
-    "language": "ECMAScript 2025, edition 16",
-    "language_url": "https://262.ecma-international.org/16.0/",
-    "dom_url": "https://dom.spec.whatwg.org/",
-    "dom_source_commit": "e4f4f4f0ace83fe6c52ab68e047351ce7f2dcd69",
-    "dom_source_sha256": "19a6d0b92549926f971a0d181d501b694a3129b7a3d3bbedccafaf30c26bd570"
-  },
-  "active_pack": {
-    "record_scope": "Historical Node root prerequisite and its original build. Current application stages are in source_baseline.",
-    "id": "node-root",
-    "contract_id": "CP8",
-    "status": "Original prerequisite committed and independently reviewed; focused/App validation passed, full candidate/public integration pending",
-    "source_commit": "3677129709bbb7fad6185a753ad9794047cb438c",
-    "scope": "Genuine zero-arity Node.prototype.getRootNode with ordinary property behavior, ordered composed dictionary Get/ToBoolean and current ordinary-tree roots for Document, detached subtrees, Attr and supported same-origin child Nodes",
-    "native_status": "Nine Node root, four existing Node constants and thirty-two namespace controls pass; receiver/origin refusal before hooks and bounded malformed-edge/cycle/work checks retained",
-    "validation_note": "Initial8/1 was a new test comparing a returned Document with a method; the oracle was corrected with no production change",
-    "app_evidence": {
-      "build_provenance": {
-        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
-        "dirty": false,
-        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
-        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
-        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release/full validation"
-      },
-      "scope": "Same original trusted-click App fixture; genuine connected/detached/reconnected roots and changed visible text/pixels",
-      "script_errors": 0,
-      "isolated_crop": false,
-      "physical_desktop": false,
-      "full_regression_or_CI": false
     },
-    "workflow_scope": "Modern fixture revision2 uses its own clean diagnostic build; jQuery advances to href assignment, while class syntax still blocks Bootstrap initialization",
-    "next_dependency": "Complete full candidate/PR/CI integration, then measured anchor URL reflection/native INPUT fragments and a concrete CSS candidate",
-    "excluded": [
-      "ShadowRoot/shadow-tree APIs",
-      "Broader child-context DOM support",
-      "Cross-origin access",
-      "Framework-specific shims or whole-library support",
-      "Release/full-candidate acceptance inferred from focused tests"
-    ]
-  },
-  "workflows": [
-    {
-      "id": "W1",
-      "kind": "Original async form/results/navigation",
-      "status": "Assessed subset",
-      "passed_stages": [
-        "Async ready",
-        "Unicode form submit",
-        "Readable results",
-        "Open destination",
-        "Exactly one Back",
-        "Different query"
-      ]
-    },
-    {
-      "id": "W2",
-      "kind": "Unmodified jQuery1.12.4 + Bootstrap3.4.1 dropdown/form",
-      "status": "Blocked at next prerequisite; no library initialization or visible workflow improvement",
-      "cascades_count_as_roots": false,
-      "observed_first_roots": [
-        "Document childNodes at borrowed slice",
-        "Native-host Function.apply capture",
-        "Main Document Node identity",
-        "Native Comment/document.createComment",
-        "Native RegExp input ToString",
-        "Checked innerHTML fragment select/option structure",
-        "INPUT type=hidden attribute mutation",
-        "Input-containing innerHTML fragment replacement"
-      ],
-      "current_first_root": "HTML fragment replacement of native controls/forms or unsupported resources is not implemented",
-      "measurement_scope": "One unchanged post-hidden-input W2 invocation at1280x800/zoom100 with JavaScript/images enabled; zero of one selected configuration passes; actual dirty development build, not clean-source/release validation",
-      "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
-      "executable_sha256": "6a1866f01f67ecea163f683cfaa11f43c0259aec4fe4a15b78083f3843d8cc19",
-      "first_root_location": "jQuery1.12.4 line2684,column2",
-      "stage_outcomes": {
-        "load": "Passed",
-        "initialization": "Failed",
-        "initial_render": "Passed",
-        "input": "Failed",
-        "async": "Failed",
-        "history": "Not applicable"
+    "bootstrap_dropdown_transition_detail": {
+      "measured_source_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
+      "integrated_main_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
+      "executable_sha256": "92b031217ebe627704d2bf068ecfd78818b125bcb250d5dc942f768fcaffc5f1",
+      "source_map_sha256": "cc44d99fe413d30cfc14a4dab8057bc56e6a4d4741c08dda3ee1c2bd9913882b",
+      "dirty": false,
+      "measurement_manifest_sha256": "c5b5b39f7156e1f95e9efcc1f022dcb3fb713c1a789cf6bfc91f6048070b1a26",
+      "build_record_sha256": "c4c555accb8a89768f1186b544298ad3846cbba87de1cb7002e5e9adf43ad2b3",
+      "configuration_manifest_sha256": {
+        "1280": "e5803b3a9af0f9b3d09a3b92223454e204a6b7b3930cec654d498c530388297a",
+        "640": "0f7813fda7ef57fc96d261158d14f5f63372eebf641b4e760974087d1705b0bd"
       },
-      "previous_measurements": [
-        {
-          "source_commit": "5cee344992cbccf77657d14ee4a69dd278c76709",
-          "executable_sha256": "9baefcf519566da75fccbde8a285d70acc2b8f68b07fc3b42057e3b9a0f86252",
-          "current_first_root": "INPUT type=hidden attribute mutation",
-          "first_root_location": "jQuery1.12.4 line1265,column4",
-          "measurement_scope": "Single unchanged CP4 JS-enabled executable W2 recheck at1280x800/zoom100; one selected configuration among three workflow families; later cascades retained",
-          "stage_outcomes": {
-            "load": "Passed",
-            "initial_render": "Passed",
-            "initialization": "Failed",
-            "input": "Failed",
-            "async": "Failed",
-            "history": "Not applicable"
-          }
-        }
-      ],
-      "first_root_operation": "div.innerHTML = '<input/>'",
-      "dirty": true,
-      "build_provenance": {
-        "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
-        "dirty": true,
-        "executable_sha256": "6a1866f01f67ecea163f683cfaa11f43c0259aec4fe4a15b78083f3843d8cc19",
-        "source_map_sha256": "cd382202249a432da1a6c43da711fd3185e5df8d9b23953a094c592f46882f3b",
-        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release validation",
-        "unregistered_draft": "script_node_root.rs is not registered/compiled into runtime"
-      },
-      "limits": "The hidden-input type mutation at1265:4 is passed; the later input-containing innerHTML operation at2684:2 remains refused. Later missing-library errors are cascades. The unregistered Node draft supplies no Node.getRootNode result."
-    },
-    {
-      "id": "W3-css",
-      "kind": "Foundation6.9.0 generated CSS",
-      "status": "Tested for stated responsive rendering scope",
-      "narrow_stacking": "Passed",
-      "wide_two_columns": "Passed",
-      "optional_javascript": "Not assessed",
-      "viewport_zoom_javascript": "1280x800 and640x800, zoom100, normal JavaScript enabled",
-      "before_wide_positions": [
-        [
-          38,
-          163
-        ],
-        [
-          38,
-          266
-        ]
-      ],
-      "after_wide_positions": [
-        [
-          38,
-          163
-        ],
-        [
-          648,
-          163
-        ]
-      ],
-      "narrow_positions": [
-        [
-          38,
-          163
-        ],
-        [
-          38,
-          266
-        ]
-      ],
-      "remaining": "Separate Vue object-prototype access failure at11:3808 remains in the post-concat development recheck; no reactive interaction pass"
-    },
-    {
-      "id": "W3-reactive",
-      "kind": "Vue2.7.16 original reactive component",
-      "status": "Blocked",
-      "first_root": "Object prototype access is not implemented",
-      "observed_first_roots": [
-        "Object-prototype configuration unsupported during parsing",
-        "Undefined noncallable concat member during execution",
-        "Object prototype access is not implemented"
-      ],
-      "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-      "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-      "first_root_location": "Vue2.7.16 runtime line11,column3808",
-      "measurement_scope": "One unchanged post-concat W3 invocation at1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configurations pass; diagnostic development build, not clean-source or release validation",
-      "stage_outcomes": {
-        "load": "Passed",
-        "initial_render": "Passed",
-        "generated_css": "Passed",
-        "initialization": "Failed",
-        "input": "Failed",
-        "async": "Failed",
-        "history": "Not applicable"
-      },
-      "limits": "Execution advances beyond the prior undefined concat failure at11:3613 to the explicit object-prototype access refusal at11:3808. Initial rendering/Foundation CSS pass; Vue initialization, reactive input and async remain failed. No visible Vue workflow improvement or whole-framework support is claimed.",
-      "modern_tier": "Vue3 Proxy prerequisite missing",
-      "previous_measurements": [
-        {
-          "source_commit": "abe2e3bd5bc8e967f4dd2e33ddc4f74ea4ddfd97",
-          "executable_sha256": "ed33208f918452be9e3506841dfe5f347997d09805d055a1f63c3c8b345853c1",
-          "first_root": "Undefined noncallable concat member during execution",
-          "first_root_location": "Vue2.7.16 runtime line11,column3613",
-          "measurement_scope": "Single unchanged W3 invocation, two configurations1280x800 and640x800, zoom100, JavaScript/images enabled; zero of two selected configuration passes among three workflow families",
-          "stage_outcomes": {
-            "load": "Passed",
-            "initial_render": "Passed",
-            "generated_css": "Passed",
-            "initialization": "Failed",
-            "input": "Failed",
-            "async": "Failed",
-            "history": "Not applicable"
-          },
-          "limits": "The whole file parses; the later prototype literal is not proved executed. Ordinary prototype membership/access remains an unobserved boundary; no Vue initialization or visible workflow improvement."
-        }
-      ],
-      "dirty": true,
-      "build_provenance": {
-        "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-        "dirty": true,
-        "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-        "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
-        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release validation"
-      },
-      "reference_browser": "Not run for this invocation"
-    },
-    {
-      "id": "modern-jquery",
-      "kind": "Unmodified jQuery4.0.0 separate original input/update app",
-      "status": "Tested selected workflow; blocked during initialization",
-      "build_provenance": {
-        "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
-        "dirty": false,
-        "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
-        "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
-        "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-        "profile": "existing development profile; not release/full validation"
-      },
-      "configurations": [
-        [
-          1280,
-          800
-        ]
-      ],
-      "zoom": 100,
-      "javascript_enabled": true,
-      "profile": "--no-profile",
-      "stage_outcomes": {
-        "load": "Passed",
-        "parse": "Not established",
-        "initialization": "Failed",
-        "render": "Passed",
-        "input": "Failed",
-        "async": "Failed"
-      },
-      "first_root": "Element property \"href\" is not writable in this subset.",
-      "first_root_location": "jQuery4.0.0 line7963,column1",
-      "cascades_count_as_roots": false,
-      "reference_browser": "Not run",
-      "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
-      "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-      "render_scope": "Initial authored page and independent control render; completed driver input does not establish a jQuery-driven visible update or timer pass",
-      "fixture_revision": 2,
-      "interaction_harness": "Revision2 has unique action names; the actual App driver completes without the revision1 missing-name refusal",
-      "previous_measurements": [
-        {
-          "status": "Tested selected workflow; blocked during initialization",
-          "build_provenance": {
-            "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-            "dirty": true,
-            "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-            "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
-            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-            "profile": "existing development profile; not release validation"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Not established",
-            "initialization": "Failed",
-            "render": "Passed",
-            "input": "Harness blocked; initialization also failed",
-            "async": "Failed"
-          },
-          "first_root": "Element property \"getRootNode\" is not supported.",
-          "first_root_location": "jQuery4.0.0 line4321,column7",
-          "cascades_count_as_roots": false,
-          "reference_browser": "Not run",
-          "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
-          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-          "render_scope": "Initial authored page and independent control render; no jQuery-driven visible update or timer pass",
-          "fixture_revision": 1,
-          "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
-          "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
-        }
-      ],
-      "observed_first_roots": [
-        "Element property \"getRootNode\" is not supported.",
-        "Element property \"href\" is not writable in this subset."
-      ],
-      "process_outcomes": [
-        {
-          "viewport": [
-            1280,
-            800
-          ],
-          "state": "completed",
-          "exit_code": 0
-        }
-      ],
-      "interaction_outcome": "Trusted input attempted; library input/timer effects failed after initialization refusal"
-    },
-    {
-      "id": "modern-bootstrap",
-      "kind": "Unmodified Bootstrap5.3.9 CSS/bundle separate original responsive/dropdown app",
-      "status": "Tested selected workflow with initialization passed and dropdown input blocked",
-      "build_provenance": {
-        "source_commit": "5c22afd735d8353528e1e6f929ca84a594250f44",
-        "executable_sha256": "73ff4306530c8a8a21a474b93ce3f7869122cd7a3162f4dff05fe761d3125978",
-        "dirty": false,
-        "cargo_version": "0.81.0-alpha.2",
-        "source_map_sha256": "4338c593129e420918e43f8c51dc54cd2337f51f31a78d0afd7ccea946e7b9f9"
-      },
+      "pixel_measurement_sha256": "2ce98b474b8d0d4d657af2a37bea7c13c7cc6bac5f2478ac8c20132830c1c649",
       "configurations": [
         [
           1280,
@@ -589,1570 +196,91 @@
         "parse": "Passed",
         "initialization": "Passed",
         "render": "Passed",
-        "input": "Failed",
+        "input": "Passed",
         "async": "Not applicable",
         "framework_layout": "Passed"
       },
-      "first_root": "Invalid selector or selector syntax outside the supported subset: \"[data-bs-toggle=\\\"dropdown\\\"]:not(.disabled):not(:disabled)\"",
-      "first_root_location": "Bootstrap5.3.9 bundle line357,column27",
-      "cascades_count_as_roots": false,
-      "reference_browser": "Not run",
-      "measurement_scope": "One finite revision2 Bootstrap App invocation per selected configuration at 1280/640 on the actual clean build. Other workflows retain their own source records.",
-      "parse_scope": "The exact library initialization marker and zero startup errors establish the admitted parse stage. Dormant paths remain unassessed.",
-      "dependencies": {
-        "popper": "2.11.8, included in the pinned bundle",
-        "jquery": "Absent from this independent workload"
-      },
-      "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640. Initial paired rendering and the independent original control pass.",
-      "fixture_revision": 2,
-      "interaction_harness": "Revision2 action names exist. The initial snapshot has zero startup errors and the exact Bootstrap5.3.9 initialization marker. The first trusted click reaches the selector syntax refusal.",
-      "observed_first_roots": [
-        "Invalid selector or selector syntax outside the supported subset: \"[data-bs-toggle=\\\"dropdown\\\"]:not(.disabled):not(:disabled)\""
-      ],
-      "process_outcomes": [
-        {
-          "viewport": [
-            1280,
-            800
-          ],
-          "state": "failed",
-          "exit_code": 1
-        },
-        {
-          "viewport": [
-            640,
-            800
-          ],
-          "state": "failed",
-          "exit_code": 1
-        }
-      ],
-      "interaction_outcome": "Trusted dropdown click attempted after successful initialization. Selector syntax refusal prevents the menu from opening and choosing an item.",
-      "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2. It does not identify the cargo executable version.",
-      "integration": {
-        "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/59",
-        "merged_main_commit": "03edad1f2e2ff7de097a7ed3d9edec4ccf956dea",
-        "scope": "The workflow ran on the source_commit in build_provenance. PR #59 integrated the change at the recorded main merge."
-      },
-      "first_failed_stage": "input",
-      "selected_workflows": [
-        "bootstrap"
-      ],
-      "cohort_workflow_denominator": 2,
+      "first_failed_stage": null,
+      "first_root": null,
       "configuration_denominator": 2,
-      "passed_configurations": 0,
-      "evidence_label": "20261118-nodelist-bootstrap",
-      "measurement_manifest_sha256": "9b12a3988a18b5bd3198bfae012cb6e3a18b34aba839d034bfcfaad7932a71db",
-      "build_record_sha256": "0f1c1d50e656a2bb625b6aea69ef584b2881728f890505e81cb6111638193ca0",
-      "integrity_checks": {
-        "original_fixtures_unchanged": true,
-        "inputs_unchanged": true,
-        "executable_unchanged": true,
-        "build_record_unchanged": true,
-        "helpers_unchanged": true
+      "passed_configurations": 2,
+      "integrity_checks_passed": true,
+      "opened_marker_observed": true,
+      "trusted_amber_choice_callback_observed": true,
+      "successful_close_observed": true,
+      "menu_open_marker_remains_after_choice": false,
+      "script_errors_per_stage": 0,
+      "menu_control_rectangles": {
+        "640": [
+          44,
+          291,
+          225,
+          39
+        ],
+        "1280": [
+          64,
+          232,
+          225,
+          39
+        ]
       },
-      "previous_measurements": [
-        {
-          "status": "Tested selected workflow; blocked during initialization",
-          "build_provenance": {
-            "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
-            "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
-            "dirty": false,
-            "cargo_version": "0.81.0-alpha.2",
-            "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Not established",
-            "initialization": "Failed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_root": "Host-object iteration is not implemented.",
-          "first_root_location": "Bootstrap5.3.9 bundle line741,column14",
-          "cascades_count_as_roots": false,
-          "reference_browser": "Not run",
-          "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
-          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-          "dependencies": {
-            "popper": "2.11.8, included in the pinned bundle",
-            "jquery": "Not loaded; independent workload"
-          },
-          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
-          "fixture_revision": 2,
-          "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
-          "observed_first_roots": [
-            "Host-object iteration is not implemented."
-          ],
-          "process_outcomes": [
-            {
-              "viewport": [
-                1280,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            },
-            {
-              "viewport": [
-                640,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            }
-          ],
-          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
-          "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
-          "integration": {
-            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/55",
-            "merged_main_commit": "0ef43d01acb84380bb1f0974f736a2e98c6acd26",
-            "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
-          },
-          "first_failed_stage": "initialization",
-          "selected_workflows": [
-            "bootstrap"
-          ],
-          "cohort_workflow_denominator": 2,
-          "configuration_denominator": 2,
-          "passed_configurations": 0,
-          "evidence_label": "20261118-canonical-selectors-modern-bootstrap",
-          "measurement_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
-          "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5",
-          "integrity_checks": {
-            "original_fixtures_unchanged": true,
-            "inputs_unchanged": true,
-            "executable_unchanged": true,
-            "build_record_unchanged": true,
-            "helpers_unchanged": true
-          }
-        },
-        {
-          "status": "Tested selected workflow; blocked during initialization",
-          "build_provenance": {
-            "source_commit": "3456e670a20e0da90f38b878fa5f745e5d98ca69",
-            "executable_sha256": "545d767512ef81cbdeec757fce3e9492f07faef9ba73e79dd168fa291eabb4b3",
-            "dirty": false,
-            "cargo_version": "0.81.0-alpha.2",
-            "source_map_sha256": "200399d23b2e3e1d9a36eda1ec338f32dd2b4cea83f26d5699e433506eabdbea"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Not established",
-            "initialization": "Failed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_root": "Cannot access a property of null or undefined.",
-          "first_root_location": "Bootstrap5.3.9 bundle line741,column27",
-          "cascades_count_as_roots": false,
-          "reference_browser": "Not run",
-          "measurement_scope": "One finite revision2 App invocation per selected Bootstrap configuration at 1280/640 using the actual clean build; this is not a new jQuery/cohort, full-framework, physical-desktop or release pass.",
-          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-          "dependencies": {
-            "popper": "2.11.8, included in the pinned bundle",
-            "jquery": "Not loaded; independent workload"
-          },
-          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; initial paired rendering and the independent original control pass while initialization and dropdown input fail.",
-          "fixture_revision": 2,
-          "interaction_harness": "Revision2 action names exist. Load-listener errors prevent the required zero-error initialization and dropdown input results; this is distinct from revision1 missing-name HarnessBlocked behavior.",
-          "observed_first_roots": [
-            "Cannot access a property of null or undefined."
-          ],
-          "process_outcomes": [
-            {
-              "viewport": [
-                1280,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            },
-            {
-              "viewport": [
-                640,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            }
-          ],
-          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed",
-          "build_provenance_note": "The retained caller build record cargo_version field contains package version 0.81.0-alpha.2; it is preserved verbatim and is not a cargo executable version.",
-          "integration": {
-            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/53",
-            "merged_main_commit": "24084f21ee71c643f75d95228aa6c3629df8c4b8",
-            "scope": "Integration identity only; this workflow ran on the build_provenance source_commit, not on the later main merge."
-          },
-          "first_failed_stage": "initialization",
-          "selected_workflows": [
-            "bootstrap"
-          ],
-          "cohort_workflow_denominator": 2,
-          "configuration_denominator": 2,
-          "passed_configurations": 0,
-          "evidence_label": "20261118-element-siblings-modern-bootstrap",
-          "measurement_manifest_sha256": "167b439fbc62f8c40df4b9a0fd3c88eaea5f367380745c1413f1810788638160",
-          "build_record_sha256": "10693724c3ff23bb53a779866ab5b1847a1df1d2ba43f73e9503f2ec8b848110",
-          "integrity_checks": {
-            "original_fixtures_unchanged": true,
-            "inputs_unchanged": true,
-            "executable_unchanged": true,
-            "build_record_unchanged": true,
-            "helpers_unchanged": true
-          }
-        },
-        {
-          "status": "Tested selected workflow; blocked during initialization",
-          "build_provenance": {
-            "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
-            "dirty": false,
-            "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
-            "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
-            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-            "profile": "existing development profile; not release/full validation"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Not established",
-            "initialization": "Failed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_root": "Unsupported syntax \"class\".",
-          "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
-          "cascades_count_as_roots": false,
-          "reference_browser": "Not run",
-          "measurement_scope": "One bounded revision2 local App invocation per selected configuration, using an actual clean diagnostic development build; no full regression/hosted CI/release or whole-library pass",
-          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-          "dependencies": {
-            "popper": "2.11.8, included in the pinned bundle",
-            "jquery": "Not loaded; independent workload"
-          },
-          "render_scope": "Unmodified Bootstrap CSS places original cards beside each other at1280 and stacks them at640; correctly named dropdown choice remains unrendered after failed initialization",
-          "fixture_revision": 2,
-          "interaction_harness": "Revision2 action names exist; class syntax prevents initialization, leaving the menu choice unrendered. This is distinct from revision1 missing-name HarnessBlocked behavior",
-          "observed_first_roots": [
-            "Unsupported syntax \"class\"."
-          ],
-          "process_outcomes": [
-            {
-              "viewport": [
-                1280,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            },
-            {
-              "viewport": [
-                640,
-                800
-              ],
-              "state": "failed",
-              "exit_code": 1
-            }
-          ],
-          "interaction_outcome": "DependencyBlocked by failed initialization; raw runner input stage remains Failed"
-        },
-        {
-          "status": "Tested selected workflow; blocked during initialization",
-          "build_provenance": {
-            "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-            "dirty": true,
-            "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-            "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
-            "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-            "profile": "existing development profile; not release validation"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Not established",
-            "initialization": "Failed",
-            "render": "Passed",
-            "input": "Harness blocked; initialization also failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_root": "Unsupported syntax \"class\".",
-          "first_root_location": "Bootstrap5.3.9 bundle line599,column3",
-          "cascades_count_as_roots": false,
-          "reference_browser": "Not run",
-          "measurement_scope": "One bounded local App invocation per selected configuration; original paired document/layout/pixels and independent control are ChezCat output; no whole-library pass",
-          "parse_scope": "Conservative runner reports Not established; the first explicit failure is retained without inferring all dormant paths parsed",
-          "dependencies": {
-            "popper": "2.11.8, included in the pinned bundle",
-            "jquery": "Not loaded; independent workload"
-          },
-          "render_scope": "Unmodified Bootstrap CSS places the original cards beside each other at1280 and stacks them at640; dropdown input remains failed",
-          "fixture_revision": 1,
-          "interaction_harness": "Harness blocked: revision1 controls had IDs but lacked the name attributes selected by the App driver. Startup load/render/first script failures remain observed; no trusted input was executed.",
-          "fixture_correction": "Revision2 adds unique action names and preflight controls; upstream assets, script apps and old raw records remain unchanged. New runtime result pending."
-        }
-      ],
-      "visual_observations": [
-        {
-          "kind": "Native button padding",
-          "before_build": {
-            "source_commit": "5c89eea82052ed6eff2cf77a5b3bf6a908cc2ab9",
-            "executable_sha256": "60362d47f72c8d21973aa2d5e8b1952b41f338c627f480e8d47804e105c2bdd1",
-            "dirty": false,
-            "source_map_sha256": "ef29880fcaa1c7d9f28986a365700f78df3b86211cdb90c5b3446a9f34d70da1",
-            "build_record_sha256": "8069b4ea3becd1fa4b57534d3f80b820b2d450c73ca7032f84322b5f4ecca1b5"
-          },
-          "after_build": {
-            "source_commit": "e94388cadafbbdd39e33c13f7b2852075c81f3d8",
-            "executable_sha256": "4ab6e3cffe15ca73eb643b3de094c805e562b7a2897cd02d7a70b387345fdacb",
-            "dirty": false,
-            "source_map_sha256": "b331a43d1c49ab7c8526da9fcc7867be29c58f77b56e193ea4a5b46e39fe5080",
-            "build_record_sha256": "85b11ab94d121b4227f60461956bed0df44bafb74d687666faf544d32977b88e"
-          },
-          "integration": {
-            "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/54",
-            "merged_main_commit": "25654fa4e73cb4fca5fa10d9d1a6802249b8ded2"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "toggle_size_before_px": [
-            167,
-            29
-          ],
-          "toggle_size_after_px": [
-            191,
-            41
-          ],
-          "caption_translation_px": [
-            12,
-            6
-          ],
-          "caption_extents_unchanged": true,
-          "aligned_original_content_crop_matches": true,
-          "caption_position_basis": {
-            "source_derived_content_offset_px": 102,
-            "source_constants": "BAR_HEIGHT68 plus default visible bookmark strip34",
-            "independently_calibrated_from_capture_metadata": false
-          },
-          "initialization": {
-            "before": "Failed",
-            "after": "Failed",
-            "first_root": "Host-object iteration is not implemented.",
-            "first_root_location": "Bootstrap5.3.9 bundle line741,column14"
-          },
-          "same_pinned_inputs_and_helpers": {
-            "fixture_identity_before": true,
-            "library_inputs": true,
-            "helpers_before": true
-          },
-          "measurement_scope": "Separate loaded-state padding comparison on 5c89eea and e94388c. The padding branch predates the NodeList merge. The later 5c22afd initialization result retains its own source identity.",
-          "comparison_sha256": "df27e36459653fa4d0a0ff4798942d41889629fd114c8edbeda27d04a411ce71",
-          "before_manifest_sha256": "04604f4a42fd59b13475c65342eca7b7555a8c65ab553e2adc09f84bcd00e97f",
-          "after_manifest_sha256": "8381681d3a75e8e3f71689c21dade5247725da5171b99341cc670dd4711ec544"
-        }
-      ],
-      "combined_main_measurement": {
-        "source_commit": "25654fa4e73cb4fca5fa10d9d1a6802249b8ded2",
-        "executable_sha256": "3989ef84653f93c797ed5a841db4521c58439a9d9da6602950cb8850f0e2da9b",
-        "source_map_sha256": "dedd04f75c372e673273a73ba8df2ffd4756447c5729a56cdc07c7544e605337",
-        "dirty": false,
-        "measurement_manifest_sha256": "a7b5c0a394190398306010c29cce05f86e5fbd8d19e789d06654fd8a4721ad13",
-        "build_record_sha256": "531e15c63a9eefaf265386f9d56171757db23a7ab34db47d8c761c051fa9d36e",
-        "configurations": [
-          [
-            1280,
-            800
-          ],
-          [
-            640,
-            800
-          ]
-        ],
-        "stage_outcomes": {
-          "load": "Passed",
-          "parse": "Passed",
-          "initialization": "Passed",
-          "render": "Passed",
-          "input": "Failed",
-          "async": "Not applicable",
-          "framework_layout": "Passed"
-        },
-        "loaded_toggle_size_px": [
-          191,
-          41
-        ],
-        "loaded_layout_sha256": {
-          "1280": "15997095ec32c9a95893be2f3319e93b7f553557fed9be00dce69f54c83169c4",
-          "640": "85b98bbbfd7386a45e7d34dd90790f56e841ea5563e823f6bfa7805a93efee8c"
-        },
-        "first_failed_stage": "input",
-        "first_root_location": "Bootstrap5.3.9 bundle line357,column27",
-        "first_click_boundary": "The same dropdown selector syntax refusal recorded on 5c22afd prevents the menu from opening.",
-        "configuration_denominator": 2,
-        "passed_configurations": 0,
-        "integrity_checks_passed": true,
-        "measurement_scope": "Bootstrap-only main recheck combining native padding and NodeList iteration. The independent 5c22afd feature record keeps its own build identity."
+      "menu_crop_sha256_at_both_widths": {
+        "loaded": "f8ae43118a9546c10906f6061246067c16837216bf4041af96785070653fd6cf",
+        "opened": "74167c348ee4886a673dde80ec05f8a17b2e0dddb1746b003efc08bffaebb837",
+        "chosen": "ddf3ae7eec6a44aa3f55b37c9659df182f20fd0d88ac828365d2c04a8dc31777"
       },
-      "recent_dropdown_measurements": {
-        "configurations": [
-          [
-            1280,
-            800
+      "pixel_deltas_per_configuration": {
+        "opened_from_loaded": 8760,
+        "chosen_from_opened": 8763,
+        "returned_to_loaded": 7631
+      },
+      "responsive_positions": {
+        "640": {
+          "BootstrapA": [
+            60,
+            122
           ],
-          [
-            640,
-            800
+          "BootstrapB": [
+            60,
+            181
           ]
-        ],
-        "stage_outcomes": {
-          "load": "Passed",
-          "parse": "Passed",
-          "initialization": "Passed",
-          "render": "Passed",
-          "input": "Failed",
-          "async": "Not applicable",
-          "framework_layout": "Passed"
         },
-        "first_failed_stage": "input",
-        "passed_configurations": 0,
-        "integrity_checks_passed": true,
-        "confirmed_main": {
-          "measured_source_commit": "02cd0f88e7bd173e5a407f6552fecc0efbd75161",
-          "executable_sha256": "d563fc731fa4d819125492675a8591c797e9c441582ece23b7b4b1328a23e391",
-          "source_map_sha256": "647b3d7a591badc893cdeb461dc7d9509aeaadaf9bb45115872f562b338e028d",
-          "dirty": false,
-          "measurement_manifest_sha256": "e9d0b8b1363da622547b7fc805110dffdafa8cc18dc447ca37a4d0c420eb7822",
-          "build_record_sha256": "b666ecbe6ef960bbacb021242fd8b75c012114984fe8e997f444d1f5382d747c",
-          "first_root": "getComputedStyle is not defined.",
-          "first_root_location": "Bootstrap5.3.9 bundle line3734,column21",
-          "integrated_main_commit": "991cba365f680534cc19cc7349e165a136f56b93",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/60"
-        },
-        "computed_style_measurement": {
-          "measured_source_commit": "63a225977adc051236d714378a65f1f0e52d6eb1",
-          "executable_sha256": "4a19bae2637c8b859ea816994e7d32875dd2df895fc2c0614b0de09cf0c0598a",
-          "source_map_sha256": "cf7c0303cac149c35c75da857cee05a346c0c6eeefa4841af3e525d2c0fb4571",
-          "dirty": false,
-          "measurement_manifest_sha256": "222b088c281d3a87decd16c49c2c81092714c232c4c07c1e774068d4d6467d07",
-          "build_record_sha256": "b6121445d518b52aaed072487d693b774329ef30182d6beb5530667a50f3d1ef",
-          "first_root": "DOM method \"toString\" is not supported.",
-          "first_root_location": "Bootstrap5.3.9 bundle line1736,column9",
-          "branch": "feat/computed-style-readback",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/62",
-          "integration_status": "Integrated through PR #62",
-          "local_validation": {
-            "normal_tests_passed": 2657,
-            "required_journeys_passed": 25
-          },
-          "integrated_main_commit": "5c2140095f6eaf479db8f2070c2ccbc401e62764",
-          "hosted_validation": {
-            "normal_tests_passed": 2657,
-            "required_journeys_passed": 25
-          }
-        },
-        "dom_object_string_measurement": {
-          "measured_source_commit": "a82267e8a8770a92991d7e7b8b39b4e89ad706fd",
-          "executable_sha256": "933d9a3569332383cf78e8effe8aae67532f20295580f26822110e14e8480f14",
-          "source_map_sha256": "f36ffdbfa91f4fdfa2ab49cded087baa575a2934cbd4c4ad3f5d256deec76f6b",
-          "dirty": false,
-          "measurement_manifest_sha256": "8aca1479b72426839afa3d418065727f447159007af1456afbc6cb2111382f27",
-          "build_record_sha256": "487a97fc41f969a42574c3329669ec1dd3f51519157302200e0ca9f0a11444af",
-          "first_root": "Computed declaration property \"overflow\" is not implemented; use getPropertyValue for custom properties.",
-          "first_root_location": "Bootstrap5.3.9 bundle line2475,column20",
-          "integrated_main_commit": "852c28cc5f8b1b01934259258a4520ed88ef8712",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/64",
-          "opened_marker_observed": false,
-          "choice_snapshot_present": false
-        },
-        "overflow_axes_measurement": {
-          "measured_source_commit": "7b8a5fbcc43d44d30835a31b7e70a674cecab5a3",
-          "executable_sha256": "56eb3c471b89268d7a58896ea819ded719a0211336bb540a6c779ddc659d8a1d",
-          "source_map_sha256": "f8aa66edc538aac6e50222776e442c2568b7b42c0edf01b2c0a064b3cc21da89",
-          "dirty": false,
-          "measurement_manifest_sha256": "a9224b861f8526f4d5d9cbf3ea074ccf288fa7dc9fadbc522cd5cc906fff1387",
-          "build_record_sha256": "f50b58feea012d438007ffe9190cb2502d734c341b57aa685ba6180edab71327",
-          "first_root": "Element property \"assignedSlot\" is not supported.",
-          "first_root_location": "Bootstrap5.3.9 bundle line1979,column7",
-          "integrated_main_commit": "bf0c7379c60a1ea07f0cd32e71cead71be5cc253",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/65",
-          "opened_marker_observed": false,
-          "choice_snapshot_present": false
-        },
-        "slottable_measurement": {
-          "measured_source_commit": "a6a26197660d97a661d0dd4eeeef80b6ae01df26",
-          "executable_sha256": "8f6b3f775dc27b3257e19e26f67fa67f2ddd238fbf8bd8cde9d19a76efb059e5",
-          "source_map_sha256": "ef319e7a214a7cddca85a21e46dc81aa008cc0386909e89cef0551e3961d574d",
-          "dirty": false,
-          "measurement_manifest_sha256": "651085d125cd550bed51227c2d0709ce84f1a08ad997eb923a42c90b9b432fe8",
-          "build_record_sha256": "edf3ec24d4d4c98d8df190865c6c532a23b1f6783a8e7ea9a5170aeb6bc10ce2",
-          "first_root": "DOM method \"toString\" is not supported.",
-          "first_root_location": "Bootstrap5.3.9 bundle line1736,column9",
-          "integrated_main_commit": "fce7b09f71b8426db31c9f754f71a78c66a1154c",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/67",
-          "opened_marker_observed": false,
-          "choice_snapshot_present": false
-        },
-        "html_container_object_measurement": {
-          "measured_source_commit": "13d7dae75b44e53a37e9112b7084ca08a1e1da50",
-          "executable_sha256": "7154855fb48d257ff663fb8a6d2e90a788678264e659b8470b2c270034fb994c",
-          "source_map_sha256": "50c8250250268aad029fbde8efd6a21dc2b0940330fc6a04eaa78aaf7a7033f2",
-          "dirty": false,
-          "measurement_manifest_sha256": "87bd6b1d988881dd3fce27a343126656b8cebfcca7444919acf051bd876a6fb4",
-          "build_record_sha256": "6353683948df365eb5d053665570369b96861a4a12b1f1859900982c2e3f66a1",
-          "first_root": "Computed declaration property \"position\" is not implemented; use the admitted overflow or custom-property reads.",
-          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1990,column5",
-          "integrated_main_commit": "5309a68954c4f91a9ea5953f9fdeec22083e315f",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/68",
-          "opened_marker_observed": true,
-          "choice_snapshot_present": true,
-          "menu_visibly_painted": true,
-          "trusted_amber_choice_callback_observed": true,
-          "menu_remains_visibly_open_after_choice": true,
-          "successful_close_observed": false,
-          "measurement_scope": "The candidate App painted the menu open and ran the trusted choice at 1280x800 and 640x800. The menu stayed open after selection. Both input checks failed.",
-          "local_validation": {
-            "normal_tests_passed": 2695,
-            "required_journeys_passed": 25
-          },
-          "hosted_validation": {
-            "normal_tests_passed": 2695,
-            "required_journeys_passed": 25
-          },
-          "integrated_main_hosted_validation": {
-            "source_commit": "5309a68954c4f91a9ea5953f9fdeec22083e315f",
-            "normal_tests_passed": 2695,
-            "required_journeys_passed": 25,
-            "scope": "Hosted integration on main. Candidate 13d7dae supplies the App interaction captures."
-          }
-        },
-        "computed_position_measurement": {
-          "measured_source_commit": "c74503c6a0ab747785151aa9ad09b8db0e47c0c4",
-          "executable_sha256": "7436642cf9b7949c6aad1471465fcc44e8728bca71f59ec43fcd135ac32d3cf8",
-          "source_map_sha256": "24fc6bd1548595c87a6bb64cf9948c627e3dca51dd9d8d6f480a7e1fcf421258",
-          "dirty": false,
-          "measurement_manifest_sha256": "b56c9464e55c169e2ff726098724a27de377060c742ef1d20baee82c340a2054",
-          "build_record_sha256": "5fef02d1203cdb4f868bf9b3639ce9fbe62902969b800882028d406061ba2410",
-          "configuration_manifest_sha256": {
-            "1280": "885bc8026a177329209ab6953a3d4b6c08b79d78bda3c92cf105d501a4dec168",
-            "640": "6750b136a2541a78da0b50af4c736e79749bf987d8714b5787d6b26c0d86ec29"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
+        "1280": {
+          "BootstrapA": [
+            80,
+            122
           ],
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Passed",
-            "initialization": "Passed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_failed_stage": "input",
-          "configuration_denominator": 2,
-          "passed_configurations": 0,
-          "completed_http_200_responses_per_configuration": 6,
-          "first_root": "Element property \"offsetParent\" is not supported.",
-          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1994,column12",
-          "integrated_main_commit": "e0195c2e389fa0ee2e24af257b77d8fe292fe1fa",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/69",
-          "opened_marker_observed": true,
-          "choice_snapshot_present": true,
-          "trusted_amber_choice_callback_observed": true,
-          "menu_open_marker_remains_after_choice": true,
-          "successful_close_observed": false,
-          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800. The open state and trusted amber-choice callback are observed; the menu remains open after selection and both input checks fail."
-        },
-        "offset_parent_measurement": {
-          "measured_source_commit": "96666d399ce834dc5db98b19c43917eea7ad6b55",
-          "executable_sha256": "5a502ed99ed2b6b234227d89c17e8a2fa98e7924bf52da83e599a3784b1346a9",
-          "source_map_sha256": "90144267915af813049683488c26abd6faefd6a50c4085f144ceed8384ac7492",
-          "dirty": false,
-          "measurement_manifest_sha256": "e2faa5480a641de96eccb9f86a2ceadb333f0be59e0f4c697d63dd413c09e4b6",
-          "build_record_sha256": "b79c42c427b55c8b545f07061a97b43fadc8a9e139761e0ca5dd73ec5a7081ba",
-          "configuration_manifest_sha256": {
-            "1280": "f6bfb7163fae0e421a8947b346e8cf8f6c17d452fa9e834867323fc85aebce31",
-            "640": "92f1e22e5da4e56074f6ebe704de0b906efbbfeaa912bbe12efbf1ea3e835aac"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Passed",
-            "initialization": "Passed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_failed_stage": "input",
-          "configuration_denominator": 2,
-          "passed_configurations": 0,
-          "completed_http_200_responses_per_configuration": 6,
-          "first_root": "Element property \"scrollLeft\" is not supported.",
-          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line3154,column19",
-          "integrated_main_commit": "3865a8ed855b453cfc4dab0a19d491f31dd71b41",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/71",
-          "opened_marker_observed": true,
-          "choice_snapshot_present": true,
-          "trusted_amber_choice_callback_observed": true,
-          "menu_open_marker_remains_after_choice": true,
-          "successful_close_observed": false,
-          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800. The open state and trusted amber-choice callback are observed; the menu remains open after selection and both input checks fail."
-        },
-        "scroll_offsets_measurement": {
-          "measured_source_commit": "e7be7cd504cf4bb978541b3d7815b442b8bc0baa",
-          "executable_sha256": "498bb95950ebf8a9ec8edfe8275e5ad47cc5c1cd4f07458a082881428937a0a3",
-          "source_map_sha256": "93f978d06e46c976c1c6263ee5c3af4c913c797f8d6035ab2fbd54fd53551d8a",
-          "dirty": false,
-          "measurement_manifest_sha256": "86b7b1217d33f47b3d1cba02217db3f0622dc7a1c3fcf2f02fd846057ae7e6a7",
-          "build_record_sha256": "efaf876150b50c7cc2c6dd5ed1a677c617a1c3fad6900e1dd9f01d1c907bfd80",
-          "configuration_manifest_sha256": {
-            "1280": "58ddd9275646ff33996553c64ec69e6a69db10e2a8dea572715fb87e382d5c17",
-            "640": "d3fb5de41cce084b1cf2bfd5dd849553ae64f54bcac8a54cfa9091411753a4dd"
-          },
-          "configurations": [
-            [
-              1280,
-              800
-            ],
-            [
-              640,
-              800
-            ]
-          ],
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Passed",
-            "initialization": "Passed",
-            "render": "Passed",
-            "input": "Failed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_failed_stage": "input",
-          "configuration_denominator": 2,
-          "passed_configurations": 0,
-          "completed_http_200_responses_per_configuration": 6,
-          "first_root": "Element property \"offsetLeft\" requires measured offset geometry. Receiver node=33; class=other; connected=true; created=false; geometry-attached=true. No coordinate was fabricated.",
-          "first_root_location": "Microtask checkpoint, Bootstrap5.3.9 bundle line1927,column10",
-          "integrated_main_commit": "13f5cd4f7aebf4d4a580287d6fdc5cd40bb56ecc",
-          "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/72",
-          "opened_marker_observed": true,
-          "choice_snapshot_present": true,
-          "trusted_amber_choice_callback_observed": true,
-          "menu_open_marker_remains_after_choice": true,
-          "successful_close_observed": false,
-          "measurement_scope": "Unchanged pinned Bootstrap App at 1280x800 and 640x800 advances past the scroll-offset reads. The trusted amber-choice callback runs, the menu remains open after selection and both input checks fail."
-        },
-        "integrated_contains_measurement": {
-          "measured_source_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
-          "integrated_main_commit": "ec7db2f61cddb78c457b2966b72e1e362b89e66a",
-          "executable_sha256": "92b031217ebe627704d2bf068ecfd78818b125bcb250d5dc942f768fcaffc5f1",
-          "source_map_sha256": "cc44d99fe413d30cfc14a4dab8057bc56e6a4d4741c08dda3ee1c2bd9913882b",
-          "dirty": false,
-          "measurement_manifest_sha256": "c5b5b39f7156e1f95e9efcc1f022dcb3fb713c1a789cf6bfc91f6048070b1a26",
-          "build_record_sha256": "c4c555accb8a89768f1186b544298ad3846cbba87de1cb7002e5e9adf43ad2b3",
-          "configuration_manifest_sha256": {
-            "1280": "e5803b3a9af0f9b3d09a3b92223454e204a6b7b3930cec654d498c530388297a",
-            "640": "0f7813fda7ef57fc96d261158d14f5f63372eebf641b4e760974087d1705b0bd"
-          },
-          "pixel_measurement_sha256": "2ce98b474b8d0d4d657af2a37bea7c13c7cc6bac5f2478ac8c20132830c1c649",
-          "configurations": [
-            [1280, 800],
-            [640, 800]
-          ],
-          "zoom": 100,
-          "javascript_enabled": true,
-          "profile": "--no-profile",
-          "stage_outcomes": {
-            "load": "Passed",
-            "parse": "Passed",
-            "initialization": "Passed",
-            "render": "Passed",
-            "input": "Passed",
-            "async": "Not applicable",
-            "framework_layout": "Passed"
-          },
-          "first_failed_stage": null,
-          "first_root": null,
-          "configuration_denominator": 2,
-          "passed_configurations": 2,
-          "pull_requests": [
-            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/74",
-            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/75",
-            "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/76"
-          ],
-          "integrity_checks_passed": true,
-          "opened_marker_observed": true,
-          "trusted_amber_choice_callback_observed": true,
-          "successful_close_observed": true,
-          "menu_open_marker_remains_after_choice": false,
-          "script_errors_per_stage": 0,
-          "menu_control_rectangles": {
-            "640": [44, 291, 225, 39],
-            "1280": [64, 232, 225, 39]
-          },
-          "menu_crop_sha256_at_both_widths": {
-            "loaded": "f8ae43118a9546c10906f6061246067c16837216bf4041af96785070653fd6cf",
-            "opened": "74167c348ee4886a673dde80ec05f8a17b2e0dddb1746b003efc08bffaebb837",
-            "chosen": "ddf3ae7eec6a44aa3f55b37c9659df182f20fd0d88ac828365d2c04a8dc31777"
-          },
-          "pixel_deltas_per_configuration": {
-            "opened_from_loaded": 8760,
-            "chosen_from_opened": 8763,
-            "returned_to_loaded": 7631
-          },
-          "responsive_positions": {
-            "640": {
-              "BootstrapA": [60, 122],
-              "BootstrapB": [60, 181]
-            },
-            "1280": {
-              "BootstrapA": [80, 122],
-              "BootstrapB": [650, 122]
-            }
-          },
-          "measurement_scope": "Unchanged pinned Bootstrap 5.3.9 / Popper 2.11.8 App: trusted open, Amber selection and close, paired DOM/pixels and responsive cards pass at both widths.",
-          "limits": "One selected offline app; async not applicable; reference interaction not run; no final/initial or reference pixel equality claim.",
-          "next_shared_prerequisite": {
-            "name": "WeakMap",
-            "first_root_location": "Original native App probe line11,column92",
-            "scope": "Same source, separate original prerequisite probe; modern Vue/React mounting unproved."
-          }
-        },
-        "latest_measurement": "integrated_contains_measurement"
-      }
+          "BootstrapB": [
+            650,
+            122
+          ]
+        }
+      },
+      "measurement_scope": "Unchanged pinned Bootstrap 5.3.9 / Popper 2.11.8 App: trusted open, Amber selection and close, paired DOM/pixels and responsive cards pass at both widths.",
+      "limits": "One selected offline app; async not applicable; reference interaction not run; no final/initial or reference pixel equality claim."
     },
-    {
-      "id": "reference",
-      "kind": "Independent browser",
-      "initial_dom_pixels": "Captured",
-      "interactions": "Not run",
-      "scope": "Historical initial captures only; no reference-browser run for the post-concat W3 or modern measurements"
-    }
-  ],
-  "modern_assessment": {
-    "input_manifest": "tools/fixtures/compatibility-modern/inputs.json",
-    "input_manifest_sha256": "61261579acf07352274a03be6562d206b0eda27474a00da7fab16dd949eb1bae",
-    "versions": {
-      "jquery": "4.0.0",
+    "bootstrap_progress_and_layout": {
+      "source": "ab77c36b51612bfeae01f25c546c93accd4f8427",
       "bootstrap": "5.3.9",
-      "popper": "2.11.8"
-    },
-    "workflow_denominator": 2,
-    "configuration_denominator": 3,
-    "passed_configurations": 0,
-    "reference_browser": "Not run",
-    "input_scope": "Pinned unmodified upstream assets/notices are unchanged; modern revision2 adds correct control names. Legacy W2 and Vue retain their earlier distinct measurement/build records",
-    "integrity_checks": {
-      "original_fixtures_unchanged": true,
-      "inputs_unchanged": true,
-      "executable_unchanged": true,
-      "build_record_unchanged": true,
-      "helpers_unchanged": true
-    },
-    "fixture_revision": 2,
-    "fixture_manifest": "tools/fixtures/compatibility-modern/fixtures.json",
-    "fixture_manifest_sha256": "41c67b054991d7d786758a172ac347ee918e08d7376878145a9f3756b84569ab",
-    "build_provenance": {
-      "source_commit": "be579b17243e0bf3f0452aa2de1516641e2f820a",
-      "dirty": false,
-      "executable_sha256": "e44ce342e2630551e994f8da36cb506dcd7b06a720755931824b4df9ac7e4944",
-      "source_map_sha256": "af53f8d25a41f5192c5560fcc5135bbc8b1647b13788ec64fa0c2007b8932b7a",
-      "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-      "profile": "existing development profile; not release/full validation"
-    },
-    "previous_assessments": [
-      {
-        "fixture_revision": 1,
-        "workflow_denominator": 2,
-        "configuration_denominator": 3,
-        "passed_configurations": 0,
-        "build_provenance": {
-          "source_commit": "b3db29a470279ab6eb0f719b72c48f7a7b8b4f92",
-          "dirty": true,
-          "executable_sha256": "688a1318dba0fc81bbe383297b773248f95495d163d046b198201124cb8c5a28",
-          "source_map_sha256": "aa7500d92c6b8c0a7c7fcda11cafa331393bc42562044662d8200060a1018ce8",
-          "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
-          "profile": "existing development profile; not release validation"
-        },
-        "scope": "Preserved revision1 startup/load/render observations plus separate missing-name HarnessBlocked interaction; raw records are not relabeled revision2"
-      }
-    ]
-  },
-  "platform": [
-    {
-      "area": "ECMAScript grammar/environments/completions/calls",
-      "status": "Partial",
-      "sources": [
-        "src/javascript.rs",
-        "src/expression_parser.rs",
-        "src/identifier_names.rs",
-        "tools/check_javascript.py"
-      ]
-    },
-    {
-      "area": "Objects/descriptors/prototypes/constructors/iteration/collections",
-      "status": "Partial",
-      "sources": [
-        "src/prototypes.rs",
-        "src/array_ops.rs",
-        "src/collections.rs",
-        "src/symbols.rs",
-        "src/iterable_builtins.rs",
-        "src/intrinsic_realms.rs"
-      ]
-    },
-    {
-      "area": "Strings/numbers/regexp/binary data",
-      "status": "Partial",
-      "sources": [
-        "src/javascript.rs",
-        "src/regexp.rs",
-        "src/binary_data.rs",
-        "src/string_replacement.rs"
-      ]
-    },
-    {
-      "area": "Promises/tasks/realms and browser scripts",
-      "status": "Partial",
-      "sources": [
-        "src/promises.rs",
-        "src/scripting.rs",
-        "src/script_timer_global_tests.rs",
-        "src/intrinsic_realms.rs",
-        "src/loader.rs",
-        "src/script_resources.rs"
-      ]
-    },
-    {
-      "area": "HTML/tree/DOM/attributes/collections/selectors",
-      "status": "Partial",
-      "sources": [
-        "src/html.rs",
-        "src/script_dom_tree.rs",
-        "src/script_inner_html.rs",
-        "src/script_collections.rs",
-        "src/script_attr.rs",
-        "src/css.rs",
-        "src/script_media_controls_tests.rs"
-      ]
-    },
-    {
-      "area": "Forms/focus/input/events/default actions/navigation/geometry/observers",
-      "status": "Partial",
-      "sources": [
-        "src/forms.rs",
-        "src/app_keyboard.rs",
-        "src/script_dispatch.rs",
-        "src/event_interface.rs",
-        "src/script_navigation.rs",
-        "src/script_geometry.rs",
-        "src/script_dom_tree.rs",
-        "src/app_session_history.rs"
-      ]
-    },
-    {
-      "area": "HTTP/Fetch/XHR/body/encoding/cookies/policy/cache/network lifecycle",
-      "status": "Partial",
-      "sources": [
-        "src/http.rs",
-        "src/http_stylesheet.rs",
-        "src/http_media_cors.rs",
-        "src/network_trace.rs",
-        "src/cookies.rs",
-        "src/csp.rs",
-        "src/text_encoding.rs",
-        "src/scripting.rs",
-        "src/loader.rs"
-      ]
-    },
-    {
-      "area": "CSS/cascade/selectors/conditional rules/layout/hit testing",
-      "status": "Partial",
-      "sources": [
-        "src/css.rs",
-        "src/css_attribute_substrings.rs",
-        "src/css_media.rs",
-        "src/layout.rs",
-        "src/layout_scroll.rs",
-        "src/app_backgrounds.rs"
-      ]
-    },
-    {
-      "area": "Fonts/images/intrinsic/responsive presentation",
-      "status": "Partial",
-      "sources": [
-        "src/font.rs",
-        "src/fonts.rs",
-        "src/image.rs",
-        "src/image_svg.rs",
-        "src/image_selection.rs",
-        "src/loader.rs",
-        "src/app_images.rs"
-      ]
-    },
-    {
-      "area": "Script storage, workers, custom elements and shadow DOM",
-      "status": "Missing",
-      "sources": [
-        "src/scripting.rs",
-        "src/cookies.rs",
-        "src/script_blank_frames.rs",
-        "docs/CAPABILITIES.md"
-      ]
-    },
-    {
-      "area": "Accessibility/Intl/SVG DOM/canvas/Wasm/media",
-      "status": "Partial",
-      "sources": [
-        "src/platform.rs",
-        "src/app_browser_ui.rs",
-        "src/image_svg.rs",
-        "src/media.rs",
-        "src/matroska.rs",
-        "src/script_media.rs",
-        "tools/compatibility_cases.json",
-        "docs/CAPABILITIES.md"
-      ]
-    }
-  ],
-  "families": [
-    {
-      "name": "vanilla JavaScript",
-      "role": "browser language/DOM",
-      "status": "Partial"
-    },
-    {
-      "name": "jQuery",
-      "role": "browser runtime",
-      "status": "The pinned 4.0.0 input and timer workflow passes. Legacy 1.12.4 initialization remains blocked.",
-      "measured_versions": [
-        "1.12.4",
-        "4.0.0"
+      "viewport_widths": [
+        640,
+        1280
       ],
-      "workflow_refs": [
-        "W2",
-        "modern-jquery"
-      ]
-    },
-    {
-      "name": "React",
-      "role": "browser UI runtime",
-      "status": "The runtimes export, and the scheduled ReactDOM callback stops before mounting the component.",
-      "measured_versions": ["18.3.1"],
-      "measurement": {
-        "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
-        "distributions": "Official React and ReactDOM 18.3.1 production UMD files",
-        "viewport": [1280, 800],
-        "result": "The native input and paint controls passed. ReactDOM initialization stopped at 223:36 on listener-object registration before a component mounted.",
-        "listener_source": "4ef9112f902249fde75d808aaa36038deace2432",
-        "listener_result": "ReactDOM passed its object-listener probe. A scheduled callback stopped on input.constructor at 23:83 during initialization. The component did not mount.",
-        "input_interface_source": "7dda376481e725d0f5ab895d97c137d927404d5c",
-        "input_interface_result": "The scheduled callback advanced to 27:75 and stopped while writing input.defaultChecked. The component did not mount. A separate App passed the native constructor, value and checked descriptor, dispatch and receiver checks.",
-        "default_checked_source": "a7959b7cf29feb807682e547277eef60d76dbebf",
-        "default_checked_result": "The scheduled callback passed the input's defaultChecked assignment and stopped at 57:363 when testing the active element against window.HTMLIFrameElement. The component did not mount. The separate native App passed direct and saved Boolean access, invalid receiver and form reset checks.",
-        "iframe_interface_source": "2f9fa8dfd69a454e74d1b0051fd875718b82434f",
-        "iframe_interface_result": "ReactDOM passed the active element's iframe identity check and then stopped at 58:228 on contentEditable. The component did not mount. A separate App verified parsed and detached frame identity, genuine same-origin frame access and distinct constructors in the two realms."
+      "result": "At 25 and 75 percent the entire 240 by 16 pixel meter matches the literal control. The trusted click grows the fill from 60 to 180 pixels.",
+      "caption_fix_source": "5298918c6f98df3cc871c6ca1e1def381815f77d",
+      "caption_fix_result": "At both widths the automatic caption occupies one 105 by 24 pixel line. Both 220 by 64 pixel crops match the explicit twin. The constrained control still wraps.",
+      "implicit_grid_source": "e11acce392d6b8c8e0deec56e8b08a7639d312f2",
+      "implicit_grid_integrated_recheck": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
+      "implicit_grid_result": "The two 160 by 40 action links and their 8 and 16 pixel row gaps match both control crops. A trusted click reaches the second link.",
+      "separate_alignment_observations": {
+        "earlier_source": "e11acce392d6b8c8e0deec56e8b08a7639d312f2",
+        "earlier_result": "A fixed 64 pixel link in a 192 pixel column stays at the start for center and end alignment. The initial paint matches the reported geometry, and the trusted click reaches the link at its painted location.",
+        "later_source_short": "b4f35e4",
+        "later_result": "The focused grid fixture places start, center and end actions at their expected painted and clickable positions.",
+        "limits": "Authored grid tracks and RTL alignment remain open. These are distinct fixtures, not a new run of the earlier Bootstrap workflow."
       }
     },
-    {
-      "name": "AngularJS1.x",
-      "role": "legacy browser runtime",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Angular",
-      "role": "compiled browser runtime",
-      "status": "Deferred"
-    },
-    {
-      "name": "Vue",
-      "role": "browser UI runtime",
-      "status": "Pinned 2.7.16 and 3.5.45 reactive application workflows passed on 067ac5e.",
-      "measured_versions": ["2.7.16", "3.5.45"]
-    },
-    {
-      "name": "Svelte",
-      "role": "development compiler plus browser runtime",
-      "status": "Deferred"
-    },
-    {
-      "name": "Ember",
-      "role": "browser framework/runtime",
-      "status": "Deferred"
-    },
-    {
-      "name": "Redux",
-      "role": "browser-capable state library",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Bootstrap",
-      "role": "compiled CSS plus browser JS",
-      "status": "The pinned 5.3.9 dropdown passes at two widths. The 3.4.1 app remains blocked during legacy jQuery initialization.",
-      "measured_versions": [
-        "3.4.1",
-        "5.3.9"
-      ],
-      "workflow_refs": [
-        "W2",
-        "modern-bootstrap"
-      ]
-    },
-    {
-      "name": "Tailwind",
-      "role": "development CSS compiler; output CSS",
-      "status": "Deferred"
-    },
-    {
-      "name": "Foundation",
-      "role": "generated CSS and optional separate JS",
-      "status": "Partial"
-    },
-    {
-      "name": "Chakra UI",
-      "role": "React browser components plus runtime styling",
-      "status": "Deferred"
-    },
-    {
-      "name": "Popper",
-      "role": "browser positioning runtime",
-      "status": "Deferred"
-    },
-    {
-      "name": "Emotion / CSS-in-JS",
-      "role": "browser styling runtime plus optional build transforms",
-      "status": "Deferred"
-    },
-    {
-      "name": "Next.js",
-      "role": "server/build tool plus browser output",
-      "status": "Deferred"
-    },
-    {
-      "name": "Nuxt",
-      "role": "server/build tool plus Vue browser output",
-      "status": "Deferred"
-    },
-    {
-      "name": "SvelteKit",
-      "role": "server/build tool plus browser output",
-      "status": "Deferred"
-    },
-    {
-      "name": "Node.js",
-      "role": "external server/development host",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Express",
-      "role": "external Node HTTP server framework",
-      "status": "Not assessed"
-    },
-    {
-      "name": "ASP.NET Core",
-      "role": "external server framework",
-      "status": "Not assessed"
-    },
-    {
-      "name": "ASP.NET classic / Web Forms",
-      "role": "external .NET Framework server",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Razor",
-      "role": "server template language/compiler",
-      "status": "Not assessed"
-    },
-    {
-      "name": "MVC",
-      "role": "external server framework",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Java portlets",
-      "role": "external portal/server component standard",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Telerik/Kendo jQuery",
-      "role": "browser widget family",
-      "status": "Deferred"
-    },
-    {
-      "name": "Telerik/Kendo React",
-      "role": "React browser components",
-      "status": "Deferred"
-    },
-    {
-      "name": "Telerik/Kendo Angular",
-      "role": "Angular browser components",
-      "status": "Deferred"
-    },
-    {
-      "name": "Telerik/Kendo Vue",
-      "role": "Vue browser components/wrappers",
-      "status": "Deferred"
-    },
-    {
-      "name": "Telerik ASP.NET Core/MVC wrappers",
-      "role": "server helpers generating browser clients",
-      "status": "Deferred"
-    },
-    {
-      "name": "Blazor Server / interactive-server",
-      "role": "browser client plus external .NET server",
-      "status": "Deferred"
-    },
-    {
-      "name": "Blazor WebAssembly",
-      "role": "downloaded sandboxed browser Wasm/.NET payload",
-      "status": "Deferred"
-    },
-    {
-      "name": "Jest",
-      "role": "external Node test host",
-      "status": "Harness blocked"
-    },
-    {
-      "name": "Mocha",
-      "role": "Node test host OR browser test workload",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Storybook",
-      "role": "development host/build plus browser stories",
-      "status": "Deferred"
-    },
-    {
-      "name": "Cypress",
-      "role": "external browser automation driver/test host",
-      "status": "Harness blocked"
-    },
-    {
-      "name": "Playwright",
-      "role": "external browser automation driver/test host",
-      "status": "Harness blocked"
-    },
-    {
-      "name": "TypeScript",
-      "role": "development compiler/language",
-      "status": "Deliberately unsupported"
-    },
-    {
-      "name": "JSX / TSX",
-      "role": "development source syntax",
-      "status": "Deliberately unsupported"
-    },
-    {
-      "name": "ESM",
-      "role": "native browser module format",
-      "status": "Missing"
-    },
-    {
-      "name": "UMD / IIFE",
-      "role": "delivered classic browser JS conventions",
-      "status": "Partial"
-    },
-    {
-      "name": "Bundled CommonJS",
-      "role": "ordinary JS wrapper/module-map output",
-      "status": "Not assessed"
-    },
-    {
-      "name": "Host-only CommonJS",
-      "role": "Node/server module environment",
-      "status": "Deliberately unsupported"
-    },
-    {
-      "name": "Lattice",
-      "role": "Unresolved",
-      "status": "Not assessed"
-    }
-  ],
-  "evidence_boundaries": [
-    "Source inventory is not an executed assertion",
-    "Model tests are not App/input/render evidence",
-    "Initial reference captures are not interaction passes",
-    "Unavailable test hosts are not language assertion failures",
-    "Cascades are separated from the first root",
-    "No public service or whole-family outcome inferred",
-    "Dirty development-build HEAD, executable digest and source-map hash remain explicit; later committed source is not substituted as the compiled identity",
-    "Modern parse Not established is distinct from initialization failure and from observed initial rendering",
-    "Hidden-input W2 uses its own actual dirty development build; an unregistered Node draft does not establish a Node.getRootNode implementation or workflow result",
-    "Later clean Node/modern revision2 diagnostic results retain a distinct build/source map; revision1 startup/HarnessBlocked records and earlier dirty W2/W3 records remain separate, with no full regression or CI inferred"
-  ],
-  "weak_collection_app_measurements": {
-    "original_weakmap_probe": {
-      "measured_source": "acd57035cf95725600e48da0477bbbb3641b4e5f",
-      "integrated_main": "5c8fe787259cb8611ab650c1f3e9b5a536bb878c",
-      "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/78",
-      "result": "A trusted click updates the visible count to 4. One timer completes with page title WeakMap pass."
-    },
-    "vue_runtime": {
-      "distribution": "Vue 3.5.45 runtime-only production browser global",
-      "asset_sha256": "3decf87d416625675c52bd38e928521ba192277a26c5172ab4545a4e98ffddc3",
-      "viewport": [1280, 800],
-      "baseline_sources": [
-        "57cc1d53db3860012b229530d8b7695e3f007f63",
-        "acd57035cf95725600e48da0477bbbb3641b4e5f"
-      ],
-      "baseline_first_fault": "WeakSet is not defined at upstream 5:5880",
-      "weakset_measured_source": "4bd4c71e8548013d5aa6b82007c163c0b7fe35dd",
-      "weakset_integrated_main": "8f24b299b1f608ebfe06b4797bb1a7a6e9e8e72d",
-      "pull_request": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/81",
-      "first_fault_after_weakset": "A class declaration extending HTMLElement stops upstream evaluation at 7:46929.",
-      "independent_controls": "A trusted literal click paints 1536 green pixels and preserves the edited neighboring input, its default value and document ownership.",
-      "framework_stages": "The trusted mount attempt runs after startup fails. The runtime export, mounted hook, component rendering, input and asynchronous updates remain unreached."
-    }
-  },
-  "vue_app_rechecks": {
-    "measured_source": "1561f4dbb3c03139a2723a2e2b2db214b3c348e1",
-    "executable_sha256": "0268a91a122c331ff4121e0f9ba5b34cdbcdfb42a3fffcd3b539d9727bfa1dab",
-    "integrated_main": "270aba853e813dbe686194e81f5dff96a4e96080",
-    "vue_2_7_16": "W3 passed load, mount, initial render, reactive input, two clicks, asynchronous update and responsive generated CSS at 1280x800 and 640x800.",
-    "vue_3_5_45": {
-      "class_heritage_measured_source": "45799d9bebb6aa339862a86cc0a741a0a640fd06",
-      "class_heritage_result": "All three scripts ran. The trusted mount reached the missing SVGElement interface at upstream 8:4340.",
-      "svg_element_result": "All three scripts ran. The trusted mount reached new Proxy at upstream 5:17410. All eight independent controls passed.",
-      "remaining": "Mounted hook, component rendering, component input and async updates remain unreached."
-    }
-  },
-  "integrated_vue_and_legacy_recheck": {
-    "source": "8d6005d17990b52f18455e8a6d01e98999eb07d7",
-    "vue_3_5_45": "Runtime loaded and eight fixture checks passed at 1280x800. Trusted mounting stopped at Proxy construction at upstream 5:17410. The component did not render.",
-    "jquery_1_12_4": "W2 loaded and rendered initial content. The mixed fragment still stopped initialization at 4465:2 in native-control or resource admission."
-  },
-  "ordinary_proxy_app_measurements": {
-    "source": "dd069bb8f5131e78f53f3e47cc035baa991ba27f",
-    "integrated_main": "95b2bbfb92ec231232a2f4672f4d0d3161f59330",
-    "counter": "Trusted click displayed count 2. A timer completed with the title Proxy pass.",
-    "vue_3_5_45": "Eight independent fixture checks passed. Mounting reached Object.prototype.hasOwnProperty.call on the proxy at upstream 5:428. The component did not render.",
-    "regressions": "The Vue 2.7.16 and Bootstrap 5.3.9 workflows passed at 1280x800 and 640x800.",
-    "own_query_followup": {
-      "source": "9081f6b40b0a585f1d850335681acb2f500b8066",
-      "integrated_main": "5be82b64870967734745aec24571406a01e60d86",
-      "mount": "The mounted hook ran. The initial count, native input, two buttons and blue component box rendered. The wrapper then stopped at removeAttribute on an absent attribute at upstream 8:4125.",
-      "interaction": "The full driver completed its native edit and clicks. Rendered count, name and phase remained at their initial values. No timer callback was observed."
-    }
-  },
-  "integrated_vue_interaction": {
-    "source": "f0dc9ef0bf797dc8746bf87212e8768d0bab8c87",
-    "distribution": "Vue 3.5.45 runtime-only production browser global",
-    "viewport": [1280, 800],
-    "initial": "count=0 name= phase=ready",
-    "after_edit_and_two_clicks": "count=2 name=Ada 雪 phase=ready",
-    "after_nexttick_and_timer": "count=2 name=Ada 雪 phase=complete",
-    "final_title": "Vue3 asynchronous update complete",
-    "controls": "All 17 original actions completed. Five paired captures and the retained final frame were fault-free. The neighboring input retained its edited value and original default."
-  },
-  "integrated_async_interaction": {
-    "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
-    "forms": ["async function", "async arrow"],
-    "actions_per_page": 23,
-    "result": "Both pages painted the pending, fulfilled and caught states. They retained the rejection identity through the later handler after one intentional unhandled rejection.",
-    "regressions": "Vue 3.5.45 retained mounted edits, clicks and timer updates. Vue 2.7.16 and Bootstrap 5.3.9 passed their existing two-width workflows."
-  },
-  "legacy_fragment_progress": {
-    "source": "22d0167af8ba48b371e2349aa46a38506d31cbb0",
-    "viewport": [1280, 800],
-    "result": "W2 passed load and initial rendering and advanced beyond mixed fragment construction. Initialization stopped on the detached NAV cloneNode call at 4481:3.",
-    "clone_candidate": "8eb872c12dfcb74e8764a15892e6bd80170c64b0",
-    "candidate_result": "The detached NAV clone succeeded. W2 stopped reading its outerHTML at the same upstream position. Initial render passed, and initialization, trusted choice and timer stages remained incomplete.",
-    "serialization_candidate": "13f80a4fb7ab923c5c6709dabd2ac56b25a4503c",
-    "serialization_result": "W2 completed the cloned NAV markup read. It next stopped assigning the checkbox type to a fresh input at 4485:2.",
-    "created_checkbox_candidate": "5731c75e3391776182768cca275a3cf4b109752f",
-    "created_checkbox_result": "W2 passed the fresh checkbox setup and stopped at the textarea fragment assignment at 4492:2. The separate native checkbox workflow passed toggle and reset with the neighboring edit preserved.",
-    "textarea_source": "01597d85a454256d44755e0858ad8ece4eeee720",
-    "textarea_result": "W2 passed textarea fragment installation and stopped on the deep container clone at 4493:29. An independent app read the decoded textarea default, preserved the neighboring editor and reproduced the clone refusal.",
-    "textarea_clone_source": "f26eeecbd66af187fbd7f830d37731fd3ff897d2",
-    "textarea_clone_result": "W2 installed and cloned the textarea fragment, read its default and stopped at the fresh input radio type assignment at 4501:2. An independent App edited deep and shallow clones and reset their distinct defaults while preserving the source and neighboring editor.",
-    "created_radio_source": "bfc6b267b15e833ec9cbc17541e0a805cf93a787",
-    "created_radio_result": "W2 created and appended a checked radio and stopped on its container's deep clone at 4509:23. The original native App passed grouping while detached and connected, trusted selection in both directions and form reset."
-  },
-  "next": [
-    "Recheck legacy jQuery initialization at its raw attribute write. Retain the trusted dropdown, form and timer stage checks.",
-    "Measure HTML contentEditable reflection for the scheduled ReactDOM callback and preserve the pinned Vue, jQuery and Bootstrap App controls."
-  ],
-  "selected_standard_controls": {
-    "suite": "Selected Test262 slice mode runs",
-    "mode_runs": 20,
-    "passed": 18,
-    "failed": 2,
-    "failure_scope": "Ordinary Array constructor-poisoning behavior",
-    "assertions": "Failing assertions retained",
-    "unavailable_hosts": "Classified separately from language assertions",
-    "whole_suite_conformance": false,
-    "baseline_pack": "CP2",
-    "execution_scope": "Selected actual CP2 observations only; no full-suite conformance inference",
-    "control_runs": 30,
-    "control_passed": 30,
-    "inputs_unchanged": true
-  },
-  "previous_packs": [
-    {
-      "id": "CP1",
-      "scope": "Live main-Document/supported Node child lists, existing host slice, native array-like apply, fresh text replacement and genuine Document Node identity/canonical getters",
-      "native_status": "Focused original Page/App checks passed; normal/build/executable integration required",
-      "normal_limits": {
-        "node_lists": 65536,
-        "snapshot_references": 1048576
-      },
-      "excluded": [
-        "Full DOM",
-        "Comment/DocumentType creation",
-        "Template contents DocumentFragment model",
-        "Child-Document collections",
-        "Whole-library support"
-      ],
-      "status": "Delivered prerequisite slice"
-    },
-    {
-      "id": "string-concat",
-      "status": "Original prerequisite implemented and committed; public integration pending",
-      "source_commit": "8b3112d170c2bad2cbb9c44561c725aa90339409",
-      "scope": "Genuine generic String.prototype.concat with ordered receiver/argument conversions through existing realm, native-capability and work bounds",
-      "native_status": "Nine focused VM/realm/App controls pass, including actual software input and text-pixel changes; no physical desktop or framework pass inferred",
-      "workflow_scope": "Diagnostic development build identity is recorded separately on measured workflows; it is not rebound to this committed checkpoint",
-      "next_dependency": "Demonstrated hidden INPUT mutation/DOM behavior in legacy W2; Vue object-prototype access, modern jQuery getRootNode and Bootstrap class syntax remain separate measured blockers",
-      "excluded": [
-        "Array.concat changes",
-        "Framework-specific shims/polyfills",
-        "Whole-framework initialization",
-        "Release validation"
-      ]
-    },
-    {
-      "id": "hidden-input",
-      "contract_id": "CP7",
-      "status": "Original finite prerequisite implemented and committed; full candidate/public integration pending",
-      "source_commit": "c679a2ed51a170e21e9773768a399a065bc31e88",
-      "scope": "Fresh detached HTML hidden-input admission; parsed-hidden attribute/IDL name/value/default reflection; retained tree/form ownership and serialization; no hidden box, hit or focus",
-      "native_status": "Nine focused and twelve adjacent select controls pass; actual App software click/text pixels, native form request serialization, neighbor value/cursor and source/history preservation; foreign-namespace atomic refusal reproduced then passed",
-      "workflow_scope": "Unchanged W2 advances to input-containing innerHTML refusal; its actual dirty development build is recorded separately, including an unregistered Node draft",
-      "next_dependency": "Genuine Node.getRootNode is being implemented for the separate modern jQuery blocker; no Node API pass is claimed yet",
-      "excluded": [
-        "Existing native input-type transitions",
-        "INPUT contents replacement and general input-containing innerHTML fragments",
-        "Whole-library initialization/interaction",
-        "Physical desktop or HTTP submission acceptance",
-        "Release validation"
-      ]
-    }
-  ],
-  "last_complete_pack": "CP5",
-  "completed_prerequisite_packs": [
-    {
-      "id": "CP1",
-      "scope": "Real collections, calls and Node identity"
-    },
-    {
-      "id": "CP2",
-      "status": "Delivered finite prerequisite; integrated",
-      "scope": "Genuine main-Document Comment factory/data/topology and existing native RegExp exec/test input ToString",
-      "native_status": "Focused original Page/App/language controls passed; integrated source is included in published36adf20",
-      "inherits_limits": "Existing CP1 host/VM admission policies; no quota expansion",
-      "next_dependency": "Historical select-fragment dependency was delivered by CP4; CP7 hidden-input work advances the latest legacy W2 recheck to an input-containing innerHTML fragment",
-      "excluded": [
-        "Parsed comments",
-        "Full Comment/CharacterData interfaces",
-        "DocumentType and template-content models",
-        "Child-context factory",
-        "Generic RegExpExec/custom exec",
-        "Object-valued lastIndex conversion",
-        "RegExp constructor pattern/flag conversion",
-        "Whole-library support"
-      ]
-    },
-    {
-      "id": "CP4",
-      "status": "Delivered finite prerequisite; integrated",
-      "scope": "Conventional select fragments and staged native ownership with retained whole-container state; hidden INPUT mutation remains distinct"
-    },
-    {
-      "id": "CP5",
-      "status": "Delivered finite prerequisite; integrated",
-      "scope": "Finite static colon literal prototype setters with existing chain guards and actual App input/text-pixel controls; broader prototype access remains unsupported"
-    }
-  ],
-  "bootstrap_progress_meter": {
-    "source": "ab77c36b51612bfeae01f25c546c93accd4f8427",
-    "bootstrap": "5.3.9",
-    "viewport_widths": [640, 1280],
-    "result": "At 25 and 75 percent the entire 240 by 16 pixel meter matches the literal control. The trusted click grows the fill from 60 to 180 pixels.",
-    "caption_comparison_source": "9494eb489ad0af86a2f1d5b1204710f8f80bee87",
-    "caption_comparison": "The automatic caption measures 104 by 48 pixels and wraps. Identical text at an explicit width of 220 pixels occupies one 24 pixel line. A constrained 80 pixel control wraps at both viewport widths.",
-    "caption_fix_source": "5298918c6f98df3cc871c6ca1e1def381815f77d",
-    "caption_fix_result": "At both widths the automatic caption occupies one 105 by 24 pixel line. Both 220 by 64 pixel crops match the explicit twin. The constrained control still wraps.",
-    "action_stack_on_caption_source": "At 640 pixels, the d-grid links remain side by side after gap-2 changes to gap-3. The literal and flex stacks match pixel for pixel with 8 and 16 pixel vertical gaps.",
-    "implicit_grid_source": "e11acce392d6b8c8e0deec56e8b08a7639d312f2",
-    "implicit_grid_integrated_recheck": "067ac5edb64e26f39c2a3d816ecbb1cf0a023f3c",
-    "implicit_grid_result": "The two 160 by 40 action links and their 8 and 16 pixel row gaps match both control crops. A trusted click reaches the second link.",
-    "inline_alignment_on_grid_source": "A fixed 64 pixel link in a 192 pixel column stays at the start for center and end alignment. The initial paint matches the reported geometry, and the trusted click reaches the link at its painted location."
-  },
-  "completed_capability_packs": [
-    {
-      "id": "CP3",
-      "status": "Measured responsive rendering improvement; local and hosted normal integration passed",
-      "scope": "Initial-font em media, typed terminal before/after stylesheet targets, explicit box-sizing inheritance and fractional flex line fitting",
-      "native_status": "Original responsive/App and flex checks passed; full normal/build/executable gates required",
-      "inherits_limits": "Existing stylesheet/selector/match/layout budgets; no quota expansion",
-      "next_dependency": "Finite B2 tabs/windows were delivered; subsequent CSS/resource defects are ranked alongside measured language/DOM blockers",
-      "excluded": [
-        "Generated-content painting",
-        "DOM-query pseudo-target support",
-        "Wider media units and font scheduling",
-        "Vue initialization/reactive interaction",
-        "Whole-framework support"
-      ]
-    },
-    {
-      "id": "B2",
-      "status": "Delivered finite tabs/windows/link/context milestone",
-      "source_commit": "36adf203291cf25e05adceb222e18c0668dfb38d",
-      "scope": "Browser-owned shared profile/download/history authorities, bounded Session/App owners, native tabs/windows/shortcuts/pinned inspectors and guarded primary/middle/context link dispositions",
-      "validation": "Source-scoped normal/optimized, hosted and six-group native desktop acceptance; actual published alpha.2 downloaded/extracted offline runtime checks passed",
-      "excluded": [
-        "Named browsing contexts",
-        "window.open/opener semantics",
-        "Broader accessibility"
-      ]
-    }
-  ],
-  "signed_out_home_observation": {
-    "build": "0.82.0-alpha.1+dev.137.g1aeef14cea53",
-    "source": "1aeef14cea5383b0bb8c894720b99a50ec05b836",
-    "main_script_decoded_bytes": 10883200,
-    "scripts_attempted": 43,
-    "scripts_completed": 40,
-    "visible_result": "Two horizontal lines and three gray placeholders. Site header and search box absent.",
-    "first_reported_failures": ["Main application UTF-16 surrogate escape", "Detached STYLE textContent assignment", "Computed opacity CSS work limit"]
-  },
-  "original_script_and_interface_probes": {
-    "scope": "Original offline App probes. Measurements retain their feature-source identities.",
-    "baseline_source": "f2e1823266a7c08c89bce7293572d801da62053c",
-    "integrated_main": "83385ca",
-    "integrated_pull_requests": [
-      121,
-      122
-    ],
-    "document": {
-      "source": "1ff9c51ae45c89da314d7c11a16d35ad4f950d07",
-      "executable_sha256": "9d19345c293b257141fed7e9bd32fc3944f0d0f29c4292c9868cd82ccdc50f56",
-      "app_feature_stages_passed": 6,
-      "independent_controls_passed": 7,
-      "result": "Main/child Document constructors and Node prototype chains, per-realm HTMLDocument alias, borrowed documentElement getter and wrong-receiver checks pass. Native/literal pixels remain unchanged."
-    },
-    "compressed_scripts": {
-      "source": "e66b0ad1ca26b0b8afe43e71fb18f4f5d974bde4",
-      "executable_sha256": "6f52e3acbd608d39fc35c52febd9aec19852a218fb901b2d9a3bd462ea4d0569",
-      "per_script_cap_bytes": 16777216,
-      "visible_effect_source_bytes": 8388609,
-      "retained_decoder_refusal_source_bytes": 16777217,
-      "result": "The previously refused 8 MiB + 1 byte gzip script is admitted, compiles and paints its marker. The 16 MiB + 1 byte source remains refused. Native controls and continuation pass.",
-      "script_policy_cases_passed": 27,
-      "script_policy_case_scope": "27 total policy cases include two exact 16 MiB cases covering parser and dynamic TLS loading."
-    },
-    "canvas_dimensions": {
-      "pull_request": 123,
-      "measured_feature_source": "3e7366a4e0c6478fc03727fa1bd2f6ecf01abd56",
-      "executable_sha256": "6fee16c358b531c21e978c3c8e7194b8ba18c42f518dd6c1567a3eb09a47aacd",
-      "app_feature_stages_passed": 5,
-      "independent_controls_passed": 7,
-      "result": "Default/parsed dimensions, IDL and Attr changes, detached ownership and saved accessors pass with retained native/literal pixels.",
-      "next_fault": "getContext('2d') at 17:86. 2D drawing remains unproved."
-    },
-    "canvas_rectangles": {
-      "pull_request": 125,
-      "measured_feature_source": "f53ab3ec6a7a0ce767602c25107740eb3f9321cc",
-      "integrated_main": "ca845b42cc5a9c781ca54125c49bd8109b285d03",
-      "executable_sha256": "f4a8aef4ce1b5b01ad62a01444d07d905073b149ecfd982055f7dbe11d3013a6",
-      "app_feature_stages_passed": 5,
-      "independent_controls_passed": 9,
-      "result": "The 80 by 48 App paints black rectangles, clears pixels, resets on same-width assignment and repaints with the saved context. Separate App controls check object-fit none and scale-down."
-    },
-    "animation_midpoints": {
+    "web_animation_midpoints": {
       "measured_source": "a965b2b572c467aa729f77f2ca155a8b9449896a",
       "integrated_main_with_same_tree": "e2dabcf90f66573c4f0176ca9dad51cbfed4cfa0",
       "executable_sha256": "be95782022addb0faac72f32b257278136fa843e2f78a2d0f81cb5fbc25d55c6",
@@ -2160,19 +288,53 @@
       "color": "At 500 ms all 576 animated pixels match the literal #6080a0 swatch. All five sampled stages pass.",
       "next_lite_opacity": "At 0, 500 and 1000 ms the 3456-pixel tile paints #ffffff, #808080 and #010101. The edited input, overlap and exterior pixels pass."
     },
-    "canvas_solid_colors": {
-      "pull_request": 126,
-      "measured_feature_source": "124686ee77f4a972a288aa46178cc2553e009dfe",
-      "integrated_main": "9610bafc7e6fc0cabfbc03d5fa69b2f46a9523ec",
-      "executable_sha256": "3f779abac578c6d4faa33dbc3b43fac537685823080feb88655fdd3aca13b393",
-      "app_feature_stages_passed": 3,
-      "result": "The original App paints the expected opaque and translucent swatches and resets to black. The alpha blend over #204080 reads #704040 on screen.",
-      "next_fault": "A separate original App paints and preserves its edited field, then stops at undefined getImageData at 28:18."
+    "vue_runtime_interaction": {
+      "source": "f0dc9ef0bf797dc8746bf87212e8768d0bab8c87",
+      "distribution": "Vue 3.5.45 runtime-only production browser global",
+      "viewport": [
+        1280,
+        800
+      ],
+      "initial": "count=0 name= phase=ready",
+      "after_edit_and_two_clicks": "count=2 name=Ada 雪 phase=ready",
+      "after_nexttick_and_timer": "count=2 name=Ada 雪 phase=complete",
+      "final_title": "Vue3 asynchronous update complete",
+      "controls": "All 17 original actions completed. Five paired captures and the retained final frame were fault-free. The neighboring input retained its edited value and original default."
     },
-    "unverified": [
-      "Live signed-out shell",
-      "Search",
-      "Playback"
-    ]
+    "async_function_and_arrow": {
+      "source": "c669dd9b3618913419e621d6cac3961e31d04db8",
+      "forms": [
+        "async function",
+        "async arrow"
+      ],
+      "actions_per_page": 23,
+      "result": "Both pages painted the pending, fulfilled and caught states. They retained the rejection identity through the later handler after one intentional unhandled rejection.",
+      "regressions": "Vue 3.5.45 retained mounted edits, clicks and timer updates. Vue 2.7.16 and Bootstrap 5.3.9 passed their existing two-width workflows."
+    }
+  },
+  "website_results": {
+    "signed_out_youtube_homepage": {
+      "source_commit": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
+      "visible_result": "Skeleton remains; usable header, guide and search field are not established",
+      "execution_result": "DOM walker reached its 30-second deadline",
+      "later_source": "1de1f24e4052fab14157c1419cb6a6e1fdbccf3c",
+      "later_source_note": "No live acceptance result after this subsequent integration is recorded.",
+      "later_journey_stages": "Search submission, results, watch navigation and playback remain unproved"
+    }
+  },
+  "original_integration_fixtures": {
+    "scope": "Selected recorded original application fixtures; separate from deployed-polyfill, live-site and physical-device acceptance.",
+    "selected_component_path": {
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/416",
+      "integrated_source": "cd0b372521244a30a687c46955710517fecebf67",
+      "result": "Original App composition exercises nested inert ownership, attribute preparation/import, styles, author/native ARIA forwarding, observer/Promise jobs, icons, events, focus, typing and a native link.",
+      "boundary": "Models selected noPatch calls without running the matching deployed polyfill; not full native Custom Elements or Shadow DOM."
+    },
+    "native_base_uri": {
+      "evidence_url": "https://github.com/c-a-t-f-o-o-d/chezcat-browser/pull/429",
+      "integrated_source": "cad5f7c14a8fe8ebe2637e4c5269e84eed9697da",
+      "result": "Original loopback App checks admitted/CSP-blocked bases, real relative-image requests and pixels, edited input preservation and native link activation.",
+      "boundary": "Existing HTTP(S) URL projection and 16 KiB bounds remain; general scheme expansion and live main-document base mutation are outside the slice."
+    }
   }
 }
