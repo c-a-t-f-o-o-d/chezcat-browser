@@ -913,6 +913,8 @@ pub trait Host {
     }
     /// Real ordinary expando storage for an explicitly proven native family.
     fn expando_owner(&self, _object:u32) -> Option<u32> { None }
+    /// Separate Symbol storage does not grant ordinary string expandos.
+    fn symbol_property_owner(&self, _object:u32) -> Option<u32> { None }
     /// Preserve a native named-read/presence fallback after ordinary own keys.
     /// Only explicitly opted-in native receivers use this; other hosts do not.
     fn ordinary_native_fallback(&self, _object:u32, _property:&str) -> bool { false }
@@ -4414,6 +4416,7 @@ pub struct Runtime {
     error_prototypes: BTreeMap<&'static str, usize>,
     browser_global: Option<(u32, usize)>,
     host_objects: BTreeMap<u32, usize>,
+    native_symbol_backings: Vec<(u32,u32,usize)>,
     host_method_values: BTreeMap<(u32, &'static str), Value>,
     exported_function_roots: std::collections::BTreeSet<usize>,
     exported_object_roots: std::collections::BTreeSet<usize>,
@@ -4579,6 +4582,7 @@ impl Runtime {
             error_prototypes: BTreeMap::new(),
             browser_global: None,
             host_objects: BTreeMap::new(),
+            native_symbol_backings: Vec::new(),
             host_method_values: BTreeMap::new(),
             exported_function_roots: std::collections::BTreeSet::new(),
             exported_object_roots: std::collections::BTreeSet::new(),
