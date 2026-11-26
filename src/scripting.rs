@@ -3288,6 +3288,7 @@ impl Bridge<'_> {
 
     /// Properties handled by ordinary lookup on the node's interface prototypes.
     fn inherited_node_property(&self, object: u32, property: &str) -> bool {
+        if self.dataset_accessor_member(object,property){return true;}
         if property=="valueOf"&&(self.area_href_receiver(object)||self.native_anchor(object)){return true;}
         if property=="baseURI" && self.form_named_control(object,property) {return false;}
         if matches!(property, "nodeValue" | "hasChildNodes") && self.text_content_receiver(object) { return !self.form_named_control(object, property); }
@@ -3869,6 +3870,7 @@ impl Host for Bridge<'_> {
     }
 
     fn owns_property(&self, object: u32, property: &str) -> bool {
+        if self.dataset_accessor_member(object,property){return false;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if self.canonical_attribute_node_member(object,property){return false;}
         if self.canonical_attr_member(object,property){return false;}
@@ -4990,6 +4992,7 @@ impl Host for Bridge<'_> {
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) && self.event_target_interface(object) {return Some(object);}
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) && self.event_target_interface(object){return Some(object);}
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) && self.event_target_interface(object) {return Some(object);}
+        if dom_compat::dataset_accessor(method).is_some()&&self.event_target_interface(object){return Some(object);}
         if script_element_id::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_element_class_name::operation(method)&&self.event_target_interface(object){return Some(object);}
         if script_input_labels::interface(method).is_some()&&self.event_target_interface(object){return Some(object);}
@@ -5459,6 +5462,7 @@ impl Host for Bridge<'_> {
             return Ok(());
         }
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.native_node_access(object);}
+        if let Some(svg)=dom_compat::dataset_accessor(method){return self.validate_dataset_accessor(object,svg);}
         if script_element_id::operation(method){return self.validate_element_id(object,method==script_element_id::SET);}
         if script_element_class_name::operation(method){return self.validate_element_class_name(object,method==script_element_class_name::SET);}
         if script_input_labels::interface(method).is_some(){return self.validate_control_labels(object,method);}
@@ -6164,6 +6168,7 @@ impl Host for Bridge<'_> {
         if matches!(method, adjacent_interface::TEXT | adjacent_interface::ELEMENT) {return self.event_target_interface(object) && self.collection_interface_receiver(receiver)==Some(false);}
         if matches!(method,TITLE_TEXT_GET|TITLE_TEXT_SET) {return self.event_target_interface(object) && self.title_receiver(receiver);}
         if matches!(method,crate::javascript::document_location_interface::GET|crate::javascript::document_location_interface::SET) {return self.event_target_interface(object)&&self.document_location_owner(receiver).is_some();}
+        if let Some(svg)=dom_compat::dataset_accessor(method){return self.event_target_interface(object)&&self.dataset_accessor_receiver(receiver,svg);}
         if script_element_id::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_element_class_name::operation(method){return self.event_target_interface(object)&&self.canonical_selector_receiver(receiver);}
         if script_input_labels::interface(method).is_some(){return self.event_target_interface(object)&&self.control_labels_receiver(receiver,method);}
@@ -6536,6 +6541,7 @@ impl Host for Bridge<'_> {
     }
 
     fn own_data(&mut self, object: u32, property: &str) -> Result<Option<Value>, String> {
+        if self.dataset_accessor_member(object,property){self.state.work(1)?;return Ok(None);}
         if self.form_request_member(object,property){self.state.work(1)?;return Ok(None);}
         if self.control_custom_validity_member(object,property)||self.control_validation_member(object,property)||self.form_validation_member(object,property){self.state.work(1)?;return Ok(None);}
         if property=="reset" && self.form_length_receiver(object) && !self.form_named_control(object,property) {self.state.work(1)?;return Ok(None);}
@@ -6914,6 +6920,7 @@ impl Host for Bridge<'_> {
     }
 
     fn has(&mut self, object: u32, property: &str) -> Result<bool, String> {
+        if self.dataset_accessor_member(object,property){self.state.work(1)?;return Ok(false);}
         if self.canonical_attribute_node_member(object,property){return Ok(false);}
         if self.canonical_attr_member(object,property){return Ok(false);}
         if self.canonical_attribute_factory_member(object,property){return Ok(false);}
@@ -7219,7 +7226,7 @@ impl Host for Bridge<'_> {
     }
 
     fn get(&mut self, object: u32, property: &str) -> Result<Value, String> {
-        if matches!(property,"id"|"className"|"classList"|"baseURI") && self.form_named_control(object,property) {return self.named_form_property(node_index(object).unwrap(),property);}
+        if matches!(property,"id"|"className"|"classList"|"baseURI"|"dataset") && self.form_named_control(object,property) {return self.named_form_property(node_index(object).unwrap(),property);}
         if property=="baseURI" && self.text_content_receiver(object) {return self.node_base_uri_get(object);}
         if self.aria_reflection_member(object,property){return self.aria_reflection_get(object,property);}
         if self.charset_member(object, property) { return self.charset_reflection_get(object); }
@@ -8286,6 +8293,7 @@ impl Host for Bridge<'_> {
         }
         if method == NODE_HAS_CHILDREN { return self.has_child_nodes(object); }
         if method==TITLE_TEXT_GET {return self.title_child_text(object,false).map(Self::dom_string_owned);}
+        if let Some(svg)=dom_compat::dataset_accessor(method){return self.dataset_accessor_get(object,svg);}
         if method==script_element_id::GET{return self.element_id_get(object);}
         if method==script_element_class_name::GET{return self.element_class_name_get(object);}
         if script_input_labels::interface(method).is_some(){return self.html_control_labels_get(object,method);}
@@ -12600,3 +12608,7 @@ mod dataset_native_writes_tests;
 #[cfg(test)]
 #[path="script_dataset_native_interface_tests.rs"]
 mod dataset_native_interface_tests;
+
+#[cfg(test)]
+#[path="script_dataset_native_accessors_tests.rs"]
+mod dataset_native_accessors_tests;

@@ -414,6 +414,7 @@ impl Runtime {
                     }
                 }
                 if name == "HTMLElement" {
+                    self.define_host_attribute(prototype,window,"dataset","\0HTMLElement.get.dataset",None)?;
                     for &(key,get,set) in html_reflection_interface::ATTRIBUTES{self.define_host_attribute(prototype,window,key,get,Some(set))?;}
                     self.define_host_attribute(prototype, window, "contentEditable",
                         "\0HTMLElement.get.contentEditable", Some("\0HTMLElement.set.contentEditable"))?;
@@ -567,6 +568,7 @@ impl Runtime {
         let tag=self.symbol_to_string_tag.ok_or_else(||Fault::new("Missing SVGElement class-tag symbol."))?;
         self.store_symbol_property(prototype,tag,Value::String("SVGElement".into()),Some((false,false,true)))?;
         self.define_host_attribute(prototype,window,"style",SVG_STYLE_GET,Some(SVG_STYLE_SET))?;
+        self.define_host_attribute(prototype,window,"dataset","\0SVGElement.get.dataset",None)?;
         self.native_constructor_prototypes.insert((window,"SVGElement"),prototype);
         self.put_binding(self.global_environment,"SVGElement".into(),Some(constructor),super::Declaration::Var,false)?;
         self.global_attributes.insert("SVGElement".into(),(false,true,true));
