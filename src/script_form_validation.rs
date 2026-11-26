@@ -41,6 +41,7 @@ impl Bridge<'_>{
         self.validate_form_validation(object).map_err(|(_,e)|e)?;
         let count=self.forms.controls.len();
         let work=count.checked_mul(count).and_then(|n|self.doc.nodes.len().checked_mul(2).and_then(|m|n.checked_add(m))).ok_or("Form validation work overflow.")?;
+        let work=work.checked_add(self.forms.validation_metadata_work(self.doc)?).ok_or("Validation metadata work overflow.")?;
         self.state.work(work)?;script_text_content::deadline(self.state)?;
         self.state.rebuild(self.doc)?;
         let owner=self.node(object)?;let mut root=owner;let mut walked=0usize;

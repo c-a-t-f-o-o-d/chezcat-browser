@@ -1,5 +1,32 @@
 //! Required-field candidates shared by static and native interactive validation.
 use super::*;
+/// Eligibility is metadata, not a claim that every constraint is implemented.
+/// Callers supply actual tree context and the native disabled/first-legend rule.
+pub(crate) fn validation_candidate(doc:&Document,node:usize,disabled:bool,in_datalist:bool,parent_select:bool)->bool{
+    if disabled||in_datalist||doc.nodes.get(node).is_none_or(|n|n.namespace!=crate::html::Namespace::Html){return false;}
+    let state=doc.attr(node,"type").unwrap_or("");
+    match tag(doc,node){
+        "input"=>{
+            if ["hidden","reset","button"].iter().any(|s|state.eq_ignore_ascii_case(s)){return false;}
+            let readonly_applies=!["checkbox","radio","file","range","color","image","submit"].iter().any(|s|state.eq_ignore_ascii_case(s));
+            !readonly_applies||doc.attr(node,"readonly").is_none()
+        }
+        "button"=>{
+            if state.eq_ignore_ascii_case("submit"){true}
+            else if state.eq_ignore_ascii_case("reset")||state.eq_ignore_ascii_case("button"){false}
+            else{!parent_select&&doc.attr(node,"command").is_none()&&doc.attr(node,"commandfor").is_none()}
+        }
+        "select"=>true,
+        "textarea"=>doc.attr(node,"readonly").is_none(),
+        _=>false,
+    }
+}
+/// Charge repeated exact attribute-name and state comparisons without copying
+/// authored values or allocating a lowercased INPUT/BUTTON state string.
+pub(crate) fn validation_attribute_work(doc:&Document,node:usize)->Result<usize,String>{
+    let NodeKind::Element{attrs,..}=&doc.nodes.get(node).ok_or("Candidate node is unavailable.")?.kind else{return Err("Candidate is not an element.".into())};
+    attrs.iter().try_fold(1usize,|total,a|a.name.bytes().checked_add(a.value.logical_bytes()).and_then(|n|n.checked_add(1)).and_then(|n|n.checked_mul(8)).and_then(|n|total.checked_add(n)).ok_or("Candidate attribute work overflow.".into()))
+}
 pub(crate) struct ValidationSnapshot{
     pub(crate) nodes:Vec<usize>,
     pub(crate) peak_bytes:usize,
@@ -17,6 +44,9 @@ fn reserve<T>(values:&mut Vec<T>,count:usize,available:&mut usize)->Result<usize
     Ok(bytes)
 }
 impl Forms{
+    pub(crate) fn validation_metadata_work(&self,doc:&Document)->Result<usize,String>{
+        self.controls.keys().try_fold(0usize,|total,&node|total.checked_add(validation_attribute_work(doc,node)?).ok_or("Validation metadata work overflow.".into()))
+    }
     pub(super) fn validation_enabled(&self,doc:&Document,owner:usize,submitter:Option<usize>)->Result<bool,String>{
         if owner>=doc.nodes.len()||doc.nodes[owner].namespace!=crate::html::Namespace::Html||tag(doc,owner)!="form"{return Err("Submission requires an existing form.".into());}
         if self.limited{return Err("This page exceeds the form value/control limits; nothing was submitted.".into());}
@@ -57,12 +87,15 @@ impl Forms{
         let seen_bytes=reserve(&mut seen,doc.nodes.len(),&mut available)?;
         let stack_bytes=reserve(&mut stack,doc.nodes.len(),&mut available)?;
         let peak_bytes=result_bytes.checked_add(seen_bytes).and_then(|n|n.checked_add(stack_bytes)).ok_or("Validation peak storage overflow.")?;
-        seen.resize(doc.nodes.len(),false);stack.push(root);
-        while let Some(node)=stack.pop(){
+        seen.resize(doc.nodes.len(),false);stack.push((root,false,false));
+        while let Some((node,in_datalist,parent_select))=stack.pop(){
             if node>=doc.nodes.len()||seen[node]{return Err("Invalid validation tree topology; nothing was submitted.".into());}seen[node]=true;
-            if self.controls.get(&node).is_some_and(|c|self.required_value_missing(owner,c)){nodes.push(node);}
+            if self.controls.get(&node).is_some_and(|c|validation_candidate(doc,node,c.disabled,in_datalist,parent_select)&&self.required_value_missing(owner,c)){nodes.push(node);}
             if stack.len().checked_add(doc.nodes[node].children.len()).is_none_or(|n|n>doc.nodes.len()){return Err("Invalid validation traversal size; nothing was submitted.".into());}
-            stack.extend(doc.nodes[node].children.iter().rev().copied());
+            let html=doc.nodes[node].namespace==crate::html::Namespace::Html;
+            let barred=in_datalist||html&&tag(doc,node)=="datalist";
+            let select=html&&tag(doc,node)=="select";
+            stack.extend(doc.nodes[node].children.iter().rev().map(|&child|(child,barred,select)));
         }
         Ok(ValidationSnapshot{nodes,peak_bytes})
     }

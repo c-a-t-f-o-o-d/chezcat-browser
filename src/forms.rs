@@ -656,7 +656,7 @@ pub(crate) use forms_reset::ResetPlan;
 
 #[path="forms_validation.rs"]
 mod forms_validation;
-pub(crate) use forms_validation::ValidationSnapshot;
+pub(crate) use forms_validation::{ValidationSnapshot,validation_candidate,validation_attribute_work};
 
 pub struct Forms {
     pub controls: BTreeMap<usize, Control>,
@@ -1226,11 +1226,8 @@ impl Forms {
         submitter: Option<usize>,
     ) -> Result<(), String> {
         if self.validation_enabled(doc, owner, submitter)? {
-            for (&node,control) in &self.controls {
-                if self.required_value_missing(owner, control) {
-                    return Err(self.required_message(node));
-                }
-            }
+            let snapshot=self.required_snapshot(doc,owner,0,usize::MAX)?;
+            if let Some(&node)=snapshot.nodes.first(){return Err(self.required_message(node));}
         }
         Ok(())
     }
