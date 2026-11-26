@@ -7366,3 +7366,7 @@ mod range_inert_tests;
 #[cfg(test)]
 #[path="app_range_native_cloning_tests.rs"]
 mod range_native_cloning_tests;
+
+#[cfg(test)]
+#[path="app_range_inert_deletion_tests.rs"]
+mod range_inert_deletion_tests;
