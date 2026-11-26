@@ -158,7 +158,7 @@ mod script_ranges;
 mod script_abort;
 #[path = "script_pi_attributes.rs"]
 mod script_pi_attributes;
-use crate::javascript::parent_node_interface;
+use crate::javascript::{parent_node_interface,child_node_interface};
 use crate::javascript::processing_instruction_interface;
 #[path = "script_message_channel.rs"]
 mod script_message_channel;
@@ -5132,7 +5132,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
         if self.event_target_interface(object)&&processing_instruction_interface::operation(method).is_some(){return Some(object);}
-        if self.event_target_interface(object)&&parent_node_interface::operation(method){return Some(object);}
+        if self.event_target_interface(object)&&(parent_node_interface::operation(method)||child_node_interface::operation(method)){return Some(object);}
         if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -5352,6 +5352,12 @@ impl Host for Bridge<'_> {
         method: &str,
         args: &[Value],
     ) -> Result<(), (&'static str, String)> {
+        if child_node_interface::operation(method){
+            if !self.child_node_variadic_receiver(object){return Err(("TypeError","ChildNode method requires a genuine child-node interface.".into()));}
+            self.native_node_access(object)?;
+            if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child document mutation requires its lifecycle hooks.".into()));}
+            return Ok(());
+        }
         if method==parent_node_interface::REPLACE_ALL{return self.validate_parent_replace_all(object,args);}
         if parent_node_interface::operation(method){return if self.parent_node_receiver(object){self.native_node_access(object)}else{Err(("TypeError","ParentNode method requires a genuine parent.".into()))};}
         if let Some(operation)=script_class_list::operation(method){return self.class_list_validate(object,operation,args);}
@@ -6350,6 +6356,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&(method.starts_with("\0UIEvent.")||method=="initUIEvent") {
             return self.ui_receiver(receiver);
         }
+        if self.event_target_interface(object)&&child_node_interface::operation(method){return self.child_node_variadic_receiver(receiver);}
         if self.event_target_interface(object) && (parent_children::operation(method).is_some()||parent_node_interface::operation(method)) {
             return self.parent_node_receiver(receiver);
         }
@@ -12535,3 +12542,7 @@ mod pi_pseudo_attributes_tests;
 #[cfg(test)]
 #[path="script_parent_node_variadic_tests.rs"]
 mod parent_node_variadic_tests;
+
+#[cfg(test)]
+#[path="script_child_node_variadic_tests.rs"]
+mod child_node_variadic_tests;

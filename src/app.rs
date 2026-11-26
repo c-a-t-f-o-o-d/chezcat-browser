@@ -7422,3 +7422,7 @@ mod pi_pseudo_attributes_tests;
 #[cfg(test)]
 #[path="app_parent_node_variadic_tests.rs"]
 mod parent_node_variadic_tests;
+
+#[cfg(test)]
+#[path="app_child_node_variadic_tests.rs"]
+mod child_node_variadic_tests;

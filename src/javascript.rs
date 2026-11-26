@@ -30,6 +30,8 @@ mod property_key_native_tests;
 pub(crate) mod processing_instruction_interface;
 #[path="parent_node_interface.rs"]
 pub(crate) mod parent_node_interface;
+#[path="child_node_interface.rs"]
+pub(crate) mod child_node_interface;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
 #[path="anchor_url_interface.rs"]
@@ -9300,6 +9302,7 @@ impl Runtime {
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
         if parent_node_interface::operation(method){return self.parent_node_variadic_call(object,method,args,host);}
+        if child_node_interface::operation(method){return self.child_node_variadic_call(object,method,args,host);}
         if range_interface::operation(method) {
             host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
             if let Err(error)=host.range_endpoint_access(object,method,args) {
