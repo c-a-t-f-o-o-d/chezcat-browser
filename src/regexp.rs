@@ -622,9 +622,6 @@ impl Parser {
     }
 
     fn character(&mut self, unit: u32) -> Result<usize, Error> {
-        if self.unicode && surrogate(unit) {
-            return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
-        }
         if self.insensitive && unit >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -663,6 +660,28 @@ impl Parser {
         }
         Ok(value)
     }
+    fn unicode_escape(&mut self) -> Result<u32, Error> {
+        if self.unicode && self.eat(b'{' as u16) {
+            return self.braced_unicode_escape();
+        }
+        let lead = u32::from(self.hex(4)?);
+        if self.unicode && (0xd800..=0xdbff).contains(&lead) {
+            // Only adjacent four-digit escapes combine. Braced escapes and
+            // mixed raw/escaped units remain distinct pattern characters.
+            let trail = self.units.get(self.at..).and_then(|tail| tail.get(..6))
+                .filter(|tail| tail[0] == 92 && tail[1] == 117)
+                .and_then(|tail| tail[2..].iter().try_fold(0u32, |value, &unit| {
+                    char::from_u32(u32::from(unit)).and_then(|c| c.to_digit(16))
+                        .map(|digit| value * 16 + digit)
+                }))
+                .filter(|trail| (0xdc00..=0xdfff).contains(trail));
+            if let Some(trail) = trail {
+                self.at += 6;
+                return Ok(0x10000 + ((lead - 0xd800) << 10) + trail - 0xdc00);
+            }
+        }
+        Ok(lead)
+    }
     fn escape(&mut self, in_class: bool) -> Result<ClassPart, Error> {
         let unit = self
             .peek()
@@ -679,8 +698,7 @@ impl Parser {
             102 => 12,
             98 if in_class => 8,
             120 => u32::from(self.hex(2)?),
-            117 if self.unicode && self.eat(b'{' as u16) => self.braced_unicode_escape()?,
-            117 => u32::from(self.hex(4)?),
+            117 => self.unicode_escape()?,
             99 => {
                 let next = self
                     .peek()
@@ -719,9 +737,6 @@ impl Parser {
                 return Err(Error::Syntax("Invalid Unicode regexp identity escape.")),
             _ => u32::from(unit),
         };
-        if self.unicode && surrogate(literal) {
-            return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
-        }
         if self.insensitive && literal >= 128 {
             return Err(Error::Unsupported(
                 "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -738,9 +753,6 @@ impl Parser {
             self.escape(true)
         } else {
             let unit = self.raw_character();
-            if self.unicode && surrogate(unit) {
-                return Err(Error::Unsupported("Unicode regexp surrogate literals are not implemented."));
-            }
             if self.insensitive && unit >= 128 {
                 return Err(Error::Unsupported(
                     "Case-insensitive non-ASCII regexp literals/ranges are not implemented.",
@@ -981,7 +993,7 @@ impl Compiler<'_> {
                 greedy,
             } => {
                 let atom = match &nodes[*body] {
-                    Node::Character(unit) if !self.unicode || *unit <= 0xffff => Some(Atom::Character(*unit)),
+                    Node::Character(unit) if !self.unicode || *unit <= 0xffff && !surrogate(*unit) => Some(Atom::Character(*unit)),
                     Node::Class(class) if !self.unicode || !class.inverted && class.parts.iter().all(|part| match *part {
                         ClassPart::Range(low, high) => high <= 0xffff && (high < 0xd800 || low > 0xdfff),
                         ClassPart::Digit(inverted) | ClassPart::Word(inverted) | ClassPart::Space(inverted) => !inverted,
