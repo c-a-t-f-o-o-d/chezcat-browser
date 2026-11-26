@@ -479,3 +479,27 @@ fn unicode_case_folding_native_work_refusal_is_fatal_and_fresh_job_recovers() {
     let error=runtime.execute("try{new RegExp(pattern,'iv');}catch(e){finished=true;}finally{finished=true;}",&mut NoHost).unwrap_err();assert!(error.contains("Regular-expression work limit"),"{error}");assert_eq!(runtime.retained_regexp,retained);
     runtime.begin_job();assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'iv').test('K');",&mut NoHost).unwrap().to_text(),"true");
 }
+#[test]
+fn regexp_inline_modifiers_native_metadata_and_string_consumers() {
+    succeeds(r#"
+var r=/(?<x>(?i:𐐀))b/gv,m=r.exec('!𐐨b');if(r.ignoreCase||r.multiline||r.dotAll||r.flags!=='gv'||m.index!==1||m.groups.x!=='𐐨'||r.lastIndex!==4)throw 'modifier result';
+if(new RegExp(r).source!==r.source||!new RegExp(r).test('𐐨b'))throw 'modifier clone';
+if('aAb'.replace(/(?i:a)/g,'!')!=='!!b'||'aΣb'.split(/(?i:(σ))/u).join()!=='a,Σ,b'||'!ς'.search(/(?i:Σ)/v)!==1)throw 'modifier consumers';
+if('aA'.match(/(?i:a)/g).join()!=='a,A'||!/(?m:^a$)/.test('x\na\ny')||!/(?s:^.$)/.test('\n'))throw 'modifier flags';
+if(/^(?i:a)b$/.test('AB')||!/(?i:a(?-i:b)c)/.test('AbC'))throw 'modifier scope';
+if('😀'.replace(/(?i:)/gu,'!')!=='!😀!')throw 'modifier empty progress';
+for(var p of ['(?-:a)','(?ii:a)','(?i-i:a)','(?g:a)','(?i)']){var e=null;try{new RegExp(p);}catch(x){e=x;}if(!(e instanceof SyntaxError))throw 'modifier syntax';}
+'ok';
+"#);
+}
+
+#[test]
+fn regexp_inline_modifiers_native_refusal_is_fatal_and_fresh_job_recovers() {
+    for work in [true,false] {
+        let mut runtime=Runtime::for_test();runtime.execute(r"var pattern='(?i:[\\p{Lu}])',finished=false;",&mut NoHost).unwrap();
+        let retained=runtime.retained_regexp;let allowance=runtime.limits.capacity.retained_regexp;
+        if work {runtime.regexp_work=100;} else {runtime.limits.capacity.retained_regexp=0;}
+        let error=runtime.execute("try{new RegExp(pattern,'v');}catch(e){finished=true;}finally{finished=true;}",&mut NoHost).unwrap_err();assert!(error.contains(if work {"Regular-expression work limit"} else {"Retained regexp limit"}),"{error}");assert_eq!(runtime.retained_regexp,retained);
+        runtime.limits.capacity.retained_regexp=allowance;runtime.begin_job();assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'v').test('K');",&mut NoHost).unwrap().to_text(),"true");
+    }
+}

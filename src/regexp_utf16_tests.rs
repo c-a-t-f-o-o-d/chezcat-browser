@@ -1,6 +1,68 @@
 use super::*;
 
 #[test]
+fn regexp_inline_modifiers_enable_disable_and_restore_locally() {
+    for (pattern,flags,text,yes) in [
+        (r"^(?i:a)b$","","Ab",true),(r"^(?i:a)b$","","AB",false),
+        (r"^(?-i:a)b$","i","aB",true),(r"^(?-i:a)b$","i","AB",false),
+        (r"^(?i:a(?-i:b)c)d$","","AbCd",true),(r"^(?i:a(?-i:b)c)d$","","ABCD",false),
+        (r"^(?i-:a)$","","A",true),(r"^(?:a)$","","a",true),
+        (r"(?m:^a$)","","x\na\ny",true),(r"(?-m:^a$)","m","x\na\ny",false),
+        (r"^(?s:.)$","","\n",true),(r"^(?-s:.)$","s","\n",false),
+        (r"^(?ims:^a.$)$","","A\n",true),(r"^(?i:a|b)c$","","Bc",true),
+        (r"(?m:^a$)\n^b$","","a\nb",false),(r"^(?s:.)\n.$","","\n\n\n",false),
+        (r"^(?i-ms:a.\n)(?ms:^b$)$","ms","Ax\nb",true),
+        (r"^(?i:a(?-i:b)c|d)e$","","De",true),
+    ] {
+        let re=Regex::compile(pattern,flags,&mut 1_000_000).unwrap();
+        assert_eq!(re.flags.text(),flags);
+        assert_eq!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 1_000_000).unwrap().is_some(),yes,"{pattern} {flags} {text:?}");
+    }
+}
+
+#[test]
+fn regexp_inline_modifiers_unicode_classes_properties_strings_and_words() {
+    for flags in ["u","v"] {
+        for (pattern,text,yes) in [(r"^(?i:[A-Z])$","K",true),(r"^(?i:[^k])$","K",false),(r"^(?i:\b\w\b)$","ſ",true),(r"^(?i:𐐀)$","𐐨",true),(r"^(?i:É)(?-i:É)$","éÉ",true),(r"^(?i:É)(?-i:É)$","éé",false)] {
+            let re=Regex::compile(pattern,flags,&mut 20_000_000).unwrap();assert_eq!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 20_000_000).unwrap().is_some(),yes,"{pattern} {flags}");
+        }
+        let re=Regex::compile(r"^(?-i:[A-Z])$",&format!("i{flags}"),&mut 20_000_000).unwrap();assert!(re.find(&[0x212a],0,false,&mut 20_000_000).unwrap().is_none());
+    }
+    for (flags,yes) in [("u",true),("v",false)] {assert_eq!(Regex::compile(r"^(?i:\P{Lowercase_Letter})$",flags,&mut 20_000_000).unwrap().find(&[97],0,false,&mut 20_000_000).unwrap().is_some(),yes);}
+    assert!(Regex::compile(r"^(?i:[\q{AB|cd}&&\q{ab}])$","v",&mut 20_000_000).unwrap().find(&[65,98],0,false,&mut 20_000_000).unwrap().is_some());
+}
+
+#[test]
+fn regexp_inline_modifiers_backtracking_assertions_references_and_captures() {
+    for (pattern,flags,text,yes) in [
+        (r"^(?:(?i:a)c|aB)$","","AB",false),
+        (r"^(?i:a+)a$","","Aa",true),(r"^(?i:a+)a$","","AA",false),
+        (r"^(?i:a)*b$","","Aab",true),(r"^(?i:a)*b$","","AaB",false),
+        (r"^(?=(?i:a))a$","","A",false),(r"^(?i:(?=a)a)b$","","Ab",true),
+        (r"(?<=(?i:a))b","","Ab",true),(r"(?i:(?<=a)b)c","","ABc",true),
+        (r"^(?i:(a))\1$","","Aa",false),(r"^(a)(?i:\1)$","","aA",true),
+        (r"^(?i:(𐐀)\1)$","v","𐐨𐐀",true),(r"^(?i:(?!b)a)b$","","Ab",true),
+    ] {assert_eq!(Regex::compile(pattern,flags,&mut 1_000_000).unwrap().find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 1_000_000).unwrap().is_some(),yes,"{pattern} {text}");}
+    let re=Regex::compile(r"^(?i:(a)|(b))+$","",&mut 1_000_000).unwrap();
+    assert_eq!(re.find(&[65,66],0,false,&mut 1_000_000).unwrap().unwrap().captures,vec![Some((0,2)),None,Some((1,2))]);
+}
+
+#[test]
+fn regexp_inline_modifiers_grammar_work_refusal_and_fresh_recovery() {
+    for flags in ["","u","v"] {
+        for pattern in ["(?-:a)","(?ii:a)","(?i-i:a)","(?i-ii:a)","(?mm:a)","(?g:a)","(?u:a)","(?v:a)","(?d:a)","(?y:a)","(?I:a)","(?i)","(?i--m:a)","(?i a)","(?i:a"] {
+            assert!(matches!(Regex::compile(pattern,flags,&mut 1_000_000),Err(Error::Syntax(_))),"{pattern}");
+        }
+    }
+    assert!(matches!(Regex::compile(r"(?i:[\p{Lu}])","v",&mut 100),Err(Error::Limit(_))));
+    let re=Regex::compile(r"^(?i:a)+$","",&mut 1_000_000).unwrap();assert!(matches!(re.find(&[65],0,false,&mut 0),Err(Error::Limit(_))));assert!(re.find(&[65],0,false,&mut 1_000_000).unwrap().is_some());
+    assert!(matches!(Regex::compile("(?i:é)","",&mut 1_000_000),Err(Error::Unsupported(_))));
+    assert!(Regex::compile("(?-i:é)","i",&mut 1_000_000).unwrap().find(&[0xe9],0,false,&mut 1_000_000).unwrap().is_some());
+    let deep=format!("{}a{}","(?i:".repeat(MAX_DEPTH),")".repeat(MAX_DEPTH));
+    assert!(matches!(Regex::compile(&deep,"",&mut 1_000_000),Err(Error::Limit(_))));
+}
+
+#[test]
 fn unicode_regexp_subset_preserves_syntax_and_unsupported_boundaries() {
     for pattern in [r"[\d-q]", r"[q-\d]", "[z-a]", r"\q", "]"] {
         assert!(matches!(Regex::compile(pattern, "u", &mut 100_000), Err(Error::Syntax(_))), "{pattern}");
