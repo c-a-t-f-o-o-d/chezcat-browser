@@ -96,6 +96,28 @@ impl Bridge<'_> {
     fn template_import_source(&self,object:u32)->Option<ImportSource<'_>>{
         self.inert_import_source(object).or_else(||{if self.template_receiver(object){let index=node_index(object)?;Some(ImportSource::Parsed{node:self.doc.nodes.get(index)?,unsafe_nonce:self.doc.nonce_unsafe_nodes.contains(&index)})}else{None}})
     }
+    // Inert data acquires a new owner without interpreting its literal text.
+    fn passive_inert_noscript_host(&mut self, object:u32)->Result<bool,String>{
+        let host=match self.template_import_source(object){
+            Some(ImportSource::Element("noscript"))=>true,
+            Some(ImportSource::Parsed{node,..})=>node.namespace==crate::html::Namespace::Html
+                && matches!(&node.kind,NodeKind::Element{tag,..} if tag=="noscript"),
+            _=>false,
+        };
+        if !host{return Ok(false);}
+        let count=self.template_import_children(object).ok_or("Inert noscript source is unavailable.")?.len();
+        self.state.work(count)?;
+        Ok(self.template_import_children(object).unwrap().iter().all(|&child|{
+            self.template_import_children(child).is_some_and(|children|children.is_empty())
+                && match self.template_import_source(child){
+                    Some(ImportSource::Text(_))=>true,
+                    Some(ImportSource::Parsed{node,..})=>node.namespace==crate::html::Namespace::None
+                        && matches!(&node.kind,NodeKind::Text(_)) && node.children.is_empty(),
+                    _=>false,
+                }
+        }))
+    }
+
     fn template_import_children(&self,object:u32)->Option<&[u32]>{if self.template_receiver(object){Some(&[])}else{self.inert_children(object)}}
     pub(super) fn import_node(&mut self, args: &[Value], fields: Option<&[(&str, Value)]>) -> Result<Value, String> {
         self.validate_import_node_kind(args).map_err(|(_,message)|message)?;
@@ -116,6 +138,7 @@ impl Bridge<'_> {
         let mut bytes = 0usize;
         let mut templates=Vec::new();
         while let Some(&(handle, parent, depth)) = pending.get(staged.len()) {
+            let passive_noscript=self.passive_inert_noscript_host(handle)?;
             let children = self.template_import_children(handle).ok_or("Inert import source is unavailable.")?;
             let count = if deep { children.len() } else { 0 };
             if count > remaining - pending.len() {
@@ -138,7 +161,7 @@ impl Bridge<'_> {
                         if attrs.iter().any(|attr|!script_attr::materializable_value(attr,node.namespace,tag)){return Err("Native import of unpaired attribute values requires its DOMString consumer integration.".into());}
                         let svg=node.namespace==crate::html::Namespace::Svg;
                         if svg{if !crate::html::svg_dom_transfer(node){return Err("SVG import requires supported passive shapes/attributes and local references.".into());}for attr in attrs{if attr.name.html_is("style"){validate_style(&attr.value,self.state.limits.host.string_bytes)?;}}}
-                        if !svg&&(node.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag)||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
+                        if !svg&&(node.namespace != crate::html::Namespace::Html || !(cloneable_html_element(tag)||passive_noscript||matches!(tag.as_str(),"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template"))) {
                             return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                         }
                         if tag=="img"&&(count!=0||attrs.iter().any(|attr|attr.name.html_is("srcset"))){return Err("Image import requires a plain childless image without srcset selection.".into());}
@@ -152,7 +175,7 @@ impl Bridge<'_> {
                     copied_node_bytes(node).saturating_add(metadata)
                 }
                 ImportSource::Element(tag) => {
-                    if !(cloneable_html_element(tag)||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
+                    if !(cloneable_html_element(tag)||passive_noscript||matches!(*tag,"input"|"textarea"|"select"|"option"|"optgroup"|"button"|"img"|"style"|"template")) {
                         return Err("Import supports ordinary HTML containers and inert data nodes.".into());
                     }
                     tag.len()
@@ -409,3 +432,7 @@ mod radio_clone_tests;
 #[cfg(test)]
 #[path="script_noscript_host_clone_tests.rs"]
 mod noscript_host_clone_tests;
+
+#[cfg(test)]
+#[path="script_noscript_inert_import_tests.rs"]
+mod noscript_inert_import_tests;
