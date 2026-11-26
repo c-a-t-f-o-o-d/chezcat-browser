@@ -7514,3 +7514,7 @@ mod noscript_loader_context_tests;
 #[cfg(test)]
 #[path="app_noscript_fragment_context_tests.rs"]
 mod noscript_fragment_context_tests;
+
+#[cfg(test)]
+#[path = "app_noscript_host_retirement_tests.rs"]
+mod app_noscript_host_retirement_tests;
