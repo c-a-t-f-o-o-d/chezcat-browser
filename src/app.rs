@@ -7498,3 +7498,7 @@ mod dataset_integrity_tests;
 #[cfg(test)]
 #[path="app_dataset_symbol_properties_tests.rs"]
 mod dataset_symbol_properties_tests;
+
+#[cfg(test)]
+#[path="app_dataset_reflect_get_tests.rs"]
+mod dataset_reflect_get_tests;
