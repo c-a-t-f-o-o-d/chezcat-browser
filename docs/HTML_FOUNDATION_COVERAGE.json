@@ -1866,7 +1866,7 @@
         },
         {
           "id": "F14.05",
-          "requirement": "Reconcile saved YouTube work and select next product checkpoint",
+          "requirement": "Reconcile shared capability contracts and select the next product checkpoint; retain site observations as test evidence",
           "status": "unassessed",
           "verification": [],
           "dependency_details": []
@@ -4269,7 +4269,7 @@
     {
       "id": "MEDIA",
       "title": "Streaming, full media platform and codecs",
-      "boundary": "Real supported element lifecycle required; no fabricated playback; YouTube P6 remains saved",
+      "boundary": "Real supported element lifecycle required; no fabricated playback; original media capability P6 remains planned and named-site playback stays separate compatibility evidence",
       "status": "related_program"
     },
     {

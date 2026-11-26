@@ -8,7 +8,7 @@
     "after": "HTML_FOUNDATION_COVERAGE.json#F14",
     "state": "planned",
     "foundation_rule": "Required CSS/default-presentation dependencies of F09–F13 remain HTML foundation blockers; the later broad CSS program does not defer them.",
-    "product_rule": "A product milestone requires its explicit dependency closure and actual journey evidence. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for YouTube. A whole-CSS claim is not permitted while required applicable coverage remains open.",
+    "product_rule": "A product capability milestone requires its explicit dependency closure and connected App evidence. Named sites are representative compatibility tests. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for every product integration check. A whole-CSS claim is not permitted while required applicable coverage remains open.",
     "preparatory_work": "Independent syntax/selector/property corrections may land before F14 when they require no unfinished HTML/XHTML contract and preserve its implementation order. Each records its own baseline, dated clauses, original cases and finite evidence; full program and package acceptance remain gated."
   },
   "source_baseline": {
@@ -9149,7 +9149,7 @@
       ],
       "required_selection": null,
       "scope_track": "program_reporting",
-      "consumer_gate": "A product milestone requires its explicit dependency closure and actual journey evidence. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for YouTube. A whole-CSS claim is not permitted while required applicable coverage remains open."
+      "consumer_gate": "A product capability milestone requires its explicit dependency closure and connected App evidence. Named sites are representative compatibility tests. Unrelated printing, speech, Houdini and forward items are not blanket prerequisites for every product integration check. A whole-CSS claim is not permitted while required applicable coverage remains open."
     }
   ],
   "wpt_plan": {
