@@ -3733,6 +3733,9 @@ impl Host for Bridge<'_> {
     fn native_descriptor_change_allowed(&self,object:u32,property:&str)->bool{
         !(self.control_form_member(object,property)&&node_index(object).is_some_and(|node|self.forms.controls.contains_key(&node)))
     }
+    fn symbol_property_owner(&self,object:u32)->Option<u32> {
+        ((DATASET_BASE..EVENT_BASE).contains(&object) && self.attr_element_receiver(node_handle((object-DATASET_BASE) as usize))).then_some(WINDOW)
+    }
     fn expando_owner(&self,object:u32)->Option<u32> {
         if self.validity_receiver(object){return Some(WINDOW);}
         if self.class_list_receiver(object){return Some(WINDOW);}
@@ -12694,3 +12697,7 @@ mod dataset_reflect_set_tests;
 #[cfg(test)]
 #[path="script_dataset_integrity_tests.rs"]
 mod dataset_integrity_tests;
+
+#[cfg(test)]
+#[path="script_dataset_symbol_properties_tests.rs"]
+mod dataset_symbol_properties_tests;

@@ -272,7 +272,8 @@ impl Runtime {
         }
     }
 
-    /// Only already registered native expando stores can hold symbol keys.
+    /// Explicit Symbol-only native stores never receive string keys.
+    /// Existing registered native expando stores retain their own policy.
     /// No key is converted to a native property name or passed to Host::set.
     pub(super) fn symbol_backing(&mut self, value: &Value, host: &dyn Host) -> Result<Option<Ordinary>, Fault> {
         self.reject_foreign_window(value, host)?;
@@ -281,6 +282,33 @@ impl Runtime {
             return Ok(Some(ordinary));
         }
         if let Value::Host(handle) = value {
+            self.validate_native_access(*handle,host)?;
+            self.work(self.native_symbol_backings.len())?;
+            let previous=self.native_symbol_backings.iter().find(|(native,_,_)|native==handle).copied();
+            if let Some(owner)=host.symbol_property_owner(*handle) {
+                let caller=self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window));
+                if caller!=Some(owner){host.validate_window_access(caller,owner).map_err(Fault::new)?;}
+                let ancestry=host.instance_ancestry(*handle).ok_or_else(||Fault::new("Native Symbol prototype provenance is unavailable."))?;
+                if ancestry.window!=owner{return Err(Fault::new("Native Symbol prototype owner mismatch."));}
+                if let Some((_,previous_owner,id))=previous {
+                    if previous_owner!=owner{return Err(Fault::new("Native Symbol owner realm changed."));}
+                    self.object(id)?;
+                    return Ok(Some(Ordinary::Object(id)));
+                }
+                if self.host_objects.contains_key(handle){return Err(Fault::new("Native Symbol store conflicts with an existing host binding."));}
+                let prototype=self.native_ancestry_anchor(ancestry)?;
+                let available=self.limits.heap.retained_values.saturating_sub(self.value_bytes);
+                let growth=super::limits::prepare_retained_growth(&self.native_symbol_backings,1,available)?;
+                self.work(growth.added.saturating_add(self.native_symbol_backings.len()))?;
+                let id=self.new_object(None)?;
+                self.objects[id].prototype=Some(prototype);
+                let bytes=growth.added;
+                growth.commit(&mut self.native_symbol_backings);
+                self.native_symbol_backings.push((*handle,owner,id));
+                self.value_bytes+=bytes;
+                return Ok(Some(Ordinary::Object(id)));
+            }
+            if previous.is_some(){return Err(Fault::new("Native Symbol receiver has expired or is no longer accessible."));}
             self.ensure_native_expando(*handle,host,true)?;
             if let Some((global, properties)) = self.browser_global {
                 if global == *handle {
@@ -779,3 +807,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path="native_symbol_backing_tests.rs"]
+mod native_symbol_backing_tests;

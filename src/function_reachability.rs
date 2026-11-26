@@ -453,7 +453,7 @@ impl Runtime {
         // even when no child realm exists. Error-family maps have bounded keys.
         meter.charge(self.transient_roots.roots.len() + 2
             + (1 + usize::from(self.parked_main_roots.is_some()) + self.intrinsic_realms.len()) * 256
-            + self.host_objects.len() + self.host_method_values.len() + exported.len()
+            + self.host_objects.len() + self.native_symbol_backings.len() + self.host_method_values.len() + exported.len()
             + self.exported_function_roots.len() + self.exported_object_roots.len())?;
         if transient { for &edge in &self.transient_roots.roots { graph.add(edge); } }
         if let Some(context) = self.invocation {
@@ -470,6 +470,7 @@ impl Runtime {
             }
         }
         for &id in self.host_objects.values() { graph.add(Edge::Object(id)); }
+        for &(_,_,id) in &self.native_symbol_backings { graph.add(Edge::Object(id)); }
         for value in self.host_method_values.values().chain(exported) { Edge::value(value, &mut |edge| graph.add(edge)); }
         if include_registered_exports {
             for &id in &self.exported_function_roots { graph.add(Edge::Function(id)); }

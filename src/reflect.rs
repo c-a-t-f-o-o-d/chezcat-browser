@@ -228,6 +228,10 @@ impl Runtime {
         let Some(base) = base else {
             self.reject_foreign_window(target, host)?;
             if let Value::Host(handle)=target {
+                if matches!(key,PropertyKey::Symbol(_)) && host.symbol_property_owner(*handle).is_some() {
+                    let backing=self.symbol_backing(target,host)?.ok_or_else(||Fault::new("Native Symbol backing is unavailable."))?;
+                    return self.reflect_set_key(backing,key,value,receiver,host).map(Value::Bool);
+                }
                 if host.named_units_setter(*handle) {
                     // Web IDL's named setter wins only for the same receiver.
                     // Otherwise its ordinary own descriptor excludes named
@@ -286,6 +290,11 @@ impl Runtime {
             self.validate_native_access(*handle,host)?;
             if host.named_units_setter(*handle)&&!matches!(key,PropertyKey::Symbol(_)) {
                 return self.reflect_native_named_set(*handle,key,value,host);
+            }
+            if matches!(key,PropertyKey::Symbol(_)) && host.symbol_property_owner(*handle).is_some() {
+                let backing=self.symbol_backing(receiver,host)?.ok_or_else(||Fault::new("Native Symbol backing is unavailable."))?;
+                let id=self.ordinary_id(backing)?;
+                return self.set_stored_receiver_data(id,key,|runtime|runtime.copy_value(value));
             }
             return Err(Fault::new(
                 "Reflect.set cannot define data on a native receiver.",
