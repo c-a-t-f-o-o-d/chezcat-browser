@@ -106,6 +106,7 @@ pub(super) struct PreparedChange {
     retained: usize,
     new_job: bool,
     transient: Option<TransientPlan>,
+    iterators: Option<super::node_iterator::live::RemovalPlan>,
 }
 
 impl Arena {
@@ -429,18 +430,28 @@ impl Runtime {
     pub(super) fn prepare_child_list_write(&mut self, target: u32, method: &str, args: &[Value], host: &mut dyn Host)
         -> Result<Option<PreparedChange>, Fault>
     {
-        if !self.mutations.observes_tree_mutations() { return Ok(None); }
+        if !self.mutations.observes_tree_mutations() && !self.node_iterators.has_states() { return Ok(None); }
         let Some(generation) = host.mutation_tree_generation() else { return Ok(None) };
         let changes = host.mutation_child_list_changes(target, method, args).map_err(Fault::new)?;
-        self.prepare_child_list_changes(target,generation,changes,host)
+        self.prepare_child_list_changes(target,generation,changes,true,host)
     }
 
     pub(super) fn prepare_native_child_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
-        if !self.mutations.observes_tree_mutations(){return Ok(None);}
-        self.prepare_child_list_changes(target,generation,changes,host)
+        if !self.mutations.observes_tree_mutations() && !self.node_iterators.has_states(){return Ok(None);}
+        self.prepare_child_list_changes(target,generation,changes,true,host)
     }
-    fn prepare_child_list_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
+    pub(super) fn prepare_normalize_child_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
+        if !self.mutations.observes_tree_mutations(){return Ok(None);}
+        self.prepare_child_list_changes(target,generation,changes,false,host)
+    }
+    pub(super) fn prepare_normalize_iterator_changes(&mut self,target:u32,generation:u64,events:&[NativeNormalizeEvent],host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
+        let changes=events.iter().filter_map(|event|match event{NativeNormalizeEvent::Child(change)=>Some(change),_=>None});
+        let iterators=self.prepare_iterator_removals(changes,host)?;
+        self.prepare_mutation_effects_with_iterators(target,generation,Vec::new(),None,iterators)
+    }
+    fn prepare_child_list_changes(&mut self,target:u32,generation:u64,changes:Vec<NativeChildListChange>,positions:bool,host:&mut dyn Host)->Result<Option<PreparedChange>,Fault>{
         if changes.is_empty() { return Ok(None); }
+        let iterators=if positions{self.prepare_iterator_removals(changes.iter(),host)?}else{None};
         let transient=self.prepare_transient_changes(&changes,host)?;
         let mut entries = Vec::new();
         for change in changes {
@@ -454,7 +465,7 @@ impl Runtime {
                 }));
             }
         }
-        self.prepare_mutation_effects(target,generation,entries,transient)
+        self.prepare_mutation_effects_with_iterators(target,generation,entries,transient,iterators)
     }
 
     pub(super) fn prepare_setter_observation(&mut self,handle:u32,name:&str,value:&Value,reflected:Option<&str>,host:&mut dyn Host)->Result<(Option<PreparedChange>,bool),Fault>{
@@ -464,12 +475,12 @@ impl Runtime {
                 if let Some((target,change))=host.mutation_attribute_setter_change(handle,name).map_err(Fault::new)?{return self.prepare_attribute_change(target,generation,change,host).map(|pending|(pending,true));}
             }
         }
-        if self.mutations.observes_tree_mutations(){
+        if self.mutations.observes_tree_mutations() || self.node_iterators.has_states(){
             if let Some(target)=host.mutation_content_target(handle,name).map_err(Fault::new)?{
-                if self.has_subtree_sources(target,host)?||!self.matching_observers(target,true,None,host)?.is_empty(){
+                if self.node_iterators.has_states()||self.has_subtree_sources(target,host)?||!self.matching_observers(target,true,None,host)?.is_empty(){
                     if let Some(generation)=host.mutation_tree_generation(){
                         let changes=host.mutation_content_changes(handle,name,value).map_err(Fault::new)?;
-                        return self.prepare_child_list_changes(target,generation,changes,host).map(|pending|(pending,true));
+                        return self.prepare_child_list_changes(target,generation,changes,true,host).map(|pending|(pending,true));
                     }
                 }
                 return Ok((None,true));
@@ -520,12 +531,16 @@ impl Runtime {
         self.prepare_mutation_effects(target,generation,entries,None)
     }
     fn prepare_mutation_effects(&mut self,target:u32,generation:u64,entries:Vec<(usize,Record)>,transient:Option<TransientPlan>)->Result<Option<PreparedChange>,Fault>{
-        if entries.is_empty()&&transient.is_none(){return Ok(None);}
+        self.prepare_mutation_effects_with_iterators(target,generation,entries,transient,None)
+    }
+    fn prepare_mutation_effects_with_iterators(&mut self,target:u32,generation:u64,entries:Vec<(usize,Record)>,transient:Option<TransientPlan>,iterators:Option<super::node_iterator::live::RemovalPlan>)->Result<Option<PreparedChange>,Fault>{
+        let observed=!entries.is_empty()||transient.is_some();
+        if !observed&&iterators.is_none(){return Ok(None);}
         if self.mutations.pending_records.saturating_add(entries.len()) > MAX_PENDING_RECORDS {
             return Err(Fault::new("MutationObserver pending-record limit reached."));
         }
         let mut counts = BTreeMap::new();
-        let mut retained = transient.as_ref().map_or(0,TransientPlan::retained_bytes);
+        let mut retained = transient.as_ref().map_or(0,TransientPlan::retained_bytes).checked_add(iterators.as_ref().map_or(0,super::node_iterator::live::RemovalPlan::retained_bytes)).ok_or_else(||Fault::new("Native mutation retained storage overflow."))?;
         for (observer, record) in &entries {
             *counts.entry(*observer).or_insert(0) += 1;
             retained = retained.saturating_add(record.retained_bytes());
@@ -538,14 +553,14 @@ impl Runtime {
                 .map_err(|_| Fault::new("Cannot reserve observer records."))?;
         }
         self.value_bytes += retained;
-        let new_job = !self.mutations.queued;
+        let new_job = observed && !self.mutations.queued;
         if new_job {
             if let Err(error) = self.enqueue_mutation_observers() {
                 self.value_bytes -= retained;
                 return Err(error);
             }
         }
-        Ok(Some(PreparedChange { target, generation, entries, retained, new_job, transient }))
+        Ok(Some(PreparedChange { target, generation, entries, retained, new_job, transient, iterators }))
     }
 
     pub(super) fn finish_character_data_write(
@@ -567,8 +582,9 @@ impl Runtime {
 
     fn finish_mutation_records(&mut self, pending: PreparedChange, committed: bool) -> Result<(), Fault> {
         if committed {
+            if !pending.entries.is_empty()||pending.transient.is_some(){self.mutations.queued = true;}
+            if let Some(iterators)=pending.iterators{self.value_bytes-=iterators.retained_bytes();self.commit_iterator_removals(iterators);}
             if let Some(transient)=pending.transient{self.commit_transient_changes(transient);}
-            self.mutations.queued = true;
             self.mutations.pending_records += pending.entries.len();
             for (id, record) in pending.entries {
                 let observer = self.mutations.observers.get_mut(&id).unwrap();
