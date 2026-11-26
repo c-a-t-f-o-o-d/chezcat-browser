@@ -7542,3 +7542,7 @@ mod app_noscript_inner_html_tests;
 #[cfg(test)]
 #[path="app_noscript_text_algorithms_tests.rs"]
 mod app_noscript_text_algorithms_tests;
+
+#[cfg(test)]
+#[path="app_noscript_text_children_tests.rs"]
+mod app_noscript_text_children_tests;

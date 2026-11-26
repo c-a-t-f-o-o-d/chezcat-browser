@@ -1127,6 +1127,18 @@ impl Bridge<'_> {
         self.checked_mutation_ancestors(node, true)
     }
 
+    // Direct main-document leaf Text uses the same metered passive-host
+    // admission as character data. Other child kinds retain ordinary guards.
+    fn text_child_mutation_ancestors(&mut self, parent: usize, child: usize) -> Result<(), String> {
+        let node = &self.doc.nodes[child];
+        if node.namespace == crate::html::Namespace::None
+            && matches!(node.kind, NodeKind::Text(_)) && node.children.is_empty() {
+            self.passive_text_mutation_ancestors(parent)
+        } else {
+            self.mutation_ancestors(parent)
+        }
+    }
+
     fn checked_mutation_ancestors(&mut self, node: usize, passive_text: bool) -> Result<(), String> {
         let mut current = Some(node);
         while let Some(index) = current {
@@ -1300,9 +1312,9 @@ impl Bridge<'_> {
         let child = self.dom_node(incoming)?;
         if self.fragment_receiver(incoming) {return self.splice_document_fragment(parent,"replaceChild",args);}
         let old = self.dom_node(outgoing)?;
-        self.mutation_ancestors(parent)?;
+        self.text_child_mutation_ancestors(parent, child)?;
         let source_parent = self.state.tree.parents[child];
-        if let Some(source) = source_parent { self.mutation_ancestors(source)?; }
+        if let Some(source) = source_parent { self.text_child_mutation_ancestors(source, child)?; }
         self.validate_svg_edge(node_handle(parent),node_handle(child))?;
         let (incoming_nodes, depth) = self.mutation_subtree_with_styles(child)?;
         self.validate_button_children(parent,&incoming_nodes)?;
@@ -1508,10 +1520,10 @@ impl Bridge<'_> {
             return Ok(Value::Host(node_handle(child)));
         }
         if method!="removeChild"{self.validate_svg_edge(node_handle(parent),node_handle(child))?;}
-        self.mutation_ancestors(parent)?;
+        self.text_child_mutation_ancestors(parent, child)?;
         let old_parent = self.state.tree.parents[child];
         if let Some(old_parent) = old_parent {
-            self.mutation_ancestors(old_parent)?;
+            self.text_child_mutation_ancestors(old_parent, child)?;
         }
         let (descendants, depth) = self.checked_mutation_subtree(child, false, true).map_err(|error| format!(
             "{error} Operation={method}; parent={parent}; child={child}; old_parent={old_parent:?}."))?;
@@ -2129,7 +2141,7 @@ mod noscript_loader_context_tests {
     fn noscript_loader_context_native_raw_reads_keep_resource_mutation_refusal_and_recover() {
         let mut d=crate::html::parse_loaded_document_with_scripting("<body><noscript id=fallback><img id=hidden src=unused><script>bad()</script></noscript><p id=out>Real</p>",true,&||Ok(())).unwrap();
         let mut f=Forms::new(&d);let mut p=Page::new();let location=crate::navigation::address("https://noscript-context.test/",&crate::navigation::Location::home()).unwrap();p.set_location(&location);p.set_resource_base(&location);assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);
-        p.begin_job();p.runtime.execute("var fallback=document.getElementById('fallback'),old=fallback.firstChild,blocker=document.createTextNode('blocked'),watch=new MutationObserver(function(){});watch.observe(fallback,{childList:true});if(document.getElementById('hidden')!==null||document.querySelectorAll('noscript').length!==1||old.nodeType!==3||!old.data.includes('<img')||fallback.textContent!==old.data)throw 'actual native raw noscript reads';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();
+        p.begin_job();p.runtime.execute("var fallback=document.getElementById('fallback'),old=fallback.firstChild,blocker=document.createElement('span'),watch=new MutationObserver(function(){});watch.observe(fallback,{childList:true});if(document.getElementById('hidden')!==null||document.querySelectorAll('noscript').length!==1||old.nodeType!==3||!old.data.includes('<img')||fallback.textContent!==old.data)throw 'actual native raw noscript reads';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();
         let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
         p.begin_job();let error=p.runtime.execute("fallback.appendChild(blocker);",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");
         assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);
@@ -2149,7 +2161,7 @@ mod noscript_host_retirement_tests {
  }
  #[test]
  fn noscript_host_retirement_interior_and_nontext_fallback_guards_remain_atomic(){
-  let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),text=host.firstChild,blocker=document.createTextNode('blocked'),watch=new MutationObserver(function(){});watch.observe(host,{childList:true,characterData:true,subtree:true});");p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
+  let(mut d,mut f,mut p)=fixture(true);run(&mut d,&mut f,&mut p,"var host=document.getElementById('fallback'),text=host.firstChild,blocker=document.createElement('span'),watch=new MutationObserver(function(){});watch.observe(host,{childList:true,characterData:true,subtree:true});");p.state.rebuild(&d).unwrap();let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
   for code in ["host.appendChild(blocker);"]{p.begin_job();let error=p.runtime.execute(code,&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);p.begin_job();run(&mut d,&mut f,&mut p,"if(watch.takeRecords().length||blocker.parentNode!==null||host.firstChild!==text)throw 'interior unchanged';");}
   p.begin_job();run(&mut d,&mut f,&mut p,"text.data='changed';var changed=watch.takeRecords();if(host.firstChild!==text||text.parentNode!==host||text.data!=='changed'||host.textContent!=='changed'||blocker.parentNode!==null||changed.length!==1||changed[0].type!=='characterData'||changed[0].target!==text)throw 'actual direct Text edit replaces former refusal';");
   p.begin_job();run(&mut d,&mut f,&mut p,"host.innerHTML='<b>changed</b>';var replaced=watch.takeRecords();if(host.firstChild===text||host.firstChild.nodeType!==3||host.firstChild.data!=='<b>changed</b>'||text.parentNode!==null||text.data!=='changed'||replaced.length!==1||replaced[0].target!==host||replaced[0].removedNodes[0]!==text||replaced[0].addedNodes[0]!==host.firstChild||blocker.parentNode!==null)throw 'actual raw markup replacement';");
@@ -2170,3 +2182,7 @@ mod noscript_character_data_tests;
 #[cfg(test)]
 #[path="script_noscript_text_algorithms_tests.rs"]
 mod noscript_text_algorithms_tests;
+
+#[cfg(test)]
+#[path="script_noscript_text_children_tests.rs"]
+mod noscript_text_children_tests;
