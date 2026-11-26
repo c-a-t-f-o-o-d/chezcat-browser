@@ -4636,9 +4636,9 @@ impl Host for Bridge<'_> {
         index==1&&matches!(method,"createElementNS"|xml_documents::CREATE)||index==0&&method=="createElement"
             ||(script_attr::factory_operation(method).is_some_and(|ns|index==usize::from(ns)))
             ||index==0&&matches!(method,"getAttribute"|"getAttributeNode"|"setAttribute"|"removeAttribute"|"hasAttribute")
-            ||index==1&&matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS")
+            ||index==1&&matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS")
             ||script_named_map::operation(method).is_some_and(|name|name=="getNamedItem"&&index==0||name=="getNamedItemNS"&&index==1)
-            ||index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
+            ||index==0&&(script_attr::factory_operation(method)==Some(true)||matches!(method,"createAttributeNS"|"setAttributeNS"|"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")||script_named_map::operation(method)==Some("getNamedItemNS"))
             ||index==0&&method==CREATE_CDATA_SECTION
             ||index==0&&method==xml_documents::CREATE
             ||index==0&&(element_names::namespace_method(method)||method=="isDefaultNamespace"&&self.namespace_receiver(object))
@@ -4862,7 +4862,7 @@ impl Host for Bridge<'_> {
         if object==DOCUMENT && matches!(method,"createAttributeNS"|"createElementNS") {return &[(0,true),(1,true)];}
         if self.attr_element_receiver(object) && method == "getAttributeNode" { return &[(0, true)]; }
         if self.attribute_names_receiver(object) && method == "setAttributeNS" { return &[(0, true), (1, true), (2, true)]; }
-        if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
+        if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "hasAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return &[(0, true), (1, true)]; }
         if self.collection_receiver(object)&&method=="\0HTMLCollection.item"{return &[(0,false)];}
         if self.collection_receiver(object)&&method=="\0HTMLCollection.namedItem"{return &[(0,true)];}
         if collection_handle_index(object).is_some() {
@@ -4954,7 +4954,7 @@ impl Host for Bridge<'_> {
         if self.class_list_receiver(object) {
             return match method {"contains"|"item"|"toggle"=>Some(1),"replace"=>Some(2),"add"|"remove"|"toString"=>Some(0),_=>None};
         }
-        (self.attribute_names_receiver(object) && matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
+        (self.attribute_names_receiver(object) && matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"removeAttributeNS")).then_some(2)
     }
 
     fn native_method_owner(&self, object:u32, method:&str) -> Option<u32> {
@@ -4995,7 +4995,7 @@ impl Host for Bridge<'_> {
             return Some(object);
         }
         if self.inert_factory(object, method).is_some() { return Some(WINDOW); }
-        if matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
+        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") && self.event_target_interface(object) { return Some(object); }
         if script_content_editable::accessor(method) && self.event_target_interface(object) {return Some(object);}
         if matches!(method, ELEMENT_INNER_HTML_GET | ELEMENT_INNER_HTML_SET)
             && self.event_target_interface(object) { return Some(object); }
@@ -5216,7 +5216,7 @@ impl Host for Bridge<'_> {
         if self.named_map_receiver(object) { return script_named_map::operation(method).unwrap_or(method) == "getNamedItemNS" && index == 0; }
         element_names::namespace_method(method)&&index==0
             ||method == "isDefaultNamespace" && index == 0 && self.namespace_receiver(object)
-            || matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attribute_names_receiver(object)
+            || matches!(method,"getAttributeNS" | "hasAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS") && index == 0 && self.attribute_names_receiver(object)
     }
 
     fn validate_argument_prefix(&self, object: u32, method: &str, next_index: usize, args: &[Value])
@@ -5324,7 +5324,7 @@ impl Host for Bridge<'_> {
         if self.attribute_names_receiver(object) && method == "setAttributeNS" { return 3; }
         if self.class_list_receiver(object)&&method=="replace"{return 2;}
         if self.class_list_receiver(object) && matches!(method,"item"|"contains"|"supports"|"toggle") { return 1; }
-        if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
+        if self.attribute_names_receiver(object) && matches!(method,"getAttributeNS" | "hasAttributeNS" | "getAttributeNodeNS" | "removeAttributeNS") { return 2; }
         if object == DOCUMENT && method == "createEvent" && self.event_factory_enabled()
             || self.event_receiver(object) && method == "initEvent"
             || self.custom_receiver(object) && method == "initCustomEvent"
@@ -6168,7 +6168,7 @@ impl Host for Bridge<'_> {
             }
         }
         if self.inert_factory(object, method).is_some() { return self.inert_document(receiver) || method=="createDocumentFragment" && receiver==DOCUMENT; }
-        if matches!(method,"getAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") {
+        if matches!(method,"getAttributeNS"|"hasAttributeNS"|"getAttributeNodeNS"|"setAttributeNS"|"removeAttributeNS"|"getAttribute"|"getAttributeNode"|"hasAttribute"|"removeAttribute"|"setAttribute"|"\0Element.getAttributeNames") {
             return (self.event_target_interface(object) || self.attr_element_receiver(object))
                 && (self.attr_element_receiver(receiver) || self.inert_node_type(receiver) == Some(1));
         }
@@ -6444,7 +6444,7 @@ impl Host for Bridge<'_> {
             // event does not revoke borrowing; the actual receiver must be live.
             return (EVENT_BASE..self.state.next_event).contains(&object) && self.event_receiver(receiver);
         }
-        if matches!(method, "getAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS" | "removeAttributeNode" | "setAttributeNode" | "setAttributeNodeNS" | "hasAttributes") {
+        if matches!(method, "getAttributeNS" | "hasAttributeNS" | "getAttributeNode" | "getAttributeNodeNS" | "removeAttributeNS" | "setAttributeNS" | "removeAttributeNode" | "setAttributeNode" | "setAttributeNodeNS" | "hasAttributes") {
             return self.attr_element_receiver(object) && self.attr_element_receiver(receiver);
         }
         if matches!(method, "isDefaultNamespace" | "compareDocumentPosition") {
@@ -8272,6 +8272,7 @@ impl Host for Bridge<'_> {
         if object == WINDOW && method == "ProcessingInstruction" {
             return self.create_processing_instruction(DOCUMENT, args);
         }
+        if method=="hasAttributeNS" {return self.has_attribute_ns(object,args);}
         if method == script_inert_documents::GET { return self.get(object, "implementation"); }
         if object == WINDOW && method == script_inert_documents::parser::CONSTRUCTOR { return self.create_dom_parser(); }
         if method == script_inert_documents::parser::PARSE && self.inert_parser(object) { return self.parse_inert_document(args); }
@@ -12636,3 +12637,7 @@ mod dataset_raw_inspection_tests;
 #[cfg(test)]
 #[path="script_dataset_raw_deletion_tests.rs"]
 mod dataset_raw_deletion_tests;
+
+#[cfg(test)]
+#[path="script_attribute_namespace_presence_tests.rs"]
+mod attribute_namespace_presence_tests;
