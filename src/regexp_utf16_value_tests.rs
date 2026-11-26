@@ -427,3 +427,38 @@ if(!/^\p{Basic_Emoji}$/v.test('😀')||/^\p{Basic_Emoji}$/v.test('❤')||!/^\p{B
 'ok';
 "#);
 }
+#[test]
+fn unicode_capture_names_native_dictionary_and_protected_data_are_exact() {
+    succeeds(r#"
+var re=/(?<猫>😀)(?<𐐨>A)?(?<__proto__>B)?/gv,m=re.exec('!😀');
+if(m.index!==1||re.lastIndex!==3||m.groups.猫!=='😀'||m.groups['𐐨']!==undefined||m.groups.__proto__!==undefined||Object.getPrototypeOf(m.groups)!==null)throw 'unicode dictionary';
+if(Object.keys(m.groups).join()!=='猫,𐐨,__proto__')throw 'unicode keys';
+var n=/(?<__proto__>a)(?<constructor>b)(?<toString>c)/.exec('abc');
+if(n.groups.__proto__!=='a'||n.groups.constructor!=='b'||n.groups.toString!=='c'||Object.getPrototypeOf(n.groups)!==null||Object.getPrototypeOf({})!==Object.prototype)throw 'protected data';
+var d=Object.getOwnPropertyDescriptor(n.groups,'__proto__');if(!d.writable||!d.enumerable||!d.configurable||d.value!=='a')throw 'protected descriptor';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_capture_names_native_templates_callbacks_and_string_consumers() {
+    succeeds(r#"
+if('ab'.replace(/(?<猫>a)(?<__proto__>b)/v,'$<__proto__>:$<猫>')!=='b:a')throw 'unicode template';
+var called=0,out='ab'.replace(/(?<猫>a)(?<𐐨>b)/v,function(m,a,b,index,input,groups){called++;if(Object.getPrototypeOf(groups)!==null||groups.猫!==a||groups['𐐨']!==b||index!==0||input!=='ab')throw 'unicode callback';return groups['𐐨']+groups.猫;});if(out!=='ba'||called!==1)throw 'callback result';
+if('!a'.match(/(?<\u732b>a)/u).groups.猫!=='a'||'!a'.search(/(?<猫>a)/v)!==1||'bab'.split(/(?<猫>a)/v).join()!=='b,a,b')throw 'unicode consumers';
+if(!/^\k<𐐨>(?<\uD801\uDC28>a)$/v.test('a')||!/(?<=(?<猫>a))\k<猫>/u.test('aa'))throw 'unicode references';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_capture_names_native_syntax_is_atomic_and_fresh_execution_works() {
+    let mut runtime=Runtime::for_test();runtime.execute("var effect=false;",&mut NoHost).unwrap();
+    assert!(runtime.execute(r"effect=true;/(?<é>a)(?<\u00e9>b)/v;",&mut NoHost).unwrap_err().contains("Duplicate"));
+    runtime.begin_job();assert_eq!(runtime.execute("!effect&&/(?<猫>a)/v.exec('a').groups.猫==='a';",&mut NoHost).unwrap().to_text(),"true");
+    runtime.execute("var pattern='(?<猫>a)',finished=false;",&mut NoHost).unwrap();
+    let retained=runtime.retained_regexp;runtime.regexp_work=30;
+    let error=runtime.execute("try{new RegExp(pattern,'v');}catch(e){finished=true;}finally{finished=true;}",&mut NoHost).unwrap_err();
+    assert!(error.contains("Regular-expression work limit"),"{error}");assert_eq!(runtime.retained_regexp,retained);
+    runtime.begin_job();assert_eq!(runtime.execute("!finished&&new RegExp(pattern,'v').exec('a').groups.猫==='a';",&mut NoHost).unwrap().to_text(),"true");
+}
