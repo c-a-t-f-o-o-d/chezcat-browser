@@ -69,7 +69,10 @@ impl Bridge<'_> {
         self.state.copies(name.len().saturating_add(initial.len().saturating_mul(6)).saturating_add(live.map_or(0,str::len).saturating_mul(4)))?;
         let mut plan = self.forms.prepare_created_input(self.doc,node,kind,name,initial,live)?;
         if let forms::InputPlan::Admit { controls, .. } = &mut plan {
-            controls.get_mut(&node).ok_or("Missing prepared INPUT identity.")?.group_root = root;
+            let control = controls.get_mut(&node).ok_or("Missing prepared INPUT identity.")?;
+            control.group_root = root;
+            let type_value = match attribute { Some(("type",value)) => value, _ => self.doc.attr(node,"type") };
+            control.password = kind == Kind::Text && type_value.is_some_and(|value|value.eq_ignore_ascii_case("password"));
         }
         Ok(plan)
     }
@@ -77,7 +80,7 @@ impl Bridge<'_> {
     pub(super) fn accepts_input_type(&self, node: usize, name: &crate::html::AttributeName, value: Option<&str>) -> bool {
         if !name.html_is("type") { return false; }
         let raw = value.unwrap_or("");
-        if self.native_text_input(node) && forms::input_kind(raw) == Kind::Text { return true; }
+        if (self.native_text_input(node) || self.fresh_text_input(node)) && forms::input_kind(raw) == Kind::Text { return true; }
         if raw.eq_ignore_ascii_case("checkbox") {
             self.fresh_text_input(node) || self.owned_native_checkbox(node)
         } else if raw.eq_ignore_ascii_case("radio") {
@@ -211,7 +214,7 @@ impl Bridge<'_> {
             return Ok(None);
         }
         if !(name.html_is("value") || name.html_is("name") || name.html_is("type")) { return Ok(None); }
-        if name.html_is("type") && value.is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("text") && !value.eq_ignore_ascii_case("checkbox") && !value.eq_ignore_ascii_case("radio")) { return Ok(None); }
+        if name.html_is("type") && value.is_some_and(|value| forms::input_kind(value) != Kind::Text && !value.eq_ignore_ascii_case("checkbox") && !value.eq_ignore_ascii_case("radio")) { return Ok(None); }
         if self.fresh_text_input(node) { return self.prepare_created_input_plan(node,Some((&name.qualified,value)),None).map(Some); }
         if name.html_is("type") { return Ok(None); }
         if name.html_is("value") && (self.owned_native_checkbox(node) || self.owned_native_radio(node)) {

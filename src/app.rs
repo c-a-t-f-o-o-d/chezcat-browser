@@ -7286,3 +7286,7 @@ mod password_input_tests;
 #[cfg(test)]
 #[path="app_text_type_transition_tests.rs"]
 mod text_type_transition_tests;
+
+#[cfg(test)]
+#[path="app_text_family_admission_tests.rs"]
+mod text_family_admission_tests;
