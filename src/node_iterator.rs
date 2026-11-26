@@ -2,6 +2,9 @@
 //! https://dom.spec.whatwg.org/#interface-nodeiterator
 use super::*;
 use std::collections::HashMap;
+#[path="node_iterator_live.rs"]
+pub(super) mod live;
+use live::Pointer;
 
 #[derive(Clone,Copy)]
 pub(super) enum Op { Interface,Create,Root,Reference,Before,Mask,Filter,Detach,Next,Previous }
@@ -13,10 +16,11 @@ impl Filter {
  fn value(self)->Value {match self {Self::Object(id)=>Value::Object(id),Self::Function(id)=>Value::Function(id),Self::Host(id)=>Value::Host(id)}}
 }
 #[derive(Clone,Copy)]
-struct IteratorState { root:u32,reference:u32,before:bool,mask:u32,filter:Option<Filter> }
+struct IteratorState { root:u32,reference:Pointer,candidate:Option<Pointer>,active:bool,mask:u32,filter:Option<Filter> }
 #[derive(Default)]
 pub(super) struct Arena {pub(super) prototype:Option<usize>,states:HashMap<usize,IteratorState>}
 impl Arena {
+ pub(super) fn has_states(&self)->bool{!self.states.is_empty()}
  pub(super) fn filter_value(&self,id:usize)->Option<Value>{self.states.get(&id).and_then(|state|state.filter).map(Filter::value)}
 }
 impl Runtime {
@@ -51,12 +55,12 @@ impl Runtime {
   self.validate_native_access(state.root,host)?;
   match op {
    Op::Root=>Ok(Value::Host(state.root)),
-   Op::Reference=>{self.validate_native_access(state.reference,host)?;Ok(Value::Host(state.reference))},
-   Op::Before=>Ok(Value::Bool(state.before)),
+   Op::Reference=>{self.validate_native_access(state.reference.node,host)?;Ok(Value::Host(state.reference.node))},
+   Op::Before=>Ok(Value::Bool(state.reference.before)),
    Op::Mask=>Ok(Value::Number(f64::from(state.mask))),
    Op::Filter=>Ok(state.filter.map_or(Value::Null,Filter::value)),
    Op::Detach=>Ok(Value::Undefined),
-   Op::Next|Op::Previous=>Err(Fault::thrown(self.native_dom_exception("NotSupportedError","NodeIterator traversal requires live cursor removal adjustment.")?)),
+   Op::Next|Op::Previous=>self.traverse_node_iterator(id,matches!(op,Op::Next),host),
    _=>unreachable!()
   }
  }
@@ -87,7 +91,7 @@ impl Runtime {
   self.node_iterators.states.try_reserve(1).map_err(|_|Fault::new("Cannot reserve NodeIterator state."))?;
   let id=self.new_object(None)?;
   self.objects[id].prototype=self.node_iterators.prototype.map(Ordinary::Object);
-  self.node_iterators.states.insert(id,IteratorState{root,reference:root,before:true,mask,filter});self.value_bytes=retained;
+  self.node_iterators.states.insert(id,IteratorState{root,reference:Pointer{node:root,before:true},candidate:None,active:false,mask,filter});self.value_bytes=retained;
   Ok(Value::Object(id))
  }
 }
@@ -116,7 +120,7 @@ mod tests {
    let Value::Object(id)=runtime.create_node_iterator(&[Value::Host(1)],Value::Host(0),&mut NoHost).unwrap() else {panic!("native iterator")};
    assert_eq!(runtime.value_bytes-before.0,std::mem::size_of::<IteratorState>());
    assert_eq!(runtime.node_iterators.states.len(),before.2+1);
-   let state=runtime.node_iterators.states[&id];assert_eq!((state.root,state.reference,state.before,state.mask),(1,1,true,u32::MAX));
+   let state=runtime.node_iterators.states[&id];assert_eq!((state.root,state.reference.node,state.reference.before,state.mask),(1,1,true,u32::MAX));
   }
  }
  #[test]

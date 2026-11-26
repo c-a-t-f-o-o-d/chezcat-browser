@@ -16,7 +16,7 @@ try{Document.prototype.createNodeIterator.call({},root);}catch(e){if(e instanceo
 try{Document.prototype.createNodeIterator.call(document,{});}catch(e){if(e instanceof TypeError)caught++;}
 try{Object.getOwnPropertyDescriptor(NodeIterator.prototype,'root').get.call({});}catch(e){if(e instanceof TypeError)caught++;}
 if(caught!==5)throw 'genuine iterator brands';var detach=made.detach;if(detach.call(made)!==undefined||made.root!==root||made.referenceNode!==root||!made.pointerBeforeReferenceNode)throw 'detach is a no-op';
-var guarded=0;try{made.nextNode();}catch(e){if(e instanceof DOMException&&e.name==='NotSupportedError')guarded++;}try{made.previousNode();}catch(e){if(e instanceof DOMException&&e.name==='NotSupportedError')guarded++;}if(guarded!==2||made.referenceNode!==root||!made.pointerBeforeReferenceNode)throw 'unimplemented cursor must refuse explicitly';
+if(made.nextNode()!==root||made.referenceNode!==root||made.pointerBeforeReferenceNode||made.previousNode()!==root||!made.pointerBeforeReferenceNode)throw 'live root pointer direction';
 "#);
 }
 #[test]

@@ -1240,14 +1240,17 @@ or silent input truncation is not an acceptable recovery result.
   acceptance remain required.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
-  Native NodeIterator creation now retains canonical initial root/reference,
-  pointer, mask and filter state for supported roots with checked publication and
-  a no-op detach. Navigation explicitly refuses pending live cursor/candidate and
-  synchronous removal adjustment; state creation does not close those gates.
+  Native NodeIterator creation/traversal now retains canonical root/reference,
+  pointer, mask and filter state for supported displayed/detached/inert roots.
+  Forward/backward callbacks distinguish flat iterator filtering from TreeWalker;
+  native removal/move/replacement/content/normalization proposals adjust references
+  and active candidates without requiring an observer. Checked admission, callback
+  realms, refusal/recovery and a real App consumer cover this path. Child/inert
+  Document factories and complete traversal/package entry paths remain required.
   Native TreeWalker function/object filters now distinguish subtree rejection
   from skipping across all seven movements, preserve live cursor/tree changes,
   route supported same-origin callback realms, and unwind active-filter state
-  after exceptions or resource refusal. NodeIterator and complete traversal
+  after exceptions or resource refusal. Complete traversal
   entry-path and package acceptance remain required.
 - Complete base EventTarget dispatch: propagation, cancellation, passive/once/
   signal listeners, removal/reentrancy, exception reporting and real native
