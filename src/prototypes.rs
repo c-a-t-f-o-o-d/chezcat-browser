@@ -1816,6 +1816,20 @@ impl Runtime {
                 }
                 let key = match key {
                     PropertyKey::StringUnits(units) => {
+                        if method=="defineProperty" {
+                            if let Value::Host(handle)=first {
+                                self.validate_native_access(*handle,host)?;
+                                if host.named_units_setter(*handle) {
+                                    let descriptor=self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
+                                    let descriptor=self.property_descriptor(descriptor,host)?;
+                                    if !descriptor.is_data() {
+                                        return Err(Fault::exception("TypeError","Native named setters require a data descriptor."));
+                                    }
+                                    self.assign_units_property(Value::Host(*handle),units,descriptor.value.unwrap_or(Value::Undefined),host)?;
+                                    return self.copy_value(first);
+                                }
+                            }
+                        }
                         if method=="getOwnPropertyDescriptor" {
                             if let Value::Host(handle)=first {
                                 self.validate_native_access(*handle,host)?;
@@ -1881,12 +1895,10 @@ impl Runtime {
                             let descriptor =
                                 self.ordinary_required(args.get(2).unwrap_or(&Value::Undefined))?;
                             let descriptor = self.property_descriptor(descriptor, host)?;
-                            if descriptor.is_accessor()
-                                || descriptor.enumerable == Some(false)
-                                || descriptor.writable == Some(false)
-                                || descriptor.configurable == Some(false)
-                            {
-                                return Err(Fault::exception("TypeError", "Named dataset properties must remain writable, enumerable and configurable data properties."));
+                            // Legacy named setters consume data descriptors; their
+                            // native attributes determine the resulting flags.
+                            if !descriptor.is_data() {
+                                return Err(Fault::exception("TypeError", "Native named setters require a data descriptor."));
                             }
                             self.host_write(
                                 *handle,

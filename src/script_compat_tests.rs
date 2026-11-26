@@ -3183,8 +3183,9 @@ fn dataset_validates_keys_and_keeps_native_attribute_readonly() {
 var p=document.getElementById('p'),d=p.dataset,caught='';
 try{d['bad-key']='x';}catch(e){caught+=e.name;}
 try{d['bad key']='x';}catch(e){caught+=','+e.name;}
-try{Object.defineProperty(d,'bad',{value:1,enumerable:false});}catch(e){caught+=','+e.name;}
+try{Object.defineProperty(d,'bad',{get:function(){return 1;},enumerable:false});}catch(e){caught+=','+e.name;}
 if(caught!=='SyntaxError,InvalidCharacterError,TypeError')throw caught;
+Object.defineProperty(d,'flags',{value:1,writable:false,enumerable:false,configurable:false});var flags=Object.getOwnPropertyDescriptor(d,'flags');if(p.getAttribute('data-flags')!=='1'||flags.value!=='1'||!flags.writable||!flags.enumerable||!flags.configurable)throw 'native named setter flags';if(!delete d.flags||p.hasAttribute('data-flags'))throw 'native definition removal';
 d['']='blank';if(p.getAttribute('data-')!=='blank')throw 'empty key';
 d.toString='shadow';if(d.toString!=='shadow'||Object.keys(d).join(',')!==',toString')throw 'override builtins';
 delete d.toString;if(typeof d.toString!=='function')throw 'prototype restored';
