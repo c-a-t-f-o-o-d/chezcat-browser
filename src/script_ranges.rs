@@ -478,7 +478,7 @@ impl Bridge<'_> {
         self.range_live_access(receiver,method,args)?;
         let record=*self.range_record(receiver).unwrap();
         if matches!(method,CLONE_CONTENTS|EXTRACT_CONTENTS|DELETE_CONTENTS|INSERT_NODE|SURROUND_CONTENTS)
-            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||(method!=CLONE_CONTENTS&&self.inert_node_type(point.node).is_some())) {
+            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||(!matches!(method,CLONE_CONTENTS|DELETE_CONTENTS)&&self.inert_node_type(point.node).is_some())) {
             return Err(Exception("NotSupportedError","Child/inert Range content mutation and fragment producers are not implemented.".into()));
         }
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
