@@ -118,6 +118,23 @@ impl Bridge<'_> {
     pub(in crate::scripting) fn range_attr_document(&self,handle:u32)->Option<u32>{
         self.state.attributes.get(script_attr::index(handle)?).map(|attr|attr.document)
     }
+    // Metadata may belong to a genuine child tree without an index in the
+    // displayed document. Mutation producers retain the main-only resolver.
+    pub(in crate::scripting) fn range_metadata_index(&self,handle:u32)->Result<Option<usize>,Error>{
+        self.native_node_access(handle).map_err(|(kind,message)|Error::Exception(kind,message))?;
+        if self.range_attr_document(handle).is_some()||self.frame_contains_node(handle).is_some(){return Ok(None);}
+        self.range_node(handle).map(Some).map_err(|message|Error::Exception("NotSupportedError",message))
+    }
+    pub(super) fn range_live_access(&self,receiver:u32,method:&str,args:&[Value])->Result<(),Error>{
+        let check=|record:&Record|->Result<(),Error>{
+            if !record.fixed {for point in [record.start,record.end] {self.native_node_access(point.node).map_err(|(kind,message)|Error::Exception(kind,message))?;}}
+            Ok(())
+        };
+        if let Some(record)=self.range_record(receiver){check(record)?;}
+        if method==COMPARE_BOUNDARIES {if let Some(Value::Host(source))=args.get(1){if let Some(record)=self.range_record(*source){check(record)?;}}}
+        if node_argument(method) {if let Some(Value::Host(node))=args.first(){self.native_node_access(*node).map_err(|(kind,message)|Error::Exception(kind,message))?;}}
+        Ok(())
+    }
     pub(in crate::scripting) fn range_node(&self, handle: u32) -> Result<usize, String> {
         if handle == DOCUMENT {
             return Ok(0);
@@ -130,6 +147,10 @@ impl Bridge<'_> {
     }
     pub(in crate::scripting) fn range_length(&mut self, handle: u32) -> Result<usize, String> {
         if self.range_attr_document(handle).is_some(){self.state.work(1)?;return Ok(0);}
+        if let Some((owner,node))=self.frame_contains_node(handle){
+            self.state.work(1)?;
+            return Ok(self.contains_child_document(owner)?.nodes[node].children.len());
+        }
         let node = self.range_node(handle)?;
         let item = &self.doc.nodes[node];
         if let Some(text) = item.kind.character_dom_string() {
@@ -141,6 +162,11 @@ impl Bridge<'_> {
     }
     pub(in crate::scripting) fn range_parent(&mut self, handle: u32) -> Result<Option<u32>, String> {
         if self.range_attr_document(handle).is_some(){self.state.work(1)?;return Ok(None);}
+        if let Some((owner,node))=self.frame_contains_node(handle){
+            let count=self.contains_child_document(owner)?.nodes.len();self.state.work(count)?;
+            let parent=self.contains_child_document(owner)?.nodes.iter().position(|item|item.children.contains(&node));
+            return parent.map(|parent|self.frame_child_node_handle(owner,parent)).transpose();
+        }
         let node = self.range_node(handle)?;
         self.state.work(1)?;
         Ok(self
@@ -162,6 +188,11 @@ impl Bridge<'_> {
         let parent = self
             .range_parent(handle)?
             .ok_or("InvalidNodeTypeError: Range relative boundary requires a parent.")?;
+        if self.frame_contains_node(handle).is_some(){
+            let children=self.equality_children(parent)?;self.state.work(children.len())?;
+            let index=children.iter().position(|&child|child==handle).ok_or("Child Range parent/child topology is inconsistent.")?;
+            return Ok((parent,index));
+        }
         let node = self.range_node(handle)?;
         let parent_index = self.range_node(parent)?;
         self.state
@@ -227,10 +258,11 @@ impl Bridge<'_> {
         Err("Range boundary order is unavailable.".into())
     }
     pub(super) fn create_range(&mut self, owner: u32, document: u32) -> Result<Value, String> {
-        if owner != WINDOW || document != DOCUMENT {
-            return Err(
-                "Range construction in child or inert documents is not implemented.".into(),
-            );
+        if owner!=WINDOW {self.contains_child_document(owner)?;}
+        if document!=DOCUMENT {
+            let (window,node)=self.frame_contains_node(document).ok_or("Range creation in inert documents is not implemented.")?;
+            if node!=0{return Err("Range factory requires a genuine Document.".into());}
+            self.contains_child_document(window)?;
         }
         let point = Point {
             node: document,
@@ -277,7 +309,8 @@ impl Bridge<'_> {
         args: &[Value],
     ) -> Result<Value, String> {
         if method == RANGE {
-            return self.create_range(receiver, DOCUMENT);
+            let document=if receiver==WINDOW{DOCUMENT}else{self.frame_child_node_handle(receiver,0)?};
+            return self.create_range(receiver, document);
         }
         if method == CREATE {
             return self.create_range(WINDOW, receiver);
@@ -323,7 +356,7 @@ impl Bridge<'_> {
                 let Some(Value::Host(node)) = args.first() else {
                     return Err("A genuine Node is required for a Range boundary.".into());
                 };
-                if self.range_attr_document(*node).is_none(){self.range_node(*node)?;}
+                self.range_metadata_index(*node).map_err(|error|match error{Error::Fatal(message)|Error::Exception(_,message)=>message})?;
                 let point = if matches!(method, SET_START | SET_END) {
                     let offset = range_offset(args.get(1).unwrap_or(&Value::Undefined))?;
                     if offset > self.range_length(*node)? {
@@ -419,24 +452,14 @@ impl Bridge<'_> {
         }
         if method==STATIC {return if self.event_target_interface(receiver){Ok(())}else{Err(Exception("TypeError","StaticRange requires a Window constructor.".into()))};}
         if method == RANGE {
-            return if receiver == WINDOW {
-                Ok(())
-            } else {
-                Err(Exception(
-                    "NotSupportedError",
-                    "Child Range construction is not implemented.".into(),
-                ))
-            };
+            if receiver==WINDOW{return Ok(());}
+            if self.frame_instance_window(receiver)==Some(receiver){self.contains_child_document(receiver).map_err(|message|Exception("NotSupportedError",message))?;return Ok(());}
+            return Err(Exception("TypeError","Range requires a native Window constructor.".into()));
         }
         if method == CREATE {
-            return if receiver == DOCUMENT {
-                Ok(())
-            } else {
-                Err(Exception(
-                    "NotSupportedError",
-                    "Range creation requires the displayed document.".into(),
-                ))
-            };
+            if receiver==DOCUMENT{return Ok(());}
+            if self.frame_contains_node(receiver).is_some_and(|(_,node)|node==0){self.range_metadata_index(receiver)?;return Ok(());}
+            return Err(Exception("NotSupportedError","Range creation in inert documents is not implemented.".into()));
         }
         if self.range_record(receiver).is_none() {
             return Err(Exception(
@@ -445,6 +468,12 @@ impl Bridge<'_> {
             ));
         }
         if self.range_record(receiver).is_some_and(|record|record.fixed) && !snapshot_getter(method) {return Err(Exception("TypeError","A live Range receiver is required.".into()));}
+        self.range_live_access(receiver,method,args)?;
+        let record=*self.range_record(receiver).unwrap();
+        if matches!(method,CLONE_CONTENTS|EXTRACT_CONTENTS|DELETE_CONTENTS|INSERT_NODE|SURROUND_CONTENTS)
+            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()) {
+            return Err(Exception("NotSupportedError","Child Range content mutation and fragment producers are not implemented.".into()));
+        }
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
         // The insertion transaction checks hierarchy before any Text split.
         if matches!(method,INSERT_NODE|SURROUND_CONTENTS) {return Ok(());}
@@ -477,9 +506,7 @@ impl Bridge<'_> {
             {
                 return Err(Exception("TypeError", "A genuine Node is required.".into()));
             }
-            let node = if self.range_attr_document(*handle).is_some(){None}else{Some(self
-                .range_node(*handle)
-                .map_err(|error| Exception("NotSupportedError", error))?)};
+            let node = self.range_metadata_index(*handle)?;
             if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && node.is_some_and(|node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_))) {
                 return Err(Exception("InvalidNodeTypeError","A DocumentType cannot be a Range boundary.".into()));
             }
@@ -511,6 +538,14 @@ impl Bridge<'_> {
 
 impl Bridge<'_> {
     fn range_string(&mut self, range: Record) -> Result<Value, String> {
+        if let Some((owner,_))=self.frame_contains_node(range.start.node){
+            let count=self.contains_child_document(owner)?.nodes.len();self.state.work(count)?;
+            // Initial blank child documents currently represent only their
+            // physical Document/html/head/body tree. Inspect that real tree;
+            // future child text producers need a selection-aware traversal.
+            if self.contains_child_document(owner)?.nodes.iter().any(|node|matches!(node.kind,NodeKind::Text(_)|NodeKind::Cdata(_))){return Err("Child Range text traversal is unavailable.".into());}
+            return Ok(Value::String(String::new()));
+        }
         if range.start == range.end {
             return Ok(Value::String(String::new()));
         }
