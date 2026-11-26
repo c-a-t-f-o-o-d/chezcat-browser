@@ -754,6 +754,7 @@ impl Runtime {
                 "HTMLSelectElement"=>Some("\0HTMLSelectElement.get.willValidate"),
                 "HTMLTextAreaElement"=>Some("\0HTMLTextAreaElement.get.willValidate"),_=>None,
             }{self.define_host_attribute(prototype,window,"willValidate",operation,None)?;}
+            for &(class,operation)in super::CONTROL_VALIDITY_MEMBERS{if name==class{self.define_host_attribute(prototype,window,"validity",operation,None)?;}}
             for &(class,operation)in super::CONTROL_CUSTOM_VALIDITY_MEMBERS{if name==class{self.deferred_host_method(prototype,window,"setCustomValidity",operation,1)?;}}
             for &(class,key,operation)in super::CONTROL_VALIDATION_MEMBERS{
                 if name!=class{continue;}

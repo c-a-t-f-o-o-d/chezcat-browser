@@ -7257,3 +7257,7 @@ mod control_validation_tests;
 #[cfg(test)]
 #[path="app_control_custom_validity_tests.rs"]
 mod control_custom_validity_tests;
+
+#[cfg(test)]
+#[path="app_candidate_validity_tests.rs"]
+mod candidate_validity_tests;

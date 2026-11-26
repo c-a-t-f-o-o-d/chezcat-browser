@@ -4167,7 +4167,7 @@ impl Host for Bridge<'_> {
         if self.control_eligibility_member(object,property){return true;}
         if self.fieldset_validation_readonly(object,property){return true;}
         if self.output_validation_readonly(object,property){return true;}
-        if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object))||self.validity_member(object,property){return true;}
+        if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object)||self.control_eligibility_class(object).is_some())||self.validity_member(object,property){return true;}
         if self.html_label_control_member(object,property){return true;}
         if self.class_list_receiver(object){return collection_index(property).is_some();}
         if property=="activeElement"&&self.document_interface_receiver(object){return true;}
@@ -6149,7 +6149,7 @@ impl Host for Bridge<'_> {
         if let Some(class)=script_control_eligibility::interface(method){return self.event_target_interface(object)&&self.control_eligibility_class(receiver)==Some(class);}
         if script_fieldset_validation::operation(method){return self.event_target_interface(object)&&self.fieldset_receiver(receiver);}
         if script_output_validation::operation(method){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
-        if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else if matches!(method,script_output_validity_state::FIELD_GET|script_output_validity_state::FIELD_SET){self.fieldset_receiver(receiver)}else{self.html_output_receiver(receiver)};}
+        if script_output_validity_state::operation(method){return self.event_target_interface(object)&&if script_output_validity_state::flag(method).is_some(){self.validity_receiver(receiver)}else if matches!(method,script_output_validity_state::FIELD_GET|script_output_validity_state::FIELD_SET){self.fieldset_receiver(receiver)}else if let Some(class)=crate::javascript::control_validity_interface(method){self.control_eligibility_class(receiver)==Some(class)}else{self.html_output_receiver(receiver)};}
         if script_output_value::operation(method).is_some(){return self.event_target_interface(object)&&self.html_output_receiver(receiver);}
         if method==script_label_control::GET{return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
         if script_label_html_for::operation(method){return self.event_target_interface(object)&&self.html_label_receiver(receiver);}
@@ -7170,6 +7170,7 @@ impl Host for Bridge<'_> {
         if self.control_eligibility_member(object,property){return self.control_eligibility_get(object);}
         if self.fieldset_validation_readonly(object,property){return self.fieldset_validation(object,if property=="willValidate"{script_fieldset_validation::WILL_GET}else{script_fieldset_validation::MESSAGE_GET});}
         if self.output_validation_readonly(object,property){return self.output_validation(object,if property=="willValidate"{script_output_validation::WILL_GET}else{script_output_validation::MESSAGE_GET});}
+        if property=="validity"&&self.control_eligibility_class(object).is_some(){let class=self.control_eligibility_class(object).unwrap();let op=crate::javascript::CONTROL_VALIDITY_MEMBERS.iter().find(|&&(c,_)|c==class).unwrap().1;return self.output_validity_call(object,op,&[]);}
         if property=="validity"&&(self.html_output_receiver(object)||self.fieldset_receiver(object)){return self.output_validity_call(object,if self.fieldset_receiver(object){script_output_validity_state::FIELD_GET}else{script_output_validity_state::GET},&[]);}
         if self.validity_member(object,property){let method=script_output_validity_state::FLAGS.iter().find(|&&(key,_)|key==property).unwrap().1;return self.output_validity_call(object,method,&[]);}
         if self.output_value_member(object,property){return self.output_value_get(object,property);}
@@ -12245,3 +12246,10 @@ mod control_custom_validity_tests;
 
 #[path="script_control_custom_validity.rs"]
 mod script_control_custom_validity;
+
+#[cfg(test)]
+#[path="script_candidate_validity_tests.rs"]
+mod candidate_validity_tests;
+
+#[path="script_candidate_validity.rs"]
+mod script_candidate_validity;

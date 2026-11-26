@@ -71,8 +71,14 @@ impl Forms{
         self.control_value_missing(control)
     }
     pub(crate) fn control_value_missing(&self,control:&Control)->bool{
+        if control.disabled{return false;}
+        self.constraint_value_missing(control)
+    }
+    /// Constraint flags remain independent of candidate eligibility. SELECT,
+    /// checkbox and radio missingness does not depend on being mutable.
+    pub(crate) fn constraint_value_missing(&self,control:&Control)->bool{
         let owner=control.owner;
-        if control.disabled||matches!(control.kind,Kind::Text|Kind::TextArea)&&control.readonly{return false;}
+        if matches!(control.kind,Kind::Text|Kind::TextArea)&&(control.disabled||control.readonly){return false;}
         let required=control.required||control.kind==Kind::Radio&&!control.name.is_empty()&&self.controls.values().any(|c|c.owner==owner&&c.group_root==control.group_root&&c.kind==Kind::Radio&&c.name==control.name&&c.required);
         if !required{return false;}
         match control.kind{
