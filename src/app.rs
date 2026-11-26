@@ -7382,3 +7382,7 @@ mod range_inert_wrapping_tests;
 #[cfg(test)]
 #[path="app_range_clone_realm_tests.rs"]
 mod range_clone_realm_tests;
+
+#[cfg(test)]
+#[path="app_event_inert_paths_tests.rs"]
+mod event_inert_paths_tests;
