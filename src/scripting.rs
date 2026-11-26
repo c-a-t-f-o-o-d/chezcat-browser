@@ -12321,3 +12321,7 @@ mod inert_traversal_factory_tests;
 #[cfg(test)]
 #[path="script_child_traversal_tests.rs"]
 mod child_traversal_tests;
+
+#[cfg(test)]
+#[path="script_static_range_child_tests.rs"]
+mod static_range_child_tests;
