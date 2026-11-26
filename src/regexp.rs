@@ -14,6 +14,9 @@ const MAX_GROUP_NAME_BYTES: usize = 256;
 const MAX_MARKS: usize = 64;
 const MAX_STACK: usize = 1024;
 
+#[path = "regexp_unicode_properties.rs"]
+mod unicode_properties;
+
 #[path = "regexp_unicode_sets.rs"]
 mod unicode_sets;
 
@@ -126,6 +129,7 @@ enum ClassPart {
     Digit(bool),
     Word(bool),
     Space(bool),
+    Property(&'static [(u32,u32)], bool),
 }
 
 #[derive(Clone, Debug)]
@@ -154,6 +158,11 @@ fn ascii_fold(unit: u32) -> u32 {
 impl Class {
     fn matches(&self, unit: u32, insensitive: bool, budget: &mut usize) -> Result<bool, Error> {
         spend(budget, self.parts.len().max(1))?;
+        for part in &self.parts {
+            if let ClassPart::Property(ranges, _) = part {
+                spend(budget, (usize::BITS - ranges.len().leading_zeros()).max(1) as usize)?;
+            }
+        }
         let found = self.parts.iter().any(|part| match *part {
             ClassPart::Range(low, high) => {
                 (low..=high).contains(&unit)
@@ -165,6 +174,7 @@ impl Class {
             ClassPart::Digit(invert) => (48..=57).contains(&unit) != invert,
             ClassPart::Word(invert) => word(unit) != invert,
             ClassPart::Space(invert) => space(unit) != invert,
+            ClassPart::Property(ranges, invert) => unicode_properties::contains(ranges, unit) != invert,
         });
         Ok(found != self.inverted)
     }
@@ -742,6 +752,7 @@ impl Parser<'_> {
                     "A named regexp escape is invalid in a character class.",
                 ))
             }
+            112 | 80 if self.unicode => return self.property_escape(unit == 80),
             112 | 80 => {
                 return Err(Error::Unsupported(
                     "Unicode regexp properties are not implemented.",
@@ -1016,6 +1027,7 @@ impl Compiler<'_> {
                     Node::Class(class) if !self.unicode || !class.inverted && class.parts.iter().all(|part| match *part {
                         ClassPart::Range(low, high) => high <= 0xffff && (high < 0xd800 || low > 0xdfff),
                         ClassPart::Digit(inverted) | ClassPart::Word(inverted) | ClassPart::Space(inverted) => !inverted,
+                        ClassPart::Property(_, _) => false,
                     }) => {
                         spend(
                             self.budget,

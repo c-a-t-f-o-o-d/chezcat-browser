@@ -362,3 +362,26 @@ if(!/^[^[\q{ab}]&&[a]]$/v.test('😀')||!/^([\q{a|ab|abc}])bc$/v.test('abc'))thr
 'ok';
 "#);
 }
+
+#[test]
+fn unicode_property_native_results_algebra_and_string_consumers_are_exact() {
+    succeeds(r#"
+var re=/(?<x>\p{L}+)/gu,m=re.exec('!𐐀é');if(m.index!==1||m[0]!=='𐐀é'||m.groups.x!=='𐐀é'||re.lastIndex!==4)throw 'property result';
+if('éAあ'.replace(/[\p{L}--\p{ASCII}]/gv,'!')!=='!A!')throw 'property replace';
+var pieces='a😀b'.split(/(\p{Emoji})/u);if(pieces.length!==3||pieces[1]!=='😀')throw 'property split';
+if('!あ'.search(/\p{sc=Hira}/u)!==1||'ー'.match(/\p{scx=Kana}/v)[0]!=='ー')throw 'property script';
+if(!/^\p{gc=Cs}$/u.test('\ud800')||/^\p{gc=Cs}$/u.test('😀'))throw 'property surrogate';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_property_native_syntax_and_fresh_jobs_preserve_real_errors() {
+    succeeds(r#"
+for(var pair of [['\\p{letter}','u'],['\\p{Script=latin}','v'],['\\p{Alphabetic=Yes}','u'],['\\p{Unknown_Property}','v'],['\\p{RGI_Emoji}','u'],['\\P{RGI_Emoji}','v']]){
+ var error=null;try{new RegExp(pair[0],pair[1]);}catch(e){error=e;}if(!(error instanceof SyntaxError))throw 'property syntax';
+}
+if(!/^\p{Alphabetic}$/u.test('é')||!/^\P{ASCII}$/v.test('😀')||/^\P{ASCII}$/v.test('A'))throw 'property fresh recovery';
+'ok';
+"#);
+}

@@ -166,7 +166,7 @@ fn unicode_character_sets_work_refusal_preserves_compiled_recovery() {
     for pattern in [r"[^\d-q]", r"[q-\D]", r"\q", "[z-a]"] {
         assert!(matches!(Regex::compile(pattern,"u",&mut 100_000),Err(Error::Syntax(_))));
     }
-    for (pattern, flags) in [(r"\p{Letter}","u"),(".","iu"),(".","d")] {
+    for (pattern, flags) in [(r"\p{RGI_Emoji}","v"),(".","iu"),(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
 }
@@ -271,7 +271,7 @@ fn unicode_group_reference_grammar_syntax_and_work_refusal_preserve_recovery() {
     }
     assert!(Regex::compile(r"(?=a)?a","",&mut 100_000).unwrap().find(&[97],0,false,&mut 100_000).unwrap().is_some());
     assert!(matches!(Regex::compile(r"\1","",&mut 100_000),Err(Error::Unsupported(_))));
-    for (pattern,flags) in [("(?<é>a)","u"),(r"\p{Letter}","u"),(".","iu"),(".","d")] {
+    for (pattern,flags) in [("(?<é>a)","u"),(r"\p{RGI_Emoji}","v"),(".","iu"),(".","d")] {
         assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));
     }
     let pattern=r"(?<=(.))\1";assert!(matches!(Regex::compile(pattern,"u",&mut 0),Err(Error::Limit(_))));
@@ -310,7 +310,12 @@ fn unicode_set_algebra_grammar_flags_and_classic_boundaries_are_preserved() {
     let strings=Regex::compile(r"^[\q{ab|cd}]$","v",&mut 100_000).unwrap();
     assert!(strings.find(&[97,98],0,false,&mut 100_000).unwrap().is_some());
     assert!(strings.find(&[97,99],0,false,&mut 100_000).unwrap().is_none());
-    for pattern in [r"[\p{Letter}]",r"[\P{ASCII}]"] {assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Unsupported(_))),"{pattern}");}
+    for pattern in [r"^[\p{Letter}]$",r"^[\P{ASCII}]$"] {
+        let property=Regex::compile(pattern,"v",&mut 100_000).unwrap();
+        assert!(property.find(&[0xe9],0,false,&mut 100_000).unwrap().is_some());
+        assert!(property.find(&[0],0,false,&mut 100_000).unwrap().is_none());
+    }
+    assert!(matches!(Regex::compile(r"[\p{RGI_Emoji}]","v",&mut 100_000),Err(Error::Unsupported(_))));
     let classic=Regex::compile("^[a&&b]$","u",&mut 100_000).unwrap();assert!(classic.find(&[38],0,false,&mut 100_000).unwrap().is_some());
     let flags=Flags::parse("yvmsg").unwrap();assert_eq!(flags.text(),"gmsvy");
 }
@@ -379,9 +384,55 @@ fn unicode_string_set_syntax_work_refusal_and_fresh_recovery_are_preserved() {
     for pattern in [r"[^\q{ab}]",r"[^\q{}]",r"[^\q{ab}--\q{ab}]",r"[^\q{ab}&&\q{ab}]",r"[\q{a}-z]",r"[a-\q{z}]",r"[\q{a-b}]",r"[\q{\d}]",r"[\q{a]",r"[\q]",r"[\q{!!}]"] {
         assert!(matches!(Regex::compile(pattern,"v",&mut 100_000),Err(Error::Syntax(_))),"{pattern}");
     }
-    for (pattern,flags) in [(r"[\p{Letter}]","v"),(r"[\q{ab}]","iv"),(".","d")] {assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));}
+    for (pattern,flags) in [(r"[\p{RGI_Emoji}]","v"),(r"[\q{ab}]","iv"),(".","d")] {assert!(matches!(Regex::compile(pattern,flags,&mut 100_000),Err(Error::Unsupported(_))));}
     assert!(matches!(Regex::compile(r"[\q{ab}]","u",&mut 100_000),Err(Error::Syntax(_))));
     let pattern=format!(r"[\q{{{}}}]",["abcdef";64].join("|"));assert!(matches!(Regex::compile(&pattern,"v",&mut 1_000),Err(Error::Limit(_))));
     let re=Regex::compile(&pattern,"v",&mut 100_000).unwrap();assert!(matches!(re.find(&[97,98,99,100,101,102],0,false,&mut 0),Err(Error::Limit(_))));
     assert_eq!(re.find(&[97,98,99,100,101,102],0,false,&mut 100_000).unwrap().unwrap().captures[0],Some((0,6)));
+}
+
+#[test]
+fn unicode_property_category_aliases_cover_supplementary_and_non_scalar_units() {
+    for flags in ["u","v"] {
+        for pattern in [r"^\p{L}+$",r"^\p{General_Category=Letter}+$",r"^\p{gc=L}+$"] {
+            let re=Regex::compile(pattern,flags,&mut 1_000_000).unwrap();
+            assert!(re.find(&"Aéあ𐐀".encode_utf16().collect::<Vec<_>>(),0,false,&mut 1_000_000).unwrap().is_some());
+            for input in [vec![49],vec![0xd83d,0xde00],vec![0xd800]] {assert!(re.find(&input,0,false,&mut 1_000_000).unwrap().is_none());}
+        }
+        for (property,unit) in [("Lu",65),("digit",0x660),("LC",0x1c5),("Cs",0xd800),("Cn",0x378),("Co",0xe000),("Zs",0xa0)] {
+            let re=Regex::compile(&format!(r"^\p{{{property}}}$"),flags,&mut 1_000_000).unwrap();assert!(re.find(&[unit],0,false,&mut 1_000_000).unwrap().is_some(),"{property}");
+        }
+    }
+}
+
+#[test]
+fn unicode_property_script_extensions_and_binary_membership_are_exact() {
+    for flags in ["u","v"] {
+        for (property,yes,no) in [("Script=Hiragana",0x3042,0x30fc),("scx=Hira",0x30fc,65),("Script_Extensions=Katakana",0x30fc,0x3042),("Script=Common",0x30fc,0x3042),("scx=Common",33,0x30fc),("sc=Unknown",0x378,65),("ASCII",65,0xe9),("AHex",70,71),("Alpha",0xe9,49),("White_Space",0x85,0xfeff),("Assigned",0xd800,0x378),("Bidi_M",40,65),("Join_C",0x200c,65)] {
+            let re=Regex::compile(&format!(r"^\p{{{property}}}$"),flags,&mut 1_000_000).unwrap();assert!(re.find(&[yes],0,false,&mut 1_000_000).unwrap().is_some(),"{property}");assert!(re.find(&[no],0,false,&mut 1_000_000).unwrap().is_none(),"{property}");
+        }
+        let re=Regex::compile(r"^\p{Emoji}$",flags,&mut 1_000_000).unwrap();assert!(re.find(&[0xd83d,0xde00],0,false,&mut 1_000_000).unwrap().is_some());
+        assert!(Regex::compile(r"^\p{Any}$",flags,&mut 1_000_000).unwrap().find(&[0xd800],0,false,&mut 1_000_000).unwrap().is_some());
+    }
+}
+
+#[test]
+fn unicode_property_complements_algebra_captures_and_directions_are_preserved() {
+    for (pattern,text,expected) in [(r"^([\p{L}&&[^\p{ASCII}]])\1$","éé",true),(r"^[[\p{L}]--[\p{Lu}]]+$","éあ",true),(r"^[[\p{L}]--[\p{Lu}]]+$","Aé",false),(r"^[\p{ASCII}\q{😀A}]$","😀A",true),(r"^\P{ASCII}+$","😀é",true),(r"^\P{Cs}+$","😀",true),(r"^\P{Cs}+$","A",true)] {
+        let re=Regex::compile(pattern,"v",&mut 1_000_000).unwrap();assert_eq!(re.find(&text.encode_utf16().collect::<Vec<_>>(),0,false,&mut 1_000_000).unwrap().is_some(),expected,"{pattern}");
+    }
+    let re=Regex::compile(r"(?<=(\p{L}+))!","u",&mut 1_000_000).unwrap();assert_eq!(re.find(&"𐐀é!".encode_utf16().collect::<Vec<_>>(),0,false,&mut 1_000_000).unwrap().unwrap().captures,vec![Some((3,4)),Some((0,3))]);
+    assert!(Regex::compile(r"^\P{Cs}$","u",&mut 1_000_000).unwrap().find(&[0xd800],0,false,&mut 1_000_000).unwrap().is_none());
+}
+
+#[test]
+fn unicode_property_strict_names_syntax_refusal_and_fresh_work_are_exact() {
+    for flags in ["u","v"] {
+        for pattern in [r"\p",r"\p{}",r"\p{letter}",r"\p{Script=latin}",r"\p{sc =Latn}",r"\p{Age=1.1}",r"\p{Alphabetic=Yes}",r"\p{Unknown_Property}",r"\p{gc=ASCII}",r"\p{Script=}",r"[\p{L}-z]"] {assert!(matches!(Regex::compile(pattern,flags,&mut 1_000_000),Err(Error::Syntax(_))),"{pattern}");}
+    }
+    assert!(matches!(Regex::compile(r"\p{RGI_Emoji}","u",&mut 1_000_000),Err(Error::Syntax(_))));
+    assert!(matches!(Regex::compile(r"\P{RGI_Emoji}","v",&mut 1_000_000),Err(Error::Syntax(_))));
+    assert!(matches!(Regex::compile(r"\p{RGI_Emoji}","v",&mut 1_000_000),Err(Error::Unsupported(_))));
+    let pattern=r"[\p{L}&&\p{ASCII}]";assert!(matches!(Regex::compile(pattern,"v",&mut 100),Err(Error::Limit(_))));
+    let re=Regex::compile(pattern,"v",&mut 1_000_000).unwrap();assert!(matches!(re.find(&[65],0,false,&mut 0),Err(Error::Limit(_))));assert!(re.find(&[65],0,false,&mut 1_000_000).unwrap().is_some());
 }
