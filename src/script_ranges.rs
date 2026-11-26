@@ -122,7 +122,7 @@ impl Bridge<'_> {
     // displayed document. Mutation producers retain the main-only resolver.
     pub(in crate::scripting) fn range_metadata_index(&self,handle:u32)->Result<Option<usize>,Error>{
         self.native_node_access(handle).map_err(|(kind,message)|Error::Exception(kind,message))?;
-        if self.range_attr_document(handle).is_some()||self.frame_contains_node(handle).is_some(){return Ok(None);}
+        if self.range_attr_document(handle).is_some()||self.frame_contains_node(handle).is_some()||self.inert_node_type(handle).is_some(){return Ok(None);}
         self.range_node(handle).map(Some).map_err(|message|Error::Exception("NotSupportedError",message))
     }
     pub(super) fn range_live_access(&self,receiver:u32,method:&str,args:&[Value])->Result<(),Error>{
@@ -151,6 +151,10 @@ impl Bridge<'_> {
             self.state.work(1)?;
             return Ok(self.contains_child_document(owner)?.nodes[node].children.len());
         }
+        if self.inert_node_type(handle).is_some(){
+            let work=self.character_data_source(handle).map_or(1,|text|text.used_bytes());self.state.work(work)?;
+            return Ok(if let Some(text)=self.character_data_source(handle){text.utf16_len()}else{self.inert_children(handle).ok_or("Inert Range child links are unavailable.")?.len()});
+        }
         let node = self.range_node(handle)?;
         let item = &self.doc.nodes[node];
         if let Some(text) = item.kind.character_dom_string() {
@@ -167,6 +171,7 @@ impl Bridge<'_> {
             let parent=self.contains_child_document(owner)?.nodes.iter().position(|item|item.children.contains(&node));
             return parent.map(|parent|self.frame_child_node_handle(owner,parent)).transpose();
         }
+        if self.inert_node_type(handle).is_some(){self.state.work(1)?;return Ok(self.inert_observation_parent(handle));}
         let node = self.range_node(handle)?;
         self.state.work(1)?;
         Ok(self
@@ -188,7 +193,7 @@ impl Bridge<'_> {
         let parent = self
             .range_parent(handle)?
             .ok_or("InvalidNodeTypeError: Range relative boundary requires a parent.")?;
-        if self.frame_contains_node(handle).is_some(){
+        if self.frame_contains_node(handle).is_some()||self.inert_node_type(handle).is_some(){
             let children=self.equality_children(parent)?;self.state.work(children.len())?;
             let index=children.iter().position(|&child|child==handle).ok_or("Child Range parent/child topology is inconsistent.")?;
             return Ok((parent,index));
@@ -259,7 +264,8 @@ impl Bridge<'_> {
     }
     pub(super) fn create_range(&mut self, owner: u32, document: u32) -> Result<Value, String> {
         if owner!=WINDOW {self.contains_child_document(owner)?;}
-        if document!=DOCUMENT {
+        if self.inert_node_type(document)==Some(9){self.native_node_access(document).map_err(|(_,message)|message)?;}
+        else if document!=DOCUMENT {
             let (window,node)=self.frame_contains_node(document).ok_or("Range creation in inert documents is not implemented.")?;
             if node!=0{return Err("Range factory requires a genuine Document.".into());}
             self.contains_child_document(window)?;
@@ -459,7 +465,8 @@ impl Bridge<'_> {
         if method == CREATE {
             if receiver==DOCUMENT{return Ok(());}
             if self.frame_contains_node(receiver).is_some_and(|(_,node)|node==0){self.range_metadata_index(receiver)?;return Ok(());}
-            return Err(Exception("NotSupportedError","Range creation in inert documents is not implemented.".into()));
+            if self.inert_node_type(receiver)==Some(9){self.range_metadata_index(receiver)?;return Ok(());}
+            return Err(Exception("TypeError","Range creation requires a genuine supported Document.".into()));
         }
         if self.range_record(receiver).is_none() {
             return Err(Exception(
@@ -471,8 +478,8 @@ impl Bridge<'_> {
         self.range_live_access(receiver,method,args)?;
         let record=*self.range_record(receiver).unwrap();
         if matches!(method,CLONE_CONTENTS|EXTRACT_CONTENTS|DELETE_CONTENTS|INSERT_NODE|SURROUND_CONTENTS)
-            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()) {
-            return Err(Exception("NotSupportedError","Child Range content mutation and fragment producers are not implemented.".into()));
+            && [record.start,record.end].iter().any(|point|self.frame_contains_node(point.node).is_some()||self.inert_node_type(point.node).is_some()) {
+            return Err(Exception("NotSupportedError","Child/inert Range content mutation and fragment producers are not implemented.".into()));
         }
         if comparison(method) {return self.validate_range_comparison(receiver,method,args);}
         // The insertion transaction checks hierarchy before any Text split.
@@ -507,7 +514,7 @@ impl Bridge<'_> {
                 return Err(Exception("TypeError", "A genuine Node is required.".into()));
             }
             let node = self.range_metadata_index(*handle)?;
-            if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && node.is_some_and(|node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_))) {
+            if matches!(method,SET_START|SET_END|SELECT_CONTENTS) && (self.inert_node_type(*handle)==Some(10)||node.is_some_and(|node|matches!(self.doc.nodes[node].kind,NodeKind::DocumentType(_)))) {
                 return Err(Exception("InvalidNodeTypeError","A DocumentType cannot be a Range boundary.".into()));
             }
             if matches!(method, SET_START | SET_END) {
@@ -537,7 +544,101 @@ impl Bridge<'_> {
 }
 
 impl Bridge<'_> {
+    fn range_inert_string(&mut self,range:Record)->Result<Value,String>{
+        if range.start == range.end {
+            return Ok(Value::String(String::new()));
+        }
+        let mut common = range.start.node;
+        while common != range.end.node
+            && self.range_ancestor_child(common, range.end.node)?.is_none()
+        {
+            common = self
+                .range_parent(common)?
+                .ok_or("Range has no common ancestor.")?;
+        }
+        let root = common;
+        self.state.copies(size_of::<u32>())?;
+        let mut stack = Vec::new();
+        stack
+            .try_reserve(1)
+            .map_err(|_| "Range text traversal reservation failed.")?;
+        stack.push(root);
+        let mut output = Vec::new();
+        while let Some(node) = stack.pop() {
+            self.state.work(1)?;
+            if matches!(self.inert_node_type(node),Some(3|4)) {
+                let handle = node;
+                let length = self.range_length(handle)?;
+                if self.range_compare(
+                    Point {
+                        node: handle,
+                        offset: length,
+                    },
+                    range.start,
+                )? == Some(Ordering::Less)
+                    || self.range_compare(
+                        Point {
+                            node: handle,
+                            offset: 0,
+                        },
+                        range.end,
+                    )? == Some(Ordering::Greater)
+                {
+                    continue;
+                }
+                let start = if range.start.node == handle {
+                    range.start.offset
+                } else {
+                    0
+                };
+                let end = if range.end.node == handle {
+                    range.end.offset
+                } else {
+                    length
+                };
+                let count = end.saturating_sub(start);
+                let bytes = count.checked_mul(2).ok_or("Range string size overflow.")?;
+                let total = output
+                    .len()
+                    .checked_add(count)
+                    .and_then(|count| count.checked_mul(2))
+                    .ok_or("Range result size overflow.")?;
+                if total > self.state.limits.host.string_bytes {
+                    return Err("Range string exceeds the shared host string allowance.".into());
+                }
+                self.state.copies(bytes)?;
+                output
+                    .try_reserve(count)
+                    .map_err(|_| "Range string reservation failed.")?;
+                let text=self.character_data_source(node).ok_or("Inert Range CharacterData is unavailable.")?;
+                output.extend(text.code_units().skip(start).take(count));
+            } else {
+                let count=self.inert_children(node).ok_or("Inert Range child links are unavailable.")?.len();
+                self.state.work(count)?;self.state.copies(count.checked_mul(size_of::<u32>()).ok_or("Inert Range traversal storage overflow.")?)?;
+                stack.try_reserve(count).map_err(|_|"Inert Range traversal reservation failed.")?;
+                stack.extend(self.inert_children(node).unwrap().iter().rev().copied());
+            }
+        }
+        if std::char::decode_utf16(output.iter().copied()).any(|unit| unit.is_err()) {
+            return Ok(Value::StringUnits(output));
+        }
+        let bytes = std::char::decode_utf16(output.iter().copied())
+            .try_fold(0usize, |bytes, unit| {
+                bytes.checked_add(unit.unwrap().len_utf8())
+            })
+            .ok_or("Range UTF8 size overflow.")?;
+        if bytes > self.state.limits.host.string_bytes {
+            return Err("Range string exceeds the shared host string allowance.".into());
+        }
+        self.state.copies(bytes)?;
+        let mut text = String::new();
+        text.try_reserve_exact(bytes)
+            .map_err(|_| "Range UTF8 reservation failed.")?;
+        text.extend(std::char::decode_utf16(output.iter().copied()).map(Result::unwrap));
+        Ok(Value::String(text))
+    }
     fn range_string(&mut self, range: Record) -> Result<Value, String> {
+        if self.inert_node_type(range.start.node).is_some(){return self.range_inert_string(range);}
         if let Some((owner,_))=self.frame_contains_node(range.start.node){
             let count=self.contains_child_document(owner)?.nodes.len();self.state.work(count)?;
             // Initial blank child documents currently represent only their

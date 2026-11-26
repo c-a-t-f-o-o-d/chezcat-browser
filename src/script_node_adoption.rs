@@ -81,7 +81,7 @@ impl Bridge<'_>{
    }
   }
   let (growth,added)=if records.is_empty(){(None,0)}else{self.prepare_adopted_index(tree.nodes.iter().copied(),self.state.retained_limit.saturating_sub(self.state.retained).checked_sub(payload).ok_or("Adoption payload allowance exhausted.")?)?};
-  if tree.native{self.state.prepare_range_changes(1,count)?;}else if let Some(parent)=tree.parent{self.prepare_document_children_sync(parent,0)?;}
+  if tree.native{self.state.prepare_range_changes(1,count)?;}else if let Some(parent)=tree.parent{self.prepare_document_children_sync(parent,0)?;self.state.prepare_inert_range_changes(1)?;}
   self.state.replace_storage(0,payload.checked_add(added).ok_or("Adoption storage overflow.")?,0)?;
   // Every fallible allocation and move is admitted. Publish source removal
   // and owner changes without callbacks between these native record writes.
@@ -93,7 +93,7 @@ impl Bridge<'_>{
    for index in indices{self.state.dom.connected[index]=false;self.state.tree.active[index]=false;if document==DOCUMENT{self.state.detached_nodes.insert(index);}else{self.state.detached_nodes.remove(&index);}}
    self.state.dirty=true;if connected{self.state.layout_changed();}
   }else{
-   if let Some(parent)=tree.parent{self.state.inert_documents.node_mut(parent).unwrap().children.remove(slot.unwrap());self.sync_document_children(parent);}
+   if let Some(parent)=tree.parent{self.state.ranges_remove_inert(parent,slot.unwrap(),1);self.state.inert_documents.node_mut(parent).unwrap().children.remove(slot.unwrap());self.sync_document_children(parent);}
    for &handle in &tree.nodes{let node=self.state.inert_documents.node_mut(handle).unwrap();node.owner=document;if handle==source{node.parent=None;}}
   }
   self.commit_attr_document_rebind(&attr_changes,document);self.state.dom_committed();Ok(Value::Host(source))

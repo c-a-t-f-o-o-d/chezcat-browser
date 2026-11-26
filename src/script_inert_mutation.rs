@@ -68,6 +68,8 @@ impl Bridge<'_> {
             let slot=self.state.inert_documents.node(parent).unwrap().children.iter().position(|&node|node==child).ok_or("Inert child link is unavailable.")?;
             let moved=self.state.inert_documents.node(parent).unwrap().children.len()-slot-1;
             self.state.copies(moved.checked_mul(size_of::<u32>()).ok_or("Inert removal copy overflow.")?)?;
+            self.state.prepare_inert_range_changes(1)?;
+            self.state.ranges_remove_inert(parent,slot,1);
             self.state.inert_documents.node_mut(parent).unwrap().children.remove(slot);
             self.state.inert_documents.node_mut(child).unwrap().parent=None;
             self.sync_document_children(parent);
@@ -110,7 +112,11 @@ impl Bridge<'_> {
         let writes=count.checked_mul(2).ok_or("Inert insertion initialization overflow.")?;
         self.state.work(moved.saturating_add(removed).saturating_add(writes).saturating_add(tail))?;
         let copies=moved.checked_add(removed).and_then(|n|n.checked_add(writes)).and_then(|n|n.checked_add(tail)).and_then(|n|n.checked_mul(size_of::<u32>())).ok_or("Inert child move copy overflow.")?;
+        self.state.prepare_inert_range_changes(3)?;
         self.state.replace_storage(0,bytes,copies)?;
+        if let Some(old)=old_parent{self.state.ranges_remove_inert(old,old_slot.unwrap(),1);}
+        if fragment{self.state.ranges_remove_inert(child,0,count);}
+        self.state.ranges_insert_handle(parent,insertion,count);
         let arena=&mut self.state.inert_documents;
         if let Some(mut next)=replacement{let children=&mut arena.node_mut(parent).unwrap().children;next.append(children);*children=next;}
         if let Some(old)=old_parent{arena.node_mut(old).unwrap().children.remove(old_slot.unwrap());}

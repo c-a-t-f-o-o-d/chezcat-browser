@@ -220,12 +220,15 @@ impl Bridge<'_> {
                 .and_then(|n| n.checked_mul(size_of::<u32>()))
                 .ok_or("Inert text child copy overflow.")?,
         )?;
+        self.state.prepare_inert_range_changes(2)?;
         let first = if count == 0 {
             self.reserve_inert_storage(0, 0, 0, 0, child_bytes)?;
             None
         } else {
             Some(self.append_inert_text(owner, Some(object), text, child_bytes)?)
         };
+        self.state.ranges_remove_inert(object,0,old_count);
+        self.state.ranges_insert_handle(object,0,count);
         let arena = &mut self.state.inert_documents;
         for slot in 0..old_count {
             let child = arena.node(object).unwrap().children[slot];

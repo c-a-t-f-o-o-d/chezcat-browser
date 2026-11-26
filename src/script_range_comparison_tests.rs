@@ -14,14 +14,13 @@ fn range_comparison_native_node_guards_and_same_origin_method_realms(){
  run(&mut d,&mut f,&mut p,r#"
 var attr=document.createAttribute('title'),inert=new Document(),node=inert.createElement('div'),seen=0,caught=0;
 try{r.comparePoint(attr,{valueOf:function(){seen++;return 0;}});}catch(e){if(e instanceof DOMException&&e.name==='WrongDocumentError')caught++;}
-try{r.isPointInRange(node,0);}catch(e){if(e.name==='NotSupportedError')caught++;}
-try{r.intersectsNode(node);}catch(e){if(e.name==='NotSupportedError')caught++;}
-if(caught!==3||seen!==1||r.startOffset!==1||r.endOffset!==3)throw 'genuine unsupported node guards';
+if(r.isPointInRange(node,0)||r.intersectsNode(node))throw 'genuine inert nodes have independent native roots';
+if(caught!==1||seen!==1||r.startOffset!==1||r.endOffset!==3)throw 'genuine native node root guards';
 var frame=document.createElement('iframe');frame.hidden=true;document.body.appendChild(frame);var child=frame.contentWindow;
 var read=child.Function('range','node','return range.comparePoint(node,2)===0&&range.intersectsNode(node);');
 if(!read(r,text))throw 'same origin caller';
 try{child.Range.prototype.comparePoint.call(r,text,999);}catch(e){if(e instanceof child.DOMException&&!(e instanceof DOMException)&&e.name==='IndexSizeError')caught++;}
-if(caught!==4)throw 'called method exception realm';
+if(caught!==2)throw 'called method exception realm';
 "#);
  p.set_location(&crate::navigation::address("https://range-query-other.test/changed",&crate::navigation::Location::home()).unwrap());
  let result=p.console_eval(&mut d,&mut f,"read(r,text);");

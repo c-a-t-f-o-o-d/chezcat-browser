@@ -230,6 +230,7 @@ impl Bridge<'_> {
             .and_then(|n| n.checked_add(2))
             .ok_or("Inert replacement copy size overflow.")?;
         self.state.work(slots)?;
+        self.state.prepare_inert_range_changes(4)?;
         self.state.replace_storage(
             0,
             storage,
@@ -239,22 +240,21 @@ impl Bridge<'_> {
         )?;
         // Both list growth and every move/parent write are admitted. Publish
         // without callbacks or fallible work between source and destination.
-        let arena = &mut self.state.inert_documents;
         if let Some(mut next) = replacement {
-            let list = &mut arena.node_mut(parent).unwrap().children;
-            next.append(list);
-            *list = next;
+            let list=&mut self.state.inert_documents.node_mut(parent).unwrap().children;
+            next.append(list);*list=next;
         }
-        if let Some(source) = old_parent {
-            arena
-                .node_mut(source)
-                .unwrap()
-                .children
-                .remove(source_at.unwrap());
+        if let Some(source)=old_parent{
+            self.state.ranges_remove_inert(source,source_at.unwrap(),1);
+            self.state.inert_documents.node_mut(source).unwrap().children.remove(source_at.unwrap());
         }
-        if remove_old {
-            arena.node_mut(parent).unwrap().children.remove(insertion);
+        if remove_old{
+            self.state.ranges_remove_inert(parent,insertion,1);
+            self.state.inert_documents.node_mut(parent).unwrap().children.remove(insertion);
         }
+        if fragment{self.state.ranges_remove_inert(incoming,0,count);}
+        self.state.ranges_insert_handle(parent,insertion,count);
+        let arena=&mut self.state.inert_documents;
         arena.node_mut(outgoing).unwrap().parent = None;
         let children = &mut arena.node_mut(parent).unwrap().children;
         let length = children.len();

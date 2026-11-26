@@ -20,7 +20,7 @@ impl Bridge<'_>{
  pub(in crate::scripting) fn write_character_splice(&mut self,object:u32,value:Value,offset:usize,removed:usize,inserted:usize)->Result<(),String>{
   let old=self.character_data_source(object).ok_or("CharacterData edit receiver disappeared.")?.utf16_len();let current=script_attribute_names::converted_name(&value).map_err(|(_,message)|message)?.code_units().count();
   if offset>old||removed>old-offset||old.checked_sub(removed).and_then(|n|n.checked_add(inserted))!=Some(current){return Err("CharacterData edit proposal no longer matches its actual source.".into());}
-  if self.inert_node_type(object).is_some(){let text=self.dom_text(&value)?;self.state.prepare_range_changes(1,0)?;self.write_inert_character_data(object,text)?;self.state.ranges_splice_data(object,offset,removed,inserted);Ok(())}else{if !self.dom_set_with_character_splice(object,"data",&value,Some((offset,removed,inserted)))?{return Err("CharacterData native setter is unavailable.".into());}Ok(())}
+  if self.inert_node_type(object).is_some(){let text=self.dom_text(&value)?;self.write_inert_character_splice(object,text,offset,removed,inserted)}else{if !self.dom_set_with_character_splice(object,"data",&value,Some((offset,removed,inserted)))?{return Err("CharacterData native setter is unavailable.".into());}Ok(())}
  }
 }
 
