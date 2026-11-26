@@ -77,6 +77,7 @@ impl Bridge<'_> {
     pub(super) fn accepts_input_type(&self, node: usize, name: &crate::html::AttributeName, value: Option<&str>) -> bool {
         if !name.html_is("type") { return false; }
         let raw = value.unwrap_or("");
+        if self.native_text_input(node) && forms::input_kind(raw) == Kind::Text { return true; }
         if raw.eq_ignore_ascii_case("checkbox") {
             self.fresh_text_input(node) || self.owned_native_checkbox(node)
         } else if raw.eq_ignore_ascii_case("radio") {
@@ -192,6 +193,11 @@ impl Bridge<'_> {
 
     pub(super) fn prepare_input_attribute(&mut self, node: usize, name: &crate::html::AttributeName,
         value: Option<&str>) -> Result<Option<forms::InputPlan>, String> {
+        if name.html_is("type") && self.native_text_input(node) && forms::input_kind(value.unwrap_or("")) == Kind::Text {
+            self.state.work(value.map_or(1, |value|value.len().saturating_add(1)))?;
+            script_text_content::deadline(self.state)?;
+            return Ok(Some(forms::InputPlan::TextType { node, password: value.is_some_and(|value|value.eq_ignore_ascii_case("password")) }));
+        }
         if name.html_is("checked") && self.input_receiver(node_handle(node)) {
             if let Some(control) = self.forms.controls.get(&node) {
                 let present = value.is_some();

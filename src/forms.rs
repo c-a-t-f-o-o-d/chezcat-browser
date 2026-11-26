@@ -38,27 +38,22 @@ pub enum Kind {
     Unsupported,
 }
 
+/// Shared case-insensitive INPUT state classification, without allocating a lowercase copy.
+pub(crate) fn input_kind(value: &str) -> Kind {
+    [("hidden",Kind::Hidden),("checkbox",Kind::Checkbox),("radio",Kind::Radio),
+     ("submit",Kind::Submit),("image",Kind::Image),("reset",Kind::Reset),("button",Kind::Button),
+     ("file",Kind::Unsupported),("number",Kind::Unsupported),("range",Kind::Unsupported),
+     ("color",Kind::Unsupported),("date",Kind::Unsupported),("datetime-local",Kind::Unsupported),
+     ("month",Kind::Unsupported),("week",Kind::Unsupported),("time",Kind::Unsupported),
+     ("email",Kind::Unsupported),("url",Kind::Unsupported)]
+        .into_iter().find_map(|(name,kind)| value.eq_ignore_ascii_case(name).then_some(kind)).unwrap_or(Kind::Text)
+}
+
 pub fn kind(doc: &Document, node: usize) -> Option<Kind> {
     if doc.nodes.get(node)?.namespace!=crate::html::Namespace::Html{return None;}
     let tag = tag(doc, node);
     Some(match tag {
-        "input" => match doc
-            .attr(node, "type")
-            .unwrap_or("text")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "hidden" => Kind::Hidden,
-            "checkbox" => Kind::Checkbox,
-            "radio" => Kind::Radio,
-            "submit" => Kind::Submit,
-            "image" => Kind::Image,
-            "reset" => Kind::Reset,
-            "button" => Kind::Button,
-            "file" | "number" | "range" | "color" | "date" | "datetime-local"
-            | "month" | "week" | "time" | "email" | "url" => Kind::Unsupported,
-            _ => Kind::Text, // text/search/tel/password, plus the HTML invalid-value default.
-        },
+        "input" => input_kind(doc.attr(node,"type").unwrap_or("text")),
         "button" => match doc
             .attr(node, "type")
             .unwrap_or("submit")

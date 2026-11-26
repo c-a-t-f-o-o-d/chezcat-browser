@@ -7282,3 +7282,7 @@ mod pattern_validation_tests;
 #[cfg(test)]
 #[path="app_password_input_tests.rs"]
 mod password_input_tests;
+
+#[cfg(test)]
+#[path="app_text_type_transition_tests.rs"]
+mod text_type_transition_tests;
