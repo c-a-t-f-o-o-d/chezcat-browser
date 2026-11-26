@@ -14,6 +14,7 @@ pub(super) const ROOT_METHOD: &str = "\0Node.getRootNode";
 impl Bridge<'_> {
     pub(super) fn node_tree_method_member(&self, object: u32, name: &str) -> bool {
         let member = match name {
+            "append"|"prepend"|"replaceChildren"=>self.parent_node_receiver(object),
             "getRootNode" => self.get_root_receiver(object),
             "getElementById"=>self.identifier_lookup_receiver(object,None),
             "normalize"=>self.normalize_receiver(object),

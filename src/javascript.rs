@@ -28,6 +28,8 @@ mod property_key_proxy_tests;
 mod property_key_native_tests;
 #[path="processing_instruction_interface.rs"]
 pub(crate) mod processing_instruction_interface;
+#[path="parent_node_interface.rs"]
+pub(crate) mod parent_node_interface;
 #[path="character_data_interface.rs"]
 pub(crate) mod character_data_interface;
 #[path="anchor_url_interface.rs"]
@@ -767,6 +769,8 @@ pub struct NativeAttributeChange {
 
 pub enum NativeControlValidation{Message(Value),Dispatch(usize)}
 pub trait Host {
+    fn genuine_node_argument(&self,_object:u32)->bool{false}
+    fn parent_insertion_validity(&self,_parent:u32,_node:u32)->Result<(),(&'static str,String)>{Ok(())}
     fn prepare_pi_operation(&mut self,_object:u32,_method:&str,_args:&[Value])->Result<processing_instruction_interface::Prepared,String>{Err("Native PI operations are unavailable.".into())}
     fn finish_pi_operation(&mut self,_object:u32,_committed:bool){}
     /// Opt-in exact native named-property reads; None preserves unsupported receivers.
@@ -4335,6 +4339,7 @@ pub struct Runtime {
     symbol_async_iterator: Option<usize>,
     symbol_to_string_tag: Option<usize>,
     symbol_species: Option<usize>,
+    symbol_unscopables: Option<usize>,
     promises: promises::Arena,
     mutations: mutation_observers::Arena,
     walkers: tree_walker::Arena,
@@ -4500,6 +4505,7 @@ impl Runtime {
             symbol_async_iterator: None,
             symbol_to_string_tag: None,
             symbol_species: None,
+            symbol_unscopables: None,
             promises: promises::Arena::default(),
             mutations: mutation_observers::Arena::default(),
             walkers: tree_walker::Arena::default(),
@@ -9293,6 +9299,7 @@ impl Runtime {
         host: &mut dyn Host,
     ) -> Result<Value, Fault> {
         self.validate_native_access(object, host)?;
+        if parent_node_interface::operation(method){return self.parent_node_variadic_call(object,method,args,host);}
         if range_interface::operation(method) {
             host.native_operation_caller(self.native_access_caller.unwrap_or_else(||self.browser_global.map(|(window,_)|window)));
             if let Err(error)=host.range_endpoint_access(object,method,args) {
@@ -9446,7 +9453,7 @@ impl Runtime {
             if method==DOCUMENT_IMPORT_NODE&&kind=="NotSupportedError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if matches!(method,"setAttributeNode"|"setAttributeNodeNS"|"removeAttributeNode")&&matches!(kind,"InUseAttributeError"|"NotFoundError"|"WrongDocumentError"|"NotSupportedError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==DOCUMENT_ADOPT_NODE&&matches!(kind,"NotSupportedError"|"HierarchyRequestError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
-            if matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild")&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
+            if (method==parent_node_interface::REPLACE_ALL||matches!(method,"appendChild"|"insertBefore"|"removeChild"|"replaceChild"))&&matches!(kind,"HierarchyRequestError"|"NotFoundError"|"NotSupportedError"|"WrongDocumentError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method.starts_with("\0XHR.")&&!matches!(kind,"TypeError"|"RangeError") {let exception=self.native_dom_exception(kind,&message)?;return Err(Fault::thrown(exception));}
             if matches!(method,"setAttribute"|"setAttributeNS")&&matches!(kind,"NamespaceError"|"InvalidCharacterError"){return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}
             if method==HTML_FORM_REQUEST&&kind=="NotFoundError"{return Err(Fault::thrown(self.native_dom_exception(kind,&message)?));}

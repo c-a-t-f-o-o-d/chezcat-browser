@@ -12,12 +12,14 @@ impl Bridge<'_> {
     pub(super) fn splice_document_fragment(&mut self,parent:usize,method:&str,args:&[Value])->Result<Value,String> {
         self.state.rebuild(self.doc)?;
         let Some(Value::Host(handle))=args.first() else{return Err("A genuine DocumentFragment is required.".into());};
-        if !self.fragment_receiver(*handle) {return Err("A genuine DocumentFragment is required.".into());}
+        let all=method==parent_node_interface::REPLACE_ALL;
+        let fragment=self.fragment_receiver(*handle);
+        if !fragment&&!all {return Err("A genuine DocumentFragment is required.".into());}
         let donor=self.dom_node(*handle)?;
         if !matches!(self.doc.nodes[parent].kind,NodeKind::Element {..}|NodeKind::DocumentFragment) {
             return Err("HierarchyRequestError: This Node cannot contain children.".into());
         }
-        if donor==parent || self.state.tree.parents[donor].is_some() || self.state.dom.connected[donor] {
+        if donor==parent || fragment&&(self.state.tree.parents[donor].is_some() || self.state.dom.connected[donor]) {
             return Err("HierarchyRequestError: A fragment container must remain a detached root.".into());
         }
         let old=if method=="replaceChild" {
@@ -42,17 +44,19 @@ impl Bridge<'_> {
         if matches!(tag(self.doc,parent),"script"|"style"|"link"|"iframe"|"select"|"option"|"optgroup") {
             return Err("Fragment insertion into resource or native-control interiors is not implemented; no tree was changed.".into());
         }
-        let root_count=self.doc.nodes[donor].children.len();
+        let source_parent=if fragment{Some(donor)}else{self.state.tree.parents[donor]};
+        let source_at=source_parent.and_then(|source|self.doc.nodes[source].children.iter().position(|&node|node==donor));
+        let root_count=if fragment{self.doc.nodes[donor].children.len()}else{1};
         self.state.work(root_count)?;
         self.state.copies(root_count.checked_mul(std::mem::size_of::<usize>()).ok_or("Fragment child copy overflow.")?)?;
         let mut roots=Vec::new();roots.try_reserve(root_count).map_err(|_|"Fragment root reservation failed.")?;
-        roots.extend(self.doc.nodes[donor].children.iter().copied());
+        if fragment{roots.extend(self.doc.nodes[donor].children.iter().copied());}else{roots.push(donor);}
         let mut incoming=Vec::new();let mut seen=HashSet::new();let mut maximum_depth=0;
         self.state.work(self.doc.nodes.len())?;
         self.state.copies(self.doc.nodes.len().checked_mul(8*std::mem::size_of::<usize>()).ok_or("Fragment staging copy overflow.")?)?;
         seen.try_reserve(self.doc.nodes.len()).map_err(|_|"Fragment topology reservation failed.")?;
         for &root in &roots {
-            if root>=self.doc.nodes.len() || self.state.tree.parents[root]!=Some(donor) {return Err("Fragment donor child identity mismatch.".into());}
+            if root>=self.doc.nodes.len() || fragment&&self.state.tree.parents[root]!=Some(donor) {return Err("Fragment donor child identity mismatch.".into());}
             let(nodes,depth)=self.mutation_subtree_with_styles(root)?;
             maximum_depth=maximum_depth.max(depth);
             incoming.try_reserve(nodes.len()).map_err(|_|"Fragment descendant reservation failed.")?;
@@ -77,30 +81,38 @@ impl Bridge<'_> {
             ancestor=self.state.tree.parents[node];
         }
         if parent_depth.saturating_add(maximum_depth)>128 {return Err("Fragment insertion depth limit reached; no tree was changed.".into());}
-        let outgoing=if let Some(old)=old {self.mutation_subtree_with_styles(old)?.0} else {Vec::new()};
+        let old_count=if all{self.doc.nodes[parent].children.len()}else{usize::from(old.is_some())};
+        self.state.work(old_count)?;self.state.copies(old_count.checked_mul(std::mem::size_of::<usize>()).ok_or("Replacement roots size overflow.")?)?;
+        let mut old_roots=Vec::new();old_roots.try_reserve_exact(old_count).map_err(|_|"Cannot reserve replacement roots.")?;
+        if all{old_roots.extend(self.doc.nodes[parent].children.iter().copied());}else if let Some(old)=old{old_roots.push(old);}
+        let mut outgoing=Vec::new();
+        for &root in &old_roots{let nodes=self.mutation_subtree_with_styles(root)?.0;outgoing.try_reserve(nodes.len()).map_err(|_|"Cannot reserve replacement subtrees.")?;outgoing.extend(nodes);}
+
         if outgoing.iter().any(|&node|self.doc.nodes[node].namespace==crate::html::Namespace::UnknownForeign
             || matches!(tag(self.doc,node),"script"|"link"|"iframe")) {
             return Err("Fragment replacement cannot retire foreign or script/stylesheet/frame resources; no tree was changed.".into());
         }
-        if outgoing.iter().any(|node|seen.contains(node)) {return Err("Fragment source overlaps the replaced subtree.".into());}
+        if !all&&outgoing.iter().any(|node|seen.contains(node)) {return Err("Fragment source overlaps the replaced subtree.".into());}
         self.validate_button_children(parent,&incoming)?;
-        if roots.is_empty() && old.is_none() {return Ok(Value::Host(*handle));}
+        if roots.is_empty() && old_count==0 {return Ok(Value::Host(*handle));}
 
         let total=self.doc.nodes[parent].children.len().checked_add(roots.len()).ok_or("Fragment destination size overflow.")?;
         self.state.work(total.saturating_add(incoming.len()).saturating_add(outgoing.len()))?;
-        let final_count = total.checked_sub(usize::from(old.is_some())).ok_or("Fragment final child count underflow.")?;
+        let final_count = total.checked_sub(old_count).ok_or("Fragment final child count underflow.")?;
         self.state.copies(final_count.checked_mul(std::mem::size_of::<usize>()).ok_or("Fragment destination copy overflow.")?)?;
         let mut children=Vec::new();children.try_reserve_exact(final_count).map_err(|_|"Fragment destination reservation failed.")?;
-        let position=reference.and_then(|reference|self.doc.nodes[parent].children.iter().position(|&node|node==reference))
-            .unwrap_or(self.doc.nodes[parent].children.len());
+        let position=if all{0}else{reference.and_then(|reference|self.doc.nodes[parent].children.iter().position(|&node|node==reference))
+            .unwrap_or(self.doc.nodes[parent].children.len())};
+        if all{children.extend(roots.iter().copied());}else{
         for (index,&node) in self.doc.nodes[parent].children.iter().enumerate() {
             if index==position {children.extend(roots.iter().copied());}
             if Some(node)!=old {children.push(node);}
         }
         if position==self.doc.nodes[parent].children.len() {children.extend(roots.iter().copied());}
-        let mut overrides=Vec::new();overrides.try_reserve(roots.len()+usize::from(old.is_some())).map_err(|_|"Fragment owner projection reservation failed.")?;
+        }
+        let mut overrides=Vec::new();overrides.try_reserve(roots.len()+old_roots.len()).map_err(|_|"Fragment owner projection reservation failed.")?;
+        for &root in &old_roots {overrides.push((root,None));}
         for &root in &roots {overrides.push((root,Some(parent)));}
-        if let Some(old)=old {overrides.push((old,None));}
         for &root in &roots{self.validate_svg_edge(node_handle(parent),node_handle(root))?;}
         let connected=self.state.dom.connected[parent];
         if incoming.iter().any(|&node|tag(self.doc,node)=="style"){self.validate_style_destination(parent)?;}
@@ -110,12 +122,15 @@ impl Bridge<'_> {
         let bytes = child_link_bytes(&children).checked_add(form_plan.retained_bytes).ok_or("Fragment child/native storage overflow.")?;
         self.state.prepare_range_changes(3,incoming.len().saturating_add(outgoing.len()))?;
         self.state.replace_storage(child_link_bytes(&self.doc.nodes[parent].children), bytes, form_plan.retained_bytes)?;
-        self.state.ranges_remove(donor,0,roots.len(),&incoming);
-        if old.is_some() { self.state.ranges_remove(parent,position,1,&outgoing); }
+        if all {self.state.ranges_remove(parent,0,old_count,&outgoing);}
+        if fragment{self.state.ranges_remove(donor,0,roots.len(),&incoming);}
+        else if let Some(source)=source_parent.filter(|source|*source!=parent){self.state.ranges_remove(source,source_at.unwrap(),1,&incoming);}
+        if !all&&old.is_some() { self.state.ranges_remove(parent,position,1,&outgoing); }
         self.state.ranges_insert(parent,position,roots.len());
         // All validation, quota checks, allocations and native plans precede
         // the first write. No author callback or fallible work in publication.
-        self.doc.nodes[donor].children.clear();
+        if fragment{self.doc.nodes[donor].children.clear();}
+        else if let Some(source)=source_parent.filter(|source|*source!=parent){self.doc.nodes[source].children.remove(source_at.unwrap());}
         self.doc.nodes[parent].children=children;
         for &(root,new_parent) in &overrides {self.state.tree.parents[root]=new_parent;}
         for node in outgoing {self.state.dom.connected[node]=false;self.state.detached_nodes.insert(node);}

@@ -1,5 +1,7 @@
 //! Separate HTML node trees with no Window, renderer, or resource loader.
 //! https://dom.spec.whatwg.org/#dom-domimplementation-createhtmldocument
+#[path="script_parent_node_variadic.rs"]
+mod script_parent_node_variadic;
 use super::*;
 use std::rc::Rc;
 #[path="script_inert_class_list.rs"]
