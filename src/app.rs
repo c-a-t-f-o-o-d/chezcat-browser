@@ -7506,3 +7506,7 @@ mod dataset_reflect_get_tests;
 #[cfg(test)]
 #[path="app_script_data_block_tree_tests.rs"]
 mod script_data_block_tree_tests;
+
+#[cfg(test)]
+#[path="app_noscript_loader_context_tests.rs"]
+mod noscript_loader_context_tests;

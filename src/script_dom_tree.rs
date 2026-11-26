@@ -52,6 +52,11 @@ pub(super) fn exposes_inert_host(name: &str, namespace: crate::html::Namespace) 
     name == "script" || matches!(name, "iframe" | "template" | "style") && namespace == crate::html::Namespace::Html
 }
 
+pub(super) fn exposes_query_host(name: &str, namespace: crate::html::Namespace) -> bool {
+    exposes_inert_host(name, namespace)
+        || name == "noscript" && namespace == crate::html::Namespace::Html
+}
+
 fn common_node_property(name: &str) -> bool {
     matches!(
         name,
@@ -227,7 +232,7 @@ impl State {
             let inert_children = inert_dom_tag(name, doc.scripting_enabled);
             // The embedding element belongs to this document. Indexing it
             // leaves its fallback subtree inert and never creates a child window.
-            if !inert && (!inert_children || exposes_inert_host(name, doc.nodes[node].namespace)) {
+            if !inert && (!inert_children || exposes_query_host(name, doc.nodes[node].namespace)) {
                 tree.active[node] = true;
                 let has_id=self.index_id_text(doc,node)?.is_some_and(|id| !id.is_empty() && id.len() <= self.limits.host.string_bytes);
                 let id_min=if has_id {(tree.ids.len()+1).saturating_sub(tree.ids.capacity())*size_of::<(usize,usize)>()}else{0};
@@ -510,7 +515,9 @@ impl Bridge<'_> {
         if matches!(self.doc.nodes[node].kind, NodeKind::Text(_) | NodeKind::Cdata(_))
             && self.state.dom.connected.get(node)==Some(&true)
             && (self.accessible_iframe_text(node) || self.state.tree.parents.get(node).copied().flatten().is_some_and(|parent|
-                tag(self.doc,parent)=="script" || self.created_html_style(parent))) {
+                tag(self.doc,parent)=="script" || self.created_html_style(parent)
+                    || self.doc.scripting_enabled && tag(self.doc,parent)=="noscript"
+                        && self.doc.nodes[parent].namespace==crate::html::Namespace::Html)) {
             return true;
         }
         if !self.state.dirty || self.state.dom.connected.get(node) != Some(&true) { return false; }
@@ -523,7 +530,7 @@ impl Bridge<'_> {
             if current == 0 { return true; }
             let name = tag(self.doc, current);
             if inert_dom_tag(name, self.doc.scripting_enabled)
-                && (current != node || !exposes_inert_host(name, self.doc.nodes[current].namespace)) {
+                && (current != node || !exposes_query_host(name, self.doc.nodes[current].namespace)) {
                 return false;
             }
             let Some(parent) = self.state.tree.parents.get(current).copied().flatten() else { return false; };
@@ -2085,5 +2092,21 @@ document.title='conversions-ok';
         let old_states=page.state.node_state_bytes();let old_core=doc.nodes.capacity();
         let source=format!("var name='{}';var element=document.createElementNS(ns,name);if(element.localName!==name)throw 'name truncated';", "n".repeat(512));
         let result=page.console_eval(&mut doc,&mut forms,&source);assert_eq!(result.errors,0,"{}",page.report());assert_eq!(doc.nodes.len(),before+1);assert_eq!(page.state.retained,retained+512+page.state.node_state_bytes()-old_states+(doc.nodes.capacity()-old_core)*size_of::<Node>());assert!(!page.has_host_tasks());
+    }
+}
+
+#[cfg(test)]
+mod noscript_loader_context_tests {
+    use super::*;
+    #[test]
+    fn noscript_loader_context_native_raw_reads_keep_resource_mutation_refusal_and_recover() {
+        let mut d=crate::html::parse_loaded_document_with_scripting("<body><noscript id=fallback><img id=hidden src=unused><script>bad()</script></noscript><p id=out>Real</p>",true,&||Ok(())).unwrap();
+        let mut f=Forms::new(&d);let mut p=Page::new();let location=crate::navigation::address("https://noscript-context.test/",&crate::navigation::Location::home()).unwrap();p.set_location(&location);p.set_resource_base(&location);assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);
+        p.begin_job();p.runtime.execute("var fallback=document.getElementById('fallback'),old=fallback.firstChild,blocker=document.createTextNode('blocked'),watch=new MutationObserver(function(){});watch.observe(fallback,{childList:true});if(document.getElementById('hidden')!==null||document.querySelectorAll('noscript').length!==1||old.nodeType!==3||!old.data.includes('<img')||fallback.textContent!==old.data)throw 'actual native raw noscript reads';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();
+        let before=format!("{:?}",d.nodes);let commits=p.state.dom_commits;
+        p.begin_job();let error=p.runtime.execute("fallback.appendChild(blocker);",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap_err();assert!(error.contains("inert resource subtrees"),"{error}");
+        assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(p.state.dom_commits,commits);
+        p.begin_job();p.runtime.execute("if(fallback.firstChild!==old||watch.takeRecords().length||blocker.parentNode!==null)throw 'protected noscript tree unchanged';document.getElementById('out').textContent='Recovered';if(fallback.textContent!==old.data||document.getElementById('out').textContent!=='Recovered')throw 'native read recovery';",&mut Bridge{doc:&mut d,forms:&mut f,state:&mut p.state}).unwrap();
+        assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
     }
 }

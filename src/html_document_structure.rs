@@ -21,6 +21,7 @@ pub(super) enum Action {
 
 pub(super) struct Structure {
     mode: Mode,
+    scripting: bool,
     html: Option<usize>,
     head: Option<usize>,
     body: Option<usize>,
@@ -61,9 +62,10 @@ fn metadata(name: &str) -> bool {
 }
 
 impl Structure {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(scripting: bool) -> Self {
         Self {
             mode: Mode::BeforeHtml,
+            scripting,
             html: None,
             head: None,
             body: None,
@@ -264,7 +266,7 @@ impl Structure {
                 }
                 Mode::InHead => {
                     if !token.closing && name == "noscript" {
-                        self.mode = Mode::InHeadNoscript;
+                        if !self.scripting { self.mode = Mode::InHeadNoscript; }
                         return Ok(Action::Normal);
                     }
                     if !token.closing && metadata(name) {

@@ -295,7 +295,7 @@ impl Bridge<'_> {
             self.state.work(1)?;
             let name=tag(self.doc,node);
             let inert=dom_tree::inert_dom_tag(name,self.doc.scripting_enabled);
-            let visible=(!inert||dom_tree::exposes_inert_host(name,self.doc.nodes[node].namespace))
+            let visible=(!inert||dom_tree::exposes_query_host(name,self.doc.nodes[node].namespace))
                 &&(self.state.tree.active.get(node).copied().unwrap_or(false)||self.state.detached_nodes.contains(&node));
             if visible&&matches!(self.doc.nodes[node].kind,NodeKind::Element{..}){self.query_push(&mut candidates,node,available)?;}
             if visible&&!inert {
