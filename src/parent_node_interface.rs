@@ -1,6 +1,7 @@
 //! ParentNode binding conversions precede native DOM construction and mutation.
 //! https://dom.spec.whatwg.org/#interface-parentnode
 use super::*;
+pub(crate) const MOVE:&str="\0ParentNode.moveBefore";
 pub(crate) const APPEND:&str="\0ParentNode.append";
 pub(crate) const PREPEND:&str="\0ParentNode.prepend";
 pub(crate) const REPLACE:&str="\0ParentNode.replaceChildren";
@@ -22,6 +23,7 @@ impl Runtime {
   for(name,method)in [("append",APPEND),("prepend",PREPEND),("replaceChildren",REPLACE)]{
    self.deferred_host_method(prototype,window,name,method,0)?;
   }
+  self.deferred_host_method(prototype,window,"moveBefore",MOVE,2)?;
   self.define_node_unscopables(prototype,&["append","prepend","replaceChildren"])
  }
  pub(super) fn parent_insertion_check(&mut self,parent:u32,node:u32,host:&mut dyn Host)->Result<(),Fault>{

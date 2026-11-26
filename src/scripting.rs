@@ -5132,7 +5132,7 @@ impl Host for Bridge<'_> {
         if self.event_target_interface(object)&&script_element_siblings::operation(method).is_some() {return Some(object);}
         if self.event_target_interface(object) && (matches!(method, "Document" | "\0Document.get.documentElement" | crate::javascript::DOCUMENT_DOCTYPE_GET | DOCUMENT_CURRENT_SCRIPT_GET | DOCUMENT_ACTIVE_ELEMENT_GET | "DocumentFragment" | "Text" | "Comment") || Slottable::getter(method).is_some() || crate::javascript::document_encoding_getter(method)) {return Some(object);}
         if self.event_target_interface(object)&&processing_instruction_interface::operation(method).is_some(){return Some(object);}
-        if self.event_target_interface(object)&&(parent_node_interface::operation(method)||child_node_interface::operation(method)){return Some(object);}
+        if self.event_target_interface(object)&&(parent_node_interface::operation(method)||method==parent_node_interface::MOVE||child_node_interface::operation(method)){return Some(object);}
         if self.event_target_interface(object) && (matches!(method, script_node_root::ROOT_METHOD | script_node_contains::CONTAINS_METHOD | script_clone_node::CLONE_METHOD)||element_names::namespace_method(method)||method==character_substring::METHOD||character_data_interface::operation(method).is_some()||method==text_whole::GETTER||method==text_split_interface::METHOD||method==node_normalize_interface::METHOD) {return Some(object);}
         if self.event_target_interface(object) && dom_tree::node_mutation_method(method) {return Some(object);}
         if self.event_target_interface(object) && matches!(method, HTML_SLOT_NAME_GET | HTML_SLOT_NAME_SET) {
@@ -5208,6 +5208,7 @@ impl Host for Bridge<'_> {
         self.validate_event_prefix(object, method, next_index, args)
     }
     fn native_reference_arguments(&self,object:u32,method:&str)->&'static [usize] {
+        if method==parent_node_interface::MOVE{return &[0,1];}
         if method=="dispatchEvent"{return &[0];}
         if method==adjacent_interface::ELEMENT {return &[1];}
         if method==script_position::METHOD{return &[0];}
@@ -5242,6 +5243,7 @@ impl Host for Bridge<'_> {
     }
 
     fn required_arguments(&self, object: u32, method: &str) -> usize {
+        if method==parent_node_interface::MOVE{return 2;}
         if matches!(method,crate::javascript::abort_interface::TIMEOUT|crate::javascript::abort_interface::ANY)&&self.event_target_interface(object){return 1;}
         if crate::javascript::control_custom_validity_interface(method).is_some()||matches!(method,script_output_validity_state::SET|script_output_validity_state::FIELD_SET){return 1;}
         let method=script_class_list::operation(method).unwrap_or(method);
@@ -5358,6 +5360,7 @@ impl Host for Bridge<'_> {
             if self.is_frame_handle(object){return Err(("NotSupportedError","Initial child document mutation requires its lifecycle hooks.".into()));}
             return Ok(());
         }
+        if method==parent_node_interface::MOVE{return self.validate_state_preserving_move(object,args);}
         if method==parent_node_interface::REPLACE_ALL{return self.validate_parent_replace_all(object,args);}
         if parent_node_interface::operation(method){return if self.parent_node_receiver(object){self.native_node_access(object)}else{Err(("TypeError","ParentNode method requires a genuine parent.".into()))};}
         if let Some(operation)=script_class_list::operation(method){return self.class_list_validate(object,operation,args);}
@@ -6357,7 +6360,7 @@ impl Host for Bridge<'_> {
             return self.ui_receiver(receiver);
         }
         if self.event_target_interface(object)&&child_node_interface::operation(method){return self.child_node_variadic_receiver(receiver);}
-        if self.event_target_interface(object) && (parent_children::operation(method).is_some()||parent_node_interface::operation(method)) {
+        if self.event_target_interface(object) && (parent_children::operation(method).is_some()||parent_node_interface::operation(method)||method==parent_node_interface::MOVE) {
             return self.parent_node_receiver(receiver);
         }
         if self.event_target_interface(object) && matches!(method,"\0Node.get.ownerDocument"|"\0Node.get.isConnected"|"\0Node.get.baseURI") {
@@ -8144,6 +8147,7 @@ impl Host for Bridge<'_> {
     }
 
     fn call(&mut self, object: u32, method: &str, args: &[Value]) -> Result<Value, String> {
+        if method==parent_node_interface::MOVE{return self.state_preserving_move(object,args);}
         if method==parent_node_interface::REPLACE_ALL{return self.parent_replace_all(object,args);}
         if let Some(operation)=script_class_list::operation(method){
             return match operation {
@@ -12546,3 +12550,7 @@ mod parent_node_variadic_tests;
 #[cfg(test)]
 #[path="script_child_node_variadic_tests.rs"]
 mod child_node_variadic_tests;
+
+#[cfg(test)]
+#[path="script_state_preserving_move_tests.rs"]
+mod state_preserving_move_tests;

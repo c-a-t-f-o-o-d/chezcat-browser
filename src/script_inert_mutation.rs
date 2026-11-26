@@ -49,7 +49,8 @@ impl Bridge<'_> {
     }
 
     pub(in crate::scripting) fn mutate_inert_children(&mut self,parent:u32,method:&str,args:&[Value])->Result<Value,String> {
-        self.validate_inert_mutation(parent,method,args).map_err(|(_,message)|message)?;
+        let moving=method==parent_node_interface::MOVE;
+        self.validate_inert_mutation(parent,if moving{"insertBefore"}else{method},args).map_err(|(_,message)|message)?;
         let Value::Host(child)=args[0] else{unreachable!()};
         if self.state.inert_documents.node(child).is_none(){return self.append_template_child(parent,args);}
         let source=self.state.inert_documents.node(child).unwrap();
@@ -59,7 +60,7 @@ impl Bridge<'_> {
         // are checked independently when this subtree enters the native sink.
 
 
-        let reference=if method=="insertBefore"{if let Some(Value::Host(handle))=args.get(1){Some(*handle)}else{None}}else{None};
+        let reference=if method=="insertBefore"||moving{if let Some(Value::Host(handle))=args.get(1){Some(*handle)}else{None}}else{None};
         if reference==Some(child){return Ok(Value::Host(child));}
         if method=="removeChild" {
             self.prepare_document_children_sync(parent,0)?;
@@ -101,7 +102,7 @@ impl Bridge<'_> {
         }else{None};
         if reference.is_some(){self.state.work(self.state.inert_documents.node(parent).unwrap().children.len())?;}
         let children=&self.state.inert_documents.node(parent).unwrap().children;
-        if reference.is_none() && old_parent==Some(parent) && old_slot==children.len().checked_sub(1){return Ok(Value::Host(child));}
+        if !moving && reference.is_none() && old_parent==Some(parent) && old_slot==children.len().checked_sub(1){return Ok(Value::Host(child));}
         let insertion=if let Some(reference)=reference{children.iter().position(|&handle|handle==reference).ok_or("Inert reference child link is unavailable.")?}else{children.len()};
         let insertion=insertion-usize::from(old_parent==Some(parent)&&old_slot.unwrap()<insertion);
         let tail=children.len()-usize::from(old_parent==Some(parent))-insertion;

@@ -1147,7 +1147,7 @@ impl Bridge<'_> {
 
     pub(super) fn mutation_subtree_with_styles(&mut self,root:usize)->Result<(Vec<usize>,usize),String>{self.checked_mutation_subtree(root,false,true)}
 
-    fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
+    pub(super) fn checked_mutation_subtree(&mut self, root: usize, bare_links: bool, direct_style: bool) -> Result<(Vec<usize>, usize), String> {
         let mut nodes = Vec::new();
         let mut stack = vec![(root, 1usize)];
         let mut depth = 0;
