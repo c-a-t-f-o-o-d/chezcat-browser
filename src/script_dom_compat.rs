@@ -233,6 +233,36 @@ impl Bridge<'_> {
         Ok(keys)
     }
 
+    /// Borrow the original name; display projections cannot identify a key.
+    pub(super) fn dataset_units_get(&mut self,handle:u32,key:&[u16])->Result<Value,String>{
+        script_text_content::deadline(self.state)?;
+        self.state.work(1)?;
+        let node=self.dataset_node(handle)?;
+        self.native_node_access(node_handle(node)).map_err(|(_,message)|message)?;
+        let NodeKind::Element{attrs,..}=&self.doc.nodes[node].kind else{return Err("Dataset requires an Element.".into())};
+        self.state.work(attrs.len())?;
+        for attr in attrs.iter().filter(|a|a.name.namespace.is_empty()){
+            script_text_content::deadline(self.state)?;
+            let name=attr.name.qualified.view();
+            self.state.work(name.logical_bytes().checked_mul(4).ok_or("Dataset raw name work overflow.")?)?;
+            let mut prefix=name.code_units();
+            if ![100,97,116,97,45].into_iter().all(|unit|prefix.next()==Some(unit)){continue;}
+            if name.code_units().skip(5).any(|unit|(65..=90).contains(&unit)){continue;}
+            let mut suffix=name.code_units().skip(5).peekable();
+            let converted=std::iter::from_fn(||{
+                let unit=suffix.next()?;
+                if unit==45&&suffix.peek().is_some_and(|next|(97..=122).contains(next)){
+                    Some(suffix.next().unwrap()-32)
+                }else{Some(unit)}
+            });
+            if !converted.eq(key.iter().copied()){continue;}
+            if attr.value.logical_bytes()>self.state.limits.host.string_bytes{return Err("Dataset value exceeds 32 KiB.".into());}
+            return Self::dom_string_value(self.state,&attr.value);
+        }
+        script_text_content::deadline(self.state)?;
+        Ok(Value::Undefined)
+    }
+
     pub(super) fn dataset_get(&mut self, handle: u32, name: &str) -> Result<Value, String> {
         let node = self.dataset_node(handle)?;
         // A literal hyphen followed by a lowercase ASCII letter cannot be a

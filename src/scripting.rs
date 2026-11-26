@@ -3467,6 +3467,7 @@ impl Bridge<'_> {
 
 impl Host for Bridge<'_> {
     fn named_units_property(&mut self,object:u32,units:&[u16])->Result<Option<Value>,String>{
+        if (DATASET_BASE..EVENT_BASE).contains(&object){return self.dataset_units_get(object,units).map(Some);}
         if self.concrete_html_interface(object)!=Some("HTMLFormElement"){return Ok(None);}
         self.native_node_access(object).map_err(|(_,message)|message)?;
         if self.is_frame_handle(object){return Err("Initial child FORM raw named lookup requires lifecycle integration.".into());}
@@ -12612,3 +12613,7 @@ mod dataset_native_interface_tests;
 #[cfg(test)]
 #[path="script_dataset_native_accessors_tests.rs"]
 mod dataset_native_accessors_tests;
+
+#[cfg(test)]
+#[path="script_dataset_raw_named_read_tests.rs"]
+mod dataset_raw_named_read_tests;
