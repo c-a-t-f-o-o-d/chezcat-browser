@@ -396,6 +396,7 @@ impl Parser<'_> {
             94 => self.push(Node::Start),
             36 => self.push(Node::End),
             91 => {
+                if self.unicode_sets { return self.unicode_set_node(); }
                 let class = self.class()?;
                 self.push(Node::Class(class))
             }
@@ -777,9 +778,6 @@ impl Parser<'_> {
         }
     }
     fn class(&mut self) -> Result<Class, Error> {
-        if self.unicode_sets {
-            return self.unicode_class();
-        }
         let inverted = self.eat(b'^' as u16);
         let mut parts = Vec::new();
         while self.peek() != Some(b']' as u16) {

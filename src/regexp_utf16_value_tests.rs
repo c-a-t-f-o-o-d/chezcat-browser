@@ -336,3 +336,29 @@ if(!/[a&&b]/u.test('&')||!/^[[a-z]&&[^aeiou]]$/v.test('b')||/^[[a-z]&&[^aeiou]]$
 'ok';
 "#);
 }
+
+#[test]
+fn unicode_string_set_native_captures_consumers_and_progress_are_exact() {
+    succeeds(r#"
+var re=/(?<x>[\q{😀|😀A}])/gv, m=re.exec('!😀A');
+if(m.index!==1||m[0]!=='😀A'||m.groups.x!=='😀A'||re.lastIndex!==4||!re.unicodeSets||re.unicode)throw 'q native result';
+if('😀A!'.replace(/([\q{😀|😀A}])/v,'<$1>')!=='<😀A>!')throw 'q replace';
+var pieces='x😀Ay'.split(/([\q{😀A}])/v);if(pieces.length!==3||pieces[0]!=='x'||pieces[1]!=='😀A'||pieces[2]!=='y')throw 'q split';
+if('!😀A'.search(/[\q{😀A}]/v)!==1||'😀'.match(/[\q{}]/gv).length!==2)throw 'q search empty progress';
+if('😀A'.split(/[\q{}]/v).join('|')!=='😀|A')throw 'q empty split';
+if(!/(?<=([\q{😀|😀A}]))!/v.test('😀A!')||!/^([\q{😀A}])\1$/v.test('😀A😀A'))throw 'q shared assertion reference';
+'ok';
+"#);
+}
+
+#[test]
+fn unicode_string_set_native_syntax_and_algebra_preserve_fresh_execution() {
+    succeeds(r#"
+for(var pattern of ['[^\\q{ab}]','[^\\q{}]','[^\\q{ab}--\\q{ab}]','[\\q{a}-z]','[\\q{a-b}]','[\\q{\\d}]']){
+ var error=null;try{new RegExp(pattern,'v');}catch(e){error=e;}if(!(error instanceof SyntaxError))throw 'q syntax';
+}
+if(!/^[[\q{ab|a|}]--[\q{ab}]]$/v.test('a')||!/^[[\q{ab|a|}]--[\q{ab}]]$/v.test('')||/^[[\q{ab|a|}]--[\q{ab}]]$/v.test('ab'))throw 'q subtraction';
+if(!/^[^[\q{ab}]&&[a]]$/v.test('😀')||!/^([\q{a|ab|abc}])bc$/v.test('abc'))throw 'q recovery';
+'ok';
+"#);
+}
