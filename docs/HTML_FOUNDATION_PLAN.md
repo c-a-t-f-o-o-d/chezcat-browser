@@ -1224,6 +1224,11 @@ or silent input truncation is not an acceptable recovery result.
   insertion have focused evidence. Inert/child endpoints, native control/handler
   lifecycles, arbitrary SVG attribute namespace production and complete Range
   operations/package acceptance remain required; no contract is newly accepted.
+  Native comparison/query methods now use the same live boundary ordering for
+  all four comparison modes, exact-unit point inclusion and strict node-edge
+  intersections. Ordered conversion, root/kind/offset errors, read-only resource
+  recovery and an actual App consumer have focused checks. Existing child/inert
+  and Attr endpoint guards and complete package acceptance remain open.
 - Complete mutation observer records and microtask delivery, NodeIterator and
   TreeWalker filters/cursors, live range updates and boundary checks.
   Native TreeWalker function/object filters now distinguish subtree rejection

@@ -7302,3 +7302,7 @@ mod tree_walker_filter_tests;
 #[cfg(test)]
 #[path="app_range_clone_contents_tests.rs"]
 mod range_clone_contents_tests;
+
+#[cfg(test)]
+#[path="app_range_comparison_tests.rs"]
+mod range_comparison_tests;

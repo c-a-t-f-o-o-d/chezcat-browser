@@ -1602,11 +1602,35 @@ detach does not reclaim or invalidate a live range.
 
 This increment supports accessible displayed-document nodes, including detached
 main-document nodes and fragments. Child/inert construction/endpoints, Attr
-endpoints, StaticRange, comparison/query methods, geometry, contextual fragments,
+endpoints, StaticRange, geometry, contextual fragments,
 content deletion/extraction/insertion and surrounding remain outside the
 implemented subset. Range identity is not a DOM selection, editor-selection or
 site initialization claim. Original App acceptance uses trusted input, actual
 text runs/pixels and stable neighboring editor/link hit targets.
+
+
+## Native Range comparison queries
+
+Canonical compareBoundaryPoints compares the specified endpoint pair using an
+unsigned-short mode, and throws NotSupportedError for other converted modes.
+Supported ranges with distinct native roots throw WrongDocumentError. comparePoint
+returns -1, 0 or 1; isPointInRange includes both boundaries. These point queries
+convert the offset once after the Node brand check, then observe current boundaries
+after author conversion effects. Root mismatch precedes DocumentType and offset
+checks: comparePoint throws WrongDocumentError, while isPointInRange returns false.
+Same-root DocumentType containers throw InvalidNodeTypeError, and offsets exceeding
+the current UTF-16 or child length throw IndexSizeError. intersectsNode uses strict
+parent/index edges, returns false across roots, and true for its matching root.
+
+The methods use existing canonical data-slot deferral, native access checks and
+metered boundary topology. Queries allocate no retained DOM records and leave
+source nodes and ranges unchanged; completed author conversion effects persist.
+Original cases cover descriptor identity/deletion, required arguments, conversion
+reentry, exact units, detached roots, live mutations, work/deadline refusal and
+fresh recovery. An in-process App callback consumes all four queries and verifies
+real result paint with stable editing and link targets. Child/inert endpoints and
+Attr containers retain existing guards; complete Range/package acceptance remains
+required. No foundation contract is newly accepted.
 
 
 ## Native Range content copying

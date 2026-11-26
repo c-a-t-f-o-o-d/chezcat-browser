@@ -4694,7 +4694,8 @@ impl Host for Bridge<'_> {
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
-        if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END) { return &[(1,false)]; }
+        if method==crate::javascript::range_interface::COMPARE_BOUNDARIES {return &[(0,false)];}
+        if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END|crate::javascript::range_interface::COMPARE_POINT|crate::javascript::range_interface::POINT_IN_RANGE) { return &[(1,false)]; }
         if method == script_inert_documents::parser::PARSE { return &[(0, true), (1, true)]; }
         if method == CREATE_CDATA_SECTION { return &[(0, true)]; }
         if method == CREATE_PROCESSING_INSTRUCTION { return &[(0, true), (1, true)]; }
@@ -5119,6 +5120,7 @@ impl Host for Bridge<'_> {
         if method==script_position::METHOD{return &[0];}
         if script_inert_documents::node_equality::operation(method){return &[0];}
         if method=="replaceChild"&&self.inert_replace_receiver(object){return &[0,1];}
+        if method==crate::javascript::range_interface::COMPARE_BOUNDARIES {return &[1];}
         if crate::javascript::range_interface::node_argument(method) { return &[0]; }
         if matches!(method,"appendChild"|"insertBefore"|"removeChild") && self.inert_mutation_receiver(object) { return if method=="insertBefore"{&[0,1]}else{&[0]}; }
         if matches!(method, "addEventListener" | "removeEventListener") { return &[1]; }
@@ -12285,3 +12287,7 @@ mod tree_walker_filter_tests;
 #[cfg(test)]
 #[path="script_range_clone_contents_tests.rs"]
 mod range_clone_contents_tests;
+
+#[cfg(test)]
+#[path="script_range_comparison_tests.rs"]
+mod range_comparison_tests;

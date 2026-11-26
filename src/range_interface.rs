@@ -19,6 +19,11 @@ pub(crate) const END_AFTER: &str = "\0Range.setEndAfter";
 pub(crate) const SELECT_NODE: &str = "\0Range.selectNode";
 pub(crate) const SELECT_CONTENTS: &str = "\0Range.selectNodeContents";
 pub(crate) const COLLAPSE: &str = "\0Range.collapse";
+pub(crate) const COMPARE_BOUNDARIES: &str = "\0Range.compareBoundaryPoints";
+pub(crate) const COMPARE_POINT: &str = "\0Range.comparePoint";
+pub(crate) const POINT_IN_RANGE: &str = "\0Range.isPointInRange";
+pub(crate) const INTERSECTS_NODE: &str = "\0Range.intersectsNode";
+pub(crate) fn comparison(method:&str)->bool {matches!(method,COMPARE_BOUNDARIES|COMPARE_POINT|POINT_IN_RANGE|INTERSECTS_NODE)}
 pub(crate) const CLONE_CONTENTS: &str = "\0Range.cloneContents";
 pub(crate) const CLONE: &str = "\0Range.cloneRange";
 pub(crate) const STRINGIFY: &str = "\0Range.toString";
@@ -47,6 +52,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | COLLAPSE
             | CLONE
             | CLONE_CONTENTS
+            | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
             | DETACH
             | STRINGIFY
     )
@@ -62,10 +68,11 @@ pub(crate) fn node_argument(method: &str) -> bool {
             | END_AFTER
             | SELECT_NODE
             | SELECT_CONTENTS
+            | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
     )
 }
 pub(crate) fn arity(method: &str) -> usize {
-    if matches!(method, SET_START | SET_END) {
+    if matches!(method, SET_START | SET_END | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE) {
         2
     } else {
         usize::from(node_argument(method))
@@ -149,6 +156,9 @@ impl Runtime {
                         )?;
                     }
                     self.deferred_host_method(prototype,window,"cloneContents",CLONE_CONTENTS,0)?;
+                    for (property,method) in [("compareBoundaryPoints",COMPARE_BOUNDARIES),("comparePoint",COMPARE_POINT),("isPointInRange",POINT_IN_RANGE),("intersectsNode",INTERSECTS_NODE)] {
+                        self.deferred_host_method(prototype,window,property,method,arity(method))?;
+                    }
                     for (key, value) in [
                         ("START_TO_START", 0),
                         ("START_TO_END", 1),
