@@ -7594,3 +7594,7 @@ mod app_range_fragment_buttons_tests;
 #[cfg(test)]
 #[path="app_range_fragment_raw_text_tests.rs"]
 mod app_range_fragment_raw_text_tests;
+
+#[cfg(test)]
+#[path="app_range_fragment_rcdata_tests.rs"]
+mod app_range_fragment_rcdata_tests;

@@ -826,12 +826,13 @@ impl Bridge<'_> {
                 crate::html::parse_contextual_fragment(source,context,self.doc.scripting_enabled)?
             },
             Some(Value::StringUnits(units))=>{
-                if !crate::html::contextual_raw_text_context(context,self.doc.scripting_enabled){return Err("Contextual fragment raw UTF-16 markup outside literal text contexts is not implemented.".into());}
+                if !crate::html::contextual_text_context(context,self.doc.scripting_enabled){return Err("Contextual fragment raw UTF-16 markup outside supported text contexts is not implemented.".into());}
                 let logical=units.len().checked_mul(2).ok_or("HTML literal source size overflow.")?;
                 if logical>self.state.limits.host.string_bytes{return Err("HTML literal source exceeds the host string limit.".into());}
-                // Temporary unit copy plus worst-case scalar projection and
-                // authoritative raw backing: at most seven bytes per unit.
-                let scratch=units.len().checked_mul(7).ok_or("HTML literal temporary size overflow.")?;
+                // Raw text owns at most seven bytes per input unit. RCDATA
+                // additionally admits source plus decoded temporary/native backing.
+                let factor=if matches!(context,"title"|"textarea"){12}else{7};
+                let scratch=units.len().checked_mul(factor).ok_or("HTML text temporary size overflow.")?;
                 self.state.work(scratch)?;self.state.copies(scratch)?;
                 let available=self.state.retained_limit.saturating_sub(self.state.retained);
                 if scratch>available{return Err("HTML literal temporary storage allowance exhausted.".into());}
@@ -858,3 +859,7 @@ mod fragment_buttons_tests;
 #[cfg(test)]
 #[path="script_range_fragment_raw_text_tests.rs"]
 mod fragment_raw_text_tests;
+
+#[cfg(test)]
+#[path="script_range_fragment_rcdata_tests.rs"]
+mod fragment_rcdata_tests;
