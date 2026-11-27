@@ -7618,3 +7618,6 @@ mod inner_html_buttons_tests;
 #[cfg(test)]
 #[path="app_svg_html_serialization_tests.rs"]
 mod svg_html_serialization_tests;
+#[cfg(test)]
+#[path="app_template_html_serialization_tests.rs"]
+mod app_template_html_serialization_tests;

@@ -988,11 +988,16 @@ impl Bridge<'_> {
     }
 
     pub(super) fn template_html(&mut self, object: u32) -> Result<Value, String> {
+        let mut output = script_inner_html::Markup::new();
+        self.template_html_into(object, &mut output)?;
+        output.finish(self.state)
+    }
+
+    pub(super) fn template_html_into(&mut self, object: u32, output: &mut script_inner_html::Markup) -> Result<(), String> {
         if self.inert_document_kind_for_node(object).unwrap_or(self.doc.kind)==crate::html::DocumentKind::Xml{return Err("XML template fragment parsing/serialization requires the XML backend; no HTML substitute is used.".into());}
-        use script_inner_html::{Markup, raw_text, serializes_as_void};
+        use script_inner_html::{raw_text, serializes_as_void};
 
         let Value::Host(root) = self.template_content(object)? else { unreachable!() };
-        let mut output = Markup::new();
         let mut pending = Vec::new();
         let children = self.inert_children(root).ok_or("Template fragment is unavailable.")?;
         pending.try_reserve(children.len()).map_err(|_| "Cannot reserve template serialization.")?;
@@ -1052,7 +1057,9 @@ impl Bridge<'_> {
                     output.open_tag(self.state, local, attrs)?;
                     let html = node.namespace == crate::html::Namespace::Html;
                     if html && serializes_as_void(tag) { continue; }
-                    let raw = html && raw_text(tag, self.doc.scripting_enabled);
+                    // Appropriate template content owners have no browsing context.
+                    // NOSCRIPT text is escaped even when the main document runs scripts.
+                    let raw = html && raw_text(tag, false);
                     let children_owner = if html && tag == "template" {
                         let Value::Host(fragment) = self.template_content(handle)? else { unreachable!() };
                         fragment
@@ -1064,7 +1071,7 @@ impl Bridge<'_> {
                 }
             }
         }
-        output.finish(self.state)
+        Ok(())
     }
 
     pub(super) fn set_template_html(&mut self, object: u32, markup: &str) -> Result<(), String> {

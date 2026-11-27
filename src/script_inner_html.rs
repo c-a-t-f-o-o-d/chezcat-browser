@@ -21,7 +21,7 @@ impl Bridge<'_> {
         let html=self.doc.nodes[node].namespace==crate::html::Namespace::Html;
         if !html&&self.doc.nodes[node].namespace!=crate::html::Namespace::Svg{return Err("HTML serialization requires known HTML or supported SVG namespace provenance.".into());}
         if !html{self.validate_svg_node(node)?;}
-        if tag(self.doc, node) == "template" { return Err("Template content serialization is not implemented.".into()); }
+        if html && tag(self.doc, node) == "template" && !include_element { return self.template_html(node_handle(node)); }
         if !include_element && html && serializes_as_void(tag(self.doc, node)) { return Ok(Value::String(String::new())); }
         let mut stack: Vec<_> = if include_element {
             vec![(node, false, false)]
@@ -48,10 +48,17 @@ impl Bridge<'_> {
                 }
                 NodeKind::ProcessingInstruction { target, data } => out.processing_instruction(self.state, target, data)?,
                 NodeKind::Element { tag, attrs, expanded_name, .. } => {
-                    if !matches!(item.namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) || tag == "template" { return Err("HTML serialization of unsupported foreign/template content is not implemented.".into()); }
+                    if !matches!(item.namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) { return Err("HTML serialization of unsupported foreign content is not implemented.".into()); }
                     let local = crate::html::element_names::local(item.namespace, tag, expanded_name)?;
                     if end { out.close_tag(self.state, local)?; continue; }
                     out.open_tag(self.state, local, attrs)?;
+                    if item.namespace==crate::html::Namespace::Html && tag=="template" {
+                        // Contents belong to the appropriate inert owner, not
+                        // the loaded source's hidden children. Share total output.
+                        self.template_html_into(node_handle(node), &mut out)?;
+                        out.close_tag(self.state, crate::dom_string::DomStringRef::Scalar("template"))?;
+                        continue;
+                    }
                     if item.namespace!=crate::html::Namespace::Html || !serializes_as_void(tag) {
                         self.state.work(item.children.len())?;
                         stack.push((node, true, false));
@@ -339,3 +346,7 @@ mod inner_html_output_tests;
 #[cfg(test)]
 #[path="script_svg_html_serialization_tests.rs"]
 mod svg_html_serialization_tests;
+
+#[cfg(test)]
+#[path="script_template_html_serialization_tests.rs"]
+mod template_html_serialization_tests;
