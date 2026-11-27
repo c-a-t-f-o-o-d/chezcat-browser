@@ -18,20 +18,23 @@ pub(super) fn serializes_as_void(name: &str) -> bool {
 impl Bridge<'_> {
     // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#dom-element-outerhtml
     pub(super) fn serialize_html(&mut self, node: usize, include_element: bool) -> Result<Value, String> {
-        if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("HTML serialization requires known HTML namespace provenance.".into()); }
+        let html=self.doc.nodes[node].namespace==crate::html::Namespace::Html;
+        if !html&&self.doc.nodes[node].namespace!=crate::html::Namespace::Svg{return Err("HTML serialization requires known HTML or supported SVG namespace provenance.".into());}
+        if !html{self.validate_svg_node(node)?;}
         if tag(self.doc, node) == "template" { return Err("Template content serialization is not implemented.".into()); }
-        if !include_element && serializes_as_void(tag(self.doc, node)) { return Ok(Value::String(String::new())); }
+        if !include_element && html && serializes_as_void(tag(self.doc, node)) { return Ok(Value::String(String::new())); }
         let mut stack: Vec<_> = if include_element {
             vec![(node, false, false)]
         } else {
             let children = &self.doc.nodes[node].children;
             self.state.work(children.len())?;
-            let raw = raw_text(tag(self.doc, node), self.doc.scripting_enabled);
+            let raw = html && raw_text(tag(self.doc, node), self.doc.scripting_enabled);
             children.iter().rev().map(|&child| (child, false, raw)).collect()
         };
         let mut out = Markup::new();
         while let Some((node, end, raw)) = stack.pop() {
             self.state.work(1)?;
+            if self.doc.nodes[node].namespace==crate::html::Namespace::Svg{self.validate_svg_node(node)?;}
             let item = &self.doc.nodes[node];
             match &item.kind {
                 NodeKind::DocumentType(data)=>{out.wrapped(self.state, "<!DOCTYPE ", &data.name, ">")?;},
@@ -45,14 +48,14 @@ impl Bridge<'_> {
                 }
                 NodeKind::ProcessingInstruction { target, data } => out.processing_instruction(self.state, target, data)?,
                 NodeKind::Element { tag, attrs, expanded_name, .. } => {
-                    if item.namespace != crate::html::Namespace::Html || tag == "template" { return Err("HTML serialization of foreign/template content is not implemented.".into()); }
+                    if !matches!(item.namespace,crate::html::Namespace::Html|crate::html::Namespace::Svg) || tag == "template" { return Err("HTML serialization of unsupported foreign/template content is not implemented.".into()); }
                     let local = crate::html::element_names::local(item.namespace, tag, expanded_name)?;
                     if end { out.close_tag(self.state, local)?; continue; }
                     out.open_tag(self.state, local, attrs)?;
-                    if !serializes_as_void(tag) {
+                    if item.namespace!=crate::html::Namespace::Html || !serializes_as_void(tag) {
                         self.state.work(item.children.len())?;
                         stack.push((node, true, false));
-                        let raw = raw_text(tag, self.doc.scripting_enabled);
+                        let raw = item.namespace==crate::html::Namespace::Html && raw_text(tag, self.doc.scripting_enabled);
                         stack.extend(item.children.iter().rev().map(|&child| (child, false, raw)));
                     }
                 }
@@ -332,3 +335,7 @@ mod inner_html_buttons_tests;
 #[cfg(test)]
 #[path="script_inner_html_output_tests.rs"]
 mod inner_html_output_tests;
+
+#[cfg(test)]
+#[path="script_svg_html_serialization_tests.rs"]
+mod svg_html_serialization_tests;

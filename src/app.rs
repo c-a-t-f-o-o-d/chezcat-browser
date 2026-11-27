@@ -7614,3 +7614,7 @@ mod app_title_inner_html_tests;
 #[cfg(test)]
 #[path="app_inner_html_buttons_tests.rs"]
 mod inner_html_buttons_tests;
+
+#[cfg(test)]
+#[path="app_svg_html_serialization_tests.rs"]
+mod svg_html_serialization_tests;
