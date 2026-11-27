@@ -7610,3 +7610,7 @@ mod app_textarea_inner_html_tests;
 #[cfg(test)]
 #[path="app_title_inner_html_tests.rs"]
 mod app_title_inner_html_tests;
+
+#[cfg(test)]
+#[path="app_inner_html_buttons_tests.rs"]
+mod inner_html_buttons_tests;
