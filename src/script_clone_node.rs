@@ -467,7 +467,7 @@ impl Bridge<'_> {
                 self.state.work(attrs.len())?;
                 let svg=node.namespace==crate::html::Namespace::Svg;
                 if svg&&!crate::html::svg_dom_transfer(&node){return Err("Contextual SVG requires supported passive shapes/attributes and local references.".into());}
-                if !svg&&(node.namespace!=crate::html::Namespace::Html||!(ordinary_clone_element(name)||matches!(name.as_str(),"input"|"textarea"|"select"|"optgroup"|"option"|"noscript")))
+                if !svg&&(node.namespace!=crate::html::Namespace::Html||!(ordinary_clone_element(name)||matches!(name.as_str(),"input"|"textarea"|"select"|"optgroup"|"option"|"noscript"|"button")))
                     ||attrs.iter().any(|attr|script_element_properties::event_handler_content_attribute(name,&attr.name)||attr.name.html_is("is")){
                     return Err("Contextual fragment native controls, resources or active elements are not implemented.".into());
                 }

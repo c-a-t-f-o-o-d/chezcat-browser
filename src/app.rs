@@ -7586,3 +7586,7 @@ mod app_range_fragment_controls_tests;
 #[cfg(test)]
 #[path="app_range_fragment_passive_content_tests.rs"]
 mod app_range_fragment_passive_content_tests;
+
+#[cfg(test)]
+#[path="app_range_fragment_buttons_tests.rs"]
+mod app_range_fragment_buttons_tests;
