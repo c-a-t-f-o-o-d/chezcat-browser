@@ -68,19 +68,24 @@ impl Bridge<'_> {
         };
         let mut added = Vec::new();
         if property == "innerHTML" {
-            let text=if matches!(value,Value::Null|Value::Undefined) {String::new()} else {self.text(value)?};
-            if text.len() > self.state.limits.host.string_bytes {
-                return Err("HTML observation source exceeds the host allowance.".into());
-            }
-            self.state.work(text.len())?;
-            self.state.copies(text.len().saturating_mul(2))?;
-            let template = self.template_receiver(object);
-            let context = if template {
-                "template"
-            } else {
-                tag(self.doc, node_index(object).unwrap())
+            let template=self.template_receiver(object);
+            let parsed=if let Value::StringUnits(units)=value{
+                if template{return Err("Exact UTF-16 template markup replacement is not implemented.".into());}
+                self.parse_inner_html_units(node_index(object).ok_or("Content observer native receiver is unavailable.")?,units)?
+            }else{
+                let text=if matches!(value,Value::Null|Value::Undefined) {String::new()} else {self.text(value)?};
+                if text.len() > self.state.limits.host.string_bytes {
+                    return Err("HTML observation source exceeds the host allowance.".into());
+                }
+                self.state.work(text.len())?;
+                self.state.copies(text.len().saturating_mul(2))?;
+                let context = if template {
+                    "template"
+                } else {
+                    tag(self.doc, node_index(object).unwrap())
             };
-            let parsed = crate::html::parse_fragment(&text, context, self.doc.scripting_enabled)?;
+            crate::html::parse_fragment(&text, context, self.doc.scripting_enabled)?
+            };
             self.state.work(parsed.nodes.len())?;
             added
                 .try_reserve_exact(parsed.nodes[0].children.len())

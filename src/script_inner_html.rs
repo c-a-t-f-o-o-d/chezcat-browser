@@ -61,7 +61,29 @@ impl Bridge<'_> {
         out.finish(self.state)
     }
 
-    pub(super) fn set_inner_html(&mut self, node: usize, source: &str) -> Result<(), String> {
+    pub(super) fn set_inner_html(&mut self,node:usize,source:&str)->Result<(),String>{
+        self.set_inner_html_source(node,crate::dom_string::DomStringRef::Scalar(source))
+    }
+
+    pub(super) fn set_inner_html_units(&mut self,node:usize,source:&[u16])->Result<(),String>{
+        self.set_inner_html_source(node,crate::dom_string::DomStringRef::Raw(source))
+    }
+
+    // Observation and native commit must predict the same actual parsed tree.
+    pub(super) fn parse_inner_html_units(&mut self,node:usize,units:&[u16])->Result<Document,String>{
+        // Other contexts retain their existing native lifecycle guards.
+        // No lossy projection supplies source or markup authority.
+        if !self.doc.scripting_enabled||!self.movable_noscript_host(node)?{return Err("Exact UTF-16 innerHTML outside passive NOSCRIPT contexts is not implemented.".into());}
+        let logical=units.len().checked_mul(2).ok_or("HTML literal source size overflow.")?;
+        if logical>self.state.limits.host.string_bytes{return Err("HTML literal source exceeds the host string limit.".into());}
+        let scratch=units.len().checked_mul(7).ok_or("HTML literal temporary size overflow.")?;
+        self.state.work(scratch)?;self.state.copies(scratch)?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        if scratch>available{return Err("HTML literal temporary storage allowance exhausted.".into());}
+        crate::html::parse_contextual_fragment_units(units,tag(self.doc,node),self.doc.scripting_enabled,available)
+    }
+
+    fn set_inner_html_source(&mut self,node:usize,source:crate::dom_string::DomStringRef<'_>)->Result<(),String>{
         self.state.rebuild(self.doc)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("innerHTML replacement requires known HTML namespace provenance.".into()); }
         if matches!(tag(self.doc, node), "script" | "style") { return Err("innerHTML replacement of script/style resource contexts is not implemented.".into()); }
@@ -71,10 +93,17 @@ impl Bridge<'_> {
         } else {
             self.mutation_ancestors(node)?;
         }
-        self.state.work(source.len())?;
-        self.state.copies(source.len().saturating_mul(2))?;
-        if source.len() > self.state.limits.host.string_bytes { return Err("HTML fragment source exceeds the host string limit.".into()); }
-        let mut staged = crate::html::parse_fragment(source, tag(self.doc, node), self.doc.scripting_enabled)?;
+        let mut staged=match source{
+            crate::dom_string::DomStringRef::Scalar(source)=>{
+                self.state.work(source.len())?;
+                self.state.copies(source.len().saturating_mul(2))?;
+                if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
+                crate::html::parse_fragment(source,tag(self.doc,node),self.doc.scripting_enabled)?
+            },
+            crate::dom_string::DomStringRef::Raw(units)=>{
+                self.parse_inner_html_units(node,units)?
+            },
+        };
         let count = staged.nodes.len() - 1;
         if self.doc.nodes.len().checked_add(count).and_then(|n| n.checked_add(self.state.blank_frame_nodes)).is_none_or(|n| n > self.state.node_limit) { return Err("DOM appended-node limit reached during HTML replacement.".into()); }
         let base = self.doc.nodes.len();
@@ -215,3 +244,7 @@ mod noscript_fragment_context_tests {
 #[cfg(test)]
 #[path="script_noscript_inner_html_tests.rs"]
 mod noscript_inner_html_tests;
+
+#[cfg(test)]
+#[path="script_noscript_inner_html_units_tests.rs"]
+mod noscript_inner_html_units_tests;

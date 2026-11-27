@@ -4680,6 +4680,9 @@ impl Host for Bridge<'_> {
                 ||self.event_target_interface(object)&&method=="ProcessingInstruction")
     }
     fn preserves_dom_string_setter(&self,object:u32,property:&str)->bool{
+        // Preserve DOMString units through conversion; the actual setter keeps
+        // context, owner and native lifecycle admission after author code.
+        if property=="innerHTML"&&self.attr_element_receiver(object){return true;}
         if (DATASET_BASE..EVENT_BASE).contains(&object){return true;}
         if self.html_label_for_member(object,property){return true;}
         if self.time_datetime_member(object,property){return true;}

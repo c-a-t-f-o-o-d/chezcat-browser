@@ -1801,8 +1801,12 @@ impl Bridge<'_> {
             return Ok(true);
         }
         if property == "innerHTML" {
-            let text = self.text(value)?;
-            self.set_inner_html(node, &text)?;
+            if let Value::StringUnits(units)=value{
+                self.set_inner_html_units(node,&units)?;
+            }else{
+                let text=self.text(value)?;
+                self.set_inner_html(node,&text)?;
+            }
             return Ok(true);
         }
         if property == "outerHTML" && matches!(self.doc.nodes[node].kind, NodeKind::Element { .. }) {
