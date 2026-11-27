@@ -997,6 +997,7 @@ fn checked_select_tag(stack: &[usize], document: &Document, incoming: &str, clos
     if context == "option" { return Err(unsupported()); }
     let current = *stack.last().unwrap();
     match (incoming, closing) {
+        ("hr", false) if select.is_some_and(|position| position > 0) => Ok(()),
         ("select", false) => Err(unsupported()), // Nested select needs recovery.
         ("select", true) if select.is_some_and(|position| position > 0) => Ok(()),
         ("option", false) => Ok(()), // close_implied pops the prior option.
@@ -1153,6 +1154,29 @@ fn close_ruby_annotation_start(stack: &mut Vec<usize>, document: &Document, inco
     }
 }
 
+// HR generates implied ends only behind an actual SELECT in ordinary scope.
+// A synthetic fragment context is not an open element and cannot enable this.
+fn close_select_implied_for_hr(stack: &mut Vec<usize>, document: &Document) {
+    let mut select_in_scope = false;
+    for &index in stack.iter().skip(1).rev() {
+        let node = &document.nodes[index];
+        if node.namespace == Namespace::Html
+            && matches!(&node.kind, NodeKind::Element { tag, .. } if tag == "select") {
+            select_in_scope = true;
+            break;
+        }
+        if active_formatting::scope_boundary(document, index) { return; }
+    }
+    if !select_in_scope { return; }
+    while stack.len() > 1 {
+        let node = &document.nodes[*stack.last().unwrap()];
+        if node.namespace != Namespace::Html { break; }
+        let NodeKind::Element { tag, .. } = &node.kind else { break; };
+        if !matches!(tag.as_str(), "dd" | "dt" | "li" | "optgroup" | "option" | "p" | "rb" | "rp" | "rt" | "rtc") { break; }
+        stack.pop();
+    }
+}
+
 fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     match incoming {
         "dt" | "dd" => close_prior_list_item(stack, document, &["dt", "dd"]),
@@ -1202,6 +1226,7 @@ fn close_implied(stack: &mut Vec<usize>, document: &Document, incoming: &str) {
     ) {
         close_paragraph_in_button_scope(stack, document);
     }
+    if incoming == "hr" { close_select_implied_for_hr(stack, document); }
     // A heading start examines only the current node after paragraph closure.
     // Older headings behind any other current node remain open.
     let heading = |name: &str| matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
@@ -1793,3 +1818,7 @@ mod noscript_loader_context_tests;
 #[cfg(test)]
 #[path="html_noscript_fragment_context_tests.rs"]
 mod noscript_fragment_context_tests;
+
+#[cfg(test)]
+#[path="html_select_hr_construction_tests.rs"]
+mod select_hr_construction_tests;
