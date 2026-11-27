@@ -7598,3 +7598,7 @@ mod app_range_fragment_raw_text_tests;
 #[cfg(test)]
 #[path="app_range_fragment_rcdata_tests.rs"]
 mod app_range_fragment_rcdata_tests;
+
+#[cfg(test)]
+#[path="app_noscript_inner_html_units_tests.rs"]
+mod app_noscript_inner_html_units_tests;
