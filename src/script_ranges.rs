@@ -818,11 +818,27 @@ impl Bridge<'_> {
         };
         if context.is_some_and(|node|self.doc.nodes[node].namespace!=crate::html::Namespace::Html){return Err("Foreign contextual fragment parsing is not implemented.".into());}
         let context=context.map_or("body",|node|{let name=tag(self.doc,node);if name=="html"{"body"}else{name}});
-        let Some(Value::String(source))=args.first() else{return Err("Contextual fragment raw UTF-16 markup is not implemented.".into());};
-        self.state.work(source.len())?;
-        self.state.copies(source.len().checked_mul(2).ok_or("HTML fragment source size overflow.")?)?;
-        if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
-        let parsed=crate::html::parse_contextual_fragment(source,context,self.doc.scripting_enabled)?;
+        let parsed=match args.first(){
+            Some(Value::String(source))=>{
+                self.state.work(source.len())?;
+                self.state.copies(source.len().checked_mul(2).ok_or("HTML fragment source size overflow.")?)?;
+                if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
+                crate::html::parse_contextual_fragment(source,context,self.doc.scripting_enabled)?
+            },
+            Some(Value::StringUnits(units))=>{
+                if !crate::html::contextual_raw_text_context(context,self.doc.scripting_enabled){return Err("Contextual fragment raw UTF-16 markup outside literal text contexts is not implemented.".into());}
+                let logical=units.len().checked_mul(2).ok_or("HTML literal source size overflow.")?;
+                if logical>self.state.limits.host.string_bytes{return Err("HTML literal source exceeds the host string limit.".into());}
+                // Temporary unit copy plus worst-case scalar projection and
+                // authoritative raw backing: at most seven bytes per unit.
+                let scratch=units.len().checked_mul(7).ok_or("HTML literal temporary size overflow.")?;
+                self.state.work(scratch)?;self.state.copies(scratch)?;
+                let available=self.state.retained_limit.saturating_sub(self.state.retained);
+                if scratch>available{return Err("HTML literal temporary storage allowance exhausted.".into());}
+                crate::html::parse_contextual_fragment_units(units,context,self.doc.scripting_enabled,available)?
+            },
+            _=>return Err("Contextual fragment requires converted HTML source.".into()),
+        };
         self.publish_contextual_html_fragment(parsed)
     }
 }
@@ -838,3 +854,7 @@ mod fragment_passive_content_tests;
 #[cfg(test)]
 #[path="script_range_fragment_buttons_tests.rs"]
 mod fragment_buttons_tests;
+
+#[cfg(test)]
+#[path="script_range_fragment_raw_text_tests.rs"]
+mod fragment_raw_text_tests;
