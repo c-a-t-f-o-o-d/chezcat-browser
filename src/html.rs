@@ -375,6 +375,32 @@ pub(crate) fn parse_contextual_fragment(input:&str,context:&str,scripting:bool)-
     checked_fragment(input,context,scripting,true)
 }
 
+// Literal tokenizer contexts share the same context/scripting decision for
+// scalar and exact UTF-16 input. RCDATA and general markup stay separate.
+pub(crate) fn contextual_raw_text_context(context:&str,scripting:bool)->bool{
+    matches!(context,"script"|"style"|"xmp"|"iframe"|"noembed"|"noframes"|"plaintext")
+        ||context=="noscript"&&scripting
+}
+
+pub(crate) fn parse_contextual_fragment_units(input:&[u16],context:&str,scripting:bool,available:usize)->Result<Document,String>{
+    if !contextual_raw_text_context(context,scripting){return Err("Contextual fragment raw UTF-16 markup outside literal text contexts is not implemented.".into());}
+    // NULL is handled in these literal tokenizer states; surrogate input is
+    // retained as-is. DOMString supplies shared exact newline normalization.
+    let mut units=Vec::new();units.try_reserve_exact(input.len()).map_err(|_|"Cannot reserve HTML literal input units.")?;
+    units.extend(input.iter().map(|&unit|if unit==0{0xfffd}else{unit}));
+    let temporary=units.capacity().checked_mul(std::mem::size_of::<u16>()).ok_or("HTML literal input backing overflow.")?;
+    let remaining=available.checked_sub(temporary).ok_or("HTML literal input backing allowance exhausted.")?;
+    let mut text=DomString::from_units(&units,remaining)?;drop(units);text.normalize_newlines();
+    let mut parsed=parse_contextual_fragment("",context,scripting)?;
+    if !text.is_empty(){
+        parsed.nodes.try_reserve(1).map_err(|_|"Cannot reserve HTML literal Text.")?;
+        parsed.nodes[0].children.try_reserve(1).map_err(|_|"Cannot reserve HTML literal Text edge.")?;
+        parsed.nodes.push(Node{kind:NodeKind::Text(text),namespace:Namespace::None,children:Vec::new()});
+        parsed.nodes[0].children.push(1);
+    }
+    Ok(parsed)
+}
+
 fn checked_fragment(input:&str,context:&str,scripting:bool,contextual_svg:bool)->Result<Document,String>{
     if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template" | "noscript") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
@@ -424,7 +450,7 @@ fn parse_internal_with_svg(
         Cow::Borrowed(input)
     };
     let input = normalized.as_ref();
-    let text_context = context.is_some_and(|name| matches!(name, "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext") || name == "noscript" && scripting);
+    let text_context = context.is_some_and(|name| matches!(name,"title"|"textarea")||contextual_raw_text_context(name,scripting));
     if checked && input.contains('\0') && !text_context {
         return Err("HTML fragment NULL handling outside text-only contexts is not implemented.".into());
     }
