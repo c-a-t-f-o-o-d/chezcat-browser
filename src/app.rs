@@ -7606,3 +7606,7 @@ mod app_noscript_inner_html_units_tests;
 #[cfg(test)]
 #[path="app_textarea_inner_html_tests.rs"]
 mod app_textarea_inner_html_tests;
+
+#[cfg(test)]
+#[path="app_title_inner_html_tests.rs"]
+mod app_title_inner_html_tests;
