@@ -84,25 +84,44 @@ impl Bridge<'_> {
     }
 
     // Observation and native replacement share the real RCDATA parser.
-    // The existing native default transaction owns dirty state and Reset.
-    pub(super) fn parse_textarea_inner_html(&mut self,node:usize,source:&str)->Result<Document,String>{
-        if !self.owned_native_textarea(node){return Err("Textarea markup requires admitted native default state.".into());}
+    // Existing text transactions own native defaults/Reset and displayed title.
+    pub(super) fn parse_native_rcdata_inner_html(&mut self,node:usize,source:&str)->Result<Document,String>{
+        if !self.owned_native_textarea(node)&&!self.title_receiver(node_handle(node)){return Err("Native RCDATA markup requires admitted TITLE or TEXTAREA state.".into());}
         if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
-        let scratch=source.len().checked_mul(7).ok_or("Textarea markup temporary size overflow.")?;
+        let scratch=source.len().checked_mul(7).ok_or("Native RCDATA markup temporary size overflow.")?;
         self.state.work(scratch)?;self.state.copies(scratch)?;
         let available=self.state.retained_limit.saturating_sub(self.state.retained);
-        if scratch>available{return Err("Textarea markup temporary storage allowance exhausted.".into());}
-        let parsed=crate::html::parse_fragment(source,"textarea",self.doc.scripting_enabled)?;
+        if scratch>available{return Err("Native RCDATA markup temporary storage allowance exhausted.".into());}
+        let context=tag(self.doc,node);
+        let parsed=crate::html::parse_fragment(source,context,self.doc.scripting_enabled)?;
+        self.validate_native_rcdata_output(&parsed,available,context)?;
+        Ok(parsed)
+    }
+
+    fn validate_native_rcdata_output(&self,parsed:&Document,available:usize,context:&str)->Result<(),String>{
         if parsed.nodes[0].children.len()>1||parsed.nodes.len()>2
             ||parsed.nodes.iter().skip(1).any(|node|!matches!(node.kind,NodeKind::Text(_))||!node.children.is_empty()){
-            return Err("Textarea RCDATA did not produce a single native Text.".into());
+            return Err("Native RCDATA did not produce a single native Text.".into());
         }
         // Literal NULL expands to U+FFFD. Source admission does not establish
         // decoded DOMString admission, even in a text-only tokenizer state.
         if parsed.nodes.iter().skip(1).any(|node|matches!(&node.kind,NodeKind::Text(text) if text.logical_bytes()>self.state.limits.host.string_bytes)){
-            return Err("Decoded textarea output exceeds the host string limit.".into());
+            return Err(format!("Decoded {context} output exceeds the host string limit."));
         }
-        if parsed.nodes.iter().skip(1).any(|node|node_bytes(node)>available){return Err("Textarea decoded output exceeds its storage allowance.".into());}
+        if parsed.nodes.iter().skip(1).any(|node|node_bytes(node)>available){return Err("Native RCDATA decoded output exceeds its storage allowance.".into());}
+        Ok(())
+    }
+
+    pub(super) fn parse_title_inner_html_units(&mut self,node:usize,units:&[u16])->Result<Document,String>{
+        if !self.title_receiver(node_handle(node)){return Err("Exact RCDATA markup requires a genuine main TITLE.".into());}
+        let logical=units.len().checked_mul(2).ok_or("TITLE markup source size overflow.")?;
+        if logical>self.state.limits.host.string_bytes{return Err("TITLE markup source exceeds the host string limit.".into());}
+        let scratch=units.len().checked_mul(12).ok_or("TITLE markup temporary size overflow.")?;
+        self.state.work(scratch)?;self.state.copies(scratch)?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        if scratch>available{return Err("TITLE markup temporary storage allowance exhausted.".into());}
+        let parsed=crate::html::parse_contextual_fragment_units(units,"title",self.doc.scripting_enabled,available)?;
+        self.validate_native_rcdata_output(&parsed,available,"title")?;
         Ok(parsed)
     }
 
@@ -110,9 +129,14 @@ impl Bridge<'_> {
         self.state.rebuild(self.doc)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("innerHTML replacement requires known HTML namespace provenance.".into()); }
         if matches!(tag(self.doc, node), "script" | "style") { return Err("innerHTML replacement of script/style resource contexts is not implemented.".into()); }
-        if self.owned_native_textarea(node){
-            let crate::dom_string::DomStringRef::Scalar(source)=source else{return Err("Native textarea defaults cannot represent unpaired UTF-16 units.".into());};
-            let mut parsed=self.parse_textarea_inner_html(node,source)?;
+        if self.owned_native_textarea(node)||self.title_receiver(node_handle(node)){
+            let mut parsed=match source{
+                crate::dom_string::DomStringRef::Scalar(source)=>self.parse_native_rcdata_inner_html(node,source)?,
+                crate::dom_string::DomStringRef::Raw(units)=>{
+                    if self.owned_native_textarea(node){return Err("Native textarea defaults cannot represent unpaired UTF-16 units.".into());}
+                    self.parse_title_inner_html_units(node,units)?
+                },
+            };
             let text=if parsed.nodes.len()==1{DomString::new()}else{
                 let NodeKind::Text(text)=parsed.nodes.pop().unwrap().kind else{unreachable!("RCDATA Text checked above")};text
             };
@@ -283,3 +307,7 @@ mod noscript_inner_html_units_tests;
 #[cfg(test)]
 #[path="script_textarea_inner_html_tests.rs"]
 mod textarea_inner_html_tests;
+
+#[cfg(test)]
+#[path="script_title_inner_html_tests.rs"]
+mod title_inner_html_tests;
