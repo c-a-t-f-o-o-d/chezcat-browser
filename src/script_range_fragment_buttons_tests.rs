@@ -1,0 +1,39 @@
+//! Native contextual BUTTON state, ownership, submission and atomic refusal.
+use super::*;
+fn fixture()->(Document,Forms,Page){
+ let mut d=crate::html::parse_loaded_document_with_scripting("<body><form id=f action='/result'><input id=neighbor name=neighbor value=seed><div id=mount></div></form><form id=g action='/other'><div id=other></div></form>",true,&||Ok(())).unwrap();
+ let mut f=Forms::new(&d);let mut p=Page::new();let l=current();p.set_location(&l);p.set_resource_base(&l);assert_eq!(p.start(&mut d,&mut f,&[]).errors,0);(d,f,p)
+}
+fn current()->crate::navigation::Location{crate::navigation::address("https://range-buttons.test/source",&crate::navigation::Location::home()).unwrap()}
+fn id(d:&Document,name:&str)->usize{(0..d.nodes.len()).find(|&n|d.attr(n,"id")==Some(name)).unwrap()}
+fn run(d:&mut Document,f:&mut Forms,p:&mut Page,s:&str){p.runtime.execute(s,&mut Bridge{doc:d,forms:f,state:&mut p.state}).unwrap();}
+fn refusal(d:&mut Document,f:&mut Forms,p:&mut Page,s:&str)->String{let source=format!("var failure=null;try{{{s}}}catch(e){{failure=e.name+': '+e.message;}}");match p.runtime.execute(&source,&mut Bridge{doc:d,forms:f,state:&mut p.state}){Err(e)=>e,Ok(_)=>{let Value::String(e)=p.runtime.execute("failure",&mut Bridge{doc:d,forms:f,state:&mut p.state}).unwrap()else{panic!("Expected refusal: {s}")};e}}}
+fn query(d:&Document,f:&Forms,owner:&str,submitter:Option<usize>)->Option<String>{f.submit_request(d,id(d,owner),submitter,&current(),&current()).unwrap().location.url.unwrap().query}
+#[test]
+fn range_fragment_buttons_detached_defaults_caption_and_native_identity(){
+ let(mut d,mut f,mut p)=fixture();let count=f.controls.len();run(&mut d,&mut f,&mut p,r#"
+var r=document.createRange(),mount=document.getElementById('mount'),watch=new MutationObserver(function(){});r.selectNodeContents(mount);watch.observe(mount,{childList:true});var fragment=r.createContextualFragment('<button id=plain type=button name=action value=before>  Run <b>now</b> </button><button id=submit name=send value=yes>Send</button><button id=reset type=reset disabled>Reset</button>'),plain=fragment.childNodes[0],submit=fragment.childNodes[1],reset=fragment.childNodes[2];if(fragment.ownerDocument!==document||plain.ownerDocument!==document||plain.parentNode!==fragment||plain.isConnected||plain.type!=='button'||plain.name!=='action'||plain.value!=='before'||plain.form!==null||submit.type!=='submit'||reset.type!=='reset'||!reset.disabled||plain.textContent!=='  Run now '||document.getElementById('plain')!==null||watch.takeRecords().length||r.startContainer!==mount||r.endOffset!==0)throw 'real detached BUTTON defaults';plain.value='edited';plain.name='changed';if(plain.value!=='edited'||plain.getAttribute('value')!=='edited'||plain.name!=='changed')throw 'native detached button edits';
+"#);assert_eq!(f.controls.len(),count+3);let c=&f.controls[&id(&d,"plain")];assert_eq!(c.kind,Kind::Button);assert_eq!(c.caption,"Run now");assert_eq!(c.name,"changed");assert_eq!(c.value.text(),"edited");assert_eq!(c.owner,None);assert_eq!(f.controls[&id(&d,"submit")].kind,Kind::Submit);assert_eq!(f.controls[&id(&d,"reset")].kind,Kind::Reset);assert!(f.controls[&id(&d,"reset")].disabled);
+}
+#[test]
+fn range_fragment_buttons_connection_movement_submission_and_reset(){
+ let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,r#"
+var r=document.createRange(),mount=document.getElementById('mount'),watch=new MutationObserver(function(){});r.selectNodeContents(mount);watch.observe(mount,{childList:true});var fragment=r.createContextualFragment('<button id=created name=send value=payload><span>Send now</span></button>'),button=fragment.firstChild;mount.appendChild(fragment);var rs=watch.takeRecords();if(fragment.firstChild!==null||document.getElementById('created')!==button||button.form!==document.getElementById('f')||!button.isConnected||rs.length!==1||rs[0].addedNodes[0]!==button)throw 'native BUTTON connection identity';document.getElementById('neighbor').value='edited';
+"#);let b=id(&d,"created");assert_eq!(f.controls[&b].owner,Some(id(&d,"f")));assert_eq!(query(&d,&f,"f",Some(b)).as_deref(),Some("neighbor=edited&send=payload"));assert_eq!(query(&d,&f,"f",None).as_deref(),Some("neighbor=edited"));
+ p.begin_job();run(&mut d,&mut f,&mut p,"button.type='reset';");assert_eq!(f.controls[&b].kind,Kind::Reset);f.reset(id(&d,"f"));p.begin_job();run(&mut d,&mut f,&mut p,"if(document.getElementById('neighbor').value!=='seed')throw 'actual native reset';button.type='button';document.getElementById('other').appendChild(button);if(button.form!==document.getElementById('g')||button!==document.getElementById('created'))throw 'new native owner';button.type='submit';");
+ assert_eq!(f.controls[&b].owner,Some(id(&d,"g")));assert_eq!(query(&d,&f,"g",Some(b)).as_deref(),Some("send=payload"));assert_eq!(query(&d,&f,"f",None).as_deref(),Some("neighbor=seed"));assert!(!p.has_navigation_request());
+}
+#[test]
+fn range_fragment_buttons_active_caption_and_association_refusal_no_prefix(){
+ let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,"var r=document.createRange(),mount=document.getElementById('mount'),watch=new MutationObserver(function(){});r.selectNodeContents(mount);watch.observe(mount,{childList:true});");let before=format!("{:?}",d.nodes);let controls=f.controls.len();let commits=p.state.dom_commits;
+ for source in ["<button type=button>good</button><button onclick=bad>bad</button>","<button form=f>X</button>","<button command=show-modal commandfor=target>X</button>","<button popovertarget=target>X</button>","<button><input value=inside></button>","<button><svg><rect width=1 height=1/></svg></button>","<button><img src=missing></button>"]{
+  p.begin_job();let e=refusal(&mut d,&mut f,&mut p,&format!("r.createContextualFragment({source:?});"));assert!(!e.is_empty(),"{source}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(f.controls.len(),controls);assert_eq!(p.state.dom_commits,commits);
+ }
+ p.begin_job();run(&mut d,&mut f,&mut p,"if(watch.takeRecords().length||mount.childNodes.length||r.startContainer!==mount||r.endOffset)throw 'no refused button prefix';var fresh=r.createContextualFragment('<button type=button>Fresh</button>');if(fresh.firstChild.type!=='button'||fresh.firstChild.ownerDocument!==document||fresh.firstChild.isConnected)throw 'fresh button recovery';");assert!(p.take_dynamic_scripts().is_empty());assert!(p.take_dynamic_stylesheets().is_empty());
+}
+#[test]
+fn range_fragment_buttons_quota_refusal_preserves_native_state_and_recovers(){
+ let(mut d,mut f,mut p)=fixture();run(&mut d,&mut f,&mut p,"var r=document.createRange(),mount=document.getElementById('mount');r.selectNodeContents(mount);");let before=format!("{:?}",d.nodes);let controls=f.controls.len();let commits=p.state.dom_commits;let held=p.state.retained_limit;let nodes=p.state.node_limit;
+ for mode in 0..4{p.begin_job();match mode{0=>p.state.copy_work=0,1=>p.state.host_work=0,2=>p.state.retained_limit=p.state.retained,_=>p.state.node_limit=d.nodes.len()};let e=refusal(&mut d,&mut f,&mut p,"r.createContextualFragment('<button type=button name=action value=payload><b>Native</b> caption</button>');").to_ascii_lowercase();assert!(e.contains("limit")||e.contains("allowance")||e.contains("storage"),"{mode}: {e}");assert_eq!(format!("{:?}",d.nodes),before);assert_eq!(f.controls.len(),controls);assert_eq!(p.state.dom_commits,commits);p.state.retained_limit=held;p.state.node_limit=nodes;}
+ p.begin_job();run(&mut d,&mut f,&mut p,"var fresh=r.createContextualFragment('<button id=recovered type=button>Fresh</button>');mount.appendChild(fresh);if(fresh.firstChild!==null||document.getElementById('recovered').type!=='button')throw 'native button quota recovery';");assert_eq!(f.controls.len(),controls+1);assert_eq!(f.controls[&id(&d,"recovered")].caption,"Fresh");
+}
