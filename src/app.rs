@@ -7574,3 +7574,7 @@ mod app_noscript_text_ranges_tests;
 #[cfg(test)]
 #[path="app_select_hr_construction_tests.rs"]
 mod app_select_hr_construction_tests;
+
+#[cfg(test)]
+#[path="app_range_contextual_fragment_tests.rs"]
+mod app_range_contextual_fragment_tests;

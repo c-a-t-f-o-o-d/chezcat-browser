@@ -356,6 +356,7 @@ impl Bridge<'_> {
                 }
                 return Ok(Value::Host(node));
             }
+            CONTEXTUAL_FRAGMENT => return self.range_contextual_fragment(record,args),
             STRINGIFY => return self.range_string(record),
             CLONE => return self.copy_range(record),
             CLONE_CONTENTS => {
@@ -790,3 +791,38 @@ mod surrounding;
 #[cfg(test)]
 #[path="script_noscript_text_ranges_tests.rs"]
 mod noscript_text_ranges_tests;
+
+#[cfg(test)]
+#[path="script_range_contextual_fragment_tests.rs"]
+mod contextual_fragment_tests;
+
+impl Bridge<'_> {
+    // Context is resolved after the runtime's DOMString conversion, which may
+    // itself move this live Range. Parsing never mutates the context node.
+    fn range_contextual_fragment(&mut self,record:Record,args:&[Value])->Result<Value,String>{
+        self.native_node_access(record.start.node).map_err(|(_,message)|message)?;
+        if self.doc.kind!=crate::html::DocumentKind::Html
+            ||self.frame_contains_node(record.start.node).is_some()
+            ||self.inert_node_type(record.start.node).is_some()
+            ||self.range_attr_document(record.start.node).is_some_and(|owner|owner!=DOCUMENT){
+            return Err("Contextual fragment parsing for this document owner is not implemented.".into());
+        }
+        self.state.rebuild(self.doc)?;
+        let context=if record.start.node==DOCUMENT||self.range_attr_document(record.start.node).is_some(){None}else{
+            let node=self.range_node(record.start.node)?;
+            match self.doc.nodes[node].kind {
+                NodeKind::Element{..}=>Some(node),
+                NodeKind::Text(_)|NodeKind::Comment(_)=>self.state.tree.parents[node].filter(|&parent|parent!=0&&matches!(self.doc.nodes[parent].kind,NodeKind::Element{..})),
+                _=>None,
+            }
+        };
+        if context.is_some_and(|node|self.doc.nodes[node].namespace!=crate::html::Namespace::Html){return Err("Foreign contextual fragment parsing is not implemented.".into());}
+        let context=context.map_or("body",|node|{let name=tag(self.doc,node);if name=="html"{"body"}else{name}});
+        let Some(Value::String(source))=args.first() else{return Err("Contextual fragment raw UTF-16 markup is not implemented.".into());};
+        self.state.work(source.len())?;
+        self.state.copies(source.len().checked_mul(2).ok_or("HTML fragment source size overflow.")?)?;
+        if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
+        let parsed=crate::html::parse_fragment(source,context,self.doc.scripting_enabled)?;
+        self.publish_contextual_html_fragment(parsed)
+    }
+}

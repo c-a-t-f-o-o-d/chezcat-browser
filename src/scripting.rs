@@ -4643,6 +4643,7 @@ impl Host for Bridge<'_> {
     }
 
     fn preserves_dom_string_argument(&self,object:u32,method:&str,index:usize)->bool{
+        if method==crate::javascript::range_interface::CONTEXTUAL_FRAGMENT {return index==0;}
         if processing_instruction_interface::operation(method).is_some(){return processing_instruction_interface::conversions(method).iter().any(|(i,string)|*i==index&&*string);}
         if index==0&&(self.listener_receiver(object)&&matches!(method,"addEventListener"|"removeEventListener")
             ||self.event_target_interface(object)&&matches!(method,"Event"|"CustomEvent"|"UIEvent"|"MouseEvent"|"WheelEvent"|"KeyboardEvent"|"FocusEvent"|"SubmitEvent"|"ProgressEvent"|"AnimationEvent"|"ErrorEvent")
@@ -4822,6 +4823,7 @@ impl Host for Bridge<'_> {
         if method==script_inert_documents::CREATE_DOCTYPE{return &[(0,true),(1,true),(2,true)];}
         if crate::javascript::xhr_interface::operation(method).is_some(){return &[];}
 
+        if method==crate::javascript::range_interface::CONTEXTUAL_FRAGMENT {return &[(0,true)];}
         if method==crate::javascript::range_interface::COMPARE_BOUNDARIES {return &[(0,false)];}
         if matches!(method,crate::javascript::range_interface::SET_START|crate::javascript::range_interface::SET_END|crate::javascript::range_interface::COMPARE_POINT|crate::javascript::range_interface::POINT_IN_RANGE) { return &[(1,false)]; }
         if method == script_inert_documents::parser::PARSE { return &[(0, true), (1, true)]; }
