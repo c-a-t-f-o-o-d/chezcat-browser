@@ -514,7 +514,7 @@ var detached=document.createElement('div'),connected=document.getElementById('ro
         page.begin_job();
         page.runtime.execute(&format!("var checked={target},retained=checked.firstChild,before=checked.innerHTML;"),
             &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap();
-        for markup in ["<section><object>A</section>", "<button>A</button>"] {
+        for markup in ["<section><object>A</section>", "<button><object>A</object></button>"] {
             page.begin_job();let tree=format!("{:?}",doc.nodes);let commits=page.state.dom_commits;
             let error=page.runtime.execute(&format!("checked.innerHTML='{markup}';"),
                 &mut Bridge {doc:&mut doc,forms:&mut forms,state:&mut page.state}).unwrap_err();
