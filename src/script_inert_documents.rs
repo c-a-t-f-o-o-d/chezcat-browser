@@ -807,6 +807,13 @@ impl Bridge<'_> {
         }
     }
 
+    pub(super) fn template_parser_scripting(&self, object: u32) -> Result<bool, String> {
+        let (document, _) = self.template_source(object).ok_or("Invalid HTML template receiver.")?;
+        // Fragment parser scripting follows the context element's document.
+        // Appropriate template and other inert owners have no browsing context.
+        Ok(document == DOCUMENT && self.doc.scripting_enabled)
+    }
+
     pub(super) fn template_receiver(&self, object: u32) -> bool {
         self.template_source(object).is_some()
     }
@@ -1082,7 +1089,8 @@ impl Bridge<'_> {
         }
         self.state.work(markup.len())?;
         self.state.copies(markup.len().saturating_mul(2))?;
-        let parsed = crate::html::parse_fragment(markup, "template", self.doc.scripting_enabled)?;
+        let scripting = self.template_parser_scripting(object)?;
+        let parsed = crate::html::parse_fragment(markup, "template", scripting)?;
 
         self.state.work(self.state.inert_documents.template_contents.lookup_work()
             + self.state.inert_documents.template_documents.lookup_work())?;
@@ -2094,3 +2102,7 @@ impl State {
 
 #[path="script_state_preserving_move.rs"]
 mod state_preserving_move;
+
+#[cfg(test)]
+#[path="script_template_parser_owner_tests.rs"]
+mod script_template_parser_owner_tests;

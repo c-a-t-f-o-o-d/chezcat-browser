@@ -7621,3 +7621,7 @@ mod svg_html_serialization_tests;
 #[cfg(test)]
 #[path="app_template_html_serialization_tests.rs"]
 mod app_template_html_serialization_tests;
+
+#[cfg(test)]
+#[path="app_template_parser_owner_tests.rs"]
+mod app_template_parser_owner_tests;

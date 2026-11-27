@@ -88,7 +88,8 @@ impl Bridge<'_> {
                 } else {
                     tag(self.doc, node_index(object).unwrap())
             };
-            crate::html::parse_fragment(&text, context, self.doc.scripting_enabled)?
+            let scripting=if template{self.template_parser_scripting(object)?}else{self.doc.scripting_enabled};
+            crate::html::parse_fragment(&text, context, scripting)?
             };
             if !template{self.validate_inner_html_text(&parsed)?;}
             self.state.work(parsed.nodes.len())?;
