@@ -822,7 +822,7 @@ impl Bridge<'_> {
         self.state.work(source.len())?;
         self.state.copies(source.len().checked_mul(2).ok_or("HTML fragment source size overflow.")?)?;
         if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
-        let parsed=crate::html::parse_fragment(source,context,self.doc.scripting_enabled)?;
+        let parsed=crate::html::parse_contextual_fragment(source,context,self.doc.scripting_enabled)?;
         self.publish_contextual_html_fragment(parsed)
     }
 }
@@ -830,3 +830,7 @@ impl Bridge<'_> {
 #[cfg(test)]
 #[path="script_range_fragment_controls_tests.rs"]
 mod fragment_controls_tests;
+
+#[cfg(test)]
+#[path="script_range_fragment_passive_content_tests.rs"]
+mod fragment_passive_content_tests;

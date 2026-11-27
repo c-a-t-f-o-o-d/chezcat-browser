@@ -446,13 +446,28 @@ impl Bridge<'_> {
         self.state.work(count)?;
         let mut parents=Vec::new();parents.try_reserve_exact(count).map_err(|_|"Cannot reserve contextual fragment parents.")?;parents.resize(count,None);
         let mut copies=Vec::new();copies.try_reserve_exact(count).map_err(|_|"Cannot reserve contextual fragment plan.")?;
+        // Whole NOSCRIPT transfer uses the same leaf-Text boundary as the live
+        // native host. Validate against the complete parsed tree before moving
+        // any node buffers into the detached publication plan.
+        self.state.work(count)?;
+        // Index zero is parser context metadata and becomes the result fragment.
+        for node in parsed.nodes.iter().skip(1) {
+            if !matches!(&node.kind,NodeKind::Element{tag,..} if tag=="noscript"){continue;}
+            self.state.work(node.children.len())?;
+            if node.namespace!=crate::html::Namespace::Html||node.children.iter().any(|&child|{
+                let child=&parsed.nodes[child];child.namespace!=crate::html::Namespace::None
+                    ||!matches!(child.kind,NodeKind::Text(_))||!child.children.is_empty()
+            }){return Err("Contextual NOSCRIPT transfer requires passive leaf Text children.".into());}
+        }
         parsed.nodes[0].kind=NodeKind::DocumentFragment;parsed.nodes[0].namespace=crate::html::Namespace::None;
         let mut bytes=0usize;
         for (local,mut node) in parsed.nodes.into_iter().enumerate(){
             self.state.work(1+node.children.len())?;
             if let NodeKind::Element{tag:name,attrs,href,..}=&node.kind{
                 self.state.work(attrs.len())?;
-                if node.namespace!=crate::html::Namespace::Html||!(ordinary_clone_element(name)||matches!(name.as_str(),"input"|"textarea"|"select"|"optgroup"|"option"))
+                let svg=node.namespace==crate::html::Namespace::Svg;
+                if svg&&!crate::html::svg_dom_transfer(&node){return Err("Contextual SVG requires supported passive shapes/attributes and local references.".into());}
+                if !svg&&(node.namespace!=crate::html::Namespace::Html||!(ordinary_clone_element(name)||matches!(name.as_str(),"input"|"textarea"|"select"|"optgroup"|"option"|"noscript")))
                     ||attrs.iter().any(|attr|script_element_properties::event_handler_content_attribute(name,&attr.name)||attr.name.html_is("is")){
                     return Err("Contextual fragment native controls, resources or active elements are not implemented.".into());
                 }

@@ -366,10 +366,20 @@ pub(crate) fn parse_inert_html(
 /// callers never create a source wrapper that markup could escape. Unsupported
 /// tree-builder recovery and declaration forms reject explicitly.
 pub(crate) fn parse_fragment(input: &str, context: &str, scripting: bool) -> Result<Document, String> {
+    checked_fragment(input,context,scripting,false)
+}
+
+// Range result publication has native passive-SVG admission. Reuse the
+// checked island builder while retaining each other producer's existing path.
+pub(crate) fn parse_contextual_fragment(input:&str,context:&str,scripting:bool)->Result<Document,String>{
+    checked_fragment(input,context,scripting,true)
+}
+
+fn checked_fragment(input:&str,context:&str,scripting:bool,contextual_svg:bool)->Result<Document,String>{
     if !matches!(context, "div" | "span" | "p" | "a" | "section" | "article" | "main" | "header" | "footer" | "aside" | "nav" | "li" | "ul" | "ol" | "dl" | "dt" | "dd" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "em" | "b" | "strong" | "i" | "u" | "small" | "label" | "pre" | "blockquote" | "body" | "title" | "textarea" | "script" | "style" | "xmp" | "iframe" | "noembed" | "noframes" | "plaintext" | "select" | "optgroup" | "option" | "template" | "noscript") {
         return Err("HTML fragment parsing for this element context is not implemented.".into());
     }
-    parse_internal(input, Some(context), scripting, None, None)
+    parse_internal_with_svg(input, Some(context), scripting, None, None, contextual_svg)
 }
 
 pub(crate) fn svg_dom_name(name:&str)->bool{svg_namespace::dom_name(name)}
@@ -384,10 +394,18 @@ fn parse_internal(
     context: Option<&str>,
     scripting: bool,
     loaded: Option<LoadedTree<'_>>,
-    mut inert_doctype: Option<&mut Option<usize>>,
+    inert_doctype: Option<&mut Option<usize>>,
 ) -> Result<Document, String> {
+    parse_internal_with_svg(input,context,scripting,loaded,inert_doctype,false)
+}
+
+fn parse_internal_with_svg(
+    input:&str,context:Option<&str>,scripting:bool,loaded:Option<LoadedTree<'_>>,
+    mut inert_doctype:Option<&mut Option<usize>>,contextual_svg:bool,
+)->Result<Document,String>{
     let checked = context.is_some();
     let template_svg = context == Some("template");
+    let checked_svg = template_svg || contextual_svg;
     let mut initial=context.is_none();
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     let node_limit = loaded.map_or(MAX_NODES, |loaded| loaded.nodes);
@@ -469,7 +487,7 @@ fn parse_internal(
         if plaintext || !rest.starts_with('<') {
             let end = if plaintext { input.len() } else { position + rest.find('<').unwrap_or(rest.len()) };
             if svg.root.is_some() && !input[position..end].bytes().all(|b| tag_space(b, true)) {
-                if template_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
+                if checked_svg { return Err("Template SVG only admits whitespace between supported shapes.".into()); }
                 svg.root = None;
             }
             if let Some(start)=&mut structure {
@@ -590,7 +608,7 @@ fn parse_internal(
             TagToken::Unsupported(error) => return Err(error.into()),
             TagToken::NotATag => {
                 if fragment_table.is_some() { return Err(fragment_table_error()); }
-                if template_svg && svg.root.is_some() {
+                if checked_svg && svg.root.is_some() {
                     return Err("Template SVG contains a malformed tag.".into());
                 }
                 svg.root = None;
@@ -637,8 +655,8 @@ fn parse_internal(
             parent
         }else{None};
 
-        let starts_template_svg = template_svg && tag.name == "svg" && !tag.closing;
-        let inside_template_svg = template_svg && svg.root.is_some();
+        let starts_template_svg = checked_svg && tag.name == "svg" && !tag.closing;
+        let inside_template_svg = checked_svg && svg.root.is_some();
         if checked {
             // Template contents form a fresh HTML scope. End tags inside one
             // cannot close an ancestor in the surrounding fragment.
@@ -685,7 +703,7 @@ fn parse_internal(
                 let exact = tag.clean_syntax && tag.attrs.is_empty() && !tag.self_closing &&
                     matches!(&document.nodes[parent].kind, NodeKind::Element { tag: open, .. } if open == &tag.name);
                 if !exact {
-                    if template_svg { return Err("Template SVG requires matching end tags.".into()); }
+                    if checked_svg { return Err("Template SVG requires matching end tags.".into()); }
                     svg.root = None;
                 } else if parent == root {
                     svg_namespace::publish(&mut document.nodes[root..]);
@@ -807,14 +825,14 @@ fn parse_internal(
             svg.blocked_depth = None;
         }
         let node = document.nodes.len();
-        let enters_svg = tag.name == "svg" && (!checked || template_svg) && !uncertain_foreign_recovery &&
+        let enters_svg = tag.name == "svg" && (!checked || checked_svg) && !uncertain_foreign_recovery &&
             svg.blocked_depth.is_none() && (parent == 0 || document.nodes[parent].namespace == Namespace::Html);
         let svg_empty = tag.self_closing && (enters_svg || svg.root.is_some()) &&
             svg_namespace::shape_element(&tag.name);
         if enters_svg {
             svg.root = Some(node);
         }
-        if !template_svg && svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
+        if !checked_svg && svg.root.is_some() && !svg_namespace::supported_tag(&tag) {
             svg.root = None;
         }
         let html_raw = (matches!(tag.name.as_str(), "iframe" | "xmp" | "noembed" | "noframes")
@@ -941,7 +959,7 @@ fn parse_internal(
     if fragment_table.is_some() { return Err(fragment_table_error()); }
     if let Some(start)=&mut structure {tables.flush(&mut document,&mut stack,&mut formatting,node_limit)?;start.finish(&mut document,&mut stack,node_limit)?;}
     formatting.topology.finish(&mut document,checked,formatting_limits.check_cancel)?;
-    if template_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
+    if checked_svg && svg.root.is_some() { return Err("Template SVG requires an explicit close.".into()); }
     if checked { document.scripting_enabled = scripting; }
     if let Some(loaded) = loaded { (loaded.check_cancel)()?; }
     Ok(document)
