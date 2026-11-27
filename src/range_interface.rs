@@ -29,6 +29,7 @@ pub(crate) const SURROUND_CONTENTS: &str = "\0Range.surroundContents";
 pub(crate) const INSERT_NODE: &str = "\0Range.insertNode";
 pub(crate) const EXTRACT_CONTENTS: &str = "\0Range.extractContents";
 pub(crate) const DELETE_CONTENTS: &str = "\0Range.deleteContents";
+pub(crate) const CONTEXTUAL_FRAGMENT: &str = "\0Range.createContextualFragment";
 pub(crate) const CLONE_CONTENTS: &str = "\0Range.cloneContents";
 pub(crate) const CLONE: &str = "\0Range.cloneRange";
 pub(crate) const STRINGIFY: &str = "\0Range.toString";
@@ -56,7 +57,7 @@ pub(crate) fn operation(method: &str) -> bool {
             | SELECT_CONTENTS
             | COLLAPSE
             | CLONE
-            | CLONE_CONTENTS | DELETE_CONTENTS | EXTRACT_CONTENTS | INSERT_NODE | SURROUND_CONTENTS
+            | CONTEXTUAL_FRAGMENT | CLONE_CONTENTS | DELETE_CONTENTS | EXTRACT_CONTENTS | INSERT_NODE | SURROUND_CONTENTS
             | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE | INTERSECTS_NODE
             | DETACH
             | STRINGIFY
@@ -78,7 +79,7 @@ pub(crate) fn node_argument(method: &str) -> bool {
 }
 pub(crate) fn snapshot_getter(method:&str)->bool {matches!(method,START_NODE|END_NODE|START_OFFSET|END_OFFSET|COLLAPSED)}
 pub(crate) fn arity(method: &str) -> usize {
-    if method==STATIC {return 1;}
+    if matches!(method,STATIC|CONTEXTUAL_FRAGMENT) {return 1;}
     if matches!(method, SET_START | SET_END | COMPARE_BOUNDARIES | COMPARE_POINT | POINT_IN_RANGE) {
         2
     } else {
@@ -165,6 +166,7 @@ impl Runtime {
                             arity(method),
                         )?;
                     }
+                    self.deferred_host_method(prototype,window,"createContextualFragment",CONTEXTUAL_FRAGMENT,1)?;
                     self.deferred_host_method(prototype,window,"cloneContents",CLONE_CONTENTS,0)?;
                     self.deferred_host_method(prototype,window,"deleteContents",DELETE_CONTENTS,0)?;
                     self.deferred_host_method(prototype,window,"extractContents",EXTRACT_CONTENTS,0)?;

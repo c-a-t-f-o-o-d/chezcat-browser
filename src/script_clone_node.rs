@@ -436,3 +436,38 @@ mod noscript_host_clone_tests;
 #[cfg(test)]
 #[path="script_noscript_inert_import_tests.rs"]
 mod noscript_inert_import_tests;
+
+impl Bridge<'_> {
+    // The parser's synthetic root becomes the returned fragment. All links and
+    // payloads are admitted before the shared detached-copy commit publishes it.
+    pub(super) fn publish_contextual_html_fragment(&mut self,mut parsed:Document)->Result<Value,String>{
+        let count=parsed.nodes.len();let base=self.doc.nodes.len();
+        if base.checked_add(count).is_none_or(|n|n>(STYLE_BASE-NODE_BASE) as usize||n.checked_add(self.state.blank_frame_nodes).is_none_or(|n|n>self.state.node_limit)){return Err("DOM appended-node limit reached during contextual fragment parsing.".into());}
+        self.state.work(count)?;
+        let mut parents=Vec::new();parents.try_reserve_exact(count).map_err(|_|"Cannot reserve contextual fragment parents.")?;parents.resize(count,None);
+        let mut copies=Vec::new();copies.try_reserve_exact(count).map_err(|_|"Cannot reserve contextual fragment plan.")?;
+        parsed.nodes[0].kind=NodeKind::DocumentFragment;parsed.nodes[0].namespace=crate::html::Namespace::None;
+        let mut bytes=0usize;
+        for (local,mut node) in parsed.nodes.into_iter().enumerate(){
+            self.state.work(1+node.children.len())?;
+            if let NodeKind::Element{tag:name,attrs,href,..}=&node.kind{
+                self.state.work(attrs.len())?;
+                if node.namespace!=crate::html::Namespace::Html||!ordinary_clone_element(name)
+                    ||attrs.iter().any(|attr|script_element_properties::event_handler_content_attribute(name,&attr.name)||attr.name.html_is("is")){
+                    return Err("Contextual fragment native controls, resources or active elements are not implemented.".into());
+                }
+                if let Some(style)=attrs.iter().find(|a|a.name.html_is("style")){validate_style(style.value.as_str(),self.state.limits.host.string_bytes)?;}
+                bytes=bytes.checked_add(name.capacity()).and_then(|n|n.checked_add(href.as_ref().map_or(0,String::capacity))).ok_or("HTML fragment metadata overflow.")?;
+            }
+            bytes=bytes.checked_add(node_bytes(&node)).and_then(|n|n.checked_add(child_link_bytes(&node.children))).ok_or("HTML fragment payload overflow.")?;
+            self.state.copies(node_bytes(&node))?;
+            if bytes>self.state.retained_limit.saturating_sub(self.state.retained){return Err("HTML fragment retained storage allowance exhausted.".into());}
+            for child in &mut node.children{
+                if *child>=count||*child<=local||parents[*child].is_some(){return Err("HTML fragment staged tree is invalid.".into());}
+                parents[*child]=Some(base+local);*child+=base;
+            }
+            copies.push(DetachedCopy{node,parent:parents[local],unsafe_nonce:parsed.nonce_unsafe_nodes.contains(&local)});
+        }
+        self.publish_detached_copy(copies,bytes,None)
+    }
+}
