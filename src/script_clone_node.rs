@@ -452,6 +452,11 @@ impl Bridge<'_> {
         self.state.work(count)?;
         // Index zero is parser context metadata and becomes the result fragment.
         for node in parsed.nodes.iter().skip(1) {
+            // Source NULL can expand after source-size admission. Check the
+            // authoritative decoded DOMString, independently of backing storage.
+            if matches!(&node.kind,NodeKind::Text(text) if text.logical_bytes()>self.state.limits.host.string_bytes){
+                return Err("Decoded contextual Text exceeds the host string limit.".into());
+            }
             if !matches!(&node.kind,NodeKind::Element{tag,..} if tag=="noscript"){continue;}
             self.state.work(node.children.len())?;
             if node.namespace!=crate::html::Namespace::Html||node.children.iter().any(|&child|{
@@ -488,3 +493,7 @@ impl Bridge<'_> {
         self.publish_detached_copy(copies,bytes,form_plan)
     }
 }
+
+#[cfg(test)]
+#[path="script_range_fragment_output_tests.rs"]
+mod range_fragment_output_tests;
