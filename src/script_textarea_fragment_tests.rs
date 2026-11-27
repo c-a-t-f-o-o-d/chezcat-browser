@@ -382,7 +382,7 @@ fn textarea_fragment_native_interiors_associations_and_contexts_remain_guarded()
     page.state.rebuild(&doc).unwrap();
     let before = Snapshot::capture(&doc, &forms, &page);
     for source in [
-        "area.innerHTML='new default';",
+        "area.innerHTML='\\udfff\\ud800new default';",
         "area.firstChild.data='new default';",
         "area.firstChild.nodeValue='new default';",
         "area.firstChild.textContent='new default';",

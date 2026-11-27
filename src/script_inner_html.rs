@@ -83,10 +83,41 @@ impl Bridge<'_> {
         crate::html::parse_contextual_fragment_units(units,tag(self.doc,node),self.doc.scripting_enabled,available)
     }
 
+    // Observation and native replacement share the real RCDATA parser.
+    // The existing native default transaction owns dirty state and Reset.
+    pub(super) fn parse_textarea_inner_html(&mut self,node:usize,source:&str)->Result<Document,String>{
+        if !self.owned_native_textarea(node){return Err("Textarea markup requires admitted native default state.".into());}
+        if source.len()>self.state.limits.host.string_bytes{return Err("HTML fragment source exceeds the host string limit.".into());}
+        let scratch=source.len().checked_mul(7).ok_or("Textarea markup temporary size overflow.")?;
+        self.state.work(scratch)?;self.state.copies(scratch)?;
+        let available=self.state.retained_limit.saturating_sub(self.state.retained);
+        if scratch>available{return Err("Textarea markup temporary storage allowance exhausted.".into());}
+        let parsed=crate::html::parse_fragment(source,"textarea",self.doc.scripting_enabled)?;
+        if parsed.nodes[0].children.len()>1||parsed.nodes.len()>2
+            ||parsed.nodes.iter().skip(1).any(|node|!matches!(node.kind,NodeKind::Text(_))||!node.children.is_empty()){
+            return Err("Textarea RCDATA did not produce a single native Text.".into());
+        }
+        // Literal NULL expands to U+FFFD. Source admission does not establish
+        // decoded DOMString admission, even in a text-only tokenizer state.
+        if parsed.nodes.iter().skip(1).any(|node|matches!(&node.kind,NodeKind::Text(text) if text.logical_bytes()>self.state.limits.host.string_bytes)){
+            return Err("Decoded textarea output exceeds the host string limit.".into());
+        }
+        if parsed.nodes.iter().skip(1).any(|node|node_bytes(node)>available){return Err("Textarea decoded output exceeds its storage allowance.".into());}
+        Ok(parsed)
+    }
+
     fn set_inner_html_source(&mut self,node:usize,source:crate::dom_string::DomStringRef<'_>)->Result<(),String>{
         self.state.rebuild(self.doc)?;
         if self.doc.nodes[node].namespace != crate::html::Namespace::Html { return Err("innerHTML replacement requires known HTML namespace provenance.".into()); }
         if matches!(tag(self.doc, node), "script" | "style") { return Err("innerHTML replacement of script/style resource contexts is not implemented.".into()); }
+        if self.owned_native_textarea(node){
+            let crate::dom_string::DomStringRef::Scalar(source)=source else{return Err("Native textarea defaults cannot represent unpaired UTF-16 units.".into());};
+            let mut parsed=self.parse_textarea_inner_html(node,source)?;
+            let text=if parsed.nodes.len()==1{DomString::new()}else{
+                let NodeKind::Text(text)=parsed.nodes.pop().unwrap().kind else{unreachable!("RCDATA Text checked above")};text
+            };
+            return self.set_text_content(node,text);
+        }
         let passive_noscript = self.doc.scripting_enabled && self.movable_noscript_host(node)?;
         if passive_noscript {
             if let Some(parent) = self.state.tree.parents[node] { self.mutation_ancestors(parent)?; }
@@ -248,3 +279,7 @@ mod noscript_inner_html_tests;
 #[cfg(test)]
 #[path="script_noscript_inner_html_units_tests.rs"]
 mod noscript_inner_html_units_tests;
+
+#[cfg(test)]
+#[path="script_textarea_inner_html_tests.rs"]
+mod textarea_inner_html_tests;
