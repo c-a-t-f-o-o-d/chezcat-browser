@@ -69,6 +69,18 @@ impl Bridge<'_> {
         self.set_inner_html_source(node,crate::dom_string::DomStringRef::Raw(source))
     }
 
+    // Source NULL can expand after source admission. Observation and commit
+    // validate authoritative decoded Text independently of retained backing.
+    pub(super) fn validate_inner_html_text(&mut self,parsed:&Document)->Result<(),String>{
+        self.state.work(parsed.nodes.len())?;
+        for node in parsed.nodes.iter().skip(1){
+            if matches!(&node.kind,NodeKind::Text(text) if text.logical_bytes()>self.state.limits.host.string_bytes){
+                return Err("Decoded HTML Text exceeds the host string limit.".into());
+            }
+        }
+        Ok(())
+    }
+
     // Observation and native commit must predict the same actual parsed tree.
     pub(super) fn parse_inner_html_units(&mut self,node:usize,units:&[u16])->Result<Document,String>{
         // Other contexts retain their existing native lifecycle guards.
@@ -159,6 +171,7 @@ impl Bridge<'_> {
                 self.parse_inner_html_units(node,units)?
             },
         };
+        self.validate_inner_html_text(&staged)?;
         let count = staged.nodes.len() - 1;
         if self.doc.nodes.len().checked_add(count).and_then(|n| n.checked_add(self.state.blank_frame_nodes)).is_none_or(|n| n > self.state.node_limit) { return Err("DOM appended-node limit reached during HTML replacement.".into()); }
         let base = self.doc.nodes.len();
@@ -315,3 +328,7 @@ mod title_inner_html_tests;
 #[cfg(test)]
 #[path="script_inner_html_buttons_tests.rs"]
 mod inner_html_buttons_tests;
+
+#[cfg(test)]
+#[path="script_inner_html_output_tests.rs"]
+mod inner_html_output_tests;
