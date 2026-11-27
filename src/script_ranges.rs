@@ -826,3 +826,7 @@ impl Bridge<'_> {
         self.publish_contextual_html_fragment(parsed)
     }
 }
+
+#[cfg(test)]
+#[path="script_range_fragment_controls_tests.rs"]
+mod fragment_controls_tests;

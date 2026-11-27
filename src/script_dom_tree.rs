@@ -1212,8 +1212,12 @@ impl Bridge<'_> {
             }
             let select_branch = self.owned_select_member(root, node);
             let owned_select = matches!(name, "select" | "option" | "optgroup") && select_branch;
+            let select_hr = name == "hr" && self.doc.nodes[node].namespace == crate::html::Namespace::Html
+                && self.doc.nodes[node].children.is_empty()
+                && self.state.tree.parents[node].is_some_and(|parent|tag(self.doc,parent)=="select"
+                    && self.doc.nodes[parent].namespace==crate::html::Namespace::Html);
             if select_branch && matches!(&self.doc.nodes[node].kind, NodeKind::Element { .. })
-                && !matches!(name, "select" | "option" | "optgroup") {
+                && !matches!(name, "select" | "option" | "optgroup") && !select_hr {
                 return Err("Moving nonconventional select descendants or resources is not implemented.".into());
             }
             if forms::kind(self.doc, node).is_some() && !owned_select && !self.hidden_input(node) && !self.owned_fragment_text_input(node) && !self.owned_native_checkbox(node) && !self.owned_native_radio(node) && !self.owned_native_textarea(node) && !self.fresh_text_input(node) && !self.native_button(node) && !self.fresh_button(node)
