@@ -91,7 +91,7 @@ impl Bridge<'_> {
             let scripting=if template{self.template_parser_scripting(object)?}else{self.doc.scripting_enabled};
             crate::html::parse_fragment(&text, context, scripting)?
             };
-            if !template{self.validate_inner_html_text(&parsed)?;}
+            self.validate_inner_html_text(&parsed)?;
             self.state.work(parsed.nodes.len())?;
             added
                 .try_reserve_exact(parsed.nodes[0].children.len())

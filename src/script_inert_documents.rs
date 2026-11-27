@@ -1091,6 +1091,7 @@ impl Bridge<'_> {
         self.state.copies(markup.len().saturating_mul(2))?;
         let scripting = self.template_parser_scripting(object)?;
         let parsed = crate::html::parse_fragment(markup, "template", scripting)?;
+        self.validate_inner_html_text(&parsed)?;
 
         self.state.work(self.state.inert_documents.template_contents.lookup_work()
             + self.state.inert_documents.template_documents.lookup_work())?;
@@ -2106,3 +2107,7 @@ mod state_preserving_move;
 #[cfg(test)]
 #[path="script_template_parser_owner_tests.rs"]
 mod script_template_parser_owner_tests;
+
+#[cfg(test)]
+#[path="script_template_output_tests.rs"]
+mod template_output_tests;
