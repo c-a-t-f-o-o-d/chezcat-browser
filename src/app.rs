@@ -7582,3 +7582,7 @@ mod app_range_contextual_fragment_tests;
 #[cfg(test)]
 #[path="app_range_fragment_controls_tests.rs"]
 mod app_range_fragment_controls_tests;
+
+#[cfg(test)]
+#[path="app_range_fragment_passive_content_tests.rs"]
+mod app_range_fragment_passive_content_tests;
