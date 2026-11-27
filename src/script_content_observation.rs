@@ -90,6 +90,7 @@ impl Bridge<'_> {
             };
             crate::html::parse_fragment(&text, context, self.doc.scripting_enabled)?
             };
+            if !template{self.validate_inner_html_text(&parsed)?;}
             self.state.work(parsed.nodes.len())?;
             added
                 .try_reserve_exact(parsed.nodes[0].children.len())
