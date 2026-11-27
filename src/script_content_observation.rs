@@ -72,6 +72,9 @@ impl Bridge<'_> {
             let parsed=if let Value::StringUnits(units)=value{
                 if template{return Err("Exact UTF-16 template markup replacement is not implemented.".into());}
                 self.parse_inner_html_units(node_index(object).ok_or("Content observer native receiver is unavailable.")?,units)?
+            }else if !template&&node_index(object).is_some_and(|node|self.owned_native_textarea(node)){
+                let text=self.text(value)?;
+                self.parse_textarea_inner_html(node_index(object).unwrap(),&text)?
             }else{
                 let text=if matches!(value,Value::Null|Value::Undefined) {String::new()} else {self.text(value)?};
                 if text.len() > self.state.limits.host.string_bytes {
