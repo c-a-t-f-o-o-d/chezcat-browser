@@ -7578,3 +7578,7 @@ mod app_select_hr_construction_tests;
 #[cfg(test)]
 #[path="app_range_contextual_fragment_tests.rs"]
 mod app_range_contextual_fragment_tests;
+
+#[cfg(test)]
+#[path="app_range_fragment_controls_tests.rs"]
+mod app_range_fragment_controls_tests;

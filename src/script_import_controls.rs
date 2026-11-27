@@ -151,14 +151,14 @@ impl Bridge<'_> {
                         let valid = match &document.nodes[child].kind {
                             NodeKind::Text(_) | NodeKind::Cdata(_) | NodeKind::Comment(_) => true,
                             NodeKind::Element { tag, .. } => match name {
-                                "select" => matches!(tag.as_str(), "option" | "optgroup"),
+                                "select" => matches!(tag.as_str(), "option" | "optgroup" | "hr"),
                                 "optgroup" => tag == "option",
                                 _ => false,
                             },
                             _ => false,
                         };
                         if !valid {
-                            return Err("Import SELECT descendants require conventional option/group/text nodes.".into());
+                            return Err("Import SELECT descendants require conventional option/group/hr/text nodes.".into());
                         }
                     }
                 }
